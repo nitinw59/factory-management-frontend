@@ -15,7 +15,7 @@ const ProtectedRoute = () => {
     const user = jwtDecode(token);
     // This is the new, more generic security check. It allows access to any user
     // with a role that is valid for this application.
-    const allowedRoles = ['factory_admin', 'store_manager']; 
+    const allowedRoles = ['factory_admin', 'store_manager', 'production_manager'];   
     if (!user.role || !allowedRoles.includes(user.role)) {
       // If the user's role is not recognized for this app, they are unauthorized.
       return <Navigate to="/unauthorized" replace />;

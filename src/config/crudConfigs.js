@@ -2,7 +2,7 @@
 
 // For: factory_users table
 export const factoryUserConfig = {
-  resource: 'factory_users',
+  resource: 'admin/factory_users',
   title: 'Factory User Management',
   fields: [
     { name: 'name', label: 'Full Name', type: 'text', required: true },
@@ -20,12 +20,12 @@ export const factoryUserConfig = {
 
 // For: supplier table
 export const supplierConfig = {
-  resource: 'supplier',
+  resource: 'shared/supplier',
   title: 'Supplier Management',
-  getAllResource: 'suppliers-detailed',
+  getAllResource: 'admin/suppliers-detailed',
   fields: [
     { name: 'name', label: 'Supplier Name', type: 'text', required: true },
-    { name: 'user_id', label: 'Associated User', type: 'select', required: true, resource: 'factory_users' }, // 'resource' can be used to fetch options
+    { name: 'user_id', label: 'Associated User', type: 'select', required: true, resource: 'admin/factory_users' }, // 'resource' can be used to fetch options
     { name: 'gstn', label: 'GSTN', type: 'text' },
     { name: 'mobile', label: 'Mobile Number', type: 'text' },
     { name: 'city', label: 'City', type: 'text' },
@@ -36,7 +36,7 @@ export const supplierConfig = {
 
 // For: production_line_types table
 export const productionLineTypeConfig = {
-  resource: 'production_line_types',
+  resource: 'shared/production_line_types',
   title: 'Production Line Types',
   fields: [
     { name: 'type_name', label: 'Line Type Name', type: 'text', required: true },
@@ -48,8 +48,8 @@ export const productionLineTypeConfig = {
 
 // For: production_lines table
 export const productionLineConfig = {
-  resource: 'production_lines', // Used for CREATE, UPDATE, DELETE
-  getAllResource: 'production-lines-detailed', // Used for the table view
+  resource: 'shared/production_lines', // Used for CREATE, UPDATE, DELETE
+  getAllResource: 'admin/production-lines-detailed', // Used for the table view
   title: 'Production Lines',
   fields: [
     { name: 'name', label: 'Line Name', type: 'text', required: true },
@@ -78,7 +78,7 @@ export const productionLineConfig = {
 
 // For: trim_items table
 export const trimItemConfig = {
-  resource: 'trim_items',
+  resource: 'shared/trim_items',
   title: 'Trim Items (Catalog)',
   fields: [
     { name: 'name', label: 'Item Name', type: 'text', required: true },
@@ -96,7 +96,7 @@ export const trimItemConfig = {
 };
 
  export const trimItemVariantConfig = {
-  resource: 'trim_item_variants',
+  resource: 'shared/trim_item_variants',
   getAllResource: 'trims/trim-item-variants-detailed',
   title: 'Trim Item Variants (Stock)',
   fields: [
@@ -127,7 +127,7 @@ export const trimItemConfig = {
 
 // For: fabric_color table
 export const fabricColorConfig = {
-  resource: 'fabric_color',
+  resource: 'shared/fabric_color',
   title: 'Fabric Colors',
   fields: [
     { name: 'name', label: 'Color Name', type: 'text', required: true },
@@ -137,7 +137,7 @@ export const fabricColorConfig = {
 };
 
 export const productBrandConfig = {
-  resource: 'product_brands',
+  resource: 'shared/product_brands',
   title: 'Product Brands',
   fields: [ { name: 'name', label: 'Brand Name', type: 'text', required: true } ],
   columns: [ { key: 'name', label: 'Name' } ]
@@ -145,7 +145,7 @@ export const productBrandConfig = {
 
 // For: product_types table
 export const productTypeConfig = {
-  resource: 'product_types',
+  resource: 'shared/product_types',
   title: 'Product Types',
   fields: [ { name: 'type', label: 'Product Type', type: 'text', required: true } ],
   columns: [ { key: 'type', label: 'Type' } ]
@@ -154,7 +154,7 @@ export const productTypeConfig = {
 // --- THIS IS THE FIX ---
 // For: products table (Main management page)
 export const productConfig = {
-  resource: 'products',
+  resource: 'shared/products',
   title: 'Product Management',
   // The 'fields' array for the create/edit form has been added.
   fields: [
@@ -183,6 +183,23 @@ export const productConfig = {
     { key: 'sku', label: 'SKU' },
     { key: 'brand_name', label: 'Brand' },
     { key: 'type_name', label: 'Type' },
+  ]
+};
+
+export const fabricTypeConfig = {
+  // The resource path must match the endpoint defined in your backend's server.js
+  resource: 'shared/fabric_type',
+  title: 'Fabric Type Management',
+  fields: [
+    { 
+      name: 'name', 
+      label: 'Fabric Type Name', 
+      type: 'text', 
+      required: true 
+    },
+  ],
+  columns: [ 
+    { key: 'name', label: 'Name' },
   ]
 };
 

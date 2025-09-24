@@ -65,6 +65,7 @@ const TopNavbar = () => {
               <NavLink to="/admin/trim-items" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Item Catalog</NavLink>
               <NavLink to="/admin/trim-item-variants" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Item Variants (Stock)</NavLink>
               <NavLink to="/admin/fabric-colors" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Fabric Colors</NavLink>
+              <NavLink to="/admin/fabric-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Fabric Types</NavLink>
             </NavDropdown>
 
             <NavDropdown title="Products">

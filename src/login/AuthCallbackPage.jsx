@@ -10,7 +10,7 @@ const AuthCallbackPage = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const token = params.get('token');
-    console.log("Auth callback received token:", token);
+   
     if (token) {
       // 1. Save the token to the global state.
       login(token);

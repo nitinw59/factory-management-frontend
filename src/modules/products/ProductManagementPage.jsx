@@ -1,32 +1,51 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { productApi } from '../../api/productApi';
-import ProductForm from './ProductForm'; // Corrected: default import
-import Modal from '../../shared/Modal'; // Corrected: default import
-import { LuChevronDown, LuChevronUp, LuTally5, LuTrash2 } from 'react-icons/lu';
+import ProductForm from './ProductForm';
+import Modal from '../../shared/Modal';
+import { LuChevronDown, LuChevronUp, LuPencil, LuTrash2 } from 'react-icons/lu';
 
 // --- SHARED COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
 
-// --- SUB-COMPONENTS for the expandable table ---
+// --- NEW SUB-COMPONENTS for the expandable table ---
+
 const MaterialsSubTable = ({ materials }) => (
-  <div className="p-4 bg-gray-50">
-    <h4 className="font-semibold text-sm text-gray-700 mb-2">Materials Required for 1 Piece:</h4>
-    <table className="min-w-full text-sm">
-      <thead className="bg-gray-200">
-        <tr>
-          <th className="py-1 px-3 text-left">Item Name</th>
-          <th className="py-1 px-3 text-left">Quantity</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-gray-200">
-        {(materials || []).map((material, index) => (
-          <tr key={index}>
-            <td className="py-1 px-3">{material.item_name}</td>
-            <td className="py-1 px-3">{material.quantity}</td>
+  <div>
+    <h4 className="font-semibold text-sm text-gray-700 mb-2">Materials Required (per piece)</h4>
+    <div className="border rounded-lg overflow-hidden">
+      <table className="min-w-full text-sm">
+        <thead className="bg-gray-200">
+          <tr>
+            <th className="py-1 px-3 text-left">Item Name</th>
+            <th className="py-1 px-3 text-left">Quantity</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody className="divide-y divide-gray-200 bg-white">
+          {(materials || []).map((material, index) => (
+            <tr key={index}>
+              <td className="py-1 px-3">{material.item_name}</td>
+              <td className="py-1 px-3">{material.quantity}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+
+const CycleFlowSubTable = ({ cycleFlow }) => (
+  <div>
+    <h4 className="font-semibold text-sm text-gray-700 mb-2">Production Cycle Flow</h4>
+    <div className="border rounded-lg overflow-hidden">
+        <ul className="divide-y divide-gray-200 bg-white">
+            {(cycleFlow || []).map((step, index) => (
+                <li key={index} className="px-3 py-2 flex items-center">
+                    <span className="font-bold text-gray-500 mr-2">{step.sequence_no}.</span>
+                    <span>{step.type_name}</span>
+                </li>
+            ))}
+        </ul>
+    </div>
   </div>
 );
 
@@ -42,16 +61,22 @@ const ProductRow = ({ product, onEdit, onDelete }) => {
         <td className="py-3 px-4">{product.type_name}</td>
         <td className="py-3 px-4">
            <div className="flex items-center space-x-4">
-            <button onClick={() => setIsExpanded(!isExpanded)} className="text-blue-600 flex items-center text-sm">{isExpanded ? <LuChevronUp/> : <LuChevronDown/>} Materials</button>
-            <button onClick={() => onEdit(product)} className="text-gray-400 hover:text-blue-600"><LuTally5 /></button>
+            <button onClick={() => setIsExpanded(!isExpanded)} className="text-blue-600 flex items-center text-sm">
+              {isExpanded ? <LuChevronUp className="mr-1"/> : <LuChevronDown className="mr-1" />}
+              Details
+            </button>
+            <button onClick={() => onEdit(product)} className="text-gray-400 hover:text-blue-600"><LuPencil /></button>
             <button onClick={() => onDelete(product.id)} className="text-gray-400 hover:text-red-600"><LuTrash2 /></button>
           </div>
         </td>
       </tr>
       {isExpanded && (
         <tr>
-          <td colSpan="5" className="p-0">
-            <MaterialsSubTable materials={product.materials} />
+          <td colSpan="5" className="p-0 bg-gray-50">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4">
+              <MaterialsSubTable materials={product.materials} />
+              <CycleFlowSubTable cycleFlow={product.cycle_flow} />
+            </div>
           </td>
         </tr>
       )}
@@ -71,7 +96,6 @@ const ProductManagementPage = () => {
     try {
       const response = await productApi.getAll();
       setProducts(response.data || []);
-      console.log("Fetched products:", response.data);
     } catch (error) {
       console.error("Failed to fetch products", error);
       setProducts([]);
@@ -85,7 +109,6 @@ const ProductManagementPage = () => {
   }, [fetchProducts]);
   
   const handleOpenModal = (product = null) => {
-    console.log("Opening modal for product:", product);
     setEditingProduct(product);
     setIsModalOpen(true);
   };
@@ -106,7 +129,7 @@ const ProductManagementPage = () => {
   };
   
   const handleDelete = async (productId) => {
-      if(window.confirm('Are you sure?')){
+      if(window.confirm('Are you sure you want to delete this product and its recipe?')){
           await productApi.delete(productId);
           fetchProducts();
       }
@@ -116,7 +139,9 @@ const ProductManagementPage = () => {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Product Management</h1>
-        <button onClick={() => handleOpenModal()} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Add New Product</button>
+        <button onClick={() => handleOpenModal()} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+          Add New Product
+        </button>
       </div>
 
       <div className="bg-white rounded-lg shadow overflow-hidden">
