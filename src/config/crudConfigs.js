@@ -233,33 +233,46 @@ export const workstationTypeConfig = {
 };
 
 // For: workstations table
+// For: workstations table
 export const workstationConfig = {
+  // Use a dedicated "detailed" endpoint for the table to get joined data like user and type names
+  getAllResource: 'shared/workstations-detailed',
+  // The base resource is still used for creating, updating, and deleting
   resource: 'shared/workstations',
   title: 'Workstations',
   fields: [
-    { name: 'name', label: 'Workstation Name', type: 'text', required: true },
+    { 
+      name: 'name', 
+      label: 'Workstation Name', 
+      type: 'text', 
+      required: true,
+      placeholder: 'e.g., Cutting Table 1, Sewing Machine 5'
+    },
     { 
       name: 'workstation_type_id', 
       label: 'Workstation Type', 
       type: 'select', 
       required: true,
       resource: 'shared/workstation_types',
+      // Tells the form to display the 'type_name' property from the fetched options
       optionLabelFormatter: (option) => option.type_name
     },
     { 
       name: 'assigned_user_id', 
-      label: 'Assigned User', 
+      label: 'Assigned Operator', 
       type: 'select', 
       resource: 'shared/factory_users',
-      optionLabelFormatter: (option) => option.name // Assuming the user object has a 'name' property
+      // --- IMPROVEMENT: Only show users with roles that can operate a workstation ---
+      resourceFilter: { roles: ['cutting_operator', 'line_loader', 'validation_user'] },
+      // Tells the form to display the 'name' property from the fetched user options
+      optionLabelFormatter: (option) => option.name
     },
-    // --- NEW FIELD ADDED HERE ---
     {
       name: 'type',
       label: 'Process Type',
       type: 'select',
       required: true,
-      // Since the options are fixed in the database ENUM, we can hardcode them here.
+      // These options are objects, which is great for storing a value and a label separately
       options: [
         { value: 'loader', label: 'Loader' },
         { value: 'regular', label: 'Regular' },
@@ -269,14 +282,61 @@ export const workstationConfig = {
   ],
   columns: [ 
     { key: 'name', label: 'Workstation Name' },
-    // --- NEW COLUMN ADDED HERE ---
-    // Note: Displaying this will work out-of-the-box since it's a direct column.
-    { key: 'type', label: 'Process Type' }, 
-    // These columns still require a dedicated endpoint with JOINs to display names
-    // { key: 'type_name', label: 'Type' },
-    // { key: 'assigned_user_name', label: 'Assigned To' } 
+    // --- IMPROVEMENT: Display human-readable names from the detailed endpoint ---
+    { key: 'workstation_type_name', label: 'Type' },
+    { key: 'assigned_user_name', label: 'Assigned To' },
+    { 
+      key: 'type', 
+      label: 'Process Type',
+      // --- IMPROVEMENT: Format the raw value for better display in the table ---
+      formatter: (value) => value.charAt(0).toUpperCase() + value.slice(1) // Changes 'loader' to 'Loader'
+    }, 
   ]
 };
+// export const workstationConfig = {
+//   resource: 'shared/workstations',
+//   title: 'Workstations',
+//   fields: [
+//     { name: 'name', label: 'Workstation Name', type: 'text', required: true },
+//     { 
+//       name: 'workstation_type_id', 
+//       label: 'Workstation Type', 
+//       type: 'select', 
+//       required: true,
+//       resource: 'shared/workstation_types',
+//       optionLabelFormatter: (option) => option.type_name
+//     },
+//     { 
+//       name: 'assigned_user_id', 
+//       label: 'Assigned User', 
+//       type: 'select', 
+//       resource: 'shared/factory_users',
+//       optionLabelFormatter: (option) => option.name // Assuming the user object has a 'name' property
+//     },
+//     // --- NEW FIELD ADDED HERE ---
+//     {
+//       name: 'type',
+//       label: 'Process Type',
+//       type: 'select',
+//       required: true,
+//       // Since the options are fixed in the database ENUM, we can hardcode them here.
+//       options: [
+//         { value: 'loader', label: 'Loader' },
+//         { value: 'regular', label: 'Regular' },
+//         { value: 'unloader', label: 'Unloader' },
+//       ]
+//     }
+//   ],
+//   columns: [ 
+//     { key: 'name', label: 'Workstation Name' },
+//     // --- NEW COLUMN ADDED HERE ---
+//     // Note: Displaying this will work out-of-the-box since it's a direct column.
+//     { key: 'type', label: 'Process Type' }, 
+//     // These columns still require a dedicated endpoint with JOINs to display names
+//     // { key: 'type_name', label: 'Type' },
+//     // { key: 'assigned_user_name', label: 'Assigned To' } 
+//   ]
+// };
 
 // For: product_piece_parts table
 export const piecePartConfig = {
