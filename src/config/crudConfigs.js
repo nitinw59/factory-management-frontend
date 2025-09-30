@@ -105,7 +105,7 @@ export const trimItemConfig = {
       label: 'Base Item', 
       type: 'select', 
       required: true, 
-      resource: 'trim_items',
+      resource: 'shared/trim_items',
       // --- THIS IS THE NEW PROPERTY ---
       // This function tells the form how to display each option.
       optionLabelFormatter: (item) => `${item.name} - ${item.brand}`
@@ -115,7 +115,7 @@ export const trimItemConfig = {
       label: 'Color', 
       type: 'select', 
       required: true, 
-      resource: 'fabric_color',
+      resource: 'shared/fabric_color',
       // Example of another formatter for the color dropdown
       optionLabelFormatter: (color) => `${color.name} (${color.color_number})`
     },
