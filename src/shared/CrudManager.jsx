@@ -1,23 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import Modal from './Modal';
 import { genericApi } from '../api/genericApi';
 import CrudForm from './CrudForm';
+import { LuPlus, LuPen, LuTrash2 } from 'react-icons/lu';
 
-// --- SHARED ICONS ---
+// --- SHARED COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
-const EditIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>;
-const DeleteIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>;
-
-const Modal = ({ children, onClose, title }) => (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4">
-        <div className="bg-white rounded-lg shadow-2xl w-full max-w-lg">
-            <header className="flex justify-between items-center p-4 border-b"><h2 className="text-xl font-semibold">{title}</h2><button onClick={onClose} className="text-2xl">&times;</button></header>
-            <main className="p-6">{children}</main>
-        </div>
-    </div>
-);
 
 // --- REUSABLE CRUD MANAGER COMPONENT ---
-const CrudManager = ({ config }) => {
+const CrudManager = ({ config, onRowSelect, selectedRowId, resourceFilter }) => {
   const [items, setItems] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [editingItem, setEditingItem] = useState(null);
@@ -27,7 +18,12 @@ const CrudManager = ({ config }) => {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const resourceToFetch = config.getAllResource || config.resource;
+      let resourceToFetch = config.getAllResource || config.resource;
+      // If a filter is provided, append it to the resource path.
+      // This is crucial for fetching variants for a specific trim item.
+      if (resourceFilter && Object.values(resourceFilter)[0]) {
+        resourceToFetch = `${resourceToFetch}/${Object.values(resourceFilter)[0]}`;
+      }
       const response = await genericApi.getAll(resourceToFetch);
       setItems(response.data || []);
     } catch (error) {
@@ -36,7 +32,7 @@ const CrudManager = ({ config }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [config.resource, config.title]);
+  }, [config.resource, config.getAllResource, config.title, resourceFilter]);
 
   useEffect(() => {
     fetchData();
@@ -56,10 +52,13 @@ const CrudManager = ({ config }) => {
   const handleSave = async (itemData) => {
     setApiError(null);
     try {
+      const resourceToSave = config.resource;
       if (itemData.id) {
-        await genericApi.update(config.resource, itemData.id, itemData);
+        await genericApi.update(resourceToSave, itemData.id, itemData);
       } else {
-        await genericApi.create(config.resource, itemData);
+        // When creating, include the filter key if it exists (e.g., trim_item_id)
+        const dataToCreate = resourceFilter ? { ...itemData, ...resourceFilter } : itemData;
+        await genericApi.create(resourceToSave, dataToCreate);
       }
       handleCloseModal();
       fetchData();
@@ -80,12 +79,21 @@ const CrudManager = ({ config }) => {
       }
     }
   };
+  
+  // --- ADDED FOR ROW SELECTION ---
+  const handleRowClick = (item) => {
+    if (onRowSelect) {
+      onRowSelect(item);
+    }
+  };
 
   return (
     <div className="bg-white p-4 rounded-lg shadow">
       <header className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold text-gray-800">{config.title}</h2>
-        <button onClick={() => handleOpenModal()} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Add New</button>
+        <button onClick={() => handleOpenModal()} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center">
+            <LuPlus size={16} className="mr-1"/> Add New
+        </button>
       </header>
       
       {isLoading ? <Spinner /> : (
@@ -99,12 +107,18 @@ const CrudManager = ({ config }) => {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {items.map(item => (
-                <tr key={item.id}>
+                <tr 
+                    key={item.id}
+                    // --- ADDED ONCLICK AND DYNAMIC STYLING ---
+                    onClick={() => handleRowClick(item)}
+                    className={`cursor-pointer transition-colors duration-150 ${selectedRowId === item.id ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}`}
+                >
                   {config.columns.map(col => <td key={col.key} className="py-4 px-4 whitespace-nowrap">{item[col.key]}</td>)}
                   <td className="py-4 px-4 whitespace-nowrap">
                     <div className="flex items-center space-x-4">
-                      <button onClick={() => handleOpenModal(item)} className="text-gray-400 hover:text-blue-600"><EditIcon /></button>
-                      <button onClick={() => handleDelete(item.id)} className="text-gray-400 hover:text-red-600"><DeleteIcon /></button>
+                      {/* Added stopPropagation to prevent row click from firing when an action button is clicked */}
+                      <button onClick={(e) => { e.stopPropagation(); handleOpenModal(item); }} className="text-gray-400 hover:text-blue-600"><LuPen size={16}/></button>
+                      <button onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }} className="text-gray-400 hover:text-red-600"><LuTrash2 size={16}/></button>
                     </div>
                   </td>
                 </tr>

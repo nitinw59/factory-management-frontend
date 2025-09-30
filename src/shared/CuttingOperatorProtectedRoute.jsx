@@ -2,18 +2,18 @@ import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const AdminProtectedRoute = ({ children }) => {
+const CuttingOperatorProtectedRoute = ({ children }) => {
   const { user } = useAuth();
 
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  if (user.role !== 'factory_admin') {
+  if (user.role !== 'cutting_operator') {
     return <Navigate to="/unauthorized" replace />;
   }
 
-  return children; // ✅ Wraps AdminLayout and its Outlet
+  return children; // ✅ Wraps CuttingPortalLayout and its Outlet
 };
 
-export default AdminProtectedRoute;
+export default CuttingOperatorProtectedRoute;

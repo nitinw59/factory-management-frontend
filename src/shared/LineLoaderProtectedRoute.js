@@ -1,9 +1,9 @@
 import React from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { jwtDecode } from 'jwt-decode';
 
-const ProductionManagerProtectedRoute = ({ children }) => {
+const LineLoaderProtectedRoute = ({ children }) => {
   const { token } = useAuth();
 
   if (!token) {
@@ -12,8 +12,8 @@ const ProductionManagerProtectedRoute = ({ children }) => {
 
   try {
     const user = jwtDecode(token);
-    // This gatekeeper ONLY allows users with the 'production_manager' role.
-    if (user.role !== 'production_manager') {
+    // This gatekeeper allows line loaders AND admins
+    if (user.role !== 'line_loader' && user.role !== 'factory_admin') {
       return <Navigate to="/unauthorized" />;
     }
   } catch (error) {
@@ -24,4 +24,4 @@ const ProductionManagerProtectedRoute = ({ children }) => {
   return children;
 };
 
-export default ProductionManagerProtectedRoute;
+export default LineLoaderProtectedRoute;

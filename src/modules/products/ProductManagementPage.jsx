@@ -11,7 +11,7 @@ const Spinner = () => <div className="flex justify-center items-center p-8"><div
 
 const MaterialsSubTable = ({ materials }) => (
   <div>
-    <h4 className="font-semibold text-sm text-gray-700 mb-2">Materials Required (per piece)</h4>
+    <h4 className="font-semibold text-sm text-gray-700 mb-2">Materials Required</h4>
     <div className="border rounded-lg overflow-hidden">
       <table className="min-w-full text-sm">
         <thead className="bg-gray-200">
@@ -27,6 +27,9 @@ const MaterialsSubTable = ({ materials }) => (
               <td className="py-1 px-3">{material.quantity}</td>
             </tr>
           ))}
+           {(materials || []).length === 0 && (
+            <tr><td colSpan="2" className="text-center py-2 text-gray-500">No materials defined.</td></tr>
+          )}
         </tbody>
       </table>
     </div>
@@ -35,19 +38,50 @@ const MaterialsSubTable = ({ materials }) => (
 
 const CycleFlowSubTable = ({ cycleFlow }) => (
   <div>
-    <h4 className="font-semibold text-sm text-gray-700 mb-2">Production Cycle Flow</h4>
+    <h4 className="font-semibold text-sm text-gray-700 mb-2">Production Cycle</h4>
     <div className="border rounded-lg overflow-hidden">
         <ul className="divide-y divide-gray-200 bg-white">
             {(cycleFlow || []).map((step, index) => (
-                <li key={index} className="px-3 py-2 flex items-center">
+                <li key={index} className="px-3 py-2 flex items-center text-sm">
                     <span className="font-bold text-gray-500 mr-2">{step.sequence_no}.</span>
                     <span>{step.type_name}</span>
                 </li>
             ))}
+            {(cycleFlow || []).length === 0 && (
+                <li className="text-center py-2 text-gray-500 text-sm">No production flow defined.</li>
+            )}
         </ul>
     </div>
   </div>
 );
+
+const PiecePartsSubTable = ({ pieceParts }) => (
+  <div>
+    <h4 className="font-semibold text-sm text-gray-700 mb-2">Piece Parts</h4>
+    <div className="border rounded-lg overflow-hidden">
+      <table className="min-w-full text-sm">
+        <thead className="bg-gray-200">
+          <tr>
+            <th className="py-1 px-3 text-left">Part Name</th>
+            <th className="py-1 px-3 text-left">Type</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-200 bg-white">
+          {(pieceParts || []).map((part, index) => (
+            <tr key={index}>
+              <td className="py-1 px-3">{part.part_name}</td>
+              <td className="py-1 px-3">{part.part_type}</td>
+            </tr>
+          ))}
+           {(pieceParts || []).length === 0 && (
+            <tr><td colSpan="2" className="text-center py-2 text-gray-500">No piece parts defined.</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+
 
 const ProductRow = ({ product, onEdit, onDelete }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -63,7 +97,7 @@ const ProductRow = ({ product, onEdit, onDelete }) => {
            <div className="flex items-center space-x-4">
             <button onClick={() => setIsExpanded(!isExpanded)} className="text-blue-600 flex items-center text-sm">
               {isExpanded ? <LuChevronUp className="mr-1"/> : <LuChevronDown className="mr-1" />}
-              Details
+              Full Recipe
             </button>
             <button onClick={() => onEdit(product)} className="text-gray-400 hover:text-blue-600"><LuPencil /></button>
             <button onClick={() => onDelete(product.id)} className="text-gray-400 hover:text-red-600"><LuTrash2 /></button>
@@ -72,9 +106,10 @@ const ProductRow = ({ product, onEdit, onDelete }) => {
       </tr>
       {isExpanded && (
         <tr>
-          <td colSpan="5" className="p-0 bg-gray-50">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4">
+          <td colSpan="5" className="p-0 bg-gray-50 border-t">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-4">
               <MaterialsSubTable materials={product.materials} />
+              <PiecePartsSubTable pieceParts={product.piece_parts} />
               <CycleFlowSubTable cycleFlow={product.cycle_flow} />
             </div>
           </td>
@@ -164,7 +199,7 @@ const ProductManagementPage = () => {
       </div>
 
       {isModalOpen && (
-        <Modal title={editingProduct ? "Edit Product" : "Create New Product"} onClose={() => setIsModalOpen(false)}>
+        <Modal title={editingProduct ? "Edit Product" : "Create New Product"} onClose={() => setIsModalOpen(false)} size="max-w-4xl">
           <ProductForm initialData={editingProduct} onSave={handleSave} onClose={() => setIsModalOpen(false)} />
         </Modal>
       )}

@@ -1,7 +1,36 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LuLogOut, LuPencil } from 'react-icons/lu';
+import { LuCircleUserRound, LuLogOut, LuChevronDown, LuPencil } from 'react-icons/lu';
+
+
+// A reusable dropdown component for the navbar
+const NavDropdown = ({ title, children }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) setIsOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [ref]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
+        {title}
+        <LuChevronDown className={`ml-1 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      {isOpen && (
+        <div className="absolute mt-2 w-56 bg-white rounded-md shadow-lg py-1 z-30" onClick={() => setIsOpen(false)}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ProductionManagerLayout = () => {
   const { user, logout } = useAuth();
@@ -19,10 +48,24 @@ const ProductionManagerLayout = () => {
           <div className="flex items-center space-x-8">
             <div className="text-xl font-bold text-gray-800">Production Portal</div>
             <nav className="hidden md:flex items-center space-x-6">
+                <NavDropdown title="Production">
                 <NavLink to="/production-manager/dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
-                    <LuPencil className="inline-block mr-1" />
-                    Planning
+                   Planning
                 </NavLink>
+                </NavDropdown>
+                <NavDropdown title="Production">
+                    <NavLink to="/production-manager/production-lines" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Lines</NavLink>
+                    <NavLink to="/production-manager/production-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Line Types</NavLink>
+                    <NavLink to="/production-manager/workstations" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Workstations</NavLink>
+                    <NavLink to="/production-manager/workstation-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Workstation Types</NavLink>
+                </NavDropdown>
+                <NavDropdown title="Floor Management">
+                    <NavLink to="/production-manager/production-lines" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Lines</NavLink>
+                    <NavLink to="/production-manager/production-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Line Types</NavLink>
+                    <NavLink to="/production-manager/workstations" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Workstations</NavLink>
+                    <NavLink to="/production-manager/factory-layout-planner" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Factory Layout</NavLink>
+                </NavDropdown>
+                 
             </nav>
           </div>
           <div className="flex items-center">

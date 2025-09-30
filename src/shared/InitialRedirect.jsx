@@ -20,12 +20,27 @@ const InitialRedirect = () => {
         
         case 'store_manager':
             // Store Managers are sent directly to their dedicated inventory dashboard.
-            return <Navigate to="/store-manager/dashboard" replace />;
+             return <Navigate to="/store-manager/trim-orders" replace />;
             
         case 'production_manager':
             // Production Managers are sent to their production planning dashboard.
             return <Navigate to="/production-manager/dashboard" replace />;
 
+        case 'cutting_operator':
+            // Cutting Operators are sent to their cutting queue dashboard.
+            return <Navigate to="/cutting-portal/dashboard" replace />;
+
+        case 'line_loader':
+            // Line Loaders are sent to their line loader dashboard.
+            return <Navigate to="/line-loader/dashboard" replace />;
+        case 'validation_user':
+            // Validation Users are sent to their validation dashboard.
+            return <Navigate to="/validation-portal/dashboard" replace />;
+
+        case 'line_manager':
+            // Line Managers are sent to their line manager dashboard.
+            return <Navigate to="/line-manager/dashboard" replace />;   
+            
         default:
             // If a user has a valid login but their role is not recognized
             // by the application's portals, they are sent to an unauthorized page.

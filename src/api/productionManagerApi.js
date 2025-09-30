@@ -18,11 +18,23 @@ export const productionManagerApi = {
   getAll: () => api.get('/production-manager/production-batches'),
 
 
- getFabricTypes: () => api.get('/shared/fabric_type'),
+ getFabricTypes: () => api.get('/production-manager/fabric_type'),
 
   /**
    * Fetches all available fabric colors for the form filters.
    */
-  getFabricColors: () => api.get('/shared/fabric_color'),
+  getFabricColors: () => api.get('/production-manager/fabric_color'),
+
+  getFactoryLayoutData: () => api.get('/production-manager/factory-layout'),
+
+  /**
+   * Updates the sequence and assignment of workstations for a specific production line.
+   * Corresponds to: PUT /api/production-manager/production-lines/:lineId/layout
+   * @param {number | string} lineId - The ID of the production line to update.
+   * @param {number[]} workstationIds - An ordered array of workstation IDs for the new layout.
+   */
+  updateLineLayout: (lineId, workstationIds) => 
+    api.put(`/production-manager/production-lines/${lineId}/layout`, { workstationIds }),
+    
 };
 

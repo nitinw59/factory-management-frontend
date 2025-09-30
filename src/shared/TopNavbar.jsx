@@ -1,38 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LuCircleUserRound, LuLogOut, LuChevronDown } from 'react-icons/lu';
 import { useAuth } from '../context/AuthContext';
+import { LuCircleUserRound, LuLogOut } from 'react-icons/lu';
 
-// A reusable dropdown component for the navbar
-const NavDropdown = ({ title, children }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (ref.current && !ref.current.contains(event.target)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [ref]);
-
-  return (
-    <div className="relative" ref={ref}>
-      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
-        {title}
-        <LuChevronDown className={`ml-1 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-      {isOpen && (
-        <div className="absolute mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-20" onClick={() => setIsOpen(false)}>
-          {children}
-        </div>
-      )}
-    </div>
-  );
-};
-
+// This is the new, "dumber" top navbar. Its only jobs are to display the
+// portal title, the user's profile, and the logout button.
 const TopNavbar = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -41,41 +13,27 @@ const TopNavbar = () => {
     logout();
     navigate('/login');
   };
+  
+  // This helper function dynamically changes the title based on the user's role.
+  const getPortalTitle = () => {
+      if(!user) return "Factory App";
+      switch(user.role) {
+          case 'factory_admin': return "Admin Portal";
+          case 'store_manager': return "Store Manager Portal";
+          case 'production_manager': return "Production Portal";
+          default: return "Factory App";
+      }
+  }
 
   return (
     <header className="bg-white shadow-md sticky top-0 z-20">
       <div className="container mx-auto px-6 py-3 flex justify-between items-center">
-        <div className="flex items-center space-x-8">
-          <NavLink to="/" className="text-xl font-bold text-gray-800">FactoryApp</NavLink>
-          <nav className="hidden md:flex items-center space-x-6">
-            <NavLink to="/admin/dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>Dashboard</NavLink>
-            
-            <NavDropdown title="Users">
-              <NavLink to="/admin/users" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">User Management</NavLink>
-              <NavLink to="/admin/suppliers" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Supplier Management</NavLink>
-            </NavDropdown>
-
-            <NavDropdown title="Production">
-              <NavLink to="/admin/production-lines" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Lines</NavLink>
-              <NavLink to="/admin/production-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Line Types</NavLink>
-            </NavDropdown>
-
-            <NavDropdown title="Trims Store">
-              <NavLink to="/admin/inventory" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Inventory Dashboard</NavLink>
-              <NavLink to="/admin/trim-items" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Item Catalog</NavLink>
-              <NavLink to="/admin/trim-item-variants" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Item Variants (Stock)</NavLink>
-              <NavLink to="/admin/fabric-colors" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Fabric Colors</NavLink>
-              <NavLink to="/admin/fabric-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Fabric Types</NavLink>
-            </NavDropdown>
-
-            <NavDropdown title="Products">
-              <NavLink to="/admin/products" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Products</NavLink>
-              <NavLink to="/admin/product-brands" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Brands</NavLink>
-              <NavLink to="/admin/product-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Types</NavLink>
-            </NavDropdown>
-            
-          </nav>
-        </div>
+        {/* The title now dynamically updates based on the user's role */}
+        <NavLink to="/" className="text-xl font-bold text-gray-800">
+          {getPortalTitle()}
+        </NavLink>
+        
+        {/* User Profile and Logout section remains the same */}
         <div className="flex items-center">
           {user && (
             <>

@@ -2,16 +2,23 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 
 // --- LAYOUTS & PROTECTORS ---
-// --- LAYOUTS & PROTECTORS ---
-import MainLayout from './shared/MainLayout';
-import AdminPortal from './portals/AdminPortal';
-import StoreManagerPortal from './portals/StoreManagerPortal';
-import ProductionManagerPortal from './portals/ProductionManagerPortal'; // Import the new portal layout
+import AdminLayout from './shared/AdminLayout';
+import StoreManagerLayout from './shared/StoreManagerLayout';
+import ProductionManagerLayout from './shared/ProductionManagerLayout';
 import ProtectedRoute from './shared/ProtectedRoute'; 
 import AdminProtectedRoute from './shared/AdminProtectedRoute';
 import StoreManagerProtectedRoute from './shared/StoreManagerProtectedRoute';
-import ProductionManagerProtectedRoute from './shared/ProductionManagerProtectedRoute'; // Import the new protector
+import ProductionManagerProtectedRoute from './shared/ProductionManagerProtectedRoute';
 import InitialRedirect from './shared/InitialRedirect';
+import WorkstationsPage from './modules/workstations/WorkstationsPage';
+import WorkstationTypesPage from './modules/workstations/WorkstationTypesPage';
+import PiecePartsPage from './modules/products/PiecePartsPage';
+import CuttingPortalLayout from './shared/CuttingPortalLayout'; // New
+import CuttingOperatorProtectedRoute from './shared/CuttingOperatorProtectedRoute'; // New
+import PortalManagementPage from './modules/portals/PortalManagementPage'; // New
+import LineLoaderProtectedRoute from './shared/LineLoaderProtectedRoute'; // New
+import LineLoaderDashboardPage from './modules/line_loader/LineLoaderDashboardPage'; // New
+import LineLoaderLayout from './shared/LineLoaderLayout'; // New  
 
 // --- PUBLIC PAGES ---
 import LoginPage from './login/LoginPage';
@@ -20,10 +27,6 @@ import UnauthorizedPage from './login/UnauthorizedPage';
 
 // --- MODULE PAGES ---
 import AdminDashboardPage from './modules/admin/AdminDashboardPage';
-import StoreManagerDashboardPage from './modules/store_manager/StoreManagerDashboardPage';
-import ProductionPlanningPage from './modules/production/ProductionPlanningPage';
-
-import DashboardPage from './modules/dashboard/DashboardPage';
 import UserManagementPage from './modules/users/UserManagementPage';
 import SupplierManagementPage from './modules/suppliers/SupplierManagementPage';
 import TrimsDashboardPage from './modules/trims/TrimsDashboardPage';
@@ -36,8 +39,19 @@ import ProductManagementPage from './modules/products/ProductManagementPage';
 import ProductBrandsPage from './modules/products/ProductBrandsPage';
 import ProductTypesPage from './modules/products/ProductTypesPage';
 import ProductionLineTypesPage from './modules/production/ProductionLineTypesPage';
-import StoreManagerLayout from './portals/StoreManagerPortal';
-import ProductionManagerLayout from './portals/ProductionManagerPortal';
+import StoreManagerDashboardPage from './modules/store_manager/StoreManagerDashboardPage';
+import ProductionPlanningPage from './modules/production/ProductionPlanningPage';
+import CuttingDashboardPage from './modules/cutting_portal/CuttingDashboardPage'; // New
+import FactoryLayoutPlannerPage from './modules/production/FactoryLayoutPlannerPage';
+import TrimIntakeForm from './modules/store_manager/TrimIntakeForm'; 
+import TrimManagementPage from './modules/store_manager/TrimManagementPage';
+import TrimOrdersPage from './modules/store_manager/TrimOrdersPage';
+import TrimOrderDetailPage from './modules/store_manager/TrimOrderDetailPage';
+import ValidationUserProtectedRoute from './shared/ValidationUserProtectedRoute';
+import ValidationPortalLayout from './shared/ValidationPortalLayout';
+import ValidationDashboardPage from './modules/validation_portal/ValidationDashboardPage';
+
+
 function App() {
   return (
     <Routes>
@@ -48,39 +62,79 @@ function App() {
 
       {/* --- 2. PROTECTED ROUTES --- */}
       <Route element={<ProtectedRoute />}>
-       <Route path="/" element={<MainLayout />}>
-          <Route index element={<InitialRedirect />} />
-          
+        {/* The root path is the main entry point that redirects based on role */}
+        <Route path="/" element={<InitialRedirect />} />
+        
         {/* Admin Portal */}
-                  <Route path="/admin" element={<AdminProtectedRoute><AdminPortal /></AdminProtectedRoute>}>
-                    <Route index element={<AdminDashboardPage />} />
-                    <Route path="dashboard" element={<AdminDashboardPage />} />
-                    <Route path="users" element={<UserManagementPage />} />
-                    <Route path="suppliers" element={<SupplierManagementPage />} />
-                    <Route path="inventory" element={<TrimsDashboardPage />} />
-                    <Route path="trim-items" element={<TrimItemsPage />} />
-                    <Route path="trim-item-variants" element={<TrimItemVariantsPage />} />
-                    <Route path="production-lines" element={<ProductionLinesPage />} />
-                    <Route path="production-line-types" element={<ProductionLineTypesPage />} />
-                    <Route path="fabric-colors" element={<FabricColorsPage />} />
-                    <Route path="fabric-types" element={<FabricTypesPage />} />
-                    <Route path="products" element={<ProductManagementPage />} />
-                    <Route path="product-brands" element={<ProductBrandsPage />} />
-                    <Route path="product-types" element={<ProductTypesPage />} />
-                  </Route>
-
-                  {/* Store Manager Portal */}
-                  <Route path="/store-manager" element={<StoreManagerProtectedRoute><StoreManagerLayout /></StoreManagerProtectedRoute>}>
-                    <Route index element={<StoreManagerDashboardPage />} />
-                    <Route path="dashboard" element={<StoreManagerDashboardPage />} />
-                  </Route>
-
-                  {/* Production Manager Portal */}
-                  <Route path="/production-manager" element={<ProductionManagerProtectedRoute><ProductionManagerLayout /></ProductionManagerProtectedRoute>}>
-                    <Route index element={<ProductionPlanningPage />} />
-                    <Route path="dashboard" element={<ProductionPlanningPage />} />
-                  </Route>
+        <Route path="/admin" element={<AdminProtectedRoute><AdminLayout /></AdminProtectedRoute>}>
+          {/* <Route index element={<AdminDashboardPage />} /> */}
+          <Route path="dashboard" element={<AdminDashboardPage />} />
+          <Route path="users" element={<UserManagementPage />} />
+          <Route path="suppliers" element={<SupplierManagementPage />} />
+          <Route path="inventory" element={<TrimsDashboardPage />} />
+          <Route path="trim-items" element={<TrimItemsPage />} />
+          <Route path="trim-item-variants" element={<TrimItemVariantsPage />} />
+          <Route path="production-lines" element={<ProductionLinesPage />} />
+          <Route path="production-line-types" element={<ProductionLineTypesPage />} />
+          <Route path="fabric-colors" element={<FabricColorsPage />} />
+          <Route path="fabric-types" element={<FabricTypesPage />} />
+          <Route path="products" element={<ProductManagementPage />} />
+          <Route path="product-brands" element={<ProductBrandsPage />} />
+          <Route path="product-types" element={<ProductTypesPage />} />
+          <Route path="workstations" element={<WorkstationsPage />} />
+          <Route path="workstation-types" element={<WorkstationTypesPage />} />
+          <Route path="product-piece-parts" element={<PiecePartsPage />} />
+          <Route path="portal-management" element={<PortalManagementPage />} />
         </Route>
+
+              {/* Store Manager Portal */}
+        <Route path="/store-manager" element={<StoreManagerProtectedRoute><StoreManagerLayout /></StoreManagerProtectedRoute>}>
+          <Route index element={<StoreManagerDashboardPage />} />
+          <Route path="fabric-stock" element={<StoreManagerDashboardPage />} />
+          <Route path="trim-management" element={<TrimManagementPage />} />
+          
+          {/* Corrected Routes for Trim Orders */}
+          {/* This route displays the list of all orders */}
+          <Route path="trim-orders" element={<TrimOrdersPage />} />
+          
+          {/* This route displays the details of a single, specific order */}
+          <Route path="trim-orders/:orderId" element={<TrimOrderDetailPage />} />
+          
+          <Route path="record-trim-purchase" element={<TrimIntakeForm />} />
+        </Route>
+
+        {/* Production Manager Portal */}
+        <Route path="/production-manager" element={<ProductionManagerProtectedRoute><ProductionManagerLayout /></ProductionManagerProtectedRoute>}>
+          <Route index element={<ProductionPlanningPage />} />
+          <Route path="dashboard" element={<ProductionPlanningPage />} />
+          <Route path="production-lines" element={<ProductionLinesPage />} />
+          <Route path="factory-layout-planner" element={<FactoryLayoutPlannerPage />} />
+          <Route path="production-line-types" element={<ProductionLineTypesPage />} />
+          <Route path="workstations" element={<WorkstationsPage />} />
+          <Route path="workstation-types" element={<WorkstationTypesPage />} />
+        </Route>
+      </Route>
+
+      <Route path="/cutting-portal" element={<CuttingOperatorProtectedRoute><CuttingPortalLayout /></CuttingOperatorProtectedRoute>}>
+          <Route index element={<CuttingDashboardPage />} />
+          <Route path="dashboard" element={<CuttingDashboardPage />} />
+          {/* Add this new route */}
+          {/* <Route path="cut/:batchId/:rollId" element={<CuttingFormPage />} /> */}
+          {/* ... other cutting portal routes ... */}
+      </Route>
+      
+
+      {/* Line Loader Portal */}
+      <Route path="/line-loader" element={<LineLoaderProtectedRoute><LineLoaderLayout /></LineLoaderProtectedRoute>}>
+          <Route index element={<LineLoaderDashboardPage />} />
+          <Route path="dashboard" element={<LineLoaderDashboardPage />} />
+          {/* Add more line loader specific routes here later */}
+      </Route>    
+
+
+      <Route path="/validation-portal" element={<ValidationUserProtectedRoute><ValidationPortalLayout /></ValidationUserProtectedRoute>}>
+          <Route index element={<ValidationDashboardPage />} />
+          <Route path="dashboard" element={<ValidationDashboardPage />} />
       </Route>
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}

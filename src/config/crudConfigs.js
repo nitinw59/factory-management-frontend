@@ -2,7 +2,7 @@
 
 // For: factory_users table
 export const factoryUserConfig = {
-  resource: 'admin/factory_users',
+  resource: 'shared/factory_users',
   title: 'Factory User Management',
   fields: [
     { name: 'name', label: 'Full Name', type: 'text', required: true },
@@ -12,7 +12,7 @@ export const factoryUserConfig = {
       label: 'Role', 
       type: 'select',
       required: true,
-      options: ['factory_admin', 'store_manager', 'line_manager', 'supplier', 'production_manager', 'accountant', 'hr_manager', 'loader', 'checker'],  
+      options: ['factory_admin', 'store_manager', 'line_manager', 'supplier', 'production_manager', 'accountant', 'hr_manager', 'loader', 'checker', 'cutting_operator', 'line_loader', 'validation_user'],
     },
   ],
   columns: [ { key: 'name', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'role', label: 'Role' } ]
@@ -49,7 +49,7 @@ export const productionLineTypeConfig = {
 // For: production_lines table
 export const productionLineConfig = {
   resource: 'shared/production_lines', // Used for CREATE, UPDATE, DELETE
-  getAllResource: 'admin/production-lines-detailed', // Used for the table view
+  //getAllResource: 'shared/production-lines-detailed', // Used for the table view
   title: 'Production Lines',
   fields: [
     { name: 'name', label: 'Line Name', type: 'text', required: true },
@@ -58,14 +58,14 @@ export const productionLineConfig = {
       label: 'Line Type', 
       type: 'select', 
       required: true,
-      resource: 'production_line_types',
+      resource: 'shared/production_line_types',
       optionLabelFormatter: (option) => option.type_name // Use 'type_name' for display
     },
     { 
       name: 'line_manager_user_id', 
       label: 'Line Manager', 
       type: 'select', 
-      resource: 'factory_users',
+      resource: 'shared/factory_users',
       resourceFilter: { role: 'line_manager' } 
     },
   ],
@@ -200,6 +200,125 @@ export const fabricTypeConfig = {
   ],
   columns: [ 
     { key: 'name', label: 'Name' },
+  ]
+};
+
+export const workstationTypeConfig = {
+  resource: 'shared/workstation_types',
+  // We need a dedicated endpoint to get the portal name for the table view
+  getAllResource: 'shared/workstation-types-detailed', 
+  title: 'Workstation Types',
+  fields: [
+    { 
+      name: 'type_name', 
+      label: 'Type Name', 
+      type: 'text', 
+      required: true,
+      placeholder: 'e.g., Cutting, Sewing'
+    },
+    {
+      name: 'portal_id',
+      label: 'Associated Portal',
+      type: 'select',
+      // The CrudForm will use this to fetch a list of all available portals
+      // and populate the dropdown menu. This is not a required field.
+      resource: 'admin/portals', 
+    }
+  ],
+  columns: [ 
+    { key: 'type_name', label: 'Type Name' },
+    // This column will display the joined name from the 'portals' table
+    { key: 'portal_name', label: 'Assigned Portal' }, 
+  ]
+};
+
+// For: workstations table
+export const workstationConfig = {
+  resource: 'shared/workstations',
+  title: 'Workstations',
+  fields: [
+    { name: 'name', label: 'Workstation Name', type: 'text', required: true },
+    { 
+      name: 'workstation_type_id', 
+      label: 'Workstation Type', 
+      type: 'select', 
+      required: true,
+      resource: 'shared/workstation_types',
+      optionLabelFormatter: (option) => option.type_name
+    },
+    { 
+      name: 'assigned_user_id', 
+      label: 'Assigned User', 
+      type: 'select', 
+      resource: 'shared/factory_users',
+      optionLabelFormatter: (option) => option.name // Assuming the user object has a 'name' property
+    },
+    // --- NEW FIELD ADDED HERE ---
+    {
+      name: 'type',
+      label: 'Process Type',
+      type: 'select',
+      required: true,
+      // Since the options are fixed in the database ENUM, we can hardcode them here.
+      options: [
+        { value: 'loader', label: 'Loader' },
+        { value: 'regular', label: 'Regular' },
+        { value: 'unloader', label: 'Unloader' },
+      ]
+    }
+  ],
+  columns: [ 
+    { key: 'name', label: 'Workstation Name' },
+    // --- NEW COLUMN ADDED HERE ---
+    // Note: Displaying this will work out-of-the-box since it's a direct column.
+    { key: 'type', label: 'Process Type' }, 
+    // These columns still require a dedicated endpoint with JOINs to display names
+    // { key: 'type_name', label: 'Type' },
+    // { key: 'assigned_user_name', label: 'Assigned To' } 
+  ]
+};
+
+// For: product_piece_parts table
+export const piecePartConfig = {
+    resource: 'admin/product_piece_parts',
+    title: 'Product Piece Parts',
+    fields: [
+        { name: 'product_id', label: 'Product', type: 'select', required: true, resource: 'admin/products'},
+        { name: 'part_name', label: 'Part Name', type: 'text', required: true, placeholder: 'e.g., Front Panel, Pocket' },
+        { name: 'part_type', label: 'Part Type', type: 'select', required: true, options: ['PRIMARY', 'SUPPORTING'] },
+    ],
+    columns: [
+        // These columns will require a dedicated endpoint with JOINs to display names
+        // { key: 'product_name', label: 'Product'},
+        { key: 'part_name', label: 'Part Name' },
+        { key: 'part_type', label: 'Part Type' },
+    ]
+};
+
+
+export const portalConfig = {
+  // The resource path must match the endpoint defined in your backend's server.js
+  resource: 'admin/portals',
+  title: 'Portal Management',
+  fields: [
+    { 
+      name: 'name', 
+      label: 'Portal Name', 
+      type: 'text', 
+      required: true,
+      placeholder: 'e.g., Cutting Portal'
+    },
+    {
+      name: 'url',
+      label: 'Portal URL',
+      type: 'text',
+      required: true,
+      placeholder: 'e.g., /cutting-portal/dashboard'
+    }
+  ],
+  columns: [ 
+    { key: 'name', label: 'Portal Name' },
+    { key: 'url', label: 'URL' },
   ]
 };
 

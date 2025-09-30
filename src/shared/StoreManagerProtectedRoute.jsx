@@ -3,7 +3,7 @@ import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { jwtDecode } from 'jwt-decode';
 
-const StoreManagerProtectedRoute = () => {
+const StoreManagerProtectedRoute = ({ children }) => {
   const { token } = useAuth();
 
   if (!token) {
@@ -20,7 +20,7 @@ const StoreManagerProtectedRoute = () => {
     return <Navigate to="/login" />;
   }
 
-  return <Outlet />;
+  return children;
 };
 
 export default StoreManagerProtectedRoute;
