@@ -78,12 +78,10 @@ function App() {
           <Route path="production-line-types" element={<ProductionLineTypesPage />} />
           <Route path="fabric-colors" element={<FabricColorsPage />} />
           <Route path="fabric-types" element={<FabricTypesPage />} />
-          <Route path="products" element={<ProductManagementPage />} />
-          <Route path="product-brands" element={<ProductBrandsPage />} />
-          <Route path="product-types" element={<ProductTypesPage />} />
+          
           <Route path="workstations" element={<WorkstationsPage />} />
           <Route path="workstation-types" element={<WorkstationTypesPage />} />
-          <Route path="product-piece-parts" element={<PiecePartsPage />} />
+          
           <Route path="portal-management" element={<PortalManagementPage />} />
           <Route path="trim-management" element={<TrimManagementPage />} />
       </Route>
@@ -113,6 +111,10 @@ function App() {
           <Route path="production-line-types" element={<ProductionLineTypesPage />} />
           <Route path="workstations" element={<WorkstationsPage />} />
           <Route path="workstation-types" element={<WorkstationTypesPage />} />
+          <Route path="products" element={<ProductManagementPage />} />
+          <Route path="product-brands" element={<ProductBrandsPage />} />
+          <Route path="product-types" element={<ProductTypesPage />} />
+          <Route path="product-piece-parts" element={<PiecePartsPage />} />
         </Route>
       </Route>
 

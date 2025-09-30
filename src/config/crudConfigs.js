@@ -222,7 +222,7 @@ export const workstationTypeConfig = {
       type: 'select',
       // The CrudForm will use this to fetch a list of all available portals
       // and populate the dropdown menu. This is not a required field.
-      resource: 'admin/portals', 
+      resource: 'shared/portals', 
     }
   ],
   columns: [ 
@@ -293,6 +293,10 @@ export const workstationConfig = {
     }, 
   ]
 };
+
+
+
+
 // export const workstationConfig = {
 //   resource: 'shared/workstations',
 //   title: 'Workstations',
@@ -358,7 +362,7 @@ export const piecePartConfig = {
 
 export const portalConfig = {
   // The resource path must match the endpoint defined in your backend's server.js
-  resource: 'admin/portals',
+  resource: 'shared/portals',
   title: 'Portal Management',
   fields: [
     { 

@@ -48,17 +48,17 @@ const ProductionManagerLayout = () => {
           <div className="flex items-center space-x-8">
             <div className="text-xl font-bold text-gray-800">Production Portal</div>
             <nav className="hidden md:flex items-center space-x-6">
-                <NavDropdown title="Production">
+                <NavDropdown title="Batches">
                 <NavLink to="/production-manager/dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
-                   Planning
+                   Batches
                 </NavLink>
                 </NavDropdown>
                 <NavDropdown title="Products">
-                                <NavLink to="/admin/products" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Products</NavLink>
-                                <NavLink to="/admin/product-piece-parts" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Piece Parts</NavLink>
-                                <NavLink to="/admin/product-brands" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Brands</NavLink>
-                                <NavLink to="/admin/product-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Types</NavLink>
-                              </NavDropdown>
+                                <NavLink to="/production-manager/products" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Products</NavLink>
+                                <NavLink to="/production-manager/product-piece-parts" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Piece Parts</NavLink>
+                                <NavLink to="/production-manager/product-brands" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Brands</NavLink>
+                                <NavLink to="/production-manager/product-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Style</NavLink>
+                </NavDropdown>
                 <NavDropdown title="Line Management">
                     <NavLink to="/production-manager/production-lines" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Lines</NavLink>
                     <NavLink to="/production-manager/production-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Line Types</NavLink>

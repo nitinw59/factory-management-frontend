@@ -138,6 +138,8 @@ const CrudManager = ({ config, onRowSelect, selectedRowId, resourceFilter }) => 
             onSave={handleSave}
             onClose={handleCloseModal}
             apiError={apiError}
+            
+            disabledFields={resourceFilter ? Object.keys(resourceFilter) : []}
           />
         </Modal>
       )}
