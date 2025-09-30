@@ -22,7 +22,7 @@ export const factoryUserConfig = {
 export const supplierConfig = {
   resource: 'shared/supplier',
   title: 'Supplier Management',
-  getAllResource: 'shared/suppliers-detailed',
+  getAllResource: 'shared/suppliers/suppliers-detailed',
   fields: [
     { name: 'name', label: 'Supplier Name', type: 'text', required: true },
     { name: 'user_id', label: 'Associated User', type: 'select', required: true, resource: 'shared/factory_users' }, // 'resource' can be used to fetch options

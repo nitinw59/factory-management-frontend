@@ -52,14 +52,9 @@ const AdminLayout = () => {
                 <NavLink to="/admin/users" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">User Management</NavLink>
                 <NavLink to="/admin/suppliers" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Supplier Management</NavLink>
               </NavDropdown>
-              <NavDropdown title="Products">
-                <NavLink to="/admin/products" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Products</NavLink>
-                <NavLink to="/admin/product-piece-parts" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Piece Parts</NavLink>
-                <NavLink to="/admin/product-brands" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Brands</NavLink>
-                <NavLink to="/admin/product-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Types</NavLink>
-              </NavDropdown>
+              
               <NavDropdown title="Inventory">
-                 <NavLink to="/admin/inventory" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Trims Dashboard</NavLink>
+                 <NavLink to="/admin/trim-management" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Trims Dashboard</NavLink>
                  <NavLink to="/admin/trim-items" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Trim Items</NavLink>
                  <NavLink to="/admin/fabric-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Fabric Types</NavLink>
                  <NavLink to="/admin/fabric-colors" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Fabric Colors</NavLink>

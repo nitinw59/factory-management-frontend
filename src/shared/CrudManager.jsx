@@ -24,7 +24,9 @@ const CrudManager = ({ config, onRowSelect, selectedRowId, resourceFilter }) => 
       if (resourceFilter && Object.values(resourceFilter)[0]) {
         resourceToFetch = `${resourceToFetch}/${Object.values(resourceFilter)[0]}`;
       }
+      
       const response = await genericApi.getAll(resourceToFetch);
+
       setItems(response.data || []);
     } catch (error) {
       console.error(`Failed to fetch ${config.title}`, error);

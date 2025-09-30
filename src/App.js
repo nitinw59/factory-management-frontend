@@ -63,7 +63,7 @@ function App() {
       {/* --- 2. PROTECTED ROUTES --- */}
       <Route element={<ProtectedRoute />}>
         {/* The root path is the main entry point that redirects based on role */}
-        <Route path="/" element={<InitialRedirect />} />
+        <Route path="/init" element={<InitialRedirect />} />
         
         {/* Admin Portal */}
         <Route path="/admin" element={<AdminProtectedRoute><AdminLayout /></AdminProtectedRoute>}>
@@ -85,7 +85,8 @@ function App() {
           <Route path="workstation-types" element={<WorkstationTypesPage />} />
           <Route path="product-piece-parts" element={<PiecePartsPage />} />
           <Route path="portal-management" element={<PortalManagementPage />} />
-        </Route>
+          <Route path="trim-management" element={<TrimManagementPage />} />
+      </Route>
 
               {/* Store Manager Portal */}
         <Route path="/store-manager" element={<StoreManagerProtectedRoute><StoreManagerLayout /></StoreManagerProtectedRoute>}>

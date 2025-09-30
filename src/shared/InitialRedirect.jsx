@@ -3,6 +3,8 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const InitialRedirect = () => {
+
+    console.log("InitialRedirect component rendered.");
     const { user } = useAuth();
 
     // This is a fallback for safety. The ProtectedRoute should prevent this

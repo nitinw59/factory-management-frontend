@@ -10,14 +10,14 @@ const AuthCallbackPage = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const token = params.get('token');
-   
+      console.log("AuthCallbackPage: Retrieved token from URL params:", token);
     if (token) {
       // 1. Save the token to the global state.
       login(token);
       console.log("Login successful, token saved.");
       // 2. Redirect ALL successful logins to the root of the protected app.
       // The <InitialRedirect /> component will then handle the role-based logic.
-      navigate('/', { replace: true });
+      navigate('/init', { replace: true });
 
     } else {
       // If no token is found, redirect back to the login page.

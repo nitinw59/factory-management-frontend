@@ -53,7 +53,13 @@ const ProductionManagerLayout = () => {
                    Planning
                 </NavLink>
                 </NavDropdown>
-                <NavDropdown title="Production">
+                <NavDropdown title="Products">
+                                <NavLink to="/admin/products" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Products</NavLink>
+                                <NavLink to="/admin/product-piece-parts" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Piece Parts</NavLink>
+                                <NavLink to="/admin/product-brands" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Brands</NavLink>
+                                <NavLink to="/admin/product-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Types</NavLink>
+                              </NavDropdown>
+                <NavDropdown title="Line Management">
                     <NavLink to="/production-manager/production-lines" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Lines</NavLink>
                     <NavLink to="/production-manager/production-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Line Types</NavLink>
                     <NavLink to="/production-manager/workstations" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Workstations</NavLink>
