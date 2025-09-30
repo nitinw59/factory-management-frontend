@@ -25,7 +25,7 @@ export const supplierConfig = {
   getAllResource: 'admin/suppliers-detailed',
   fields: [
     { name: 'name', label: 'Supplier Name', type: 'text', required: true },
-    { name: 'user_id', label: 'Associated User', type: 'select', required: true, resource: 'admin/factory_users' }, // 'resource' can be used to fetch options
+    { name: 'user_id', label: 'Associated User', type: 'select', required: true, resource: 'shared/factory_users' }, // 'resource' can be used to fetch options
     { name: 'gstn', label: 'GSTN', type: 'text' },
     { name: 'mobile', label: 'Mobile Number', type: 'text' },
     { name: 'city', label: 'City', type: 'text' },
