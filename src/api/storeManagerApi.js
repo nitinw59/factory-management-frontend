@@ -22,4 +22,8 @@ export const storeManagerApi = {
     getSuppliers: () => api.get('/shared/supplier'),
     getFabricTypes: () => api.get('/shared/fabric_type'),
     getFabricColors: () => api.get('/shared/fabric_color'),
+
+
+    recheckMissingItems: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/recheck`),
+
 };

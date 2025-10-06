@@ -32,8 +32,13 @@ export const productionManagerApi = {
    * @param {number | string} lineId - The ID of the production line to update.
    * @param {number[]} workstationIds - An ordered array of workstation IDs for the new layout.
    */
-  updateLineLayout: (lineId, workstationIds) => 
-    api.put(`/production-manager/production-lines/${lineId}/layout`, { workstationIds }),
-    
+  updateLineLayout: (lineId, workstationIds) => api.put(`/production-manager/production-lines/${lineId}/layout`, { workstationIds }),
+
+
+  getAll: () => api.get('/production-manager'),
+
+  // New function for the modal
+  getRollStatusForBatchOnLine: (batchId, lineId) => api.get(`/production-manager/batch/${batchId}/line/${lineId}/rolls`),
+  
 };
 

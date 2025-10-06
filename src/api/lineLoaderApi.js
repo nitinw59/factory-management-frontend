@@ -20,4 +20,6 @@ export const lineLoaderApi = {
    * @param {number} data.lineId - The ID of the production line to assign.
    */
   assignLine: (data) => api.post('/line-loader/assign-line', data),
+  
+  getRollsForBatch: (batchId) => api.get(`/line-loader/batch/${batchId}/rolls`),
 };

@@ -12,7 +12,7 @@ const InitialRedirect = () => {
     if (!user) {
         return <Navigate to="/login" replace />;
     }
-
+    console.log("User role identified as:", user.role);
     // --- This is the central role-based routing logic ---
     // The switch statement explicitly handles each role defined in your application.
     switch (user.role) {
@@ -41,12 +41,15 @@ const InitialRedirect = () => {
 
         case 'line_manager':
             // Line Managers are sent to their line manager dashboard.
-            return <Navigate to="/line-manager/dashboard" replace />;   
-            
+            return <Navigate to="/line-manager/dashboard" replace />;
+        case 'checking_user':
+            // Checking Users are sent to their checking workstation.
+            return <Navigate to="/checking-portal" replace />;
+
         default:
             // If a user has a valid login but their role is not recognized
             // by the application's portals, they are sent to an unauthorized page.
-            return <Navigate to="/unauthorized" replace />;
+           return <Navigate to="/unauthorized" replace />;
     }
 };
 

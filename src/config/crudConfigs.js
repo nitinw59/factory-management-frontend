@@ -12,7 +12,7 @@ export const factoryUserConfig = {
       label: 'Role', 
       type: 'select',
       required: true,
-      options: ['factory_admin', 'store_manager', 'line_manager', 'supplier', 'production_manager', 'accountant', 'hr_manager', 'loader', 'checker', 'cutting_operator', 'line_loader', 'validation_user'],
+      options: ['factory_admin', 'store_manager', 'line_manager', 'supplier', 'production_manager', 'accountant', 'hr_manager', 'checking_user', 'cutting_operator', 'line_loader', 'validation_user'],
     },
   ],
   columns: [ { key: 'name', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'role', label: 'Role' } ]
@@ -280,17 +280,22 @@ export const workstationConfig = {
       ]
     }
   ],
-  columns: [ 
+  columns: [
     { key: 'name', label: 'Workstation Name' },
-    // --- IMPROVEMENT: Display human-readable names from the detailed endpoint ---
-    { key: 'workstation_type_name', label: 'Type' },
+    { key: 'type_name', label: 'Type' }, // This was workstation_type_name in your code, ensure it matches your API response
     { key: 'assigned_user_name', label: 'Assigned To' },
-    { 
-      key: 'type', 
+    {
+      key: 'process_type', // The key should match the alias from your API ('w.type AS process_type')
       label: 'Process Type',
-      // --- IMPROVEMENT: Format the raw value for better display in the table ---
-      formatter: (value) => value.charAt(0).toUpperCase() + value.slice(1) // Changes 'loader' to 'Loader'
-    }, 
+      // ✅ CORRECTED FORMATTER
+      formatter: (item) => {
+        // Access the correct property from the row object and check if it's a valid string.
+        if (typeof item.process_type === 'string' && item.process_type.length > 0) {
+          return item.process_type.charAt(0).toUpperCase() + item.process_type.slice(1);
+        }
+        return ''; // Return an empty string for invalid or null data
+      }
+    },
   ]
 };
 

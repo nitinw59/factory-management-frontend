@@ -19,6 +19,9 @@ import PortalManagementPage from './modules/portals/PortalManagementPage'; // Ne
 import LineLoaderProtectedRoute from './shared/LineLoaderProtectedRoute'; // New
 import LineLoaderDashboardPage from './modules/line_loader/LineLoaderDashboardPage'; // New
 import LineLoaderLayout from './shared/LineLoaderLayout'; // New  
+import CheckingPortalLayout from './shared/CheckingPortalLayout';
+import CheckingUserProtectedRoute from './shared/CheckingUserProtectedRoute';
+
 
 // --- PUBLIC PAGES ---
 import LoginPage from './login/LoginPage';
@@ -50,7 +53,7 @@ import TrimOrderDetailPage from './modules/store_manager/TrimOrderDetailPage';
 import ValidationUserProtectedRoute from './shared/ValidationUserProtectedRoute';
 import ValidationPortalLayout from './shared/ValidationPortalLayout';
 import ValidationDashboardPage from './modules/validation_portal/ValidationDashboardPage';
-
+import CheckingWorkstationDashboardPage from './modules/checking_portal/CheckingWorkstationDashboardPage';
 
 function App() {
   return (
@@ -139,6 +142,12 @@ function App() {
           <Route index element={<ValidationDashboardPage />} />
           <Route path="dashboard" element={<ValidationDashboardPage />} />
       </Route>
+
+      <Route path="/checking-portal" element={<CheckingUserProtectedRoute><CheckingPortalLayout /></CheckingUserProtectedRoute>}>
+          <Route index element={<CheckingWorkstationDashboardPage />} />
+          <Route path="dashboard" element={<CheckingWorkstationDashboardPage />} />
+      </Route>
+      
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}
       <Route path="*" element={<Navigate to="/" />} />

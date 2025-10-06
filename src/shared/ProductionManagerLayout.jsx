@@ -55,7 +55,7 @@ const ProductionManagerLayout = () => {
                 </NavDropdown>
                 <NavDropdown title="Products">
                                 <NavLink to="/production-manager/products" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Products</NavLink>
-                                <NavLink to="/production-manager/product-piece-parts" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Piece Parts</NavLink>
+                                {/* <NavLink to="/production-manager/product-piece-parts" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Piece Parts</NavLink> */}
                                 <NavLink to="/production-manager/product-brands" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Brands</NavLink>
                                 <NavLink to="/production-manager/product-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Style</NavLink>
                 </NavDropdown>
