@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { productionManagerApi } from '../../api/productionManagerApi';
-// import CreateProductionBatchForm from './CreateProductionBatchForm'; // Assuming this exists for creating new batches
+import CreateProductionBatchForm from './CreateProductionBatchForm'; // Assuming this exists for creating new batches
 import Modal from '../../shared/Modal';
 import { LuPlus, LuChevronDown, LuLoader, LuCircle, LuCircleCheck, LuPlayCircle } from 'react-icons/lu';
 
@@ -125,7 +125,7 @@ const ProductionPlanningPage = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
     const [expandedBatchId, setExpandedBatchId] = useState(null);
-    // const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
     const fetchBatches = useCallback(async () => {
         setIsLoading(true);
@@ -160,9 +160,9 @@ const ProductionPlanningPage = () => {
         <div>
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-3xl font-bold">Production Planning Dashboard</h1>
-                {/* <button onClick={() => setIsCreateModalOpen(true)} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                <button onClick={() => setIsCreateModalOpen(true)} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                     <LuPlus className="mr-2" /> Create New Batch
-                </button> */}
+                </button> 
             </div>
       
             <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -201,11 +201,11 @@ const ProductionPlanningPage = () => {
                 )}
             </div>
 
-            {/* {isCreateModalOpen && (
+             {isCreateModalOpen && (
                 <Modal title="Create New Production Batch" onClose={() => setIsCreateModalOpen(false)}>
                     <CreateProductionBatchForm onClose={() => { setIsCreateModalOpen(false); fetchBatches(); }} />
                 </Modal>
-            )} */}
+            )} 
         </div>
     );
 };

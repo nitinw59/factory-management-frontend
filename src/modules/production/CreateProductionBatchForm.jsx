@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { LuPlus } from 'react-icons/lu';
 
+
 const Spinner = () => <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
 
 const CreateProductionBatchForm = ({ onClose }) => {
