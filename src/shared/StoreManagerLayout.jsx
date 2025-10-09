@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LuLogOut, LuChevronDown, LuLayers, LuScissors, LuArchive, LuBell, LuCircle, LuClipboardList } from 'react-icons/lu';
+// Added LuMenu for the hamburger icon
+import { LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX } from 'react-icons/lu';
 import { notificationApi } from '../api/notificationApi';
 
+// No changes to NavDropdown component
 const NavDropdown = ({ title, children }) => {
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef(null);
@@ -21,7 +23,7 @@ const NavDropdown = ({ title, children }) => {
       <button onClick={() => setIsOpen(!isOpen)} className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
         {title}
         <LuChevronDown className={`ml-1 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
+      </button>      
       {isOpen && (
         <div className="absolute mt-2 w-56 bg-white rounded-md shadow-lg py-1 z-30" onClick={() => setIsOpen(false)}>
           {children}
@@ -31,10 +33,14 @@ const NavDropdown = ({ title, children }) => {
   );
 };
 
+
 const StoreManagerLayout = () => {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
     const [notifications, setNotifications] = useState([]);
+    
+    // 1. STATE FOR MOBILE MENU
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
     const fetchNotifications = useCallback(async () => {
         try {
@@ -64,6 +70,9 @@ const StoreManagerLayout = () => {
         logout();
         navigate('/login');
     };
+    
+    // Function to close mobile menu when a link is clicked
+    const closeMobileMenu = () => setIsMobileMenuOpen(false);
 
     return (
         <div className="flex flex-col h-screen bg-gray-50">
@@ -71,6 +80,7 @@ const StoreManagerLayout = () => {
                 <div className="container mx-auto px-6 py-3 flex justify-between items-center">
                     <div className="flex items-center space-x-8">
                         <div className="text-xl font-bold text-gray-800">Store Portal</div>
+                        {/* This is the original desktop navigation */}
                         <nav className="hidden md:flex items-center space-x-6">
                             <NavDropdown title="Fabric">
                                 <NavLink to="/store-manager/fabric-stock" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
@@ -116,13 +126,49 @@ const StoreManagerLayout = () => {
                             </div>
                         </NavDropdown>
                         {user && (
-                            <>
+                            // Hide user name on smaller screens to save space
+                            <div className="hidden md:flex items-center space-x-4">
                                 <span className="text-sm font-medium">Welcome, {user.name}</span>
                                 <button onClick={handleLogout} className="flex items-center text-sm text-gray-600 hover:text-red-600"><LuLogOut className="mr-1" /> Logout</button>
-                            </>
+                            </div>
                         )}
+                        {/* 2. HAMBURGER BUTTON - visible only on mobile (md:hidden) */}
+                        <div className="md:hidden">
+                            <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+                                {isMobileMenuOpen ? <LuX size={24} /> : <LuMenu size={24} />}
+                            </button>
+                        </div>
                     </div>
                 </div>
+
+                {/* 3. MOBILE MENU - Conditionally rendered */}
+                {isMobileMenuOpen && (
+                    <div className="md:hidden bg-white shadow-md">
+                        <nav className="flex flex-col p-4 space-y-4">
+                            {/* Re-using NavLink for consistency */}
+                            <NavLink to="/store-manager/fabric-stock" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuLayers className="mr-2" /> Fabric Intake & Stock
+                            </NavLink>
+                            <NavLink to="/store-manager/trim-management" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuScissors className="mr-2" /> Trim Management
+                            </NavLink>
+                            <NavLink to="/store-manager/record-trim-purchase" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuCircle className="mr-2" /> Record Trim Purchase
+                            </NavLink>
+                            <NavLink to="/store-manager/trim-orders" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuClipboardList className="mr-2" /> Trim Orders
+                            </NavLink>
+                            <hr />
+                            {/* Logout button for mobile menu */}
+                             {user && (
+                                <>
+                                    <div className="px-4 py-2 text-sm text-gray-500">Welcome, {user.name}</div>
+                                    <button onClick={handleLogout} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"><LuLogOut className="mr-2" /> Logout</button>
+                                </>
+                            )}
+                        </nav>
+                    </div>
+                )}
             </header>
             <main className="flex-1 p-6 overflow-y-auto">
                 <Outlet />

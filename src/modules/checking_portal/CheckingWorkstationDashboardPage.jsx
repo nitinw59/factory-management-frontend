@@ -49,7 +49,7 @@ const ValidationModal = ({ sizeInfo, unloadMode, onClose, onValidationSubmit }) 
                         <label className="block text-sm font-medium text-gray-700 mb-2">Select QC Status (this will submit)</label>
                         <div className="grid grid-cols-3 gap-2">
                             <button onClick={() => handleStatusClick('APPROVED')} className="p-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-semibold">APPROVE</button>
-                            <button onClick={() => handleStatusClick('REJECT')} className="p-3 bg-red-500 text-white rounded-lg hover:bg-red-600 font-semibold">REJECT</button>
+                            {/* <button onClick={() => handleStatusClick('REJECT')} className="p-3 bg-red-500 text-white rounded-lg hover:bg-red-600 font-semibold">REJECT</button> */}
                             <button onClick={() => handleStatusClick('ALTER')} className="p-3 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 font-semibold">ALTER</button>
                         </div>
                     </div>

@@ -45,6 +45,9 @@ const InitialRedirect = () => {
         case 'checking_user':
             // Checking Users are sent to their checking workstation.
             return <Navigate to="/checking-portal" replace />;
+        case 'numbering_user':
+            // Numbering Users are sent to their numbering workstation.
+            return <Navigate to="/numbering-portal" replace />;
 
         default:
             // If a user has a valid login but their role is not recognized
