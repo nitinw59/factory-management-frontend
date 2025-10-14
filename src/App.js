@@ -23,6 +23,9 @@ import CheckingPortalLayout from './shared/CheckingPortalLayout';
 import CheckingUserProtectedRoute from './shared/CheckingUserProtectedRoute';
 import NumberingPortalLayout from './shared/NumberingPortalLayout';
 import NumberingUserProtectedRoute from './shared/NumberingUserProtectedRoute';
+import InitializationPortalLayout from './shared/InitialisationPortalLayout'; 
+import InitializationPortalProtectedRoute from './shared/InitialisationPortalProtectedRoute';
+
 
 // --- PUBLIC PAGES ---
 import LoginPage from './login/LoginPage';
@@ -56,11 +59,18 @@ import ValidationPortalLayout from './shared/ValidationPortalLayout';
 import ValidationDashboardPage from './modules/validation_portal/ValidationDashboardPage';
 import CheckingWorkstationDashboardPage from './modules/checking_portal/CheckingWorkstationDashboardPage';
 import NumberingWorkstationDashboardPage from './modules/numbering_portal/NumberingWorkstationDashboardPage';
+import InitializationDashboardPortalPage from './modules/initialisation_portal/InitializationDashboardPortalPage';
+import AlterPiecesDashboardPage from './modules/initialisation_portal/AlterPiecesDashboardPage';
+import NumberingBatchDetailsPage from './modules/numbering_portal/NumberingBatchDetailsPage';
+
+
+
+
 function App() {
   return (
     <Routes>
       {/* --- 1. PUBLIC ROUTES --- */}
-      <Route path="/login" element={<LoginPage />} />
+      <Route path="/" element={<LoginPage />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
@@ -152,7 +162,17 @@ function App() {
       <Route path="/numbering-portal" element={<NumberingUserProtectedRoute><NumberingPortalLayout /></NumberingUserProtectedRoute>}>
           <Route index element={<NumberingWorkstationDashboardPage />} />
           <Route path="dashboard" element={<NumberingWorkstationDashboardPage />} />
+          <Route path="summary" element={<NumberingBatchDetailsPage />} />
       </Route>
+
+
+      <Route path="/initialization-portal" element={<InitializationPortalProtectedRoute><InitializationPortalLayout /></InitializationPortalProtectedRoute>}>
+          <Route index element={<InitializationDashboardPortalPage />} />
+          <Route path="dashboard" element={<InitializationDashboardPortalPage />} />
+          <Route path="alter-pieces" element={<AlterPiecesDashboardPage />} />  
+          <Route path="summary" element={<NumberingBatchDetailsPage />} />
+      </Route>
+
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}
       <Route path="*" element={<Navigate to="/" />} />

@@ -10,7 +10,7 @@ const LoginPage = () => {
 
   return (
     <div>
-      <h2>Admin Login</h2>
+      <h2> Login</h2>
       <button onClick={handleLogin}>Sign in with Google</button>
     </div>
   );

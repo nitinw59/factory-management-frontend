@@ -1,9 +1,36 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LuLogOut, LuClipboardCheck, LuLayoutGrid, LuMenu, LuX, LuBell, LuFileText } from 'react-icons/lu';
+import { LuLogOut, LuChevronDown, LuLayoutDashboard, LuHammer, LuMenu, LuX, LuBell ,LuFileText} from 'react-icons/lu';
+// Assuming notificationApi exists
+// import { notificationApi } from '../api/notificationApi';
 
-const NumberingPortalLayout = () => {
+const NavDropdown = ({ title, children }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) setIsOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [ref]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
+        {title} <LuChevronDown className={`ml-1 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>      
+      {isOpen && (
+        <div className="absolute mt-2 w-56 bg-white rounded-md shadow-lg py-1 z-30" onClick={() => setIsOpen(false)}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const InitializationPortalLayout = () => {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -19,21 +46,18 @@ const NumberingPortalLayout = () => {
         <div className="flex flex-col h-screen bg-gray-50">
             <header className="bg-white shadow-md sticky top-0 z-20">
                 <div className="container mx-auto px-6 py-3 flex justify-between items-center">
-                    <div className="text-xl font-bold text-gray-800">Numbering Portal</div>
+                    <div className="text-xl font-bold text-gray-800">Initialization Portal</div>
                     
                     {/* Desktop Navigation */}
                     <nav className="hidden md:flex items-center space-x-6">
-                        <NavLink 
-                            to="/numbering-portal/dashboard" 
-                            className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}
-                        >
-                            <LuClipboardCheck className="mr-2" /> My Numbering Queue
+                        <NavLink to="/initialization-portal/dashboard" className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                            <LuLayoutDashboard className="mr-2" /> Initialization Queue
                         </NavLink>
-                        <NavLink 
-                            to="/numbering-portal/summary" 
-                            className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}
-                        >
-                            <LuFileText className="mr-2" /> Batch QC Summary
+                        <NavLink to="/initialization-portal/alter-pieces" className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                            <LuHammer className="mr-2" /> Alter Pieces
+                        </NavLink>
+                        <NavLink to="/initialization-portal/summary" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuFileText className="mr-2" /> Batch QC Summary
                         </NavLink>
                     </nav>
 
@@ -57,10 +81,13 @@ const NumberingPortalLayout = () => {
 
                 {/* Mobile Menu */}
                 {isMobileMenuOpen && (
-                    <div className="md:hidden bg-white shadow-md" onClick={closeMobileMenu}>
+                    <div className="md:hidden bg-white shadow-md">
                         <nav className="flex flex-col p-4 space-y-4">
-                            <NavLink to="/numbering-portal/dashboard" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
-                                <LuClipboardCheck className="mr-2" /> My Numbering Queue
+                            <NavLink to="/initialization-portal/dashboard" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuLayoutDashboard className="mr-2" /> Initialization Queue
+                            </NavLink>
+                            <NavLink to="/initialization-portal/alter-pieces" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuHammer className="mr-2" /> Alter Pieces
                             </NavLink>
                             <NavLink to="/numbering-portal/summary" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuFileText className="mr-2" /> Batch QC Summary
@@ -79,5 +106,4 @@ const NumberingPortalLayout = () => {
     );
 };
 
-export default NumberingPortalLayout;
-
+export default InitializationPortalLayout;

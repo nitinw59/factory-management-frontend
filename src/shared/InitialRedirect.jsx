@@ -48,6 +48,11 @@ const InitialRedirect = () => {
         case 'numbering_user':
             // Numbering Users are sent to their numbering workstation.
             return <Navigate to="/numbering-portal" replace />;
+        case 'cutting_manager':
+            // Cutting Managers are sent to their cutting management dashboard.
+            return <Navigate to="/initialization-portal/dashboard" replace />;
+
+       
 
         default:
             // If a user has a valid login but their role is not recognized
