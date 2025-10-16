@@ -129,12 +129,17 @@ const CreateProductionBatchForm = ({ onClose }) => {
         </div>
         {/* --- The list now uses the filtered array --- */}
         <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-2 border rounded-md">
+          
+          <div className="bg-gray-50 p-2 rounded-lg min-h-[100px] border">
           {filteredFabricRolls.map(roll => (
             <div key={roll.id} className="flex items-center p-1 bg-gray-50 rounded">
               <input type="checkbox" id={`roll-${roll.id}`} checked={selectedRolls.includes(roll.id)} onChange={() => handleRollSelection(roll.id)} className="h-4 w-4 rounded" />
               <label htmlFor={`roll-${roll.id}`} className="ml-2 text-sm">{roll.type} - {roll.color} ({roll.meter}m)</label>
             </div>
           ))}
+
+          </div>
+
         </div>
       </div>
 
