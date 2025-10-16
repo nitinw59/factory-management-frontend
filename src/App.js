@@ -25,6 +25,8 @@ import NumberingPortalLayout from './shared/NumberingPortalLayout';
 import NumberingUserProtectedRoute from './shared/NumberingUserProtectedRoute';
 import InitializationPortalLayout from './shared/InitialisationPortalLayout'; 
 import InitializationPortalProtectedRoute from './shared/InitialisationPortalProtectedRoute';
+import PreparationPortalLayout from './shared/PreparationPortalLayout';
+import PreparationUserProtectedRoute from './shared/PreparationUserProtectedRoute';
 
 
 // --- PUBLIC PAGES ---
@@ -62,7 +64,7 @@ import NumberingWorkstationDashboardPage from './modules/numbering_portal/Number
 import InitializationDashboardPortalPage from './modules/initialisation_portal/InitializationDashboardPortalPage';
 import AlterPiecesDashboardPage from './modules/initialisation_portal/AlterPiecesDashboardPage';
 import NumberingBatchDetailsPage from './modules/numbering_portal/NumberingBatchDetailsPage';
-
+import PreparationDashboardPage from './modules/preparation_portal/PreparationDashboardPage';
 
 
 
@@ -171,6 +173,12 @@ function App() {
           <Route path="dashboard" element={<InitializationDashboardPortalPage />} />
           <Route path="alter-pieces" element={<AlterPiecesDashboardPage />} />  
           <Route path="summary" element={<NumberingBatchDetailsPage />} />
+      </Route>
+
+      <Route path="/preparation-portal" element={<PreparationUserProtectedRoute><PreparationPortalLayout /></PreparationUserProtectedRoute>}>
+          <Route index element={<PreparationDashboardPage />} />
+          <Route path="dashboard" element={<PreparationDashboardPage />} />
+          {/* Add more preparation portal specific routes here later */}
       </Route>
 
 

@@ -153,6 +153,7 @@ const ProductForm = ({ onSave, onClose, initialData = null }) => {
         {activeTab === 'materials' && (
           <div className="space-y-4">
             <h3 className="text-lg font-semibold">Materials Required</h3>
+            <div className="max-h-[40vh] overflow-y-auto space-y-4 p-2 border rounded-md">
             {materials.map((material, index) => (
               <div key={index} className="flex items-center space-x-2">
                 <div className="flex-1"><label className="text-xs">Trim / Accessory</label><select value={material.trim_item_id} onChange={e => handleMaterialChange(index, 'trim_item_id', e.target.value)} className="p-2 w-full border rounded-md" required><option value="">Select an item</option>{(options.trimItems || []).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>
@@ -160,6 +161,8 @@ const ProductForm = ({ onSave, onClose, initialData = null }) => {
                 <button type="button" onClick={() => removeMaterialRow(index)} className="p-2 text-red-500 hover:bg-red-100 rounded-full mt-4"><LuTrash2 /></button>
               </div>
             ))}
+            </div>
+            
             <button type="button" onClick={addMaterialRow} className="flex items-center text-sm text-blue-600 hover:underline"><LuPlus className="mr-1" /> Add Material</button>
           </div>
         )}
@@ -168,6 +171,7 @@ const ProductForm = ({ onSave, onClose, initialData = null }) => {
           <div className="space-y-4">
             <h3 className="text-lg font-semibold">Product Piece Parts</h3>
             <p className="text-sm text-gray-500">Define the components cut from fabric to construct this product.</p>
+            <div className="max-h-[40vh] overflow-y-auto space-y-4 p-2 border rounded-md">
             {pieceParts.map((part, index) => (
               <div key={index} className="flex items-center space-x-2">
                 <div className="flex-1"><label className="text-xs">Part Name</label><input type="text" placeholder="e.g., Front Panel, Pocket" value={part.part_name} onChange={e => handlePiecePartChange(index, 'part_name', e.target.value)} className="p-2 w-full border rounded-md" required /></div>
@@ -175,6 +179,7 @@ const ProductForm = ({ onSave, onClose, initialData = null }) => {
                 <button type="button" onClick={() => removePiecePartRow(index)} className="p-2 text-red-500 hover:bg-red-100 rounded-full mt-4"><LuTrash2 /></button>
               </div>
             ))}
+            </div>  
             <button type="button" onClick={addPiecePartRow} className="flex items-center text-sm text-blue-600 hover:underline"><LuPlus className="mr-1" /> Add Piece Part</button>
           </div>
         )}

@@ -52,6 +52,10 @@ const InitialRedirect = () => {
             // Cutting Managers are sent to their cutting management dashboard.
             return <Navigate to="/initialization-portal/dashboard" replace />;
 
+        case 'preparation_user':
+            // Preparation Users are sent to their preparation workstation.
+            return <Navigate to="/preparation-portal" replace />;
+
        
 
         default:
