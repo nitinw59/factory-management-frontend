@@ -79,6 +79,9 @@ const FabricIntakeForm = ({ onSave, onClose }) => {
             </div>
             <div className="space-y-2 pt-4 border-t">
                 <h3 className="font-semibold">Fabric Rolls Received</h3>
+                
+                <div className="max-h-[40vh] overflow-y-auto space-y-2 p-2 border rounded-md">
+    
                 {rolls.map((roll, index) => (
                     <div key={index} className="flex items-center space-x-2">
                         <select value={roll.fabric_type_id} onChange={e => handleRollChange(index, 'fabric_type_id', e.target.value)} required className="p-2 border rounded flex-1">
@@ -87,12 +90,15 @@ const FabricIntakeForm = ({ onSave, onClose }) => {
                         </select>
                          <select value={roll.fabric_color_id} onChange={e => handleRollChange(index, 'fabric_color_id', e.target.value)} required className="p-2 border rounded flex-1">
                             <option value="">Select Color</option>
-                            {fabricColors.map(fc => <option key={fc.id} value={fc.id}>{fc.name}</option>)}
+                            {fabricColors.map(fc => <option key={fc.id} value={fc.id}>{fc.color_number} ({fc.name})</option>)}
                         </select>
                         <input type="number" step="0.01" placeholder="Meters" value={roll.meter} onChange={e => handleRollChange(index, 'meter', e.target.value)} required className="p-2 border rounded w-32" />
                         <button type="button" onClick={() => removeRoll(index)} className="p-2 text-red-500"><LuTrash2 /></button>
                     </div>
                 ))}
+
+                </div>
+
             </div>
             <button type="button" onClick={addRoll} className="text-sm text-blue-600 flex items-center"><LuPlus size={16} className="mr-1"/> Add Another Roll</button>
             <div className="flex justify-end space-x-2 pt-4"><button type="button" onClick={onClose}>Cancel</button><button type="submit" disabled={isSaving} className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:bg-gray-400">{isSaving ? 'Saving...' : 'Save Intake'}</button></div>

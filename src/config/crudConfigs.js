@@ -391,4 +391,32 @@ export const portalConfig = {
   ]
 };
 
+// In crudConfigs.js
 
+// ... (keep all your other existing configs) ...
+
+export const trimSubstituteConfig = {
+  // The base resource for creating/deleting
+  resource: 'shared/trim_item_substitutes',
+  // A dedicated endpoint for the table to get substitute names and colors
+  getAllResource: 'trims/substitutes-detailed', 
+  title: 'Allowed Substitutes',
+  fields: [
+    { 
+      name: 'substitute_variant_id', 
+      label: 'Substitute With', 
+      type: 'select', 
+      required: true, 
+      // The dropdown will be populated with ALL available variants
+      resource: 'shared/trim_item_variants',
+      // This makes the dropdown user-friendly
+      optionLabelFormatter: (variant) => `${variant.item_name} - ${variant.color_name}`
+    },
+  ],
+  columns: [ 
+      // These keys must match the response from your detailed endpoint
+      { key: 'substitute_item_name', label: 'Item' }, 
+      { key: 'substitute_color_name', label: 'Color' },
+      { key: 'substitute_stock', label: 'Stock' }
+    ]
+};

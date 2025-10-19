@@ -13,7 +13,7 @@ export const storeManagerApi = {
     getAllTrimOrders: () => api.get('/store-manager/trim-orders'),
     getTrimOrderDetails: (orderId) => api.get(`/store-manager/trim-orders/${orderId}`),
     fulfillOrderItem: (data) => api.post('/store-manager/trim-orders/fulfill-item', data),
-
+    fulfillWithVariant: (data) => api.post('/store-manager/trim-orders/fulfill-with-variant', data),
     // Trim Intake
     createTrimIntake: (data) => api.post('/store-manager/trim-intake', data),
     getTrimIntakeFormData: () => api.get('/store-manager/form-data/trim-intake'),
@@ -25,5 +25,7 @@ export const storeManagerApi = {
 
 
     recheckMissingItems: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/recheck`),
+
+    
 
 };
