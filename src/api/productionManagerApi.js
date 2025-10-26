@@ -35,8 +35,6 @@ export const productionManagerApi = {
   updateLineLayout: (lineId, workstationIds) => api.put(`/production-manager/production-lines/${lineId}/layout`, { workstationIds }),
 
 
-  getAll: () => api.get('/production-manager'),
-
   // New function for the modal
   getRollStatusForBatchOnLine: (batchId, lineId) => api.get(`/production-manager/batch/${batchId}/line/${lineId}/rolls`),
   
@@ -54,6 +52,10 @@ export const productionManagerApi = {
   // --- NEW: Functions to fetch data for the Production Line Form ---
   getLineTypes: () => api.get('/shared/production_line_types'),
   getLineManagers: () => api.get('/shared/factory_users?role=line_manager'), // Fetch users with 'line_manager' role
+  
+  
+  getBatchForEdit: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/edit-data`),
+  updateBatch: (batchId, batchData) => api.put(`/production-batch-api/production-batches/${batchId}`, batchData),
 
 };
 

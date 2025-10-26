@@ -66,6 +66,7 @@ import AlterPiecesDashboardPage from './modules/initialisation_portal/AlterPiece
 import NumberingBatchDetailsPage from './modules/numbering_portal/NumberingBatchDetailsPage';
 import PreparationDashboardPage from './modules/preparation_portal/PreparationDashboardPage';
 import BatchCuttingDetailsPage from './modules/cutting_portal/BatchCuttingDetailsPage';
+import CreateProductionBatchForm from './modules/production/CreateProductionBatchForm'; // Assuming this exists for creating new batches
 
 
 function App() {
@@ -131,6 +132,8 @@ function App() {
           <Route path="product-brands" element={<ProductBrandsPage />} />
           <Route path="product-types" element={<ProductTypesPage />} />
           <Route path="product-piece-parts" element={<PiecePartsPage />} />
+          <Route path="batches/new" element={<CreateProductionBatchForm />} />
+          <Route path="batches/edit/:batchId" element={<CreateProductionBatchForm />} />
         </Route>
       </Route>
 
