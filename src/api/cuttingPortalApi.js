@@ -23,5 +23,7 @@ export const cuttingPortalApi = {
    * @param {object} data - The payload containing batchId, rollId, and cuts array.
    */
   logCutPieces: (data) => api.post('/cutting-portal/log-cut', data),
+
+  getBatchCuttingDetails: (batchId) => api.get(`/cutting-portal/batch-cutting-details/${batchId}`),
 };
 

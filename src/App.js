@@ -65,7 +65,7 @@ import InitializationDashboardPortalPage from './modules/initialisation_portal/I
 import AlterPiecesDashboardPage from './modules/initialisation_portal/AlterPiecesDashboardPage';
 import NumberingBatchDetailsPage from './modules/numbering_portal/NumberingBatchDetailsPage';
 import PreparationDashboardPage from './modules/preparation_portal/PreparationDashboardPage';
-
+import BatchCuttingDetailsPage from './modules/cutting_portal/BatchCuttingDetailsPage';
 
 
 function App() {
@@ -137,6 +137,7 @@ function App() {
       <Route path="/cutting-portal" element={<CuttingOperatorProtectedRoute><CuttingPortalLayout /></CuttingOperatorProtectedRoute>}>
           <Route index element={<CuttingDashboardPage />} />
           <Route path="dashboard" element={<CuttingDashboardPage />} />
+          <Route path="batch-details/:batchId" element={<BatchCuttingDetailsPage />} />
           {/* Add this new route */}
           {/* <Route path="cut/:batchId/:rollId" element={<CuttingFormPage />} /> */}
           {/* ... other cutting portal routes ... */}
@@ -159,6 +160,7 @@ function App() {
       <Route path="/checking-portal" element={<CheckingUserProtectedRoute><CheckingPortalLayout /></CheckingUserProtectedRoute>}>
           <Route index element={<CheckingWorkstationDashboardPage />} />
           <Route path="dashboard" element={<CheckingWorkstationDashboardPage />} />
+          <Route path="batch-details/:batchId" element={<BatchCuttingDetailsPage />} />
       </Route>
       
       <Route path="/numbering-portal" element={<NumberingUserProtectedRoute><NumberingPortalLayout /></NumberingUserProtectedRoute>}>

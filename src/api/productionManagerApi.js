@@ -40,5 +40,20 @@ export const productionManagerApi = {
   // New function for the modal
   getRollStatusForBatchOnLine: (batchId, lineId) => api.get(`/production-manager/batch/${batchId}/line/${lineId}/rolls`),
   
+
+
+
+
+  // --- NEW: Specific CRUD for Production Lines ---
+  getAllProductionLines: () => api.get('/shared/production-lines/production-lines-detailed'), // Endpoint for detailed view
+  getProductionLineById: (id) => api.get(`/shared/production-lines/${id}`), // Fetch single for editing
+  createProductionLine: (data) => api.post('/shared/production-lines', data),
+  updateProductionLine: (id, data) => api.put(`/shared/production-lines/${id}`, data),
+  deleteProductionLine: (id) => api.delete(`/shared/production-lines/${id}`),
+
+  // --- NEW: Functions to fetch data for the Production Line Form ---
+  getLineTypes: () => api.get('/shared/production_line_types'),
+  getLineManagers: () => api.get('/shared/factory_users?role=line_manager'), // Fetch users with 'line_manager' role
+
 };
 

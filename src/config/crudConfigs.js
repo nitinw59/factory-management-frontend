@@ -83,19 +83,22 @@ export const trimItemConfig = {
   fields: [
     { name: 'name', label: 'Item Name', type: 'text', required: true },
     { name: 'brand', label: 'Brand', type: 'text', required: true },
-    { name: 'description', label: 'Description', type: 'textarea', required: true },
+    // ✅ NEW FIELD
+    { name: 'is_color_agnostic', label: 'Common Across All Colors?', type: 'checkbox' },
+    { name: 'description', label: 'Description', type: 'textarea' },
     { name: 'item_code', label: 'Item Code / SKU', type: 'text' },
     { name: 'unit_of_measure', label: 'Unit of Measure', type: 'select', required: true, options: ['pieces', 'meters', 'spools', 'packets'] },
   ],
   columns: [ 
       { key: 'name', label: 'Name' }, 
       { key: 'brand', label: 'Brand' },
-      { key: 'item_code', label: 'Code' }, 
-      { key: 'unit_of_measure', label: 'Unit' } 
+      { key: 'item_code', label: 'Code' },
+      // ✅ NEW COLUMN to make it visible in the table
+      { key: 'is_color_agnostic', label: 'Color Agnostic', formatter: (item) => item.is_color_agnostic ? 'Yes' : 'No' } 
     ]
 };
 
- export const trimItemVariantConfig = {
+export const trimItemVariantConfig = {
   resource: 'shared/trim_item_variants',
   getAllResource: 'trims/trim-item-variants-detailed',
   title: 'Trim Item Variants (Stock)',
@@ -106,18 +109,18 @@ export const trimItemConfig = {
       type: 'select', 
       required: true, 
       resource: 'shared/trim_items',
-      // --- THIS IS THE NEW PROPERTY ---
-      // This function tells the form how to display each option.
       optionLabelFormatter: (item) => `${item.name} - ${item.brand}`
     },
     { 
       name: 'fabric_color_id', 
       label: 'Color', 
       type: 'select', 
-      required: true, 
+      // ✅ CHANGED: No longer always required
+      required: false, 
       resource: 'shared/fabric_color',
-      // Example of another formatter for the color dropdown
-      optionLabelFormatter: (color) => `${color.name} (${color.color_number})`
+      optionLabelFormatter: (color) => `${color.name} (${color.color_number})`,
+      // ✅ NEW: Helpful text to guide the user
+      helpText: "Leave blank only if the Base Item is marked as color-agnostic."
     },
     { name: 'main_store_stock', label: 'Initial Stock', type: 'number', required: true, defaultValue: 0 },
     { name: 'low_stock_threshold', label: 'Low Stock Alert Level', type: 'number', defaultValue: 10 },

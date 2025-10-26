@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { storeManagerApi } from '../../api/storeManagerApi';
-import { LuPackageCheck, LuPackage, LuTriangleAlert, LuRefreshCw, LuReplace, LuArrowLeft, LuListOrdered, LuWarehouse, LuInfo } from 'react-icons/lu';
+import { LuClock, LuPackageCheck, LuPackage, LuTriangleAlert, LuRefreshCw, LuReplace, LuArrowLeft, LuListOrdered, LuWarehouse, LuInfo } from 'react-icons/lu';
 
 const Spinner = () => <div className="flex justify-center items-center p-12"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
 
@@ -96,10 +96,12 @@ const TrimOrderDetailPage = () => {
         setError(null);
         try {
             const response = await storeManagerApi.getTrimOrderDetails(orderId);
+            console.log("Fetched order details:", response.data);
             const sanitizedItems = (response.data.items || []).map(item => ({
                 ...item,
                 quantity_fulfilled: item.quantity_fulfilled || 0,
             }));
+            console.log("Sanitized items:", sanitizedItems);
             setItems(sanitizedItems);
             setMissingItems(response.data.missing_items || []);
             setOrderInfo({
@@ -133,6 +135,7 @@ const TrimOrderDetailPage = () => {
     
     const handleRecheck = async () => {
         try {
+            console.log("Initiating re-check for missing items...");
             const response = await storeManagerApi.recheckMissingItems(orderId);
             alert(response.data.message || "Re-check complete.");
             fetchDetails();
@@ -228,11 +231,33 @@ const TrimOrderDetailPage = () => {
                                                 <td className="py-3 px-4 text-center font-bold text-gray-900">{item.quantity_required}</td>
                                                 <td className="py-3 px-4 text-center font-semibold text-gray-600">{item.quantity_fulfilled}</td>
                                                 <td className="py-3 px-4 text-center text-gray-600">{item.available_stock}</td>
+
                                                 <td className="py-3 px-4 text-center">
-                                                    <span className={`inline-flex items-center font-semibold text-xs text-${status.color}-700 bg-${status.color}-100 px-2.5 py-1 rounded-full`}>
-                                                        <Icon className="mr-1.5 h-4 w-4"/> {status.text}
-                                                    </span>
+                                                    <div className="relative group inline-flex justify-center">
+                                                         <span className={`inline-flex items-center font-semibold text-xs text-${status.color}-700 bg-${status.color}-100 px-2.5 py-1 rounded-full cursor-default`}>
+                                                            <Icon className="mr-1.5 h-4 w-4"/> {status.text}
+                                                         </span>
+                                                         {(item.fulfillment_log && item.fulfillment_log.length > 0) && (
+                                                             <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10 invisible group-hover:visible pointer-events-none">
+                                                                <h4 className="font-bold border-b border-gray-600 pb-1 mb-1">Fulfillment History:</h4>
+                                                                <ul className="space-y-1">
+                                                                    {item.fulfillment_log.map((log, index) => (
+                                                                        <li key={index} className="flex items-start">
+                                                                             <LuClock size={12} className="mr-1.5 mt-0.5 text-gray-400 flex-shrink-0"/>
+                                                                             <div>
+                                                                                {log.quantity_fulfilled} units with <strong className={log.used_substitute ? 'text-purple-300' : ''}>{log.fulfilled_item_name} - {log.fulfilled_color_name}</strong>
+                                                                                {log.used_substitute && <span className="text-purple-300 text-[10px]"> (Sub)</span>}
+                                                                             </div>
+                                                                        </li>
+                                                                    ))}
+                                                                </ul>
+                                                                 <div className="absolute bottom-[-4px] left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-l-transparent border-r-4 border-r-transparent border-t-4 border-t-gray-800"></div> {/* Arrow */}
+                                                            </div>
+                                                         )}
+                                                    </div>
                                                 </td>
+
+
                                                 <td className="py-3 px-4 text-center">
                                                     <button onClick={() => handleFulfillClick(item)} disabled={!isFulfillmentPossible(item)} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-blue-700">
                                                         Fulfill

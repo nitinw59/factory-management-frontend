@@ -80,6 +80,7 @@ const StartBatchModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave })
 };
 
 const ReceiveRollsModal = ({ batch, onClose, onRefresh }) => {
+    console.log('ReceiveRollsModal batch:', batch);
     // ... (This component remains the same)
     const [rolls, setRolls] = useState(batch.rolls || []);
     const [updatingRollId, setUpdatingRollId] = useState(null);
@@ -88,6 +89,7 @@ const ReceiveRollsModal = ({ batch, onClose, onRefresh }) => {
         try {
             await initializationPortalApi.receiveRoll(rollId);
             setRolls(currentRolls => currentRolls.map(r => r.id === rollId ? { ...r, status: 'IN_PRODUCTION' } : r));
+            
             onRefresh();
         } catch (error) {
             alert('Failed to update roll status.');
@@ -104,7 +106,7 @@ const ReceiveRollsModal = ({ batch, onClose, onRefresh }) => {
                             <p className="font-semibold">Roll #{roll.id} ({roll.meter}m)</p>
                             <p className="text-sm text-gray-600">{roll.type} - {roll.color}</p>
                         </div>
-                        {roll.status === 'IN_STOCK' ? (
+                        {roll.status === 'ASSIGNED_TO_PRODUCTION' ? (
                             <button onClick={() => handleReceive(roll.id)} disabled={updatingRollId === roll.id} className="px-3 py-1 text-sm bg-blue-500 text-white rounded-md flex items-center disabled:bg-gray-400">
                                 {updatingRollId === roll.id ? <LuLoader className="animate-spin mr-2" /> : <LuTruck className="mr-2" />} Receive
                             </button>
