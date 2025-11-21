@@ -52,11 +52,30 @@ const InitialRedirect = () => {
             // Cutting Managers are sent to their cutting management dashboard.
             return <Navigate to="/initialization-portal/dashboard" replace />;
 
-        case 'preparation_user':
-            // Preparation Users are sent to their preparation workstation.
+        case 'preparation_loader':
+            // Preparation Loaders are sent to their preparation workstation.
             return <Navigate to="/preparation-portal" replace />;
 
+        case 'preparation_manager':
+            // Preparation Managers are sent to their preparation management dashboard.
+            return <Navigate to="/preparation-manager" replace />;
+
+        case 'preparation_unloader':
+            // Preparation Unloaders are sent to their preparation unloading workstation.
+            return <Navigate to="/preparation-unload-portal" replace />;
+        
+        case 'sewing_part_operator':
+            // Sewing Part Operators are sent to their sewing part operator dashboard.
+            return <Navigate to="/sewing-part-operator/dashboard" replace />;
+        
        
+        case 'sewing_manager':
+            // Sewing Managers are sent to their sewing management dashboard.
+            return <Navigate to="/sewing-manager/dashboard" replace />;
+        case 'assembly_operator':
+            // Assembly Operators are sent to their assembly operator dashboard.
+            return <Navigate to="/assembly-portal/dashboard" replace />;
+        
 
         default:
             // If a user has a valid login but their role is not recognized

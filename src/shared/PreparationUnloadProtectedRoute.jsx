@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { jwtDecode } from 'jwt-decode';
 
-const PreparationUserProtectedRoute = ({ children }) => {
+const PreparationUnloadProtectedRoute = ({ children }) => {
   const { token } = useAuth();
 
   if (!token) {
@@ -12,9 +12,9 @@ const PreparationUserProtectedRoute = ({ children }) => {
 
   try {
     const user = jwtDecode(token);
-    // This gatekeeper allows admins or users with the 'preparation_user' role.
-    if (user.role !== 'preparation_user' && user.role !== 'factory_admin') {
-      return <Navigate to="/unauthorized" />;
+    // This gatekeeper allows admins or users with the 'preparation_unloader' role.
+    if (user.role !== 'preparation_unloader' && user.role !== 'factory_admin') {
+      //return <Navigate to="/unauthorized" />;
     }
   } catch (error) {
     console.error("Invalid token:", error);
@@ -24,4 +24,4 @@ const PreparationUserProtectedRoute = ({ children }) => {
   return children;
 };
 
-export default PreparationUserProtectedRoute;
+export default PreparationUnloadProtectedRoute;

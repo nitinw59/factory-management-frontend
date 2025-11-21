@@ -102,7 +102,7 @@ const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick })
     const total_repaired = parseInt(sizeDetail.total_repaired, 10) || 0;
 
     const total_processed = total_validated + total_rejected + total_repaired;
-    const pending_alter = total_altered - total_repaired;
+    const pending_alter = total_altered -  (total_repaired + total_rejected);
     const isValidationComplete = (total_processed + pending_alter) >= total_cut;
 
     // Percentages for the stacked progress bar

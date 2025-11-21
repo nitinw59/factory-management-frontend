@@ -25,8 +25,13 @@ import NumberingPortalLayout from './shared/NumberingPortalLayout';
 import NumberingUserProtectedRoute from './shared/NumberingUserProtectedRoute';
 import InitializationPortalLayout from './shared/InitialisationPortalLayout'; 
 import InitializationPortalProtectedRoute from './shared/InitialisationPortalProtectedRoute';
-import PreparationPortalLayout from './shared/PreparationPortalLayout';
-import PreparationUserProtectedRoute from './shared/PreparationUserProtectedRoute';
+import PreparationManagerProtectedRoute from './shared/PreperationManagerProtectedRoute';
+import PreparationUnloadProtectedRoute from './shared/PreparationUnloadProtectedRoute';
+import SewingPartProtectedRoute from './shared/SewingPartProtectedRoute'; 
+import SewingManagerLayout from './shared/SewingPartLayout';
+import SewingManagerProtectedRoute from './shared/SewingManagerProtectedRoute'; 
+import AssemblyLayout from './shared/AssemblyLayout';
+import AssemblyProtectedRoute from './shared/AssemblyProtectedRoute'; 
 
 
 // --- PUBLIC PAGES ---
@@ -64,9 +69,18 @@ import NumberingWorkstationDashboardPage from './modules/numbering_portal/Number
 import InitializationDashboardPortalPage from './modules/initialisation_portal/InitializationDashboardPortalPage';
 import AlterPiecesDashboardPage from './modules/initialisation_portal/AlterPiecesDashboardPage';
 import NumberingBatchDetailsPage from './modules/numbering_portal/NumberingBatchDetailsPage';
-import PreparationDashboardPage from './modules/preparation_portal/PreparationDashboardPage';
+import PreparationManagerDashboardPage from './modules/preparation_portal/PreparationManagerDashboardPage';
 import BatchCuttingDetailsPage from './modules/cutting_portal/BatchCuttingDetailsPage';
 import CreateProductionBatchForm from './modules/production/CreateProductionBatchForm'; // Assuming this exists for creating new batches
+import WorkstationManagement from './modules/workstations/WorkstationManagement'; 
+import PreparationManagerLayout from './shared/PreperationManagerLayout';
+import PreparationUnloadDashboardPage from './modules/preparation_portal/PreparationUnloadDashboard';
+import PreparationUnloadLayout from './shared/PreparationUnloadLayout'; 
+import AssetManagementPage from './modules/asset/AssetManagementPage';
+import SewingPartLayout from './shared/SewingPartLayout';
+import SewingPartDashboardPage from './modules/sewing_portal/SewingPartDashboardPage';
+import SewingManagerDashboardPage from './modules/sewing_portal/SewingManagerDashboardPage'; 
+import AssemblyDashboardPage from './modules/sewing_portal/AssemblyDashboardPage';
 
 
 function App() {
@@ -95,9 +109,11 @@ function App() {
           <Route path="production-line-types" element={<ProductionLineTypesPage />} />
           <Route path="fabric-colors" element={<FabricColorsPage />} />
           <Route path="fabric-types" element={<FabricTypesPage />} />
+          <Route path ="asset-management" element={<AssetManagementPage />} />  
+
           
-          <Route path="workstations" element={<WorkstationsPage />} />
-          <Route path="workstation-types" element={<WorkstationTypesPage />} />
+         
+          <Route path="workstation-management" element={<WorkstationManagement />} />
           
           <Route path="portal-management" element={<PortalManagementPage />} />
           <Route path="trim-management" element={<TrimManagementPage />} />
@@ -126,8 +142,7 @@ function App() {
           <Route path="production-lines" element={<ProductionLinesPage />} />
           <Route path="factory-layout-planner" element={<FactoryLayoutPlannerPage />} />
           <Route path="production-line-types" element={<ProductionLineTypesPage />} />
-          <Route path="workstations" element={<WorkstationsPage />} />
-          <Route path="workstation-types" element={<WorkstationTypesPage />} />
+          <Route path="workstation-management" element={<WorkstationManagement />} />
           <Route path="products" element={<ProductManagementPage />} />
           <Route path="product-brands" element={<ProductBrandsPage />} />
           <Route path="product-types" element={<ProductTypesPage />} />
@@ -180,12 +195,35 @@ function App() {
           <Route path="summary" element={<NumberingBatchDetailsPage />} />
       </Route>
 
-      <Route path="/preparation-portal" element={<PreparationUserProtectedRoute><PreparationPortalLayout /></PreparationUserProtectedRoute>}>
-          <Route index element={<PreparationDashboardPage />} />
-          <Route path="dashboard" element={<PreparationDashboardPage />} />
+      <Route path="/preparation-unload-portal" element={<PreparationUnloadProtectedRoute><PreparationUnloadLayout /></PreparationUnloadProtectedRoute>}>
+          <Route index element={<PreparationUnloadDashboardPage />} />
+          <Route path="dashboard" element={<PreparationUnloadDashboardPage />} />
           {/* Add more preparation portal specific routes here later */}
       </Route>
 
+      <Route path="/preparation-manager" element={<PreparationManagerProtectedRoute><PreparationManagerLayout /></PreparationManagerProtectedRoute>}>
+          <Route index element={<PreparationManagerDashboardPage />} />
+          <Route path="dashboard" element={<PreparationManagerDashboardPage />} />
+          {/* Add more preparation manager specific routes here later */}
+      </Route>
+
+      <Route path="/sewing-part-operator" element={<SewingPartProtectedRoute><SewingPartLayout /></SewingPartProtectedRoute>}>
+          <Route index element={<SewingPartDashboardPage />} />
+          <Route path="dashboard" element={<SewingPartDashboardPage />} />
+          {/* Add more sewing part operator specific routes here later */}
+      </Route>
+
+      <Route path="/sewing-manager" element={<SewingManagerProtectedRoute><SewingManagerLayout /></SewingManagerProtectedRoute>}>
+          <Route index element={<SewingManagerDashboardPage />} />
+          <Route path="dashboard" element={<SewingManagerDashboardPage />} />
+          {/* Add more sewing manager specific routes here later */}
+      </Route>  
+
+      <Route path="/assembly-portal" element={<AssemblyProtectedRoute><AssemblyLayout /></AssemblyProtectedRoute>}>
+          <Route index element={<AssemblyDashboardPage />} />
+          <Route path="dashboard" element={<AssemblyDashboardPage />} />
+          {/* Add more assembly operator specific routes here later */}
+      </Route>  
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}
       <Route path="*" element={<Navigate to="/" />} />

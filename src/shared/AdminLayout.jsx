@@ -65,6 +65,9 @@ const AdminLayout = () => {
                  <NavLink to="/admin/workstation-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">workstation-types</NavLink>
                  <NavLink to="/admin/portal-management" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Portals</NavLink>
               </NavDropdown>
+
+              <NavLink to="/admin/asset-management" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>Asset Management</NavLink>  
+              
             </nav>
           </div>
           <div className="flex items-center">

@@ -30,7 +30,7 @@ const LineLoaderLayout = () => {
           <div className="flex items-center">
             {user && (
               <>
-                <span className="text-sm font-medium mr-4">Welcome, {user.name}</span>
+                <span className="text-sm font-medium mr-4">Welcome, {console.log(user)}</span>
                 <button onClick={handleLogout} className="flex items-center text-sm text-gray-600 hover:text-red-600">
                   <LuLogOut className="mr-1" />
                   Logout

@@ -14,6 +14,7 @@ export const AuthProvider = ({ children }) => {
     if (token) {
       try {
         const decodedUser = jwtDecode(token);
+        console.log("Decoded user from token:", decodedUser);
         if (decodedUser.exp * 1000 < Date.now()) {
           localStorage.removeItem('factory_token');
           setToken(null);
@@ -37,6 +38,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('factory_token', jwt);
     api.defaults.headers.common['Authorization'] = `Bearer ${jwt}`;
     const decodedUser = jwtDecode(jwt);
+    console.log("Decoded user on login:", decodedUser); 
     setUser(decodedUser);
     setToken(jwt); // Call setToken last to avoid race conditions with useEffect
   }, []); // Empty dependencies means this function is created only ONCE

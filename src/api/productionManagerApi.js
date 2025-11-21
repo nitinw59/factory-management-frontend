@@ -52,10 +52,15 @@ export const productionManagerApi = {
   // --- NEW: Functions to fetch data for the Production Line Form ---
   getLineTypes: () => api.get('/shared/production_line_types'),
   getLineManagers: () => api.get('/shared/factory_users?role=line_manager'), // Fetch users with 'line_manager' role
-  
-  
+  assignManagerToLine: (lineId, managerId) => api.put(`/production-manager/lines/${lineId}/assign-manager`, { managerId }),
+  assignLoaderToLine: (lineId, loaderId) => api.put(`/production-manager/lines/${lineId}/assign-loader`, { loaderId }),
+  getLinesWithLoaders: () => api.get('/production-manager/lines-with-loaders'),
+  // --- NEW: Functions for Editing Production Batches ---
+
+
   getBatchForEdit: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/edit-data`),
   updateBatch: (batchId, batchData) => api.put(`/production-batch-api/production-batches/${batchId}`, batchData),
+
 
 };
 

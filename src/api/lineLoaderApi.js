@@ -19,7 +19,7 @@ export const lineLoaderApi = {
    * @param {number} data.cycleFlowId - The ID of the product_cycle_flow step.
    * @param {number} data.lineId - The ID of the production line to assign.
    */
-  assignLine: (data) => api.post('/line-loader/assign-line', data),
+  assignLineAndLogRolls: (data) => api.post('/line-loader/assign-line', data),
   
   getRollsForBatch: (batchId) => api.get(`/line-loader/batch/${batchId}/rolls`),
 };

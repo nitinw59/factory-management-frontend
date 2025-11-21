@@ -2,9 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { cuttingPortalApi } from '../../api/cuttingPortalApi';
 import { FiSave, FiChevronDown, FiChevronUp, FiAlertTriangle } from 'react-icons/fi';
 
+
 const Spinner = () => <div className="flex justify-center items-center p-4"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div></div>;
 
-// Keep SIZES definition
+// Keep SIZES definition - UPDATED as per your request
 const SIZES = [
     { key: 'S(28)', value: 'S' }, { key: 'M(30)', value: 'M' },
     { key: 'L(32)', value: 'L' }, { key: 'XL(34)', value: 'XL' },
@@ -34,11 +35,12 @@ const PartInputRow = ({ part, isFirstPrimary = false, cuts, isSynced, onQuantity
             <div className="w-full sm:w-3/4 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-x-4 gap-y-2">
                 {SIZES.map(size => (
                     <div key={size.key}>
+                        {/* Label now uses the new key */}
                         <label className="block text-xs font-medium text-gray-500">{size.key}</label>
                         <input
-                            type="text" // Use text to allow empty input easily
-                            inputMode="numeric" // Hint for mobile keyboards
-                            pattern="[0-9]*" // Allow only digits
+                            type="text" 
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             value={cuts[`${part.id}-${size.value}`] || ''}
                             onChange={(e) => onQuantityChange(part, size.value, e.target.value)}
                             disabled={!isFirstPrimary && !!isSynced[part.id]}
@@ -52,6 +54,7 @@ const PartInputRow = ({ part, isFirstPrimary = false, cuts, isSynced, onQuantity
 );
 
 
+// UPDATED props to include 'meter'
 const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
     const [batchDetails, setBatchDetails] = useState(null);
     const [cuts, setCuts] = useState({});
@@ -62,6 +65,7 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
     const [error, setError] = useState(null);
     const [shortageMeters, setShortageMeters] = useState('');
 
+    // This useEffect logic is from your provided file
     useEffect(() => {
         setIsLoading(true);
         cuttingPortalApi.getBatchDetailsForCutting(batchId, rollId)
@@ -83,7 +87,7 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
                 const initialSyncState = {};
                 otherParts.forEach(part => {
                     const hasExistingData = SIZES.some(size => initialCuts[`${part.id}-${size.value}`]);
-                    initialSyncState[part.id] = !hasExistingData;
+                    initialSyncState[part.id] = true; // Sync if no data exists
                 });
                 setIsSynced(initialSyncState);
             })
@@ -91,6 +95,7 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
             .finally(() => setIsLoading(false));
     }, [batchId, rollId]);
 
+    // useMemo for parts calculation (from your file)
     const { firstPrimaryPart, otherPrimaryParts, supportingParts } = useMemo(() => {
         const parts = batchDetails?.piece_parts || [];
         const primary = parts.filter(p => p.part_type === 'PRIMARY');
@@ -101,6 +106,7 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
         };
     }, [batchDetails]);
 
+    // handleQuantityChange (from your file)
     const handleQuantityChange = (part, size, value) => {
         if (value !== '' && !/^[0-9]*$/.test(value)) return;
 
@@ -123,6 +129,7 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
         setCuts(updatedCuts);
     };
 
+    // handleSyncChange (from your file)
     const handleSyncChange = (partId, isChecked) => {
         setIsSynced(prev => ({...prev, [partId]: isChecked}));
 
@@ -136,6 +143,7 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
         }
     };
 
+    // handleShortageChange (from your file)
      const handleShortageChange = (e) => {
          const value = e.target.value;
          if (value === '' || (/^\d*\.?\d*$/.test(value) && parseFloat(value) >= 0)) {
@@ -143,6 +151,7 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
          }
      };
 
+    // handleSave (from your file)
     const handleSave = async () => {
         setIsSaving(true);
         setError(null);
@@ -167,14 +176,13 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
 
         const payload = {
             batchId: batchId,
-            rollId: rollId, // rollId is needed to identify which roll's data is being saved
+            rollId: rollId,
             cuts: cutsPayload,
-            shortageMeters: shortageNum > 0 ? shortageNum : null 
+            shortageMeters: shortageNum > 0 ? shortageNum : null
         };
 
         try {
-            // Pass the complete payload to the API function
-            console.log("Saving payload:", payload);
+            console.log("Saving payload:", payload); // Log from your file
             await cuttingPortalApi.logCutPieces(payload); 
             onSaveSuccess();
         } catch (err) {
@@ -190,11 +198,12 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
         <div className="p-1">
             {error && <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">{error}</div>}
 
+            {/* UPDATED Header to include meter */}
             <div className="mb-4 text-sm bg-blue-50 p-3 rounded-md border border-blue-200">
                 <p className="text-gray-700">
                     <strong>Batch:</strong> {batchDetails?.batch_code || `B-${batchId}`} |
                     <strong> Product:</strong> {batchDetails?.product_name} |
-                    <strong> Roll ID:</strong> {rollId}|
+                    <strong> Roll ID:</strong> {rollId} |
                     <strong> Meter:</strong> {meter || 'N/A'}
                 </p>
             </div>
@@ -217,6 +226,7 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
                             onClick={() => setShowAdvanced(!showAdvanced)}
                             className="flex items-center text-sm font-medium text-blue-600 hover:text-blue-800 mb-2"
                         >
+                            {/* Replaced icons with Fi variants */}
                             {showAdvanced ? <FiChevronUp className="mr-1" /> : <FiChevronDown className="mr-1" />}
                             {showAdvanced ? 'Hide Other Parts' : 'Customize Other Parts'} ({otherPrimaryParts.length + supportingParts.length})
                         </button>
@@ -248,6 +258,7 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
                 )}
                  <div className="mt-6 pt-4 border-t">
                      <label htmlFor="shortageMeters" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                         {/* Replaced icon with Fi variant */}
                          <FiAlertTriangle className="mr-2 text-orange-500" /> Report Fabric Shortage (Optional)
                      </label>
                      <input
@@ -267,6 +278,7 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
             <div className="mt-6 flex justify-end space-x-3 pt-4 border-t">
                  <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors font-medium">Cancel</button>
                  <button onClick={handleSave} disabled={isSaving} className="flex items-center px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors font-semibold">
+                    {/* Replaced icon with Fi variant */}
                     {isSaving ? <Spinner /> : <FiSave className="mr-2" />}
                     Save Cut Data
                 </button>

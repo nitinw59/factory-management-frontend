@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { initializationPortalApi } from '../../api/initializationPortalApi';
+import { numberingCheckerApi } from '../../api/numberingCheckerApi';
+
 import { LuTriangleAlert, LuHammer, LuWrench, LuCircleX } from 'react-icons/lu';
 
 // --- SHARED UI COMPONENTS ---
@@ -105,7 +107,7 @@ const AlterPiecesDashboardPage = () => {
         try {
             const response = await initializationPortalApi.getAlterPiecesData();
             setDashboardData(response.data || { overall_stats: {}, urgent_actions: [], batch_details: [] });
-            console.log("Fetched dashboard data:", response.data);
+            
         } catch (err) {
             setError("Could not load dashboard data. Please try again later.");
             console.error(err);
@@ -123,13 +125,34 @@ const AlterPiecesDashboardPage = () => {
 
     const handleRejectSubmit = async (quantity) => {
         if (!selectedItem) return;
+
+       
+        if (!selectedItem.batch_id || !selectedItem.line_id) {
+                alert("Error: Missing Batch ID or Line ID. Cannot process rejection. Please check API data.");
+                return;
+            }
+
         try {
             await initializationPortalApi.rejectAltered({ 
                 rollId: selectedItem.fabric_roll_id,
                 partId: selectedItem.product_piece_part_id,
                 size: selectedItem.size,
+                batch_id: selectedItem.batch_id,
+                line_id: selectedItem.line_id,  
                 quantity: quantity
             });
+
+            try {
+                await numberingCheckerApi.checkAndCompleteStages({
+                    rollId: selectedItem.fabric_roll_id,
+                    batchId: selectedItem.batch_id,
+                    lineId: selectedItem.line_id
+                });
+            } catch (completeErr) {
+                // Log the error but don't block the UI refresh
+                console.warn("Rejection was successful, but checking for stage completion failed:", completeErr);
+            }
+
             setIsRejectModalOpen(false);
             setSelectedItem(null);
             fetchData(); // Refresh all data after action
