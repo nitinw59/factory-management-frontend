@@ -33,6 +33,7 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave
                 console.log("Fetched lines:", linesRes.data);
                 setLines(linesRes.data || []);
                 const rollData = rollsRes.data || [];
+                console.log("Fetched rolls:", rollData);
                 setRolls(rollData);
                 setSelectedRolls(new Set(rollData.map(r => r.id))); // Select all by default
             } catch (error) { console.error("Failed to fetch modal data", error); } 
@@ -91,7 +92,9 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave
                                     {selectedRolls.has(roll.id) ? 
                                      <FiRotateCw className="text-blue-600 mr-3" size={20}/> : // Changed Icon
                                      <FiSquare className="text-gray-400 mr-3" size={20}/>}
-                                    <span className="font-medium">Roll #{roll.id}</span>
+                                    <span className="font-medium">Roll #{roll.roll_id}</span>
+                                    <span className="font-medium"> - {roll.fabric_type}</span>
+                                    <span className="font-medium"> - {roll.color_name} ({roll.color_number})</span>
                                     <span className="ml-auto text-sm text-gray-500">{roll.meter}m</span>
                                 </div>
                             )) : <p className="text-sm text-gray-500 text-center">No rolls found for this batch.</p>}

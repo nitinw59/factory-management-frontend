@@ -2,39 +2,84 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import { FiClock, FiCheckCircle, FiList, FiPackage } from 'react-icons/fi'; 
-
+import { FileText, ChevronRight } from 'lucide-react';
 const Spinner = () => <div className="flex justify-center items-center p-12"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
 
 // --- Reusable Order Card ---
+
 const OrderCard = ({ order }) => {
     // Determine status based on order.status
     const statusInfo = {
         PENDING: { color: 'yellow', icon: FiClock, text: 'Pending' },
         PREPARED: { color: 'blue', icon: FiPackage, text: 'Prepared' },
         COMPLETED: { color: 'green', icon: FiCheckCircle, text: 'Completed' },
-    }[order.status] || { color: 'gray', icon: FiList, text: order.status }; // Default fallback
+    }[order.status] || { color: 'gray', icon: FiList, text: order.status };
 
     const Icon = statusInfo.icon;
 
+    // Dynamic Tailwind classes based on status color
+    const borderColorClass = {
+        'yellow': 'border-yellow-500 hover:border-yellow-600',
+        'blue': 'border-blue-500 hover:border-blue-600',
+        'green': 'border-green-500 hover:border-green-600',
+        'gray': 'border-gray-500 hover:border-gray-600',
+    }[statusInfo.color];
+
+    const badgeColorClass = {
+        'yellow': 'bg-yellow-100 text-yellow-800',
+        'blue': 'bg-blue-100 text-blue-800',
+        'green': 'bg-green-100 text-green-800',
+        'gray': 'bg-gray-100 text-gray-800',
+    }[statusInfo.color];
+
     return (
-        <Link 
-            to={`/store-manager/trim-orders/${order.id}`} 
-            className={`block bg-white p-4 rounded-lg shadow-md border-l-4 border-${statusInfo.color}-500 hover:shadow-lg hover:border-${statusInfo.color}-600 transition-all duration-200`}
-        >
-            <div className="flex justify-between items-start">
-                <div>
-                    <h3 className="font-bold text-lg text-gray-800">Order #{order.id}</h3>
-                    <p className="text-sm text-gray-600 mt-1">For Batch #{order.production_batch_id}</p>
+        <div className={`bg-white rounded-lg shadow-md border-l-4 ${borderColorClass} transition-all duration-200 flex flex-col h-full`}>
+            {/* Main Card Area - Links to Fulfillment/Action Page */}
+            <Link 
+                to={`/store-manager/trim-orders/${order.id}`} 
+                className="block p-4 flex-grow hover:bg-gray-50 rounded-t-lg transition-colors"
+            >
+                <div className="flex justify-between items-start">
+                    <div>
+                        <h3 className="font-bold text-lg text-gray-800">Order #{order.id}</h3>
+                        <p className="text-sm text-gray-600 mt-1">
+                            For Batch #{order.production_batch_id || order.batch_code}
+                        </p>
+                    </div>
+                    <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full ${badgeColorClass}`}>
+                        <Icon size={14} className="mr-1.5"/>
+                        {statusInfo.text}
+                    </span>
                 </div>
-                 <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full bg-${statusInfo.color}-100 text-${statusInfo.color}-800`}>
-                     <Icon size={14} className="mr-1.5"/>
-                     {statusInfo.text}
-                 </span>
+                <div className="mt-3 pt-2 border-t border-gray-100">
+                    <p className="text-xs text-gray-500">
+                        <span className="font-medium">Created by:</span> {order.created_by}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                        {new Date(order.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })}
+                    </p>
+                </div>
+            </Link>
+
+            {/* Footer Actions - Links to Summary Page */}
+            <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 rounded-b-lg flex justify-between items-center">
+                <Link 
+                    to={`/store-manager/trim-orders/${order.id}/summary`} 
+                    className="text-xs font-bold text-slate-600 hover:text-purple-700 flex items-center transition-colors"
+                    title="View Detailed Summary"
+                >
+                    <FileText size={14} className="mr-1.5" />
+                    View Summary
+                </Link>
+                
+                <Link 
+                    to={`/store-manager/trim-orders/${order.id}`} 
+                    className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center transition-colors"
+                >
+                    Process <ChevronRight size={14} className="ml-0.5" />
+                </Link>
             </div>
-            <p className="text-xs text-gray-400 mt-3 pt-2 border-t border-gray-100">
-                Created by {order.created_by} on {new Date(order.created_at).toLocaleDateString()}
-            </p>
-        </Link>
+        </div>
     );
 };
 
@@ -48,6 +93,7 @@ const TrimOrdersPage = () => {
         setError(null);
         try {
             const response = await storeManagerApi.getAllTrimOrders();
+            console.log("Fetched trim orders:", response.data);
             setAllOrders(response.data || []);
         } catch (err) {
             console.error("Failed to fetch trim orders", err);

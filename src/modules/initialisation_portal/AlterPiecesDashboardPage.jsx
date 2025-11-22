@@ -143,6 +143,7 @@ const AlterPiecesDashboardPage = () => {
             });
 
             try {
+                console.log("Checking and completing numbering checker stages...");
                 await numberingCheckerApi.checkAndCompleteStages({
                     rollId: selectedItem.fabric_roll_id,
                     batchId: selectedItem.batch_id,

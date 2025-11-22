@@ -14,6 +14,8 @@ export const storeManagerApi = {
     getTrimOrderDetails: (orderId) => api.get(`/store-manager/trim-orders/${orderId}`),
     fulfillOrderItem: (data) => api.post('/store-manager/trim-orders/fulfill-item', data),
     fulfillWithVariant: (data) => api.post('/store-manager/trim-orders/fulfill-with-variant', data),
+    getTrimOrderSummary: async (orderId) => api.get(`/store-manager/trim-orders/${orderId}/summary`),
+
     // Trim Intake
     createTrimIntake: (data) => api.post('/store-manager/trim-intake', data),
     getTrimIntakeFormData: () => api.get('/store-manager/form-data/trim-intake'),

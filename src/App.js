@@ -81,7 +81,7 @@ import SewingPartLayout from './shared/SewingPartLayout';
 import SewingPartDashboardPage from './modules/sewing_portal/SewingPartDashboardPage';
 import SewingManagerDashboardPage from './modules/sewing_portal/SewingManagerDashboardPage'; 
 import AssemblyDashboardPage from './modules/sewing_portal/AssemblyDashboardPage';
-
+import TrimOrderSummaryPage from './modules/store_manager/TrimOrderSummaryPage';
 
 function App() {
   return (
@@ -133,6 +133,7 @@ function App() {
           <Route path="trim-orders/:orderId" element={<TrimOrderDetailPage />} />
           
           <Route path="record-trim-purchase" element={<TrimIntakeForm />} />
+          <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} /> 
         </Route>
 
         {/* Production Manager Portal */}

@@ -24,6 +24,7 @@ const StartBatchModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave })
                 // We just fetch the rolls.
                 const rollsRes = await initializationPortalApi.getRollsForBatch(batchId);
                 const rollData = rollsRes.data || [];
+                console.log("Fetched rolls for start batch modal:", rollData);
                 setRolls(rollData);
                 // Select all rolls by default
                 setSelectedRolls(new Set(rollData.map(r => r.id)));
@@ -73,9 +74,11 @@ const StartBatchModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave })
                     <label className="block text-sm font-medium text-gray-700 mb-2">Confirm Fabric Rolls to Start</label>
                     <div className="space-y-2 max-h-48 overflow-y-auto border p-3 rounded-md bg-gray-50">
                         {isLoading ? <Spinner/> : rolls.map(roll => (
-                            <div key={roll.id} onClick={() => handleRollToggle(roll.id)} className="flex items-center p-2 rounded-md cursor-pointer hover:bg-blue-50">
-                                {selectedRolls.has(roll.id) ? <FiCheckSquare className="text-blue-600 mr-3" size={20}/> : <FiSquare className="text-gray-400 mr-3" size={20}/>}
-                                <span className="font-medium">Roll #{roll.id}</span>
+                            <div key={roll.roll_id} onClick={() => handleRollToggle(roll.roll_id)} className="flex items-center p-2 rounded-md cursor-pointer hover:bg-blue-50">
+                                {selectedRolls.has(roll.roll_id) ? <FiCheckSquare className="text-blue-600 mr-3" size={20}/> : <FiSquare className="text-gray-400 mr-3" size={20}/>}
+                                <span className="font-medium">Roll #{roll.roll_id}</span>
+                                <span className="font-medium"> - {roll.fabric_type}</span>
+                                <span className="font-medium"> - {roll.color_name} ({roll.color_number})</span>
                                 <span className="ml-auto text-sm text-gray-500">{roll.meter}m</span>
                             </div>
                         ))}
@@ -146,7 +149,7 @@ const BatchCard = ({ batch, onStartClick }) => {
                                 roll.status === 'ASSIGNED_TO_PRODUCTION' ? 'bg-yellow-100 text-yellow-800' : 
                                 'bg-green-100 text-green-800'
                             }`}>
-                                Roll #{roll.id} ({roll.meter}m)
+                                Roll #{roll.id} - {roll.color}({roll.color_number}) ({roll.meter}m)
                             </span>
                         ))}
                     </div>
@@ -178,6 +181,7 @@ const InitializationDashboardPortalPage = () => {
         setIsLoading(true);
         try {
             const response = await initializationPortalApi.getDashboardData();
+            console.log("Fetched dashboard data:", response.data);
             setBatches(response.data);
         } catch (err) {
             setError("Could not load initialization queue.");

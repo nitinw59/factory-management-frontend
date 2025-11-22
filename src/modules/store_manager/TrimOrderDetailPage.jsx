@@ -103,6 +103,7 @@ const TrimOrderDetailPage = () => {
             }));
             console.log("Sanitized items:", sanitizedItems);
             setItems(sanitizedItems);
+            console.log("Missing items:", response.data.missing_items || []);
             setMissingItems(response.data.missing_items || []);
             setOrderInfo({
                 status: response.data.status,
@@ -199,7 +200,7 @@ const TrimOrderDetailPage = () => {
                             </div>
                             <ul className="list-disc list-inside pl-12 mt-3 space-y-1 text-sm text-red-900">
                                 {missingItems.map(item => (
-                                    <li key={item.id}><strong>{Math.ceil(item.quantity_required)} units</strong> of {item.item_name} - {item.color_name}</li>
+                                    <li key={item.id}><strong>{Math.ceil(item.quantity_required)} units</strong> of {item.item_name} - {item.color_name || "AGNOSTIC"}</li>
                                 ))}
                             </ul>
                         </div>
