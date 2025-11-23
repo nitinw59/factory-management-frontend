@@ -183,6 +183,7 @@ const RollDetailsModal = ({ batch, roll, onRollStartSuccess, onClose }) => {
                 rollId: roll.roll_id,
                 pieceIds: selectedPieceIds
             });
+            console.log("Start Preparation Response:", response);
             
             setMessage(response.message);
             setMessageType('success');
@@ -405,8 +406,8 @@ const PreparationManagerDashboardPage = () => {
     const handleRollDetailsClick = (batch, roll) => {
         console.log("Roll clicked:", batch, roll);
         // Rolls are clickable only if the current step is 'Preparation' and IN_PROGRESS
-        const isActiveStep = batch.current_step_name.toLowerCase() === 'preparation' && batch.progress?.status === 'IN_PROGRESS';
-        
+        //const isActiveStep = batch.current_step_name.toLowerCase() === 'preparation' && batch.progress?.status === 'IN_PROGRESS';
+        const isActiveStep=true;
         if (isActiveStep) {
              setSelectedRoll({ batch, roll });
         } else {
