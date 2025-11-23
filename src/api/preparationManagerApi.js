@@ -23,7 +23,7 @@ export const preparationManagerApi = {
      * @param {number} data.batchId - The ID of the batch.
      * @param {number} data.rollId - The ID of the fabric roll.
      */
-    startRollPreparation: (data) => api.post('/preparation-manager/start-roll-preparation', data),
+    startPreparationForPieces: (data) => api.post('/preparation-manager/start-roll-preparation', data),
 
     // --- New/Updated endpoint for marking pieces as COMPLETE ---
     /**
