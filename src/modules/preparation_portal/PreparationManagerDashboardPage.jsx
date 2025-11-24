@@ -407,7 +407,7 @@ const PreparationManagerDashboardPage = () => {
         console.log("Roll clicked:", batch, roll);
         // Rolls are clickable only if the current step is 'Preparation' and IN_PROGRESS
         //const isActiveStep = batch.current_step_name.toLowerCase() === 'preparation' && batch.progress?.status === 'IN_PROGRESS';
-        const isActiveStep=true;
+        const isActiveStep=true
         if (isActiveStep) {
              setSelectedRoll({ batch, roll });
         } else {
