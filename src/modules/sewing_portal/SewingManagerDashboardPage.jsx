@@ -181,9 +181,11 @@ const SewingManagerDashboardPage = () => {
         setIsLoading(true);
         try {
             const response = await sewingManagerApi.getDashboardData();
-            console.log("Fetched sewing manager dashboard data:", response.data);
+            //console.log("Fetched sewing manager dashboard data:", response.data);
             // ✅ FIX: The API returns an object { batches: [...] }, not just the array.
-            setBatches(response.data.batches || []); 
+            console.log("Updated batches state:", response.data || []);
+            setBatches(response.data || []);
+            
         } catch (err) {
             setError("Could not load sewing queue.");
             console.error(err);
@@ -211,6 +213,7 @@ const SewingManagerDashboardPage = () => {
             {isLoading ? <Spinner /> : error ? <ErrorDisplay message={error} /> : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {batches.length > 0 ? batches.map(batch => (
+                       
                         <BatchCard 
                             key={batch.batch_id} 
                             batch={batch}
