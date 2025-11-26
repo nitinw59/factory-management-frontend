@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { FiPlus, FiEdit3, FiTrash2, FiChevronRight, FiPackage, FiLayers, FiRepeat } from 'react-icons/fi';
+import { FiPlus, FiEdit3, FiTrash2, FiChevronRight, FiSearch, FiPackage, FiLayers, FiRepeat } from 'react-icons/fi';
 import { trimsApi } from '../../api/trimsApi';
 import { useAuth } from '../../context/AuthContext';
 
@@ -63,10 +63,7 @@ const VariantFormModal = ({ onSave, onClose, initialData = {}, isColorAgnostic, 
         onSave(dataToSave);
     };
     
-    // Determine if the definition fields should be disabled based on role for EDITING.
-    // When creating (no initialData.id), even store managers can set the color.
     const isDefinitionDisabled = userRole === 'store_manager' && initialData.id;
-
 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -113,7 +110,7 @@ const SubstituteFormModal = ({ onSave, onClose, variants, currentVariantId, exis
 
 // --- Main Page Component ---
 const TrimManagementPage = () => {
-    const { user } = useAuth(); // Get the current user's role
+    const { user } = useAuth(); 
 
     const [items, setItems] = useState([]);
     const [variants, setVariants] = useState([]);
@@ -122,6 +119,11 @@ const TrimManagementPage = () => {
     const [selectedItem, setSelectedItem] = useState(null);
     const [selectedVariant, setSelectedVariant] = useState(null);
     
+    // --- NEW: Search Filter States ---
+    const [itemFilter, setItemFilter] = useState('');
+    const [variantFilter, setVariantFilter] = useState('');
+    const [substituteFilter, setSubstituteFilter] = useState('');
+
     const [loading, setLoading] = useState({ items: true, variants: false, substitutes: false });
     const [modal, setModal] = useState({ type: null, data: null });
 
@@ -172,10 +174,14 @@ const TrimManagementPage = () => {
     const handleSelectItem = (item) => {
         setSelectedItem(item);
         setSelectedVariant(null);
+        // Reset sub-filters when main selection changes
+        setVariantFilter(''); 
+        setSubstituteFilter('');
     };
     
     const handleSelectVariant = (variant) => {
         setSelectedVariant(variant);
+        setSubstituteFilter('');
     };
 
     const handleSave = async (type, data) => {
@@ -224,75 +230,262 @@ const TrimManagementPage = () => {
         }
     };
 
+    // --- NEW: Filter Logic ---
+    const filteredItems = items.filter(item => 
+        item.name.toLowerCase().includes(itemFilter.toLowerCase()) || 
+        item.brand?.toLowerCase().includes(itemFilter.toLowerCase()) ||
+        item.item_code?.toLowerCase().includes(itemFilter.toLowerCase())
+    );
+
+    const filteredVariants = variants.filter(variant => {
+        const name = variant.color_name || 'Generic (Color Agnostic)';
+        return name.toLowerCase().includes(variantFilter.toLowerCase());
+    });
+
+    const filteredSubstitutes = substitutes.filter(sub => {
+        const name = `${sub.substitute_item_name} ${sub.substitute_color_name || 'Generic'}`;
+        return name.toLowerCase().includes(substituteFilter.toLowerCase());
+    });
+
+
     return (
         <div className="p-6 bg-gray-100 min-h-screen">
             <h1 className="text-3xl font-bold mb-6 text-gray-800">Trim Management & Substitutions</h1>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 
                 {/* Column 1: Trim Items */}
-                <div className="bg-white rounded-lg shadow-md border">
-                    <header className="flex justify-between items-center p-4 border-b">
-                        <h2 className="font-bold text-lg flex items-center"><FiPackage className="mr-2 text-gray-400"/>Trim Items</h2>
-                        {(user.role === 'factory_admin' || user.role === 'store_manager') && <button onClick={() => setModal({ type: 'item' })} className="text-blue-600 hover:text-blue-800"><FiPlus /></button>}
-                    </header>
-                    <div className="max-h-[60vh] overflow-y-auto">
-                        {loading.items ? <Spinner /> : items.map(item => (
-                            <div key={item.id} onClick={() => handleSelectItem(item)} className={`group flex justify-between items-center p-3 cursor-pointer border-l-4 ${selectedItem?.id === item.id ? 'border-blue-500 bg-blue-50' : 'border-transparent hover:bg-gray-50'}`}>
-                                <div>
-                                    <p className="font-semibold">{item.name}</p>
-                                    <p className="text-xs text-gray-500">{item.brand} {item.is_color_agnostic && <span className="font-bold text-purple-600">(Generic)</span>}</p>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-[70vh]">
+                    <div className="border-b border-gray-100 bg-white rounded-t-xl z-10">
+                        <header className="flex justify-between items-center p-4 pb-2">
+                            <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
+                                <div className="p-1.5 bg-gray-100 rounded-md">
+                                    <FiPackage className="text-gray-500" />
                                 </div>
-                                <div className="flex items-center space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    {user.role === 'factory_admin' && <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'item', data: item }); }} className="text-gray-400 hover:text-blue-600"><FiEdit3 size={14}/></button>}
-                                    {user.role === 'factory_admin' && <button onClick={(e) => { e.stopPropagation(); handleDelete('item', item.id); }} className="text-gray-400 hover:text-red-600"><FiTrash2 size={14}/></button>}
-                                    <FiChevronRight className="text-gray-400"/>
-                                </div>
+                                Trim Items
+                            </h2>
+                            {(user.role === 'factory_admin' || user.role === 'store_manager') && (
+                                <button 
+                                    onClick={() => setModal({ type: 'item' })} 
+                                    className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
+                                >
+                                    <FiPlus size={18} />
+                                </button>
+                            )}
+                        </header>
+                        
+                        {/* Filter Input */}
+                        <div className="px-4 pb-3">
+                            <div className="relative">
+                                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
+                                <input 
+                                    type="text" 
+                                    placeholder="Filter items..." 
+                                    value={itemFilter}
+                                    onChange={(e) => setItemFilter(e.target.value)}
+                                    className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white"
+                                />
                             </div>
-                        ))}
+                        </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                        {loading.items ? (
+                            <div className="flex justify-center p-8"><Spinner /></div>
+                        ) : (
+                            filteredItems.map(item => (
+                                <div 
+                                    key={item.id} 
+                                    onClick={() => handleSelectItem(item)} 
+                                    className={`group flex justify-between items-center p-3 rounded-lg cursor-pointer border transition-all duration-200 
+                                    ${selectedItem?.id === item.id 
+                                        ? 'border-blue-200 bg-blue-50/80 ring-1 ring-blue-200' 
+                                        : 'border-transparent hover:bg-gray-50 hover:border-gray-100'
+                                    }`}
+                                >
+                                    <div>
+                                        <p className={`text-sm font-semibold ${selectedItem?.id === item.id ? 'text-blue-900' : 'text-gray-700'}`}>
+                                            {item.name}
+                                        </p>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                            {item.brand} {item.is_color_agnostic && <span className="text-purple-600 font-medium ml-1 text-[10px] bg-purple-50 px-1.5 py-0.5 rounded-full border border-purple-100">Generic</span>}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        {user.role === 'factory_admin' && (
+                                            <>
+                                                <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'item', data: item }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200">
+                                                    <FiEdit3 size={12}/>
+                                                </button>
+                                                <button onClick={(e) => { e.stopPropagation(); handleDelete('item', item.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200">
+                                                    <FiTrash2 size={12}/>
+                                                </button>
+                                            </>
+                                        )}
+                                        <FiChevronRight className={`text-gray-300 ${selectedItem?.id === item.id ? 'text-blue-400' : ''}`}/>
+                                    </div>
+                                </div>
+                            ))
+                        )}
                     </div>
                 </div>
 
                 {/* Column 2: Variants */}
-                <div className="bg-white rounded-lg shadow-md border">
-                     <header className="flex justify-between items-center p-4 border-b">
-                        <h2 className="font-bold text-lg flex items-center"><FiLayers className="mr-2 text-gray-400"/>Variants</h2>
-                        {selectedItem && (user.role === 'factory_admin' || user.role === 'store_manager') && <button onClick={() => setModal({ type: 'variant' })} className="text-blue-600 hover:text-blue-800"><FiPlus /></button>}
-                    </header>
-                    <div className="max-h-[60vh] overflow-y-auto">
-                        {loading.variants ? <Spinner /> : !selectedItem ? <Placeholder text="Select an item to view variants." /> : variants.map(variant => (
-                             <div key={variant.id} onClick={() => handleSelectVariant(variant)} className={`group flex justify-between items-center p-3 cursor-pointer border-l-4 ${selectedVariant?.id === variant.id ? 'border-blue-500 bg-blue-50' : 'border-transparent hover:bg-gray-50'}`}>
-                                <div>
-                                    <p className="font-semibold">{variant.color_name || 'Generic (Color Agnostic)'}</p>
-                                    <p className="text-xs text-gray-500">Stock: {variant.main_store_stock}</p>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-[70vh]">
+                    <div className="border-b border-gray-100 bg-white rounded-t-xl z-10">
+                        <header className="flex justify-between items-center p-4 pb-2">
+                            <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
+                                <div className="p-1.5 bg-gray-100 rounded-md">
+                                    <FiLayers className="text-gray-500" />
                                 </div>
-                               <div className="flex items-center space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    {user.role === 'factory_admin' && <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'variant', data: variant }); }} className="text-gray-400 hover:text-blue-600"><FiEdit3 size={14}/></button>}
-                                    {user.role === 'factory_admin' && <button onClick={(e) => { e.stopPropagation(); handleDelete('variant', variant.id); }} className="text-gray-400 hover:text-red-600"><FiTrash2 size={14}/></button>}
-                                    <FiChevronRight className="text-gray-400"/>
-                                </div>
+                                Variants
+                            </h2>
+                            {selectedItem && (user.role === 'factory_admin' || user.role === 'store_manager') && (
+                                <button 
+                                    onClick={() => setModal({ type: 'variant' })} 
+                                    className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
+                                >
+                                    <FiPlus size={18} />
+                                </button>
+                            )}
+                        </header>
+
+                        {/* Filter Input */}
+                        <div className="px-4 pb-3">
+                            <div className="relative">
+                                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
+                                <input 
+                                    type="text" 
+                                    placeholder="Filter variants..." 
+                                    disabled={!selectedItem}
+                                    value={variantFilter}
+                                    onChange={(e) => setVariantFilter(e.target.value)}
+                                    className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white disabled:bg-gray-100 disabled:text-gray-400"
+                                />
                             </div>
-                        ))}
-                         {variants.length === 0 && selectedItem && !loading.variants && <p className="text-sm text-center text-gray-400 p-4">No variants defined for this item.</p>}
+                        </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                        {loading.variants ? (
+                            <div className="flex justify-center p-8"><Spinner /></div>
+                        ) : !selectedItem ? (
+                            <div className="h-full flex flex-col items-center justify-center p-6 text-center opacity-60">
+                                <FiPackage className="text-4xl text-gray-300 mb-2" />
+                                <Placeholder text="Select an item to view variants." />
+                            </div>
+                        ) : (
+                            filteredVariants.map(variant => (
+                                <div 
+                                    key={variant.id} 
+                                    onClick={() => handleSelectVariant(variant)} 
+                                    className={`group flex justify-between items-center p-3 rounded-lg cursor-pointer border transition-all duration-200 
+                                    ${selectedVariant?.id === variant.id 
+                                        ? 'border-blue-200 bg-blue-50/80 ring-1 ring-blue-200' 
+                                        : 'border-transparent hover:bg-gray-50 hover:border-gray-100'
+                                    }`}
+                                >
+                                    <div>
+                                        <p className={`text-sm font-semibold ${selectedVariant?.id === variant.id ? 'text-blue-900' : 'text-gray-700'}`}>
+                                            {variant.color_name || 'Generic (Color Agnostic)'}
+                                        </p>
+                                        <p className="text-xs text-gray-500 mt-0.5 font-mono bg-gray-100 inline-block px-1 rounded">
+                                            Stock: {variant.main_store_stock}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        {user.role === 'factory_admin' && (
+                                            <>
+                                                <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'variant', data: variant }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200">
+                                                    <FiEdit3 size={12}/>
+                                                </button>
+                                                <button onClick={(e) => { e.stopPropagation(); handleDelete('variant', variant.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200">
+                                                    <FiTrash2 size={12}/>
+                                                </button>
+                                            </>
+                                        )}
+                                        <FiChevronRight className={`text-gray-300 ${selectedVariant?.id === variant.id ? 'text-blue-400' : ''}`}/>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                        {filteredVariants.length === 0 && selectedItem && !loading.variants && (
+                            <p className="text-sm text-center text-gray-400 p-8 bg-gray-50 rounded-lg border border-dashed border-gray-200 m-2">No variants found.</p>
+                        )}
                     </div>
                 </div>
 
                 {/* Column 3: Substitutes */}
-                 <div className="bg-white rounded-lg shadow-md border">
-                     <header className="flex justify-between items-center p-4 border-b">
-                        <h2 className="font-bold text-lg flex items-center"><FiRepeat className="mr-2 text-gray-400"/>Substitutes</h2>
-                        {selectedVariant  && <button onClick={() => setModal({ type: 'substitute' })} className="text-blue-600 hover:text-blue-800"><FiPlus /></button>}
-                    </header>
-                    <div className="max-h-[60vh] overflow-y-auto">
-                        {loading.substitutes ? <Spinner /> : !selectedVariant ? <Placeholder text="Select a variant to manage substitutes." /> : substitutes.map(sub => (
-                             <div key={sub.id} className="group flex justify-between items-center p-3 border-b">
-                                <div>
-                                    <p className="font-semibold">{sub.substitute_item_name} - {sub.substitute_color_name || 'Generic'}</p>
-                                    <p className="text-xs text-gray-500">Stock: {sub.substitute_stock}</p>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-[70vh]">
+                    <div className="border-b border-gray-100 bg-white rounded-t-xl z-10">
+                        <header className="flex justify-between items-center p-4 pb-2">
+                            <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
+                                <div className="p-1.5 bg-gray-100 rounded-md">
+                                    <FiRepeat className="text-gray-500" />
                                 </div>
-                                {user.role === 'factory_admin' && <button onClick={() => handleDelete('substitute', sub.id)} className="text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"><FiTrash2 size={14}/></button>}
+                                Substitutes
+                            </h2>
+                            {selectedVariant && (
+                                <button 
+                                    onClick={() => setModal({ type: 'substitute' })} 
+                                    className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
+                                >
+                                    <FiPlus size={18} />
+                                </button>
+                            )}
+                        </header>
+
+                        {/* Filter Input */}
+                        <div className="px-4 pb-3">
+                            <div className="relative">
+                                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
+                                <input 
+                                    type="text" 
+                                    placeholder="Filter substitutes..." 
+                                    disabled={!selectedVariant}
+                                    value={substituteFilter}
+                                    onChange={(e) => setSubstituteFilter(e.target.value)}
+                                    className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white disabled:bg-gray-100 disabled:text-gray-400"
+                                />
                             </div>
-                        ))}
-                         {substitutes.length === 0 && selectedVariant && !loading.substitutes && <p className="text-sm text-center text-gray-400 p-4">No substitutes defined.</p>}
+                        </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                        {loading.substitutes ? (
+                            <div className="flex justify-center p-8"><Spinner /></div>
+                        ) : !selectedVariant ? (
+                            <div className="h-full flex flex-col items-center justify-center p-6 text-center opacity-60">
+                                <FiLayers className="text-4xl text-gray-300 mb-2" />
+                                <Placeholder text="Select a variant to manage substitutes." />
+                            </div>
+                        ) : (
+                            filteredSubstitutes.map(sub => (
+                                <div 
+                                    key={sub.id} 
+                                    className="group flex justify-between items-center p-3 rounded-lg border border-transparent hover:bg-gray-50 hover:border-gray-100 transition-all duration-200"
+                                >
+                                    <div>
+                                        <p className="text-sm font-semibold text-gray-700">
+                                            {sub.substitute_item_name} <span className="text-gray-400 font-normal mx-1">/</span> {sub.substitute_color_name || 'Generic'}
+                                        </p>
+                                        <p className="text-xs text-gray-500 mt-0.5 font-mono bg-gray-100 inline-block px-1 rounded">
+                                            Stock: {sub.substitute_stock}
+                                        </p>
+                                    </div>
+                                    {user.role === 'factory_admin' && (
+                                        <button 
+                                            onClick={() => handleDelete('substitute', sub.id)} 
+                                            className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200 opacity-0 group-hover:opacity-100 transition-all"
+                                        >
+                                            <FiTrash2 size={12}/>
+                                        </button>
+                                    )}
+                                </div>
+                            ))
+                        )}
+                        {filteredSubstitutes.length === 0 && selectedVariant && !loading.substitutes && (
+                             <p className="text-sm text-center text-gray-400 p-8 bg-gray-50 rounded-lg border border-dashed border-gray-200 m-2">No substitutes found.</p>
+                        )}
                     </div>
                 </div>
             </div>

@@ -77,14 +77,38 @@ const BatchCuttingDetailsPage = () => {
                 <Link to="/cutting-portal/dashboard" className="text-sm text-blue-600 hover:underline flex items-center mb-4">
                     <FiArrowLeft className="mr-2" /> Back to Cutting Queue
                 </Link>
-                <div className="bg-white p-4 rounded-lg shadow-sm border">
-                    <h1 className="text-2xl font-bold text-gray-800">Cutting Details: Batch {details.batch_code || `#${batchId}`}</h1>
-                    <p className="text-sm text-gray-600">{details.product_name}</p>
-                </div>
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+    <div className="flex justify-between items-start">
+        {/* Left: Identity */}
+        <div>
+            <h6 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                Cutting Details
+            </h6>
+            <h1 className="text-2xl font-bold text-gray-900 leading-none mb-1">
+                Batch <span className="font-mono text-indigo-600">{details.batch_code || `#${batchId}`}</span>
+            </h1>
+            <h3 className="text-sm font-medium text-gray-500">
+                {details.product_name}
+            </h3>
+        </div>
+
+        {/* Right: Metric */}
+        <div className="text-right pl-4 border-l border-gray-100">
+            <span className="block text-xs text-gray-400 font-medium uppercase">Fabric Layer</span>
+            <div className="flex items-baseline justify-end gap-1">
+                <span className="text-3xl font-bold text-gray-800">
+                    {details.length_of_layer_inches || '0'}
+                </span>
+                <span className="text-sm text-gray-500 font-medium">in</span>
+            </div>
+        </div>
+    </div>
+</div>
             </header>
 
             {/* Summary Header */}
             <section className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+                
                 <div className="bg-white p-4 rounded-lg shadow-sm border text-center">
                     <h2 className="text-xs text-gray-500 uppercase font-semibold">Total Fabric Assigned</h2>
                     <p className="text-2xl font-bold text-blue-600">{summaryStats.totalMeters.toFixed(2)} m</p>
