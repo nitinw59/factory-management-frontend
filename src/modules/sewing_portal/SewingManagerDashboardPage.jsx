@@ -28,7 +28,7 @@ const StartBatchModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave })
                 setRolls(rollData);
                 // Select all rolls that are not already IN_PRODUCTION by default
                 const defaultSelected = rollData
-                    .filter(r => r.status === 'ASSIGNED_TO_PRODUCTION')
+                    .filter(r => r.status != 'COMPLETED')
                     .map(r => r.id);
                 setSelectedRolls(new Set(defaultSelected));
             } catch (error) { console.error("Failed to fetch modal data", error); }

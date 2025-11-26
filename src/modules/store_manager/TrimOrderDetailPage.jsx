@@ -45,7 +45,7 @@ const FulfillmentModal = ({ item, onClose, onSubmit }) => {
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
                 <div className="p-6 border-b">
                     <h3 className="text-xl font-bold text-gray-800">Fulfill Order Item</h3>
-                    <p className="text-sm text-gray-500">Required: <strong>{item.item_name} - {item.color_name}</strong></p>
+                    <p className="text-sm text-gray-500">Required: <strong>{item.item_name} - {item.color_name} - {item.color_number}</strong></p>
                 </div>
                 <div className="p-6 space-y-5 bg-gray-50">
                     <div>
@@ -228,7 +228,7 @@ const TrimOrderDetailPage = () => {
                                         const Icon = status.icon;
                                         return (
                                             <tr key={item.id} className="hover:bg-gray-50">
-                                                <td className="py-3 px-4 font-medium text-gray-800">{item.item_name} - {item.color_name}</td>
+                                                <td className="py-3 px-4 font-medium text-gray-800">{item.item_name} - {item.color_name} ({item.color_number})</td>
                                                 <td className="py-3 px-4 text-center font-bold text-gray-900">{item.quantity_required}</td>
                                                 <td className="py-3 px-4 text-center font-semibold text-gray-600">{item.quantity_fulfilled}</td>
                                                 <td className="py-3 px-4 text-center text-gray-600">{item.available_stock}</td>
