@@ -287,6 +287,7 @@ const SewingDashboardPage = () => {
         setMessage(null);
         try {
             const res = await sewingPortalApi.getMyQueue();
+            console.log(res);
             setBatches(res.data.batches || []);
             // Automatically set filter to the first PRIMARY part if none is saved/selected
             const firstPrimaryPart = res.data.batches?.[0]?.rolls?.[0]?.parts_details?.find(p => p.part_type === 'PRIMARY')?.part_name;

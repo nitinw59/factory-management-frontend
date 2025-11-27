@@ -82,6 +82,7 @@ import SewingPartDashboardPage from './modules/sewing_portal/SewingPartDashboard
 import SewingManagerDashboardPage from './modules/sewing_portal/SewingManagerDashboardPage'; 
 import AssemblyDashboardPage from './modules/sewing_portal/AssemblyDashboardPage';
 import TrimOrderSummaryPage from './modules/store_manager/TrimOrderSummaryPage';
+import NumberingCheckerSummaryPage from './modules/numbering_portal/NumberingCheckerSummaryPage';
 
 function App() {
   return (
@@ -186,6 +187,7 @@ function App() {
           <Route index element={<NumberingWorkstationDashboardPage />} />
           <Route path="dashboard" element={<NumberingWorkstationDashboardPage />} />
           <Route path="summary" element={<NumberingBatchDetailsPage />} />
+          <Route path="checker-summary" element={<NumberingCheckerSummaryPage />} />
       </Route>
 
 

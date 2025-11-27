@@ -6,6 +6,22 @@ import { LuShirt, LuLayers, LuClipboardCheck, LuComponent, LuCheck, LuX, LuHamme
 const Spinner = () => <div className="flex justify-center items-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
 const ErrorDisplay = ({ message }) => <div className="p-4 bg-red-100 text-red-700 rounded-lg">{message}</div>;
 
+// --- HELPER FOR COLLAPSING LOGIC ---
+// Checks if a specific part has any cut quantity > 0
+const hasPartData = (part) => {
+    return part.size_details && part.size_details.some(detail => (parseInt(detail.total_cut, 10) || 0) > 0);
+};
+
+// Checks if a roll has any valid parts
+const hasRollData = (roll) => {
+    return roll.parts_details && roll.parts_details.some(part => hasPartData(part));
+};
+
+// Checks if a batch has any valid rolls
+const hasBatchData = (batch) => {
+    return batch.rolls && batch.rolls.some(roll => hasRollData(roll));
+};
+
 // --- MODAL FOR VALIDATING NEW PIECES ---
 const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) => {
     const total_cut_num = parseInt(itemInfo.total_cut, 10) || 0;
@@ -47,9 +63,9 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
         </div>
     );
 };
-// ✅ --- NEW MODAL FOR APPROVING ALTERED PIECES ---
+
+// --- MODAL FOR APPROVING ALTERED PIECES ---
 const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
-    console.log("ApproveAlteredModal itemInfo:", itemInfo);
     const pending_alter = parseInt(itemInfo.total_altered, 10) - (parseInt(itemInfo.total_repaired, 10) + parseInt(itemInfo.total_rejected, 10));
     const [quantity, setQuantity] = useState(pending_alter);
 
@@ -72,15 +88,7 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                             Quantity Repaired & Approved (Max: {pending_alter})
                         </label>
-                        <input
-                            type="number"
-                            value={quantity}
-                            onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
-                            className="w-full p-2 border rounded-md"
-                            min="1"
-                            max={pending_alter}
-                            autoFocus
-                        />
+                        <input type="number" value={quantity} onChange={(e) => setQuantity(parseInt(e.target.value) || 0)} className="w-full p-2 border rounded-md" min="1" max={pending_alter} autoFocus />
                     </div>
                 </div>
                 <div className="px-6 py-4 border-t flex justify-end space-x-2">
@@ -92,10 +100,12 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
     );
 };
 
-
-
 const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick }) => {
     const total_cut = parseInt(sizeDetail.total_cut, 10) || 0;
+    
+    // If this specific row has 0 cut, we generally shouldn't see it, but handled by parent filtering
+    if (total_cut === 0) return null;
+
     const total_validated = parseInt(sizeDetail.total_validated, 10) || 0;
     const total_rejected = parseInt(sizeDetail.total_rejected, 10) || 0;
     const total_altered = parseInt(sizeDetail.total_altered, 10) || 0;
@@ -105,7 +115,6 @@ const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick })
     const pending_alter = total_altered -  (total_repaired + total_rejected);
     const isValidationComplete = (total_processed + pending_alter) >= total_cut;
 
-    // Percentages for the stacked progress bar
     const approvedPercent = total_cut > 0 ? (total_validated / total_cut) * 100 : 0;
     const repairedPercent = total_cut > 0 ? (total_repaired / total_cut) * 100 : 0;
     const rejectedPercent = total_cut > 0 ? (total_rejected / total_cut) * 100 : 0;
@@ -117,24 +126,18 @@ const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick })
                 <div className="font-semibold text-gray-800 text-lg">{sizeDetail.size}</div>
                 <div className="text-sm font-bold text-gray-700">{total_processed} / {total_cut} Checked</div>
             </div>
-
-            {/* Combined, stacked progress bar */}
             <div title="Progress: Green=Approved, Orange=Repaired, Red=Rejected, Yellow=Pending Alter" className="w-full bg-gray-200 rounded-full h-4 mb-2 flex overflow-hidden text-white text-xs items-center justify-center">
                 <div className="bg-green-500 h-4" style={{ width: `${approvedPercent}%` }}></div>
                 <div className="bg-orange-500 h-4" style={{ width: `${repairedPercent}%` }}></div>
                 <div className="bg-red-500 h-4" style={{ width: `${rejectedPercent}%` }}></div>
                 <div className="bg-yellow-400 h-4" style={{ width: `${pendingAlterPercent}%` }}></div>
             </div>
-
-            {/* Detailed stats grid */}
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600">
                 <span className="flex items-center"><LuCheck className="text-green-500 mr-1.5"/> Approved: <strong>{total_validated}</strong></span>
                 <span className="flex items-center"><LuWrench className="text-orange-500 mr-1.5"/> Repaired: <strong>{total_repaired}</strong></span>
                 <span className="flex items-center"><LuX className="text-red-500 mr-1.5"/> Rejected: <strong>{total_rejected}</strong></span>
                 <span className="flex items-center"><LuHammer className="text-yellow-500 mr-1.5"/> Pending Alter: <strong>{pending_alter}</strong></span>
             </div>
-
-            {/* Action Buttons */}
             <div className="flex justify-end space-x-2 mt-3 pt-2 border-t">
                 {pending_alter > 0 && (
                      <button onClick={onApproveAlterClick} className="px-3 py-1 text-xs bg-orange-100 text-orange-800 rounded-full hover:bg-orange-200 font-semibold">
@@ -149,11 +152,59 @@ const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick })
     );
 };
 
-// ... Other components (PrimaryPartCard, FabricRollCard, ProductionBatchCard) remain unchanged ...
-const PrimaryPartCard = ({ part, rollId, onValidateClick, onApproveAlterClick }) => ( <div className="bg-gray-100 p-3 rounded-lg border"> <h5 className="font-semibold text-gray-800 flex items-center mb-2 text-md"><LuComponent className="mr-2 text-gray-600"/>{part.part_name}</h5> <div className="space-y-2"> {part.size_details.map(detail => ( <SizeValidationRow key={detail.size} sizeDetail={detail} onValidateClick={() => onValidateClick({ partId: part.part_id, partName: part.part_name, rollId, ...detail })} onApproveAlterClick={() => onApproveAlterClick({ partId: part.part_id, rollId, ...detail})} /> ))} </div> </div> );
-const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick }) => ( <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200"> <h4 className="font-bold text-indigo-800 flex items-center mb-3 text-lg"><LuLayers className="mr-2"/>Fabric Roll #{roll.fabric_roll_id}</h4> <div className="space-y-3"> {roll.parts_details.map(part => ( <PrimaryPartCard key={part.part_id} part={part} rollId={roll.fabric_roll_id} onValidateClick={onValidateClick} onApproveAlterClick={onApproveAlterClick} /> ))} </div> </div> );
-const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick }) => ( <div className="bg-white p-4 rounded-lg shadow-md border border-gray-200"> <div className="border-b pb-3 mb-3"> <h2 className="text-xl font-bold text-gray-800 flex items-center"><LuShirt className="mr-2 text-blue-500"/>Batch #{batch.batch_id} <span className="ml-2 text-sm font-normal text-gray-500">{batch.batch_code}</span></h2> </div> <div className="space-y-4"> {batch.rolls.map(roll => <FabricRollCard key={roll.fabric_roll_id} roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} />)} </div> </div> );
+const PrimaryPartCard = ({ part, rollId, onValidateClick, onApproveAlterClick }) => {
+    // Collapsing Logic: If no cut data for this part, hide it.
+    if (!hasPartData(part)) return null;
 
+    return (
+        <div className="bg-gray-100 p-3 rounded-lg border">
+            <h5 className="font-semibold text-gray-800 flex items-center mb-2 text-md"><LuComponent className="mr-2 text-gray-600"/>{part.part_name}</h5>
+            <div className="space-y-2">
+                {part.size_details.map(detail => (
+                    <SizeValidationRow key={detail.size} sizeDetail={detail} onValidateClick={() => onValidateClick({ partId: part.part_id, partName: part.part_name, rollId, ...detail })} onApproveAlterClick={() => onApproveAlterClick({ partId: part.part_id, rollId, ...detail})} />
+                ))}
+            </div>
+        </div>
+    );
+};
+
+const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick }) => {
+    // Collapsing Logic: Filter parts first. If no valid parts remain, hide the roll.
+    const validParts = roll.parts_details.filter(hasPartData);
+    if (validParts.length === 0) return null;
+
+    return (
+        <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200">
+            <h4 className="font-bold text-indigo-800 flex items-center mb-3 text-lg"><LuLayers className="mr-2"/>Fabric Roll #{roll.fabric_roll_id}</h4>
+            <div className="space-y-3">
+                {validParts.map(part => (
+                    <PrimaryPartCard key={part.part_id} part={part} rollId={roll.fabric_roll_id} onValidateClick={onValidateClick} onApproveAlterClick={onApproveAlterClick} />
+                ))}
+            </div>
+        </div>
+    );
+};
+
+const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick }) => {
+    // Collapsing Logic: Filter rolls first. If no valid rolls remain, hide the batch.
+    const validRolls = batch.rolls.filter(hasRollData);
+    if (validRolls.length === 0) return null;
+
+    return (
+        <div className="bg-white p-4 rounded-lg shadow-md border border-gray-200">
+            <div className="border-b pb-3 mb-3">
+                <h2 className="text-xl font-bold text-gray-800 flex items-center">
+                    <LuShirt className="mr-2 text-blue-500"/>Batch #{batch.batch_id} <span className="ml-2 text-sm font-normal text-gray-500">{batch.batch_code}</span>
+                </h2>
+            </div>
+            <div className="space-y-4">
+                {validRolls.map(roll => (
+                    <FabricRollCard key={roll.fabric_roll_id} roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} />
+                ))}
+            </div>
+        </div>
+    );
+};
 
 const NumberingCheckerDashboardPage = () => {
     const [batches, setBatches] = useState([]);
@@ -170,7 +221,15 @@ const NumberingCheckerDashboardPage = () => {
         try {
             const res = await numberingCheckerApi.getMyQueue();
             console.log("Fetched Queue Data:", res.data);
-            setBatches(res.data.batches || []);
+            
+            // Store raw data, filtering happens at render time for individual roll/part collapsing,
+            // but sorting happens here.
+            let fetchedBatches = res.data.batches || [];
+            
+            // Sorting Logic: Ascending Order of Batch ID
+            fetchedBatches.sort((a, b) => a.batch_id - b.batch_id);
+
+            setBatches(fetchedBatches);
             setHeaderInfo({ lineName: res.data.production_line_name || 'N/A', processType: res.data.workstation_process_type || 'unknown', lineId: res.data.production_line_id || null });
             setError(null);
         } catch (err) {
@@ -233,6 +292,9 @@ const NumberingCheckerDashboardPage = () => {
         }
     };
 
+    // Collapsing Logic: Only render batches that have at least one valid roll/part
+    const validBatchesToRender = batches.filter(hasBatchData);
+
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
             <div className="max-w-7xl mx-auto">
@@ -255,7 +317,15 @@ const NumberingCheckerDashboardPage = () => {
                 
                 {isLoading ? <Spinner /> : error ? <ErrorDisplay message={error} /> : (
                     <div className="space-y-6">
-                        {batches.map(batch => <ProductionBatchCard key={batch.batch_id} batch={batch} onValidateClick={openValidationModal} onApproveAlterClick={openAlterModal} />)}
+                        {validBatchesToRender.length > 0 ? (
+                            validBatchesToRender.map(batch => (
+                                <ProductionBatchCard key={batch.batch_id} batch={batch} onValidateClick={openValidationModal} onApproveAlterClick={openAlterModal} />
+                            ))
+                        ) : (
+                            <div className="text-center py-10 bg-white rounded-lg border border-dashed border-gray-300">
+                                <p className="text-gray-500">No active batches available for checking.</p>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -272,4 +342,3 @@ const NumberingCheckerDashboardPage = () => {
 };
 
 export default NumberingCheckerDashboardPage;
-
