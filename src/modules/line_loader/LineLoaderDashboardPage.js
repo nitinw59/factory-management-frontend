@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { lineLoaderApi } from '../../api/lineLoaderApi';
+import { Link } from 'react-router-dom';
 import Modal from '../../shared/Modal';
-import { FiCircle, FiLoader, FiEdit3, FiRotateCw, FiSquare, FiCheckCircle, FiList, FiPackage } from 'react-icons/fi';
-
+import { 
+    Circle, Loader, Edit3, RotateCw, Square, CheckCircle, 
+    List, Package, FileText, ExternalLink 
+} from 'lucide-react';
 // --- Reusable Components ---
 const Spinner = () => <div className="flex justify-center items-center p-12"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
 const Placeholder = ({ icon: Icon, title, message }) => (
@@ -12,6 +15,7 @@ const Placeholder = ({ icon: Icon, title, message }) => (
         <p className="mt-1 text-sm text-gray-500">{message}</p>
     </div>
 );
+
 
 
 // --- Line Selection Modal Component ---
@@ -30,12 +34,10 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave
                     lineLoaderApi.getLinesByType(cycleFlow.line_type_id),
                     lineLoaderApi.getRollsForBatch(batchId)
                 ]);
-                console.log("Fetched lines:", linesRes.data);
                 setLines(linesRes.data || []);
                 const rollData = rollsRes.data || [];
-                console.log("Fetched rolls:", rollData);
                 setRolls(rollData);
-                setSelectedRolls(new Set(rollData.map(r => r.id))); // Select all by default
+                setSelectedRolls(new Set(rollData.map(r => r.id))); 
             } catch (error) { console.error("Failed to fetch modal data", error); } 
             finally { setIsLoading(false); }
         };
@@ -45,11 +47,8 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave
     const handleRollToggle = (rollId) => {
         setSelectedRolls(prevSelected => {
             const newSelected = new Set(prevSelected);
-            if (newSelected.has(rollId)) {
-                newSelected.delete(rollId);
-            } else {
-                newSelected.add(rollId);
-            }
+            if (newSelected.has(rollId)) newSelected.delete(rollId);
+            else newSelected.add(rollId);
             return newSelected;
         });
     };
@@ -59,7 +58,6 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave
             alert("Please select a line and at least one fabric roll.");
             return;
         }
-        // Pass cycleFlow.id as cycleFlowId
         await onSave({
             batchId,
             cycleFlowId: cycleFlow.id,
@@ -69,8 +67,8 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave
     };
 
     return (
-        <div>
-            <h3 className="text-lg font-medium mb-4">Assign Line for: <span className="font-bold">{cycleFlow.line_type_name}</span></h3>
+        <div className="p-4">
+            <h3 className="text-lg font-medium mb-4 text-gray-800">Assign Line for: <span className="font-bold text-blue-600">{cycleFlow.line_type_name}</span></h3>
             {isLoading ? <Spinner /> : (
                 <div className="space-y-6">
                     <div>
@@ -78,33 +76,34 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave
                         <select
                             value={selectedLine}
                             onChange={(e) => setSelectedLine(e.target.value)}
-                            className="w-full p-2 border border-gray-300 rounded-md"
+                            className="w-full p-2.5 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
                         >
                             <option value="">-- Choose a line --</option>
                             {lines.map(line => <option key={line.id} value={line.id}>{line.name}</option>)}
                         </select>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Step 2: Select Fabric Rolls to Log</label>
-                        <div className="space-y-2 max-h-48 overflow-y-auto border p-3 rounded-md bg-gray-50">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Step 2: Select Fabric Rolls</label>
+                        <div className="space-y-2 max-h-48 overflow-y-auto border p-3 rounded-lg bg-gray-50">
                             {rolls.length > 0 ? rolls.map(roll => (
-                                <div key={roll.id} onClick={() => handleRollToggle(roll.id)} className="flex items-center p-2 rounded-md cursor-pointer hover:bg-blue-50">
+                                <div key={roll.id} onClick={() => handleRollToggle(roll.id)} className="flex items-center p-2 rounded-md cursor-pointer hover:bg-blue-50 transition-colors border border-transparent hover:border-blue-100">
                                     {selectedRolls.has(roll.id) ? 
-                                     <FiRotateCw className="text-blue-600 mr-3" size={20}/> : // Changed Icon
-                                     <FiSquare className="text-gray-400 mr-3" size={20}/>}
-                                    <span className="font-medium">Roll #{roll.roll_id}</span>
-                                    <span className="font-medium"> - {roll.fabric_type}</span>
-                                    <span className="font-medium"> - {roll.color_name} ({roll.color_number})</span>
-                                    <span className="ml-auto text-sm text-gray-500">{roll.meter}m</span>
+                                     <RotateCw className="text-blue-600 mr-3" size={20}/> :
+                                     <Square className="text-gray-400 mr-3" size={20}/>}
+                                    <div className="text-sm">
+                                        <span className="font-semibold text-gray-800">Roll #{roll.roll_id}</span>
+                                        <span className="text-gray-500"> • {roll.fabric_type} • {roll.color_name}</span>
+                                        <span className="ml-2 bg-gray-200 px-1.5 py-0.5 rounded text-xs font-mono">{roll.meter}m</span>
+                                    </div>
                                 </div>
-                            )) : <p className="text-sm text-gray-500 text-center">No rolls found for this batch.</p>}
+                            )) : <p className="text-sm text-gray-500 text-center italic">No rolls found for this batch.</p>}
                         </div>
                     </div>
                 </div>
             )}
-            <div className="mt-6 flex justify-end space-x-3">
-                <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancel</button>
-                <button onClick={handleSave} disabled={!selectedLine || selectedRolls.size === 0 || isLoading} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400">Assign & Log Rolls</button>
+            <div className="mt-8 flex justify-end space-x-3 pt-4 border-t">
+                <button onClick={onClose} className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Cancel</button>
+                <button onClick={handleSave} disabled={!selectedLine || selectedRolls.size === 0 || isLoading} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 shadow-sm">Assign & Log Rolls</button>
             </div>
         </div>
     );
@@ -115,7 +114,7 @@ const BatchCard = ({ batch, onAssign }) => {
     const [modalOpen, setModalOpen] = useState(false);
     const [activeFlowData, setActiveFlowData] = useState(null);
 
-    // --- Logic to determine batch status and next step ---
+    // Status Logic
     const { nextStepSequence, overallStatus } = useMemo(() => {
         if (!batch.cycle_flow || batch.cycle_flow.length === 0) return { nextStepSequence: -1, overallStatus: 'NO_FLOW' };
         const completedFlowIds = new Set(batch.progress?.filter(p => p.status === 'COMPLETED').map(p => p.product_cycle_flow_id));
@@ -123,7 +122,6 @@ const BatchCard = ({ batch, onAssign }) => {
         const highestCompletedSeq = batch.cycle_flow.filter(cf => completedFlowIds.has(cf.id)).reduce((max, cf) => Math.max(max, cf.sequence_no), 0);
         return { nextStepSequence: highestCompletedSeq + 1, overallStatus: batch.progress?.length > 0 ? 'IN_PROGRESS' : 'PENDING' };
     }, [batch]);
-    // --- End status logic ---
 
     const handleButtonClick = (cycleFlow, progress) => {
         const currentLineId = progress ? progress.line_id : null;
@@ -137,27 +135,50 @@ const BatchCard = ({ batch, onAssign }) => {
     };
 
     const statusStyles = {
-        PENDING: { bg: 'bg-yellow-100', text: 'text-yellow-800', icon: <FiCircle/>, label: 'Pending Start' },
-        IN_PROGRESS: { bg: 'bg-blue-100', text: 'text-blue-800', icon: <FiLoader className="animate-spin"/>, label: 'In Progress' },
-        COMPLETED: { bg: 'bg-green-100', text: 'text-green-800', icon: <FiCheckCircle/>, label: 'Completed' }, // Changed Icon
-        NO_FLOW: { bg: 'bg-red-100', text: 'text-red-800', icon: null, label: 'Setup Required' },
+        PENDING: { bg: 'bg-amber-50', text: 'text-amber-800', border: 'border-t-amber-500', icon: <Circle size={14}/>, label: 'Pending Start' },
+        IN_PROGRESS: { bg: 'bg-blue-50', text: 'text-blue-800', border: 'border-t-blue-500', icon: <Loader className="animate-spin" size={14}/>, label: 'In Progress' },
+        COMPLETED: { bg: 'bg-green-50', text: 'text-green-800', border: 'border-t-green-500', icon: <CheckCircle size={14}/>, label: 'Completed' },
+        NO_FLOW: { bg: 'bg-red-50', text: 'text-red-800', border: 'border-t-red-500', icon: null, label: 'Setup Required' },
     };
     const currentStatus = statusStyles[overallStatus];
 
     return (
-        <div className="bg-white rounded-lg shadow-md overflow-hidden border border-gray-200">
+        <div className={`bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200 hover:shadow-md transition-shadow border-t-4 ${currentStatus.border}`}>
             {/* Card Header */}
-            <div className={`px-4 py-3 flex items-center justify-between ${currentStatus.bg} border-b border-gray-200`}>
-                <h2 className="font-bold text-lg text-gray-800">{batch.batch_code || `BATCH-${batch.batch_id}`}</h2>
-                <span className={`flex items-center text-sm font-semibold px-2 py-1 rounded-full ${currentStatus.bg} ${currentStatus.text}`}>
-                   {currentStatus.icon && <span className="mr-2">{currentStatus.icon}</span>} {currentStatus.label}
-                </span>
+            <div className="px-5 py-4 border-b border-gray-100">
+                <div className="flex justify-between items-start mb-2">
+                    <h2 className="font-bold text-lg text-gray-800">{batch.batch_code || `BATCH-${batch.batch_id}`}</h2>
+                    <span className={`flex items-center text-xs font-bold px-2.5 py-1 rounded-full border ${currentStatus.bg.replace('bg-', 'border-')} ${currentStatus.bg} ${currentStatus.text}`}>
+                       {currentStatus.icon && <span className="mr-1.5">{currentStatus.icon}</span>} {currentStatus.label}
+                    </span>
+                </div>
+                <p className="text-sm text-gray-600">{batch.product_name}</p>
+                
+                {/* NEW: Trim Order Links */}
+                {batch.trim_orders && batch.trim_orders.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-dashed border-gray-200">
+                        <div className="text-xs font-semibold text-gray-500 uppercase mb-1.5 flex items-center">
+                            <List size={12} className="mr-1"/> Trim Orders
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {batch.trim_orders.map(to => (
+                                <Link 
+                                    key={to.id}
+                                    to={`/line-loader/trim-orders/${to.id}/summary`}
+                                    className="flex items-center text-xs bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-100 hover:bg-purple-100 hover:border-purple-200 transition-colors"
+                                    title={`View Summary for Order #${to.id}`}
+                                >
+                                    <FileText size={10} className="mr-1"/> #{to.id} <ExternalLink size={8} className="ml-1 opacity-50"/>
+                                </Link>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
-            <p className="text-sm text-gray-600 px-4 pt-2">{batch.product_name}</p>
             
             {/* Workflow Nodes */}
-            <div className="p-4">
-                <p className="text-sm font-semibold mb-2 text-gray-600">Production Cycle:</p>
+            <div className="p-5 bg-gray-50/50 flex-1">
+                <p className="text-xs font-bold text-gray-400 uppercase mb-3 tracking-wider">Production Cycle</p>
                 <div className="flex flex-wrap gap-2">
                     {batch.cycle_flow?.map(cf => {
                         const progressEntry = batch.progress?.find(p => p.product_cycle_flow_id === cf.id);
@@ -170,20 +191,21 @@ const BatchCard = ({ batch, onAssign }) => {
                         }
                         
                         const buttonStyles = {
-                           COMPLETED: 'bg-green-100 text-green-700 cursor-not-allowed',
-                           PENDING: 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200',
-                           ENABLED: 'bg-blue-500 text-white hover:bg-blue-600',
-                           DISABLED: 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                           COMPLETED: 'bg-green-100 text-green-700 border-green-200 cursor-default',
+                           PENDING: 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-200 cursor-pointer',
+                           ENABLED: 'bg-white border-blue-300 text-blue-600 hover:bg-blue-50 hover:border-blue-400 cursor-pointer shadow-sm',
+                           DISABLED: 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
                         };
+                        
                         return (
                             <button key={cf.id} 
                                 disabled={buttonState === 'DISABLED' || buttonState === 'COMPLETED'}
                                 onClick={() => handleButtonClick(cf, progressEntry)}
-                                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center ${buttonStyles[buttonState]}`}>
+                                className={`px-3 py-2 text-sm font-medium rounded-lg border transition-all flex items-center ${buttonStyles[buttonState]}`}>
                                {cf.line_type_name}
                                {buttonState === 'PENDING' && (
-                                   <span className="ml-2 text-xs font-normal opacity-90 truncate flex items-center">
-                                       ({progressEntry.line_name}) <FiEdit3 className="inline-block ml-1" size={10}/>
+                                   <span className="ml-2 text-xs font-normal opacity-80 truncate flex items-center pl-2 border-l border-amber-300/50">
+                                       {progressEntry.line_name} <Edit3 className="ml-1" size={10}/>
                                    </span>
                                )}
                             </button>
@@ -206,7 +228,7 @@ const BatchCard = ({ batch, onAssign }) => {
     );
 };
 
-// --- MAIN PAGE COMPONENT (REWRITTEN for Grouping) ---
+// --- MAIN PAGE COMPONENT ---
 const LineLoaderDashboardPage = () => {
     const [allBatches, setAllBatches] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -216,8 +238,8 @@ const LineLoaderDashboardPage = () => {
         setIsLoading(true);
         setError(null);
         try {
+            // Using mock/real API toggle
             const response = await lineLoaderApi.getDashboardData();
-            console.log("Fetched dashboard data:", response.data);
             setAllBatches(response.data || []);
         } catch (error) {
             console.error("Failed to fetch dashboard data", error);
@@ -234,7 +256,6 @@ const LineLoaderDashboardPage = () => {
             await lineLoaderApi.assignLineAndLogRolls(data);
             fetchDashboardData();
         } catch (error) {
-            console.error("Failed to assign line", error);
             alert('Failed to assign line. Please try again.');
         }
     };
@@ -252,19 +273,21 @@ const LineLoaderDashboardPage = () => {
     }, [allBatches]);
 
     const sortedGroupNames = Object.keys(groupedBatches).sort();
-    // --- End Grouping Logic ---
 
     return (
-        <div className="p-6 bg-gray-100 min-h-screen">
-            <h1 className="text-3xl font-bold mb-6 text-gray-800">Line Loader Dashboard</h1>
+        <div className="p-6 bg-gray-100 min-h-screen font-inter text-slate-800">
+            <header className="mb-8">
+                <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Line Loader Dashboard</h1>
+                <p className="text-slate-500 mt-1">Assign production lines and track batch flow.</p>
+            </header>
             
             {isLoading ? <Spinner /> : error ? (
-                 <div className="p-4 bg-red-100 text-red-700 rounded-lg shadow-sm border border-red-200">{error}</div>
+                 <div className="p-4 bg-red-100 text-red-700 rounded-lg shadow-sm border border-red-200 flex items-center"><span className="mr-2">⚠️</span> {error}</div>
             ) : (
-                <div className="space-y-8">
+                <div className="space-y-10">
                     {allBatches.length === 0 && (
                         <Placeholder 
-                            icon={FiPackage} 
+                            icon={Package} 
                             title="No Work Pending" 
                             message="There are no batches currently assigned to your lines." 
                         />
@@ -273,9 +296,14 @@ const LineLoaderDashboardPage = () => {
                     {/* Render batches by group */}
                     {sortedGroupNames.map(groupName => (
                         <section key={groupName}>
-                            <h2 className="text-2xl font-semibold mb-4 text-gray-700 border-b pb-2">
-                                {groupName} Department
-                            </h2>
+                            <div className="flex items-center mb-4 pb-2 border-b border-gray-200">
+                                <h2 className="text-xl font-bold text-gray-700 mr-3">
+                                    {groupName}
+                                </h2>
+                                <span className="bg-gray-200 text-gray-600 text-xs font-bold px-2 py-0.5 rounded-full">
+                                    {groupedBatches[groupName].length}
+                                </span>
+                            </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {groupedBatches[groupName].map(batch => (
                                     <BatchCard 

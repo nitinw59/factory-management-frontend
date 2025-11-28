@@ -62,6 +62,8 @@ const CreateProductionBatchForm = () => {
                     productionManagerApi.getFabricColors(),
                     productionManagerApi.getLinesWithLoaders(), // Always fetch the correct lines list
                 ]);
+
+                console.log("Fetched fabric types, colors, and lines:", typesRes, colorsRes, linesRes);
                 
                 const commonOptions = {
                     fabricTypes: typesRes.data || [],
@@ -125,6 +127,7 @@ const CreateProductionBatchForm = () => {
     // --- Filtered Rolls Logic ---
     const filteredFabricRolls = useMemo(() => {
          return (options.availableRolls || []).filter(roll => {
+            console.log("Filtering roll:", roll, "with typeFilter:", fabricTypeFilter, "and colorFilter:", fabricColorFilter);
             const typeMatch = !fabricTypeFilter || roll.type === fabricTypeFilter;
             const colorMatch = !fabricColorFilter || roll.color === fabricColorFilter;
             return typeMatch && colorMatch;
@@ -261,7 +264,7 @@ const CreateProductionBatchForm = () => {
                                  <h3 className="text-lg font-semibold text-gray-800 mb-4">Assign Fabric Rolls*</h3>
                                  <div className="grid grid-cols-2 gap-4 mb-4">
                                      <select value={fabricTypeFilter} onChange={e => setFabricTypeFilter(e.target.value)} className="p-2 border rounded-md bg-gray-50"><option value="">Filter by Type</option>{(options.fabricTypes || []).map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</select>
-                                     <select value={fabricColorFilter} onChange={e => setFabricColorFilter(e.target.value)} className="p-2 border rounded-md bg-gray-50"><option value="">Filter by Color</option>{(options.fabricColors || []).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
+                                     <select value={fabricColorFilter} onChange={e => setFabricColorFilter(e.target.value)} className="p-2 border rounded-md bg-gray-50"><option value="">Filter by Color</option>{(options.fabricColors || []).map(c => <option key={c.id} value={`${c.color_number} ${c.name}`}>{c.color_number}-{c.name}</option>)}</select>
                                  </div>
                                  <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-3 max-h-48 overflow-y-auto p-3 border rounded-md bg-gray-50">
                                      {filteredFabricRolls.length > 0 ? filteredFabricRolls.map(roll => (

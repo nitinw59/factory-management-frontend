@@ -88,19 +88,29 @@ const VariantFormModal = ({ onSave, onClose, initialData = {}, isColorAgnostic, 
     );
 };
 
-const SubstituteFormModal = ({ onSave, onClose, variants, currentVariantId, existingSubstitutes }) => {
+const SubstituteFormModal = ({ onSave, onClose, variants, currentVariantId, existingSubstitutes, parentItemName, parentItemBrand }) => {
+    console.log("SubstituteFormModal rendered", variants);
     const [substituteId, setSubstituteId] = useState('');
     const handleSubmit = (e) => { e.preventDefault(); onSave({ substitute_variant_id: substituteId }); };
 
+    // Filter out the current variant itself and any that are already substitutes
     const availableOptions = variants.filter(v => 
         v.id !== currentVariantId && !existingSubstitutes.some(s => s.substitute_variant_id === v.id)
     );
 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="bg-blue-50 p-3 rounded-md text-sm text-blue-700 mb-2">
+                Showing variants for <strong>{parentItemName} - {parentItemBrand}</strong> only.
+            </div>
             <select value={substituteId} onChange={e => setSubstituteId(e.target.value)} required className="w-full p-2 border rounded">
                 <option value="">Select a variant to use as a substitute</option>
-                {availableOptions.map(v => <option key={v.id} value={v.id}> {v.item_name} - {v.color_name || 'Generic'}</option>)}
+                {availableOptions.map(v => (
+                    <option key={v.id} value={v.id}> 
+                        {/* Use item_name if available (global list), else fallback to parent name (scoped list) */}
+                        {v.item_name || parentItemName} - {v.item_brand || parentItemBrand} - {v.color_name || 'Generic'}
+                    </option>
+                ))}
             </select>
             <div className="flex justify-end space-x-2 pt-4 border-t"><button type="button" onClick={onClose}>Cancel</button><button type="submit">Add Substitute</button></div>
         </form>
@@ -119,7 +129,7 @@ const TrimManagementPage = () => {
     const [selectedItem, setSelectedItem] = useState(null);
     const [selectedVariant, setSelectedVariant] = useState(null);
     
-    // --- NEW: Search Filter States ---
+    // --- Search Filter States ---
     const [itemFilter, setItemFilter] = useState('');
     const [variantFilter, setVariantFilter] = useState('');
     const [substituteFilter, setSubstituteFilter] = useState('');
@@ -128,19 +138,20 @@ const TrimManagementPage = () => {
     const [modal, setModal] = useState({ type: null, data: null });
 
     const [colors, setColors] = useState([]);
-    const [allVariants, setAllVariants] = useState([]);
+    // We can keep allVariants if needed for other features, but Substitute modal will use scoped `variants`
+    // const [allVariants, setAllVariants] = useState([]); 
 
     const fetchData = useCallback(async () => {
         setLoading(p => ({ ...p, items: true }));
         try {
-            const [itemsRes, colorsRes, allVariantsRes] = await Promise.all([
+            const [itemsRes, colorsRes] = await Promise.all([
                 trimsApi.getItems(),
                 trimsApi.getColors(),
-                trimsApi.getAllVariants(),
+                // trimsApi.getAllVariants(), // Removed if not strictly needed elsewhere, or keep for global features
             ]);
             setItems(itemsRes.data);
             setColors(colorsRes.data);
-            setAllVariants(allVariantsRes.data);
+            // setAllVariants(allVariantsRes.data);
         } catch (error) { console.error("Failed to fetch initial data", error); }
         finally { setLoading(p => ({ ...p, items: false })); }
     }, []);
@@ -230,7 +241,7 @@ const TrimManagementPage = () => {
         }
     };
 
-    // --- NEW: Filter Logic ---
+    // --- Filter Logic ---
     const filteredItems = items.filter(item => 
         item.name.toLowerCase().includes(itemFilter.toLowerCase()) || 
         item.brand?.toLowerCase().includes(itemFilter.toLowerCase()) ||
@@ -493,7 +504,21 @@ const TrimManagementPage = () => {
             {/* Modal Rendering */}
             {modal.type === 'item' && <Modal title={modal.data ? 'Edit Item' : 'Add New Item'} onClose={() => setModal({type: null})}><ItemFormModal onSave={(data) => handleSave('item', data)} onClose={() => setModal({type: null})} initialData={modal.data} /></Modal>}
             {modal.type === 'variant' && <Modal title={modal.data ? 'Edit Variant' : 'Add New Variant'} onClose={() => setModal({type: null})}><VariantFormModal onSave={(data) => handleSave('variant', data)} onClose={() => setModal({type: null})} initialData={modal.data} isColorAgnostic={selectedItem?.is_color_agnostic} colors={colors} userRole={user.role} /></Modal>}
-            {modal.type === 'substitute' && <Modal title="Add Substitute" onClose={() => setModal({type: null})}><SubstituteFormModal onSave={(data) => handleSave('substitute', data)} onClose={() => setModal({type: null})} variants={allVariants} currentVariantId={selectedVariant?.id} existingSubstitutes={substitutes} /></Modal>}
+            
+            {/* Updated Substitute Modal usage */}
+            {modal.type === 'substitute' && (
+                <Modal title="Add Substitute" onClose={() => setModal({type: null})}>
+                    <SubstituteFormModal 
+                        onSave={(data) => handleSave('substitute', data)} 
+                        onClose={() => setModal({type: null})} 
+                        variants={variants} // Passing scoped variants instead of global
+                        parentItemName={selectedItem?.name} // Passing parent name for display
+                        parentItemBrand={selectedItem?.brand} // Passing parent brand for display
+                        currentVariantId={selectedVariant?.id} 
+                        existingSubstitutes={substitutes} 
+                    />
+                </Modal>
+            )}
         </div>
     );
 };

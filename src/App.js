@@ -168,6 +168,8 @@ function App() {
       <Route path="/line-loader" element={<LineLoaderProtectedRoute><LineLoaderLayout /></LineLoaderProtectedRoute>}>
           <Route index element={<LineLoaderDashboardPage />} />
           <Route path="dashboard" element={<LineLoaderDashboardPage />} />
+          <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} /> 
+
           {/* Add more line loader specific routes here later */}
       </Route>    
 

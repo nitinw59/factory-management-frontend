@@ -19,12 +19,10 @@ const LineLoaderLayout = () => {
           <div className="flex items-center space-x-8">
             <div className="text-xl font-bold text-gray-800">Line Loader Portal</div>
             <nav className="hidden md:flex items-center space-x-6">
-                <NavLink 
-                  to="/line-loader/dashboard" 
-                  className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}
-                >
-                  Dashboard
-                </NavLink>
+              <NavLink to="/line-loader/dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                Dashboard
+              </NavLink>
+              
             </nav>
           </div>
           <div className="flex items-center">

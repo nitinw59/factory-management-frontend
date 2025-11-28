@@ -13,7 +13,7 @@ const StoreManagerProtectedRoute = ({ children }) => {
   try {
     const user = jwtDecode(token);
     // This gatekeeper ONLY allows users with the 'store_manager' role.
-    if (user.role !== 'store_manager') {
+    if (user.role !== 'store_manager' && user.role !== 'factory_admin' ) {
       return <Navigate to="/unauthorized" />;
     }
   } catch (error) {
