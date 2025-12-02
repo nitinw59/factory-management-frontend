@@ -23,6 +23,10 @@ const LineLoaderLayout = () => {
                 Dashboard
               </NavLink>
               
+              <NavLink to="/line-loader/sewing-machine-complaints" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                Sewing Machine Complaints
+              </NavLink>
+              
             </nav>
           </div>
           <div className="flex items-center">

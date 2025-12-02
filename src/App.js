@@ -83,6 +83,7 @@ import SewingManagerDashboardPage from './modules/sewing_portal/SewingManagerDas
 import AssemblyDashboardPage from './modules/sewing_portal/AssemblyDashboardPage';
 import TrimOrderSummaryPage from './modules/store_manager/TrimOrderSummaryPage';
 import NumberingCheckerSummaryPage from './modules/numbering_portal/NumberingCheckerSummaryPage';
+import SewingMachineComplaintPage from './modules/asset/SewingMachineComplaintPage';
 
 function App() {
   return (
@@ -111,6 +112,7 @@ function App() {
           <Route path="fabric-colors" element={<FabricColorsPage />} />
           <Route path="fabric-types" element={<FabricTypesPage />} />
           <Route path ="asset-management" element={<AssetManagementPage />} />  
+          <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
 
           
          
@@ -151,6 +153,8 @@ function App() {
           <Route path="product-piece-parts" element={<PiecePartsPage />} />
           <Route path="batches/new" element={<CreateProductionBatchForm />} />
           <Route path="batches/edit/:batchId" element={<CreateProductionBatchForm />} />
+          <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+
         </Route>
       </Route>
 
@@ -158,6 +162,8 @@ function App() {
           <Route index element={<CuttingDashboardPage />} />
           <Route path="dashboard" element={<CuttingDashboardPage />} />
           <Route path="batch-details/:batchId" element={<BatchCuttingDetailsPage />} />
+          <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+
           {/* Add this new route */}
           {/* <Route path="cut/:batchId/:rollId" element={<CuttingFormPage />} /> */}
           {/* ... other cutting portal routes ... */}
@@ -169,6 +175,8 @@ function App() {
           <Route index element={<LineLoaderDashboardPage />} />
           <Route path="dashboard" element={<LineLoaderDashboardPage />} />
           <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} /> 
+          <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+
 
           {/* Add more line loader specific routes here later */}
       </Route>    
@@ -190,6 +198,8 @@ function App() {
           <Route path="dashboard" element={<NumberingWorkstationDashboardPage />} />
           <Route path="summary" element={<NumberingBatchDetailsPage />} />
           <Route path="checker-summary" element={<NumberingCheckerSummaryPage />} />
+          <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+
       </Route>
 
 
@@ -198,17 +208,24 @@ function App() {
           <Route path="dashboard" element={<InitializationDashboardPortalPage />} />
           <Route path="alter-pieces" element={<AlterPiecesDashboardPage />} />  
           <Route path="summary" element={<NumberingBatchDetailsPage />} />
+          <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+
       </Route>
 
       <Route path="/preparation-unload-portal" element={<PreparationUnloadProtectedRoute><PreparationUnloadLayout /></PreparationUnloadProtectedRoute>}>
           <Route index element={<PreparationUnloadDashboardPage />} />
           <Route path="dashboard" element={<PreparationUnloadDashboardPage />} />
+          <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+
           {/* Add more preparation portal specific routes here later */}
       </Route>
 
       <Route path="/preparation-manager" element={<PreparationManagerProtectedRoute><PreparationManagerLayout /></PreparationManagerProtectedRoute>}>
           <Route index element={<PreparationManagerDashboardPage />} />
           <Route path="dashboard" element={<PreparationManagerDashboardPage />} />
+          <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+          
+
           {/* Add more preparation manager specific routes here later */}
       </Route>
 
@@ -221,6 +238,8 @@ function App() {
       <Route path="/sewing-manager" element={<SewingManagerProtectedRoute><SewingManagerLayout /></SewingManagerProtectedRoute>}>
           <Route index element={<SewingManagerDashboardPage />} />
           <Route path="dashboard" element={<SewingManagerDashboardPage />} />
+          <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+
           {/* Add more sewing manager specific routes here later */}
       </Route>  
 

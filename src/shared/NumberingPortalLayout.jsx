@@ -35,6 +35,13 @@ const NumberingPortalLayout = () => {
                         >
                             <LuFileText className="mr-2" /> Batch QC Summary
                         </NavLink>
+
+                        <NavLink 
+                            to="/numbering-portal/sewing-machine-complaints" 
+                            className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}
+                        >
+                            <LuLayoutGrid className="mr-2" /> Sewing Machine Complaints
+                        </NavLink>
                     </nav>
 
                     <div className="flex items-center space-x-4">
@@ -64,6 +71,9 @@ const NumberingPortalLayout = () => {
                             </NavLink>
                             <NavLink to="/numbering-portal/summary" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuFileText className="mr-2" /> Batch QC Summary
+                            </NavLink>
+                            <NavLink to="/numbering-portal/sewing-machine-complaints" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuLayoutGrid className="mr-2" /> Sewing Machine Complaints
                             </NavLink>
                             <hr />
                             <div className="px-4 py-2 text-sm text-gray-500">Welcome, {user?.name}</div>

@@ -37,6 +37,12 @@ const PreparationUnloadLayout = () => {
                         >
                             <LuFileText className="mr-2" /> Batch QC Summary
                         </NavLink>
+                        <NavLink 
+                            to="/preparation-unload-portal/sewing-machine-complaints" 
+                            className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}
+                        >
+                            <LuFileText className="mr-2" /> Sewing Machine Complaints
+                        </NavLink>
                     </nav>
 
                     <div className="flex items-center space-x-4">
@@ -75,6 +81,14 @@ const PreparationUnloadLayout = () => {
                                 className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
                             >
                                 <LuFileText className="mr-2" /> Batch QC Summary
+                            </NavLink>
+
+                            <NavLink 
+                                to="/preparation-unload-portal/sewing-machine-complaints" 
+                                onClick={closeMobileMenu} 
+                                className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
+                            >
+                                <LuFileText className="mr-2" /> Sewing Machine Complaints
                             </NavLink>
                             <hr />
                             <div className="px-4 py-2 text-sm text-gray-500">Welcome, {user?.name}</div>
