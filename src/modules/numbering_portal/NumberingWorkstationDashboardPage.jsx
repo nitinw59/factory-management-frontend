@@ -4,12 +4,11 @@ import { Shirt, Layers, ClipboardCheck, Component, Check, X, Hammer, Wrench, Loa
 
 
 
-
-// --- UI COMPONENTS ---
+// --- UI & LOGIC COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
 const ErrorDisplay = ({ message }) => <div className="p-4 bg-red-100 text-red-700 rounded-lg">{message}</div>;
 
-// --- LOGIC HELPERS ---
+// --- LOGIC HELPERS (Used for Grouping/Collapsing) ---
 
 const checkSizeStatus = (detail) => {
     const total_cut = parseInt(detail.total_cut, 10) || 0;
@@ -28,12 +27,9 @@ const checkSizeStatus = (detail) => {
 
 const checkRollStatus = (roll) => {
     if (!roll.parts_details) return false;
-    // Roll is complete if ALL sizes are complete AND have NO pending alterations
+    // A roll is complete if EVERY size in EVERY part is complete
     return roll.parts_details.every(part => 
-        part.size_details.every(size => {
-            const status = checkSizeStatus(size);
-            return status.isComplete && status.pending_alter === 0;
-        })
+        part.size_details.every(size => checkSizeStatus(size).isComplete)
     );
 };
 
@@ -81,12 +77,13 @@ const willActionCompleteRoll = (roll, action) => {
     });
 };
 
+// Check if data exists (for initial filtering)
 const hasPartData = (part) => part.size_details && part.size_details.some(detail => (parseInt(detail.total_cut, 10) || 0) > 0);
 const hasRollData = (roll) => roll.parts_details && roll.parts_details.some(part => hasPartData(part));
 const hasBatchData = (batch) => batch.rolls && batch.rolls.some(roll => hasRollData(roll));
 
 
-// --- MODALS ---
+// --- MODAL COMPONENTS (Unchanged Logic) ---
 const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) => {
     const total_cut_num = parseInt(itemInfo.total_cut, 10) || 0;
     const total_validated_num = parseInt(itemInfo.total_validated, 10) || 0;
@@ -94,24 +91,30 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
     const total_altered_num = parseInt(itemInfo.total_altered, 10) || 0;
     const remaining = total_cut_num - (total_validated_num + total_rejected_num + total_altered_num);
     const [quantity, setQuantity] = useState(unloadMode === 'bundle' ? remaining : 1);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => { setQuantity(unloadMode === 'bundle' ? remaining : 1); }, [unloadMode, remaining]);
 
-    const handleStatusClick = (qcStatus) => {
-        if (quantity > 0) {
-            onValidationSubmit({ rollId: itemInfo.rollId, partId: itemInfo.partId, size: itemInfo.size, quantity, qcStatus });
+    const handleStatusClick = async (qcStatus) => {
+        if (quantity > 0 && !isSubmitting) {
+            setIsSubmitting(true);
+            try {
+                await onValidationSubmit({ rollId: itemInfo.rollId, partId: itemInfo.partId, size: itemInfo.size, quantity, qcStatus });
+            } finally {
+                setIsSubmitting(false);
+            }
         }
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 backdrop-blur-sm" onClick={onClose}>
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 backdrop-blur-sm" onClick={!isSubmitting ? onClose : undefined}>
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all" onClick={e => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
                     <div>
                         <h3 className="text-lg font-bold text-gray-800">Validate: {itemInfo.partName}</h3>
                         <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Size {itemInfo.size}</p>
                     </div>
-                    <button onClick={onClose}><X className="w-5 h-5 text-gray-400 hover:text-gray-600"/></button>
+                    <button onClick={onClose} disabled={isSubmitting}><X className="w-5 h-5 text-gray-400 hover:text-gray-600"/></button>
                 </div>
                 <div className="p-6 space-y-5">
                     <div>
@@ -119,11 +122,18 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
                             <label className="text-sm font-semibold text-gray-700">Quantity to Validate</label>
                             <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">Remaining: {remaining}</span>
                         </div>
-                        <input type="number" value={quantity} onChange={(e) => setQuantity(Math.max(1, Math.min(remaining, parseInt(e.target.value) || 1)))} disabled={unloadMode === 'single'} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg font-medium text-center disabled:bg-gray-100" min="1" max={remaining} />
+                        <input type="number" value={quantity} onChange={(e) => setQuantity(Math.max(1, Math.min(remaining, parseInt(e.target.value) || 1)))} disabled={unloadMode === 'single' || isSubmitting} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg font-medium text-center disabled:bg-gray-100" min="1" max={remaining} />
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => handleStatusClick('APPROVED')} className="py-3 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 font-bold shadow-sm flex items-center justify-center transition-all active:scale-95"><Check className="w-5 h-5 mr-2"/> APPROVE</button>
-                        <button onClick={() => handleStatusClick('ALTER')} className="py-3 px-4 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-bold shadow-sm flex items-center justify-center transition-all active:scale-95"><Hammer className="w-5 h-5 mr-2"/> ALTER</button>
+                    <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">QC Decision</label>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={() => handleStatusClick('APPROVED')} disabled={isSubmitting} className="py-3 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 font-bold shadow-sm flex items-center justify-center transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed">
+                                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin"/> : <><Check className="w-5 h-5 mr-2"/> APPROVE</>}
+                            </button>
+                            <button onClick={() => handleStatusClick('ALTER')} disabled={isSubmitting} className="py-3 px-4 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-bold shadow-sm flex items-center justify-center transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed">
+                                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin"/> : <><Hammer className="w-5 h-5 mr-2"/> ALTER</>}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -134,14 +144,20 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
 const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
     const pending_alter = parseInt(itemInfo.total_altered, 10) - (parseInt(itemInfo.total_repaired, 10) + parseInt(itemInfo.total_rejected, 10));
     const [quantity, setQuantity] = useState(pending_alter);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const handleSave = () => {
+    const handleSave = async () => {
         if (isNaN(quantity) || quantity <= 0 || quantity > pending_alter) return alert("Invalid quantity.");
-        onSave(quantity);
+        setIsSubmitting(true);
+        try {
+            await onSave(quantity);
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 backdrop-blur-sm" onClick={onClose}>
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 backdrop-blur-sm" onClick={!isSubmitting ? onClose : undefined}>
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
                  <div className="px-6 py-4 border-b bg-amber-50 border-amber-100">
                     <h3 className="text-lg font-bold text-amber-900">Approve Repaired Pieces</h3>
@@ -150,24 +166,27 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
                 <div className="p-6 space-y-4">
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Quantity Repaired (Max: {pending_alter})</label>
-                        <input type="number" value={quantity} onChange={(e) => setQuantity(parseInt(e.target.value) || 0)} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-lg font-medium" min="1" max={pending_alter} autoFocus />
+                        <input type="number" value={quantity} onChange={(e) => setQuantity(parseInt(e.target.value) || 0)} disabled={isSubmitting} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-lg font-medium disabled:bg-gray-100" min="1" max={pending_alter} autoFocus />
                     </div>
                 </div>
                 <div className="px-6 py-4 border-t bg-gray-50 flex justify-end space-x-3">
-                    <button onClick={onClose} className="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50">Cancel</button>
-                    <button onClick={handleSave} className="px-4 py-2 bg-amber-600 text-white font-bold rounded-lg hover:bg-amber-700 shadow-sm">Confirm</button>
+                    <button onClick={onClose} disabled={isSubmitting} className="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+                    <button onClick={handleSave} disabled={isSubmitting} className="px-4 py-2 bg-amber-600 text-white font-bold rounded-lg hover:bg-amber-700 shadow-sm disabled:opacity-70 disabled:cursor-not-allowed">
+                        {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin"/> : "Confirm"}
+                    </button>
                 </div>
             </div>
         </div>
     );
 };
 
-// --- ROW & CARD COMPONENTS ---
+// --- DATA ROW COMPONENTS ---
 
 const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick }) => {
     const { total_cut, total_processed, pending_alter, isComplete } = checkSizeStatus(sizeDetail);
     if (total_cut === 0) return null;
 
+    // Calc percentages
     const approvedPercent = total_cut > 0 ? (parseInt(sizeDetail.total_validated||0) / total_cut) * 100 : 0;
     const repairedPercent = total_cut > 0 ? (parseInt(sizeDetail.total_repaired||0) / total_cut) * 100 : 0;
     const rejectedPercent = total_cut > 0 ? (parseInt(sizeDetail.total_rejected||0) / total_cut) * 100 : 0;
@@ -177,12 +196,15 @@ const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick })
         <div className="p-3 bg-white border-b last:border-b-0 hover:bg-gray-50 transition-colors">
             <div className="flex justify-between items-center mb-2">
                 <div className="flex items-center">
-                    <span className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center font-bold text-gray-700 text-sm mr-3 border border-gray-200">{sizeDetail.size}</span>
+                    <span className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center font-bold text-gray-700 text-sm mr-3 border border-gray-200">
+                        {sizeDetail.size}
+                    </span>
                     <div className="flex flex-col">
                         <span className="text-xs text-gray-500 font-medium uppercase">Progress</span>
                         <span className="text-sm font-bold text-gray-800">{total_processed} <span className="text-gray-400 text-xs font-normal">/ {total_cut}</span></span>
                     </div>
                 </div>
+                
                 <div className="flex items-center space-x-2">
                     {pending_alter > 0 && (
                          <button onClick={onApproveAlterClick} className="px-3 py-1.5 text-xs bg-amber-100 text-amber-800 border border-amber-200 rounded-md hover:bg-amber-200 font-semibold flex items-center transition-colors">
@@ -190,12 +212,18 @@ const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick })
                         </button>
                     )}
                     {!isComplete ? (
-                        <button onClick={onValidateClick} className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold shadow-sm transition-all active:scale-95">Validate</button>
+                        <button onClick={onValidateClick} className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold shadow-sm transition-all active:scale-95">
+                            Validate
+                        </button>
                     ) : (
-                        <span className="px-3 py-1 text-xs bg-green-100 text-green-700 border border-green-200 rounded-md font-bold flex items-center"><Check className="w-3 h-3 mr-1"/> Done</span>
+                        <span className="px-3 py-1 text-xs bg-green-100 text-green-700 border border-green-200 rounded-md font-bold flex items-center">
+                            <Check className="w-3 h-3 mr-1"/> Done
+                        </span>
                     )}
                 </div>
             </div>
+
+            {/* Stacked Progress Bar */}
             <div className="w-full h-2 bg-gray-200 rounded-full flex overflow-hidden">
                 <div className="bg-green-500 h-full" style={{ width: `${approvedPercent}%` }} title="Approved"></div>
                 <div className="bg-orange-500 h-full" style={{ width: `${repairedPercent}%` }} title="Repaired"></div>
@@ -206,37 +234,58 @@ const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick })
     );
 };
 
+// Expandable Part Card
 const PrimaryPartCard = ({ part, rollId, onValidateClick, onApproveAlterClick }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     if (!hasPartData(part)) return null;
 
+    // Calculate aggregate part progress for summary
     const partStats = part.size_details.reduce((acc, curr) => {
         const stats = checkSizeStatus(curr);
-        return { processed: acc.processed + stats.total_processed, cut: acc.cut + stats.total_cut };
+        return { 
+            processed: acc.processed + stats.total_processed, 
+            cut: acc.cut + stats.total_cut 
+        };
     }, { processed: 0, cut: 0 });
+
     const percent = partStats.cut > 0 ? Math.round((partStats.processed / partStats.cut) * 100) : 0;
     const isPartComplete = partStats.processed >= partStats.cut;
 
     return (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm transition-all">
-            <div onClick={() => setIsExpanded(!isExpanded)} className={`p-3 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors ${isExpanded ? 'bg-gray-50 border-b border-gray-100' : ''}`}>
+            <div 
+                onClick={() => setIsExpanded(!isExpanded)}
+                className={`p-3 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors ${isExpanded ? 'bg-gray-50 border-b border-gray-100' : ''}`}
+            >
                 <div className="flex items-center">
                     <div className={`p-1 rounded mr-3 ${isExpanded ? 'bg-gray-200 text-gray-700' : 'text-gray-400'}`}>
                         {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     </div>
-                    <span className="font-semibold text-gray-800 text-sm flex items-center"><Component className="w-4 h-4 mr-1.5 text-blue-600"/> {part.part_name}</span>
+                    <div className="flex flex-col">
+                        <span className="font-semibold text-gray-800 text-sm flex items-center">
+                            <Component className="w-4 h-4 mr-1.5 text-blue-600"/> {part.part_name}
+                        </span>
+                    </div>
                 </div>
-                <div className="text-right">
-                    <div className="text-xs font-medium text-gray-500">{partStats.processed} / {partStats.cut}</div>
-                    <div className="w-16 h-1 bg-gray-200 rounded-full mt-1 overflow-hidden">
-                        <div className={`h-full rounded-full ${isPartComplete ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${percent}%` }}></div>
+                <div className="flex items-center space-x-3">
+                    <div className="text-right">
+                        <div className="text-xs font-medium text-gray-500">{partStats.processed} / {partStats.cut}</div>
+                        <div className="w-16 h-1 bg-gray-200 rounded-full mt-1 overflow-hidden">
+                            <div className={`h-full rounded-full ${isPartComplete ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${percent}%` }}></div>
+                        </div>
                     </div>
                 </div>
             </div>
+            
             {isExpanded && (
                 <div className="bg-gray-50/50 p-2 space-y-2">
                     {part.size_details.map(detail => (
-                        <SizeValidationRow key={detail.size} sizeDetail={detail} onValidateClick={() => onValidateClick({ partId: part.part_id, partName: part.part_name, rollId, ...detail })} onApproveAlterClick={() => onApproveAlterClick({ partId: part.part_id, rollId, ...detail})} />
+                        <SizeValidationRow 
+                            key={detail.size} 
+                            sizeDetail={detail} 
+                            onValidateClick={() => onValidateClick({ partId: part.part_id, partName: part.part_name, rollId, ...detail })} 
+                            onApproveAlterClick={() => onApproveAlterClick({ partId: part.part_id, rollId, ...detail})} 
+                        />
                     ))}
                 </div>
             )}
@@ -245,6 +294,7 @@ const PrimaryPartCard = ({ part, rollId, onValidateClick, onApproveAlterClick })
 };
 
 const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick }) => {
+    // Collapsing Logic: Filter parts first.
     const validParts = roll.parts_details.filter(hasPartData);
     if (validParts.length === 0) return null;
 
@@ -253,7 +303,9 @@ const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick }) => {
             <div className="bg-indigo-50/50 border border-indigo-100 p-3 rounded-lg flex items-center mb-2">
                 <Layers className="w-5 h-5 mr-2.5 text-indigo-600"/>
                 <span className="font-bold text-indigo-900 text-sm">Roll #{roll.fabric_roll_id}</span>
-                <span className="ml-auto text-xs font-medium text-indigo-400 bg-white px-2 py-0.5 rounded border border-indigo-100 shadow-sm">{validParts.length} Parts</span>
+                <span className="ml-auto text-xs font-medium text-indigo-400 bg-white px-2 py-0.5 rounded border border-indigo-100 shadow-sm">
+                    {validParts.length} Parts
+                </span>
             </div>
             <div className="pl-2 space-y-2 border-l-2 border-indigo-100 ml-4">
                 {validParts.map(part => (
@@ -264,38 +316,74 @@ const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick }) => {
     );
 };
 
+// --- BATCH CARD with GROUPED ROLLS ---
 const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick }) => {
+    // Hooks must be at the top
     const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
+
+    // Collapsing Logic
     const validRolls = batch.rolls.filter(hasRollData);
     if (validRolls.length === 0) return null;
 
+    // Group rolls: Completed vs Pending
     const completedRolls = validRolls.filter(r => checkRollStatus(r));
     const activeRolls = validRolls.filter(r => !checkRollStatus(r));
 
     return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
-            <div className="bg-white border-b border-gray-100 p-4 flex justify-between items-center">
-                <div className="flex items-center">
-                    <div className="p-2 bg-blue-50 text-blue-600 rounded-lg mr-3"><Shirt className="w-6 h-6" /></div>
-                    <div><h2 className="text-lg font-bold text-gray-900">Batch #{batch.batch_id}</h2><p className="text-xs text-gray-500 font-mono mt-0.5">{batch.batch_code}</p></div>
+            {/* Batch Header */}
+            <div className="bg-white border-b border-gray-100 p-4">
+                <div className="flex justify-between items-center">
+                    <div className="flex items-center">
+                        <div className="p-2 bg-blue-50 text-blue-600 rounded-lg mr-3">
+                            <Shirt className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-bold text-gray-900">Batch #{batch.batch_id}</h2>
+                            <p className="text-xs text-gray-500 font-mono mt-0.5">{batch.batch_code}</p>
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Pending Rolls</span>
+                        <div className="text-xl font-bold text-blue-600 leading-none mt-1">{activeRolls.length}</div>
+                    </div>
                 </div>
-                <div className="text-right"><span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Pending Rolls</span><div className="text-xl font-bold text-blue-600 leading-none mt-1">{activeRolls.length}</div></div>
             </div>
 
             <div className="p-4 bg-gray-50/30">
+                {/* ACTIVE ROLLS SECTION */}
                 {activeRolls.length > 0 ? (
                     <div className="space-y-4 mb-4">
-                        <h4 className="text-xs font-bold text-gray-500 uppercase flex items-center mb-3"><span className="w-2 h-2 rounded-full bg-blue-500 mr-2"></span>Active / Pending Rolls</h4>
-                        {activeRolls.map(roll => <FabricRollCard key={roll.fabric_roll_id} roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} />)}
+                        <h4 className="text-xs font-bold text-gray-500 uppercase flex items-center mb-3">
+                            <span className="w-2 h-2 rounded-full bg-blue-500 mr-2"></span>
+                            Active / Pending Rolls
+                        </h4>
+                        {activeRolls.map(roll => (
+                            <FabricRollCard key={roll.fabric_roll_id} roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} />
+                        ))}
                     </div>
-                ) : <div className="p-4 text-center text-sm text-gray-500 italic bg-white rounded border border-dashed mb-4">All active rolls completed!</div>}
+                ) : (
+                    <div className="p-4 text-center text-sm text-gray-500 italic bg-white rounded border border-dashed mb-4">
+                        All active rolls completed!
+                    </div>
+                )}
 
+                {/* COMPLETED ROLLS SECTION (COLLAPSIBLE) */}
                 {completedRolls.length > 0 && (
                     <div className="mt-6 pt-4 border-t border-gray-200">
-                        <button onClick={() => setIsCompletedExpanded(!isCompletedExpanded)} className="flex items-center justify-between w-full text-left group">
-                            <h4 className="text-xs font-bold text-gray-400 uppercase flex items-center group-hover:text-gray-600 transition-colors"><span className="w-2 h-2 rounded-full bg-green-500 mr-2"></span>Completed Rolls ({completedRolls.length})</h4>
-                            <div className="p-1 rounded hover:bg-gray-200 text-gray-400 transition-colors">{isCompletedExpanded ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}</div>
+                        <button 
+                            onClick={() => setIsCompletedExpanded(!isCompletedExpanded)}
+                            className="flex items-center justify-between w-full text-left group"
+                        >
+                            <h4 className="text-xs font-bold text-gray-400 uppercase flex items-center group-hover:text-gray-600 transition-colors">
+                                <span className="w-2 h-2 rounded-full bg-green-500 mr-2"></span>
+                                Completed Rolls ({completedRolls.length})
+                            </h4>
+                            <div className="p-1 rounded hover:bg-gray-200 text-gray-400 transition-colors">
+                                {isCompletedExpanded ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}
+                            </div>
                         </button>
+                        
                         {isCompletedExpanded && (
                             <div className="mt-3 space-y-4 animate-in slide-in-from-top-2 duration-200">
                                 {completedRolls.map(roll => (
@@ -305,7 +393,7 @@ const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick }) =>
                                                 <span className="text-sm font-bold text-green-800 flex items-center"><CheckCircle2 className="w-4 h-4 mr-2"/> Roll #{roll.fabric_roll_id}</span>
                                                 <span className="text-xs font-medium text-green-600">Complete</span>
                                             </div>
-                                            {/* Showing details even for completed rolls as requested */}
+                                            {/* Render details for context even if completed */}
                                             <FabricRollCard roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} />
                                         </div>
                                     </div>

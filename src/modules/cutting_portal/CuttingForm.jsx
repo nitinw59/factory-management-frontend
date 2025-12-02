@@ -152,15 +152,20 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
      };
 
     // handleSave (from your file)
-    const handleSave = async () => {
+   const handleSave = async () => {
         setIsSaving(true);
         setError(null);
 
         const cutsPayload = Object.entries(cuts)
             .map(([key, quantity]) => {
                 const [piece_part_id, size] = key.split('-');
-                const numQuantity = parseInt(quantity, 10);
-                if (!isNaN(numQuantity) && numQuantity > 0) {
+                
+                // Treat empty string as 0
+                const val = quantity === '' ? 0 : quantity;
+                const numQuantity = parseInt(val, 10);
+
+                // Allow 0 values, only filter out invalid numbers (NaN)
+                if (!isNaN(numQuantity) && numQuantity >= 0) {
                      return { product_piece_part_id: parseInt(piece_part_id), size, quantity_cut: numQuantity };
                 }
                 return null;
