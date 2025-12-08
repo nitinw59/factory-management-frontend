@@ -1,10 +1,47 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { FiPlus, FiEdit3, FiTrash2, FiChevronRight, FiSearch, FiPackage, FiLayers, FiRepeat } from 'react-icons/fi';
 import { trimsApi } from '../../api/trimsApi';
 import { useAuth } from '../../context/AuthContext';
+import { 
+    Plus, Edit2, Trash2, ChevronRight, Search, Package, Layers, Repeat, 
+    FileSpreadsheet, Loader2, Download 
+} from 'lucide-react';
+
+
+
+
+const downloadAsExcel = (data, fileName = 'trim_inventory.csv') => {
+    if (!data || !data.length) {
+        alert("No data available to export.");
+        return;
+    }
+    const headers = Object.keys(data[0]);
+    const csvContent = [
+        headers.join(','), 
+        ...data.map(row => 
+            headers.map(fieldName => {
+                const val = row[fieldName] === null || row[fieldName] === undefined ? '' : row[fieldName].toString();
+                return `"${val.replace(/"/g, '""')}"`;
+            }).join(',')
+        )
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', fileName);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+};
+
+
 
 // --- UI Components ---
-const Spinner = () => <div className="flex justify-center items-center p-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-500"></div></div>;
+const Spinner = () => <div className="flex justify-center items-center p-8"><Loader2 className="animate-spin h-6 w-6 text-gray-500" /></div>;
 const Placeholder = ({ text }) => <div className="p-8 text-center bg-gray-50 rounded-lg h-full flex items-center justify-center"><p className="text-gray-500">{text}</p></div>;
 const Modal = ({ title, children, onClose }) => (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center" onClick={onClose}>
@@ -31,10 +68,19 @@ const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-                <input name="name" value={formData.name} onChange={handleChange} placeholder="Item Name" required className="w-full p-2 border rounded" />
-                <input name="brand" value={formData.brand} onChange={handleChange} placeholder="Brand" required className="w-full p-2 border rounded" />
+                <div>
+                    <label className="text-xs font-medium text-gray-500">Name</label>
+                    <input name="name" value={formData.name} onChange={handleChange} placeholder="Item Name" required className="w-full p-2 border rounded" />
+                </div>
+                <div>
+                    <label className="text-xs font-medium text-gray-500">Brand</label>
+                    <input name="brand" value={formData.brand} onChange={handleChange} placeholder="Brand" required className="w-full p-2 border rounded" />
+                </div>
             </div>
-            <input name="item_code" value={formData.item_code} onChange={handleChange} placeholder="Item Code / SKU" className="w-full p-2 border rounded" />
+            <div>
+                <label className="text-xs font-medium text-gray-500">Item Code / SKU</label>
+                <input name="item_code" value={formData.item_code} onChange={handleChange} placeholder="Item Code" className="w-full p-2 border rounded" />
+            </div>
             <textarea name="description" value={formData.description} onChange={handleChange} placeholder="Description" className="w-full p-2 border rounded" rows="3"></textarea>
             <select name="unit_of_measure" value={formData.unit_of_measure} onChange={handleChange} className="w-full p-2 border rounded">
                 <option value="pieces">pieces</option>
@@ -44,9 +90,9 @@ const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
             </select>
             <label className="flex items-center space-x-2">
                 <input type="checkbox" name="is_color_agnostic" checked={formData.is_color_agnostic} onChange={handleChange} />
-                <span>Common across all colors (e.g., Wash Care Label)</span>
+                <span className="text-sm">Common across all colors (e.g., Wash Care Label)</span>
             </label>
-            <div className="flex justify-end space-x-2 pt-4 border-t"><button type="button" onClick={onClose}>Cancel</button><button type="submit">Save Item</button></div>
+            <div className="flex justify-end space-x-2 pt-4 border-t"><button type="button" onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded">Cancel</button><button type="submit" className="px-4 py-2 text-sm bg-blue-600 text-white rounded">Save Item</button></div>
         </form>
     );
 };
@@ -83,13 +129,12 @@ const VariantFormModal = ({ onSave, onClose, initialData = {}, isColorAgnostic, 
                 <label className="text-sm font-medium">Low Stock Threshold</label>
                 <input type="number" name="low_stock_threshold" value={formData.low_stock_threshold} onChange={handleChange} placeholder="Low Stock Threshold" required className="w-full p-2 border rounded" />
             </div>
-            <div className="flex justify-end space-x-2 pt-4 border-t"><button type="button" onClick={onClose}>Cancel</button><button type="submit">Save Variant</button></div>
+            <div className="flex justify-end space-x-2 pt-4 border-t"><button type="button" onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded">Cancel</button><button type="submit" className="px-4 py-2 text-sm bg-blue-600 text-white rounded">Save Variant</button></div>
         </form>
     );
 };
 
 const SubstituteFormModal = ({ onSave, onClose, variants, currentVariantId, existingSubstitutes, parentItemName, parentItemBrand }) => {
-    console.log("SubstituteFormModal rendered", variants);
     const [substituteId, setSubstituteId] = useState('');
     const handleSubmit = (e) => { e.preventDefault(); onSave({ substitute_variant_id: substituteId }); };
 
@@ -100,19 +145,24 @@ const SubstituteFormModal = ({ onSave, onClose, variants, currentVariantId, exis
 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="bg-blue-50 p-3 rounded-md text-sm text-blue-700 mb-2">
-                Showing variants for <strong>{parentItemName} - {parentItemBrand}</strong> only.
+            <div className="bg-blue-50 p-3 rounded-md text-sm text-blue-700 mb-2 border border-blue-100">
+                <p>Showing variants for <strong>{parentItemName} - {parentItemBrand}</strong> only.</p>
             </div>
-            <select value={substituteId} onChange={e => setSubstituteId(e.target.value)} required className="w-full p-2 border rounded">
-                <option value="">Select a variant to use as a substitute</option>
-                {availableOptions.map(v => (
-                    <option key={v.id} value={v.id}> 
-                        {/* Use item_name if available (global list), else fallback to parent name (scoped list) */}
-                        {v.item_name || parentItemName} - {v.item_brand || parentItemBrand} - {v.color_name || 'Generic'}
-                    </option>
-                ))}
-            </select>
-            <div className="flex justify-end space-x-2 pt-4 border-t"><button type="button" onClick={onClose}>Cancel</button><button type="submit">Add Substitute</button></div>
+            <div>
+                <label className="text-sm font-medium mb-1 block">Select Substitute</label>
+                <select value={substituteId} onChange={e => setSubstituteId(e.target.value)} required className="w-full p-2 border rounded">
+                    <option value="">Choose a variant...</option>
+                    {availableOptions.map(v => (
+                        <option key={v.id} value={v.id}> 
+                            {v.color_name || 'Generic (Color Agnostic)'} (Stock: {v.main_store_stock})
+                        </option>
+                    ))}
+                </select>
+                {availableOptions.length === 0 && (
+                    <p className="text-xs text-orange-500 mt-1">No other variants available to substitute.</p>
+                )}
+            </div>
+            <div className="flex justify-end space-x-2 pt-4 border-t"><button type="button" onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded">Cancel</button><button type="submit" disabled={!substituteId} className="px-4 py-2 text-sm bg-blue-600 text-white rounded disabled:bg-gray-400">Add Substitute</button></div>
         </form>
     );
 };
@@ -133,13 +183,12 @@ const TrimManagementPage = () => {
     const [itemFilter, setItemFilter] = useState('');
     const [variantFilter, setVariantFilter] = useState('');
     const [substituteFilter, setSubstituteFilter] = useState('');
-
+    
     const [loading, setLoading] = useState({ items: true, variants: false, substitutes: false });
+    const [isExporting, setIsExporting] = useState(false);
     const [modal, setModal] = useState({ type: null, data: null });
 
     const [colors, setColors] = useState([]);
-    // We can keep allVariants if needed for other features, but Substitute modal will use scoped `variants`
-    // const [allVariants, setAllVariants] = useState([]); 
 
     const fetchData = useCallback(async () => {
         setLoading(p => ({ ...p, items: true }));
@@ -147,11 +196,9 @@ const TrimManagementPage = () => {
             const [itemsRes, colorsRes] = await Promise.all([
                 trimsApi.getItems(),
                 trimsApi.getColors(),
-                // trimsApi.getAllVariants(), // Removed if not strictly needed elsewhere, or keep for global features
             ]);
             setItems(itemsRes.data);
             setColors(colorsRes.data);
-            // setAllVariants(allVariantsRes.data);
         } catch (error) { console.error("Failed to fetch initial data", error); }
         finally { setLoading(p => ({ ...p, items: false })); }
     }, []);
@@ -185,7 +232,6 @@ const TrimManagementPage = () => {
     const handleSelectItem = (item) => {
         setSelectedItem(item);
         setSelectedVariant(null);
-        // Reset sub-filters when main selection changes
         setVariantFilter(''); 
         setSubstituteFilter('');
     };
@@ -193,6 +239,21 @@ const TrimManagementPage = () => {
     const handleSelectVariant = (variant) => {
         setSelectedVariant(variant);
         setSubstituteFilter('');
+    };
+
+    const handleExport = async () => {
+        setIsExporting(true);
+        try {
+            const res = await trimsApi.exportInventory();
+            console.log(res.data);
+            const date = new Date().toISOString().split('T')[0];
+            downloadAsExcel(res.data, `Trim_Catalog_Export_${date}.csv`);
+        } catch (error) {
+            console.log("Export failed", error);
+            alert("Export failed.", error);
+        } finally {
+            setIsExporting(false);
+        }
     };
 
     const handleSave = async (type, data) => {
@@ -261,7 +322,23 @@ const TrimManagementPage = () => {
 
     return (
         <div className="p-6 bg-gray-100 min-h-screen">
-            <h1 className="text-3xl font-bold mb-6 text-gray-800">Trim Management & Substitutions</h1>
+            <div className="flex justify-between items-end mb-6">
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-800">Trim Management</h1>
+                    <p className="text-gray-500 text-sm mt-1">Manage definitions, stock variants, and substitutes.</p>
+                </div>
+                
+                {/* NEW: Export Button */}
+                <button 
+                    onClick={handleExport} 
+                    disabled={isExporting}
+                    className="flex items-center space-x-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg shadow-sm transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                    {isExporting ? <Loader2 className="animate-spin w-4 h-4"/> : <FileSpreadsheet className="w-4 h-4"/>}
+                    <span>{isExporting ? 'Exporting...' : 'Download Excel Report'}</span>
+                </button>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 
                 {/* Column 1: Trim Items */}
@@ -270,7 +347,7 @@ const TrimManagementPage = () => {
                         <header className="flex justify-between items-center p-4 pb-2">
                             <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
                                 <div className="p-1.5 bg-gray-100 rounded-md">
-                                    <FiPackage className="text-gray-500" />
+                                    <Package className="text-gray-500 w-5 h-5" />
                                 </div>
                                 Trim Items
                             </h2>
@@ -279,7 +356,7 @@ const TrimManagementPage = () => {
                                     onClick={() => setModal({ type: 'item' })} 
                                     className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
                                 >
-                                    <FiPlus size={18} />
+                                    <Plus size={18} />
                                 </button>
                             )}
                         </header>
@@ -287,7 +364,7 @@ const TrimManagementPage = () => {
                         {/* Filter Input */}
                         <div className="px-4 pb-3">
                             <div className="relative">
-                                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
                                 <input 
                                     type="text" 
                                     placeholder="Filter items..." 
@@ -325,14 +402,14 @@ const TrimManagementPage = () => {
                                         {user.role === 'factory_admin' && (
                                             <>
                                                 <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'item', data: item }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200">
-                                                    <FiEdit3 size={12}/>
+                                                    <Edit2 size={12}/>
                                                 </button>
                                                 <button onClick={(e) => { e.stopPropagation(); handleDelete('item', item.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200">
-                                                    <FiTrash2 size={12}/>
+                                                    <Trash2 size={12}/>
                                                 </button>
                                             </>
                                         )}
-                                        <FiChevronRight className={`text-gray-300 ${selectedItem?.id === item.id ? 'text-blue-400' : ''}`}/>
+                                        <ChevronRight className={`w-4 h-4 text-gray-300 ${selectedItem?.id === item.id ? 'text-blue-400' : ''}`}/>
                                     </div>
                                 </div>
                             ))
@@ -346,7 +423,7 @@ const TrimManagementPage = () => {
                         <header className="flex justify-between items-center p-4 pb-2">
                             <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
                                 <div className="p-1.5 bg-gray-100 rounded-md">
-                                    <FiLayers className="text-gray-500" />
+                                    <Layers className="text-gray-500 w-5 h-5" />
                                 </div>
                                 Variants
                             </h2>
@@ -355,7 +432,7 @@ const TrimManagementPage = () => {
                                     onClick={() => setModal({ type: 'variant' })} 
                                     className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
                                 >
-                                    <FiPlus size={18} />
+                                    <Plus size={18} />
                                 </button>
                             )}
                         </header>
@@ -363,7 +440,7 @@ const TrimManagementPage = () => {
                         {/* Filter Input */}
                         <div className="px-4 pb-3">
                             <div className="relative">
-                                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
                                 <input 
                                     type="text" 
                                     placeholder="Filter variants..." 
@@ -381,7 +458,7 @@ const TrimManagementPage = () => {
                             <div className="flex justify-center p-8"><Spinner /></div>
                         ) : !selectedItem ? (
                             <div className="h-full flex flex-col items-center justify-center p-6 text-center opacity-60">
-                                <FiPackage className="text-4xl text-gray-300 mb-2" />
+                                <Package className="w-10 h-10 text-gray-300 mb-2" />
                                 <Placeholder text="Select an item to view variants." />
                             </div>
                         ) : (
@@ -407,14 +484,14 @@ const TrimManagementPage = () => {
                                         {user.role === 'factory_admin' && (
                                             <>
                                                 <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'variant', data: variant }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200">
-                                                    <FiEdit3 size={12}/>
+                                                    <Edit2 size={12}/>
                                                 </button>
                                                 <button onClick={(e) => { e.stopPropagation(); handleDelete('variant', variant.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200">
-                                                    <FiTrash2 size={12}/>
+                                                    <Trash2 size={12}/>
                                                 </button>
                                             </>
                                         )}
-                                        <FiChevronRight className={`text-gray-300 ${selectedVariant?.id === variant.id ? 'text-blue-400' : ''}`}/>
+                                        <ChevronRight className={`w-4 h-4 text-gray-300 ${selectedVariant?.id === variant.id ? 'text-blue-400' : ''}`}/>
                                     </div>
                                 </div>
                             ))
@@ -431,7 +508,7 @@ const TrimManagementPage = () => {
                         <header className="flex justify-between items-center p-4 pb-2">
                             <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
                                 <div className="p-1.5 bg-gray-100 rounded-md">
-                                    <FiRepeat className="text-gray-500" />
+                                    <Repeat className="text-gray-500 w-5 h-5" />
                                 </div>
                                 Substitutes
                             </h2>
@@ -440,7 +517,7 @@ const TrimManagementPage = () => {
                                     onClick={() => setModal({ type: 'substitute' })} 
                                     className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
                                 >
-                                    <FiPlus size={18} />
+                                    <Plus size={18} />
                                 </button>
                             )}
                         </header>
@@ -448,7 +525,7 @@ const TrimManagementPage = () => {
                         {/* Filter Input */}
                         <div className="px-4 pb-3">
                             <div className="relative">
-                                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
                                 <input 
                                     type="text" 
                                     placeholder="Filter substitutes..." 
@@ -466,7 +543,7 @@ const TrimManagementPage = () => {
                             <div className="flex justify-center p-8"><Spinner /></div>
                         ) : !selectedVariant ? (
                             <div className="h-full flex flex-col items-center justify-center p-6 text-center opacity-60">
-                                <FiLayers className="text-4xl text-gray-300 mb-2" />
+                                <Layers className="w-10 h-10 text-gray-300 mb-2" />
                                 <Placeholder text="Select a variant to manage substitutes." />
                             </div>
                         ) : (
@@ -488,7 +565,7 @@ const TrimManagementPage = () => {
                                             onClick={() => handleDelete('substitute', sub.id)} 
                                             className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200 opacity-0 group-hover:opacity-100 transition-all"
                                         >
-                                            <FiTrash2 size={12}/>
+                                            <Trash2 size={12}/>
                                         </button>
                                     )}
                                 </div>

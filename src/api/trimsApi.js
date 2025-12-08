@@ -5,7 +5,7 @@ export const trimsApi = {
    * Fetches all aggregated data for the trims analytics dashboard.
    * @returns {Promise<object>}
    */
-  getAnalyticsData: () => api.get('/admin/trims/analytics'),
+    getAnalyticsData: () => api.get('/admin/trims/analytics'),
     getItems: () => api.get('trims/items'),
     createItem: (data) => api.post('trims/items', data),
     updateItem: (id, data) => api.put(`trims/items/${id}`, data),
@@ -23,4 +23,7 @@ export const trimsApi = {
     // For dropdowns
     getColors: () => api.get('shared/fabric_color'),
     getAllVariants: () => api.get('trims/variants-detailed'),
+
+    // Export inventory data  
+    exportInventory: () => api.get('trims/export'),
 };
