@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import Modal from '../../shared/Modal';
-// --- SHARED COMPONENTS ---
 import { Link, useNavigate } from 'react-router-dom';
-// Corrected icon import path and changed icons to Fi variants
-import { FiPlus, FiChevronDown, FiLoader, FiCircle, FiCheckCircle, FiPlayCircle, FiX, FiEdit3 } from 'react-icons/fi'; // Changed Lu to Fi
+import { FiPlus, FiChevronDown, FiLoader, FiCircle, FiCheckCircle, FiX, FiEdit3 } from 'react-icons/fi';
 
 // --- SHARED COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
@@ -60,7 +58,6 @@ const RollStatusModal = ({ batchId, lineId, lineName, onClose }) => {
 const WorkflowNode = ({ step, progress, onClick }) => {
     const status = progress ? progress.status : 'PENDING';
 
-    // Changed icons to Fi variants
     const statusInfo = {
         'PENDING': { icon: <FiCircle/>, color: 'text-gray-400', label: 'Pending' },
         'IN_PROGRESS': { icon: <FiLoader className="animate-spin"/>, color: 'text-blue-500', label: progress?.line_name || 'In Progress' },
@@ -100,7 +97,7 @@ const ExpandedRowContent = ({ batch }) => {
 
     return (
         <tr className="bg-gray-50 border-t border-gray-200">
-            <td colSpan="6" className="p-4"> {/* Increased colspan */}
+            <td colSpan="6" className="p-4"> 
                 <h4 className="font-semibold text-sm mb-3 text-gray-700">Production Workflow</h4>
                 <div className="flex items-center space-x-4 overflow-x-auto pb-2">
                     {(batch.cycle_flow || []).map((step, index) => {
@@ -184,7 +181,7 @@ const ProductionPlanningPage = () => {
                     onClick={navigateToCreateBatch}
                     className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold shadow-sm"
                 >
-                    <FiPlus className="mr-2" /> Create New Batch {/* Changed Icon */}
+                    <FiPlus className="mr-2" /> Create New Batch
                 </button>
             </div>
 
@@ -206,26 +203,21 @@ const ProductionPlanningPage = () => {
                                 <React.Fragment key={batch.id}>
                                     <tr className={`transition-colors duration-150 ${expandedBatchId === batch.id ? 'bg-gray-50' : 'hover:bg-gray-50'}`}>
                                         <td onClick={() => handleRowClick(batch.id)} className="py-3 px-3 text-center text-gray-400 cursor-pointer">
-                                            <FiChevronDown className={`transition-transform duration-200 ${expandedBatchId === batch.id ? 'rotate-180' : ''}`} /> {/* Changed Icon */}
+                                            <FiChevronDown className={`transition-transform duration-200 ${expandedBatchId === batch.id ? 'rotate-180' : ''}`} />
                                         </td>
                                         <td className="py-3 px-3 font-mono text-sm text-gray-700">{batch.batch_code || `BATCH-${batch.id}`}</td>
                                         <td className="py-3 px-3 text-gray-900">{batch.product_name}</td>
                                         <td className="py-3 px-3">{getStatusChip(batch.overall_status)}</td>
                                         <td className="py-3 px-3 text-sm text-gray-600">{new Date(batch.created_at).toLocaleDateString()}</td>
                                         <td className="py-3 px-3 text-center">
-                                            {batch.overall_status === 'PENDING' ? (
-                                                <Link
-                                                    to={`/production-manager/batches/edit/${batch.id}`}
-                                                    className="text-gray-400 hover:text-blue-600"
-                                                    title="Edit Batch"
-                                                >
-                                                    <FiEdit3 size={16}/> {/* Changed Icon */}
-                                                </Link>
-                                            ) : (
-                                                <span className="text-gray-300 cursor-not-allowed" title="Cannot edit in-progress or completed batches">
-                                                     <FiEdit3 size={16}/> {/* Changed Icon */}
-                                                </span>
-                                            )}
+                                            {/* Edit Button - Enabled for all statuses */}
+                                            <Link
+                                                to={`/production-manager/batches/edit/${batch.id}`}
+                                                className="text-gray-400 hover:text-blue-600 transition-colors"
+                                                title="Edit Batch"
+                                            >
+                                                <FiEdit3 size={16}/>
+                                            </Link>
                                         </td>
                                     </tr>
                                     {expandedBatchId === batch.id && <ExpandedRowContent batch={batch} />}
