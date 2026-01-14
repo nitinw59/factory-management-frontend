@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom'; // 1. Import useNavigate
 import { storeManagerApi } from '../../api/storeManagerApi';
 import { LuPlus, LuTrash2 } from 'react-icons/lu';
 
 const Spinner = () => <div className="flex justify-center p-4"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div></div>;
 
-// This component can be used on its own page or in a modal
 const TrimIntakeForm = ({ onSaveSuccess }) => {
+    // 2. Initialize the navigate function
+    const navigate = useNavigate();
+    
     const [suppliers, setSuppliers] = useState([]);
     const [trimVariants, setTrimVariants] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -44,9 +47,12 @@ const TrimIntakeForm = ({ onSaveSuccess }) => {
         try {
             await storeManagerApi.createTrimIntake({ supplier_id: supplierId, challan_number: challanNumber, items });
             alert('Trim intake recorded successfully!');
-            // Reset form or call a success callback
-            if (onSaveSuccess) onSaveSuccess();
+            
+            // 3. Redirect to the trim management page
+            navigate('/store-manager/trim-management');
+
         } catch (error) {
+            console.error(error);
             alert('Failed to submit request.');
         } finally {
             setIsSaving(false);
