@@ -84,6 +84,8 @@ import AssemblyDashboardPage from './modules/sewing_portal/AssemblyDashboardPage
 import TrimOrderSummaryPage from './modules/store_manager/TrimOrderSummaryPage';
 import NumberingCheckerSummaryPage from './modules/numbering_portal/NumberingCheckerSummaryPage';
 import SewingMachineComplaintPage from './modules/asset/SewingMachineComplaintPage';
+import ListTrimStockIntake from './modules/store_manager/ListTrimStockIntake';  
+
 
 function App() {
   return (
@@ -127,6 +129,7 @@ function App() {
           <Route index element={<StoreManagerDashboardPage />} />
           <Route path="fabric-stock" element={<StoreManagerDashboardPage />} />
           <Route path="trim-management" element={<TrimManagementPage />} />
+          <Route path="trim-stock-intake" element={<ListTrimStockIntake />} />
           
           {/* Corrected Routes for Trim Orders */}
           {/* This route displays the list of all orders */}

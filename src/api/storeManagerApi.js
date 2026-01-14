@@ -19,7 +19,8 @@ export const storeManagerApi = {
     // Trim Intake
     createTrimIntake: (data) => api.post('/store-manager/trim-intake', data),
     getTrimIntakeFormData: () => api.get('/store-manager/form-data/trim-intake'),
-    
+    getTrimStockIntakes: () => api.get('/store-manager/trim-intakes-list'),
+
     // Generic resources needed for forms
     getSuppliers: () => api.get('/shared/supplier'),
     getFabricTypes: () => api.get('/shared/fabric_type'),

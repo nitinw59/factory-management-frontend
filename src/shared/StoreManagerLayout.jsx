@@ -96,6 +96,9 @@ const StoreManagerLayout = () => {
                                 <NavLink to="/store-manager/record-trim-purchase" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuCircle className="mr-2" /> Record Trim Purchase
                                 </NavLink>
+                                <NavLink to="/store-manager/trim-stock-intake" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuClipboardList className="mr-2" /> Trim Stock Intake
+                                </NavLink>
                                  <NavLink to="/store-manager/trim-orders" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuClipboardList className="mr-2" /> Trim Orders
                                 </NavLink>
