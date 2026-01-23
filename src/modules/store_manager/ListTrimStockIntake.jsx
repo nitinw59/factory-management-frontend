@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-    FileText, Calendar, User, Package, X, Search, Box, Truck, Loader2 
+    FileText, Calendar, User, Package, X, Search, Box, Truck, Loader2, Image as ImageIcon, ExternalLink 
 } from 'lucide-react';
 import { storeManagerApi } from '../../api/storeManagerApi';
-
+import api from '../../utils/api';
 const Spinner = () => <div className="flex justify-center items-center p-12"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
 
 const Modal = ({ title, onClose, children }) => (
@@ -19,6 +19,17 @@ const Modal = ({ title, onClose, children }) => (
 );
 
 const DetailView = ({ intake, onClose }) => {
+    console.log('Intake DetailView props:', intake);    
+    // Logic to construct image URL from the stored path
+    const imageUrl = useMemo(() => {
+        if (!intake.challan_document_path) return null;
+        // 1. Extract filename from full path (works for both Unix / and Windows \ paths)
+        const filename = intake.challan_document_path.split(/[/\\]/).pop();
+        // 2. Construct static URL (Backend serves /uploads statically)
+        console.log('Constructed image URL:', `${api.defaults.baseURLImage}/${filename}`);
+        return `${api.defaults.baseURLImage}/${filename}`;
+    }, [intake.challan_document_path]);
+
     return (
         <Modal title={`Intake Details: ${intake.challan_number}`} onClose={onClose}>
             <div className="space-y-6">
@@ -75,6 +86,41 @@ const DetailView = ({ intake, onClose }) => {
                         </table>
                     </div>
                 </div>
+
+                {/* Challan Image Section */}
+                <div>
+                    <h3 className="font-bold text-gray-700 mb-3 flex items-center"><ImageIcon size={18} className="mr-2"/> Challan Document</h3>
+                    <div className="border rounded-lg p-4 bg-gray-50 flex flex-col items-center justify-center min-h-[150px]">
+                        {imageUrl ? (
+                            <>
+                                <img 
+                                    src={imageUrl} 
+                                    alt="Challan" 
+                                    className="max-h-60 object-contain rounded shadow-sm border border-gray-200 mb-3"
+                                    onError={(e) => {
+                                        e.target.onerror = null; 
+                                        //e.target.src = "https://via.placeholder.com/400x150?text=Image+Not+Found";
+                                    }}
+                                />
+                                <a 
+                                    href={imageUrl} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="flex items-center px-4 py-2 bg-white text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors shadow-sm text-sm font-medium"
+                                >
+                                    <ExternalLink size={16} className="mr-2" />
+                                    Open Full Size Image
+                                </a>
+                            </>
+                        ) : (
+                            <div className="text-center text-gray-400">
+                                <FileText size={40} className="mx-auto mb-2 opacity-50"/>
+                                <p>No image uploaded for this intake.</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
             </div>
              <div className="mt-8 flex justify-end">
                 <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-medium transition-colors">Close</button>
@@ -165,6 +211,7 @@ const ListTrimStockIntake = () => {
                                         <button 
                                             onClick={() => setSelectedIntake(intake)}
                                             className="text-gray-400 hover:text-indigo-600 transition-colors p-1.5 rounded-md hover:bg-indigo-50"
+                                            title="View Details & Challan"
                                         >
                                             <FileText size={18} />
                                         </button>

@@ -12,10 +12,12 @@ console.log('API is configured to use base URL:', API_BASE_URL);
 
 // 2. Create the Axios instance using the constant
 const api = axios.create({
-  baseURL: `${API_BASE_URL}/api`, // Append /api for Axios requests
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  baseURL: `${API_BASE_URL}/api`,
+  baseURLImage: `${API_BASE_URL}/uploads`,
+   // Append /api for Axios requests
+  // headers: {
+  //   'Content-Type': 'application/json',
+  // },
 });
 
 export default api;
