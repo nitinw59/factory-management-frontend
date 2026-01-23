@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { cuttingPortalApi } from '../../api/cuttingPortalApi';
 import { 
-    FiArrowLeft, FiPackage, FiScissors, FiAlertTriangle, 
-    FiCheckCircle, FiFileText, FiPrinter, FiShare2, FiDownload 
+    FiArrowLeft, FiAlertTriangle, 
+    FiFileText,  FiShare2, FiDownload 
 } from 'react-icons/fi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';

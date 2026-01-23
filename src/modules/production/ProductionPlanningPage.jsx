@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import Modal from '../../shared/Modal';
 import { Link, useNavigate } from 'react-router-dom';
-import { FiPlus, FiChevronDown, FiLoader, FiCircle, FiCheckCircle, FiX, FiEdit3 } from 'react-icons/fi';
+import { FiPlus, FiChevronDown, FiLoader, FiCircle, FiCheckCircle,  FiEdit3 } from 'react-icons/fi';
 
 // --- SHARED COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
