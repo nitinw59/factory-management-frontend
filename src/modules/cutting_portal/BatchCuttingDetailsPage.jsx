@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { cuttingPortalApi } from '../../api/cuttingPortalApi';
 import { 
-    FiArrowLeft, FiAlertTriangle, 
-    FiFileText,  FiShare2, FiDownload 
+    FiArrowLeft, FiPackage, FiScissors, FiAlertTriangle, 
+    FiCheckCircle, FiFileText, FiPrinter, FiShare2, FiDownload 
 } from 'react-icons/fi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -61,7 +61,6 @@ const BatchCuttingDetailsPage = () => {
         setError(null);
         try {
             const response = await cuttingPortalApi.getBatchCuttingDetails(batchId);
-            console.log("Fetched Batch Details:", response.data);
             setDetails(response.data);
         } catch (err) {
             console.error("Failed to fetch batch details:", err);
@@ -100,7 +99,6 @@ const BatchCuttingDetailsPage = () => {
 
         const avgConsumption = totalPieces > 0 ? (totalMeters - totalShortage) / totalPieces : 0;
         
-        // Updated sorting logic here
         const allSizes = Array.from(allSizesSet).sort(sortSizes);
 
         return { totalMeters, totalPieces, avgConsumption, totalShortage, allSizes, sizeTotals };
@@ -111,44 +109,46 @@ const BatchCuttingDetailsPage = () => {
     const handleGeneratePDF = () => {
         if (!details) return;
 
-        // 1. Landscape Orientation
-        const doc = new jsPDF({ orientation: 'landscape' });
-
-        // 2. Report Header & Prominent Batch Info
+        // 1. Landscape Orientation, Millimeters, A4
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
         const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const marginLeft = 10;
+        const marginRight = 10;
+
+        // 2. Report Header
         const now = new Date().toLocaleString();
 
-        doc.setFontSize(10);
-        doc.setTextColor(0);
-        doc.text(`Generated: ${now}`, pageWidth - 14, 15, { align: 'right' });
+        doc.setFontSize(8);
+        doc.setTextColor(100);
+        doc.text(`Generated: ${now}`, pageWidth - marginRight, 10, { align: 'right' });
 
-        // Batch Code - Larger and Bold
-        doc.setFontSize(30);
+        // Batch Code & Product
+        doc.setFontSize(22);
         doc.setTextColor(0);
         doc.setFont("helvetica", "bold");
-        doc.text(`Batch: ${details.batch_code || `#${batchId}`}`, 14, 25);
+        doc.text(`Batch: ${details.batch_code || `#${batchId}`}`, marginLeft, 15);
 
-        // Product Name - Medium and Bold
-        doc.setFontSize(18);
-        doc.setTextColor(0);
-        doc.text(`${details.product_name}`, 14, 35);
-
-        // Other Details - Normal
         doc.setFontSize(14);
+        doc.setTextColor(50);
+        doc.text(`${details.product_name}`, marginLeft, 22);
+
+        doc.setFontSize(10);
         doc.setFont("helvetica", "normal");
-        doc.setTextColor(0);
-        doc.text(`Layer Length: ${details.length_of_layer_inches || '0'} in`, 14, 42);
+        doc.setTextColor(80);
+        doc.text(`Layer Length: ${details.length_of_layer_inches || '0'} in`, marginLeft, 28);
 
-        let finalY = 50;
+        let finalY = 32;
 
-        // 3. Detailed Cut Log Table (Moved before Summary)
+        // 3. Detailed Cut Log Table
+        // Need to fit many columns (sizes), so we use a small font size.
         const cutLogHead = [
             "Roll ID", 
             "Fabric Type",
             "Color", 
             "Meters", 
-            ...summaryStats.allSizes.map(getSizeLabel), // Using mapped size labels
-            "Total Pcs"
+            ...summaryStats.allSizes.map(getSizeLabel), 
+            "Total"
         ];
 
         const cutLogBody = (details.rolls || []).map(roll => {
@@ -168,67 +168,73 @@ const BatchCuttingDetailsPage = () => {
             ];
         });
 
-        // Footer Row for Cut Log
+        // Footer Row
         const footerRow = [
-            "TOTAL", 
-            "", 
-            "", 
+            "TOTAL", "", "", 
             summaryStats.totalMeters.toFixed(2),
             ...summaryStats.allSizes.map(size => summaryStats.sizeTotals[size] || 0),
             summaryStats.totalPieces
         ];
 
-        doc.setFontSize(14);
+        doc.setFontSize(12);
         doc.setTextColor(0);
         doc.setFont("helvetica", "bold");
-        doc.text("Cut Log Details", 14, finalY);
+        doc.text("Cut Log Details", marginLeft, finalY);
         
         autoTable(doc, {
-            startY: finalY + 5,
+            startY: finalY + 2,
             head: [cutLogHead],
             body: [...cutLogBody, footerRow],
-            theme: 'grid', // Use grid theme for simple borders
+            theme: 'grid', // Plain borders
             styles: { 
-                fontSize: 10, 
-                cellPadding: 3, 
-                textColor: 0, // Black text
-                lineWidth: 0.1, // Thin borders
-                lineColor: 0 // Black borders
+                fontSize: 7, // Small font to fit 16+ rows and many columns
+                cellPadding: 1, 
+                textColor: 0, 
+                lineWidth: 0.1, 
+                lineColor: 0 
             },
             headStyles: { 
-                fillColor: 255, // White background
-                textColor: 0, // Black text
+                fillColor: 255, 
+                textColor: 0, 
                 fontStyle: 'bold',
                 lineWidth: 0.1,
-                lineColor: 0
+                lineColor: 0,
+                halign: 'center'
+            },
+            columnStyles: {
+                0: { fontStyle: 'bold' }, // Roll ID bold
+                3: { halign: 'right' }, // Meters right align
+                [cutLogHead.length - 1]: { fontStyle: 'bold', halign: 'right' } // Total right align
             },
             footStyles: {
-                fillColor: 255,
+                fillColor: 240,
                 textColor: 0,
                 fontStyle: 'bold',
                 lineWidth: 0.1,
-                lineColor: 0
+                lineColor: 0,
+                halign: 'center'
             },
             didParseCell: (data) => {
-                // Bold the footer row text
+                // Highlight Footer Row manually if needed, though footStyles covers it mostly
                 if (data.row.index === cutLogBody.length) {
                     data.cell.styles.fontStyle = 'bold';
+                    data.cell.styles.fillColor = [230, 230, 230];
                 }
             }
         });
 
-        finalY = doc.lastAutoTable.finalY + 15;
+        finalY = doc.lastAutoTable.finalY + 10;
 
         // 4. Shortages Table (if exists)
         if (details.shortages && details.shortages.length > 0) {
-             // Page break check
-             if (finalY > doc.internal.pageSize.getHeight() - 40) {
+             // Check space for Shortage table
+             if (finalY > pageHeight - 30) {
                 doc.addPage();
-                finalY = 20;
+                finalY = 15;
             }
 
-            doc.setFontSize(14);
-            doc.text("Reported Shortages", 14, finalY);
+            doc.setFontSize(12);
+            doc.text("Reported Shortages", marginLeft, finalY);
             
             const shortageBody = details.shortages.map(s => [
                 s.roll_identifier,
@@ -239,47 +245,58 @@ const BatchCuttingDetailsPage = () => {
             ]);
 
             autoTable(doc, {
-                startY: finalY + 5,
+                startY: finalY + 2,
                 head: [["Roll ID", "Meters Claimed", "Status", "Claimed By", "Date"]],
                 body: shortageBody,
                 theme: 'grid',
-                styles: { textColor: 0, lineColor: 0, lineWidth: 0.1 },
+                styles: { fontSize: 8, textColor: 0, lineColor: 0, lineWidth: 0.1 },
                 headStyles: { fillColor: 255, textColor: 0, lineColor: 0, lineWidth: 0.1 }
             });
             
-            finalY = doc.lastAutoTable.finalY + 15;
+            finalY = doc.lastAutoTable.finalY + 10;
         }
 
-        // 5. Summary Statistics (Row wise at the bottom, 4 plain text lines)
-        // Page break check
-        if (finalY > doc.internal.pageSize.getHeight() - 45) {
+        // 5. Summary Statistics (Plain text, bottom of page)
+        // Check if we need a new page for the summary (needs approx 30mm)
+        if (finalY > pageHeight - 35) {
             doc.addPage();
-            finalY = 20;
+            finalY = 15;
         }
 
-        doc.setFontSize(14);
+        doc.setFontSize(12);
         doc.setTextColor(0);
         doc.setFont("helvetica", "bold");
-        doc.text("Summary Statistics", 14, finalY);
+        doc.text("Summary Statistics", marginLeft, finalY);
         
-        const startY = finalY + 8;
-        const lineHeight = 7;
-        const labelX = 14;
-        const valueOffset = 60; // Offset for value column to align properly
+        const summaryY = finalY + 6;
+        const lineHeight = 6;
+        const valueX = marginLeft + 60; // Indent values
 
-        // Helper to print Label (normal) and Value (bold)
-        const printSummaryLine = (label, value, y) => {
-            doc.setFont("helvetica", "normal");
-            doc.text(label, labelX, y);
-            doc.setFont("helvetica", "bold");
-            doc.text(value, labelX + valueOffset, y);
-        };
+        doc.setFontSize(10);
         
-        doc.setFontSize(12);
-        printSummaryLine("Total Fabric Assigned:", `${summaryStats.totalMeters.toFixed(2)} m`, startY);
-        printSummaryLine("Total Pieces Cut:", `${summaryStats.totalPieces}`, startY + lineHeight);
-        printSummaryLine("Avg. Consumption:", `${summaryStats.avgConsumption.toFixed(3)} m/pc`, startY + (lineHeight * 2));
-        printSummaryLine("Total Shortage:", `${summaryStats.totalShortage.toFixed(2)} m`, startY + (lineHeight * 3));
+        // Line 1
+        doc.setFont("helvetica", "normal");
+        doc.text("Total Fabric Assigned:", marginLeft, summaryY);
+        doc.setFont("helvetica", "bold");
+        doc.text(`${summaryStats.totalMeters.toFixed(2)} m`, valueX, summaryY);
+
+        // Line 2
+        doc.setFont("helvetica", "normal");
+        doc.text("Total Pieces Cut:", marginLeft, summaryY + lineHeight);
+        doc.setFont("helvetica", "bold");
+        doc.text(`${summaryStats.totalPieces}`, valueX, summaryY + lineHeight);
+
+        // Line 3
+        doc.setFont("helvetica", "normal");
+        doc.text("Avg. Consumption:", marginLeft, summaryY + (lineHeight * 2));
+        doc.setFont("helvetica", "bold");
+        doc.text(`${summaryStats.avgConsumption.toFixed(3)} m/pc`, valueX, summaryY + (lineHeight * 2));
+
+        // Line 4
+        doc.setFont("helvetica", "normal");
+        doc.text("Total Shortage:", marginLeft, summaryY + (lineHeight * 3));
+        doc.setFont("helvetica", "bold");
+        doc.text(`${summaryStats.totalShortage.toFixed(2)} m`, valueX, summaryY + (lineHeight * 3));
 
         // Save PDF
         doc.save(`Cutting_Report_${details.batch_code || batchId}.pdf`);
@@ -301,13 +318,17 @@ const BatchCuttingDetailsPage = () => {
         }
     };
 
+    const handlePrint = () => {
+        window.print();
+    };
+
     if (isLoading) return <Spinner />;
     if (error) return <div className="p-6"><div className="p-4 bg-red-100 text-red-700 rounded-lg">{error}</div></div>;
     if (!details) return <div className="p-6 text-center text-gray-500">No details found for this batch.</div>;
 
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
-            {/* Print Styles */}
+            {/* Print Styles for Browser Print */}
             <style>
                 {`
                     @media print {
@@ -315,6 +336,7 @@ const BatchCuttingDetailsPage = () => {
                         .print-p-0 { padding: 0 !important; }
                         .print-bg-white { background-color: white !important; }
                         body { background-color: white; -webkit-print-color-adjust: exact; }
+                        @page { size: landscape; margin: 10mm; }
                     }
                 `}
             </style>
@@ -331,6 +353,12 @@ const BatchCuttingDetailsPage = () => {
                             className="flex items-center px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
                         >
                             <FiShare2 className="mr-2"/> Share
+                        </button>
+                        <button 
+                             onClick={handlePrint}
+                             className="flex items-center px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
+                        >
+                            <FiPrinter className="mr-2"/> Browser Print
                         </button>
                         <button 
                             onClick={handleGeneratePDF}
@@ -368,21 +396,21 @@ const BatchCuttingDetailsPage = () => {
                 </div>
             </header>
 
-            {/* Summary Header */}
-            <section className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-white p-4 rounded-lg shadow-sm border text-center print-bg-white">
+            {/* Summary Header Cards (Hidden in Print PDF logic, visible in UI) */}
+            <section className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-4 no-print">
+                <div className="bg-white p-4 rounded-lg shadow-sm border text-center">
                     <h2 className="text-xs text-gray-500 uppercase font-semibold">Total Fabric Assigned</h2>
                     <p className="text-2xl font-bold text-blue-600">{summaryStats.totalMeters.toFixed(2)} m</p>
                 </div>
-                <div className="bg-white p-4 rounded-lg shadow-sm border text-center print-bg-white">
+                <div className="bg-white p-4 rounded-lg shadow-sm border text-center">
                     <h2 className="text-xs text-gray-500 uppercase font-semibold">Total Pieces Cut</h2>
                     <p className="text-2xl font-bold text-green-600">{summaryStats.totalPieces}</p>
                 </div>
-                 <div className="bg-white p-4 rounded-lg shadow-sm border text-center print-bg-white">
+                 <div className="bg-white p-4 rounded-lg shadow-sm border text-center">
                     <h2 className="text-xs text-gray-500 uppercase font-semibold">Avg. Consumption</h2>
                     <p className="text-2xl font-bold text-purple-600">{summaryStats.avgConsumption > 0 ? `${summaryStats.avgConsumption.toFixed(3)} m/pc` : 'N/A'}</p>
                  </div>
-                 <div className="bg-white p-4 rounded-lg shadow-sm border text-center print-bg-white">
+                 <div className="bg-white p-4 rounded-lg shadow-sm border text-center">
                     <h2 className="text-xs text-gray-500 uppercase font-semibold">Total Shortage</h2>
                     <p className={`text-2xl font-bold ${summaryStats.totalShortage > 0 ? 'text-red-600' : 'text-gray-700'}`}>{summaryStats.totalShortage.toFixed(2)} m</p>
                  </div>
