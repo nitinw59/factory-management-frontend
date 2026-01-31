@@ -1,9 +1,12 @@
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Printer, ArrowLeft, Package, Calendar, User, Layers, Clock, CheckCircle, AlertCircle, Box } from 'lucide-react';
+import { 
+    ArrowLeft, Package, Calendar, User, Layers, 
+    Clock, CheckCircle, AlertCircle, Box, Download 
+} from 'lucide-react';
 import { storeManagerApi } from '../../api/storeManagerApi'; 
-
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // --- UTILS ---
 const formatDate = (dateString) => {
@@ -16,7 +19,10 @@ const formatDate = (dateString) => {
 const TrimOrderSummaryPage = () => {
     const params = useParams();
     const orderId = params.orderId || '1001'; 
-    const navigate = (path) => console.log(`Maps to: ${path}`);
+    
+    // Fixed: Call useNavigate unconditionally
+    const navigateHook = useNavigate();
+    const navigate = navigateHook || ((path) => console.log(`Maps to: ${path}`));
     
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -38,6 +44,42 @@ const TrimOrderSummaryPage = () => {
         };
         fetchSummary();
     }, [orderId]);
+
+    const handleDownloadPDF = () => {
+        if (!data) return;
+        const { order, consumption_report } = data;
+        const doc = new jsPDF();
+
+        // 1. Header
+        doc.setFontSize(18);
+        doc.setTextColor(0, 0, 0);
+        doc.text(`Inventory Consumption Report - Order #${order.id}`, 14, 20);
+
+        doc.setFontSize(10);
+        doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 26);
+        doc.text(`Batch: ${order.batch_code} | Product: ${order.product_name}`, 14, 32);
+
+        // 2. Consumption Report Table
+        const consumptionRows = consumption_report.map(report => [
+            `${report.item_name}\n${report.brand}`,
+            report.color_name,
+            report.total_consumed
+        ]);
+
+        autoTable(doc, {
+            startY: 40,
+            head: [['Item / Brand', 'Color', 'Total Consumed']],
+            body: consumptionRows,
+            theme: 'grid',
+            headStyles: { fillColor: [240, 240, 240], textColor: 0, lineWidth: 0.1, lineColor: 0 },
+            styles: { textColor: 0, lineWidth: 0.1, lineColor: 0 },
+            columnStyles: {
+                2: { halign: 'right', fontStyle: 'bold' }
+            }
+        });
+
+        doc.save(`Trim_Consumption_Report_${order.id}.pdf`);
+    };
 
     if (loading) return <div className="flex justify-center p-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
     if (error) return <div className="p-6 text-red-600 bg-red-50 rounded-lg">{error}</div>;
@@ -64,8 +106,11 @@ const TrimOrderSummaryPage = () => {
                 <button onClick={() => navigate(-1)} className="flex items-center text-gray-600 hover:text-gray-900">
                     <ArrowLeft className="w-4 h-4 mr-2" /> Back to Orders
                 </button>
-                <button onClick={() => window.print()} className="flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 text-sm font-medium">
-                    <Printer className="w-4 h-4 mr-2" /> Print Summary
+                <button 
+                    onClick={handleDownloadPDF} 
+                    className="flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 text-sm font-medium transition-colors"
+                >
+                    <Download className="w-4 h-4 mr-2" /> Download PDF Report
                 </button>
             </div>
 
@@ -89,7 +134,7 @@ const TrimOrderSummaryPage = () => {
                 </div>
             </div>
 
-            {/* NEW: Inventory Consumption Report (Grouped by fulfilled_with_variant_id) */}
+            {/* Inventory Consumption Report */}
             <div className="mb-8">
                 <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center">
                     <Box className="w-5 h-5 mr-2 text-purple-600"/> 
