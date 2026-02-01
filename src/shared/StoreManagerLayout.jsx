@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 // Added LuMenu for the hamburger icon
-import { LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX } from 'react-icons/lu';
+import { LuFileText, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX } from 'react-icons/lu';
 import { notificationApi } from '../api/notificationApi';
 
 // No changes to NavDropdown component
@@ -82,26 +82,29 @@ const StoreManagerLayout = () => {
                         <div className="text-xl font-bold text-gray-800">Store Portal</div>
                         {/* This is the original desktop navigation */}
                         <nav className="hidden md:flex items-center space-x-6">
-                            <NavDropdown title="Fabric">
+                            {/* <NavDropdown title="Fabric">
                                 <NavLink to="/store-manager/fabric-stock" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuLayers className="mr-2" /> Fabric Intake & Stock
                                 </NavLink>
-                            </NavDropdown>
+                            </NavDropdown> */}
                              <NavDropdown title="Trims">
                                 <NavLink to="/store-manager/trim-management" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuScissors className="mr-2" /> Trim Management
                                 </NavLink>
+                                <NavLink to="/store-manager/trim-orders" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuClipboardList className="mr-2" /> Trim Orders
+                                </NavLink>
                             </NavDropdown>
-                             <NavDropdown title="Store">
+                             <NavDropdown title="Purchase">
                                 <NavLink to="/store-manager/record-trim-purchase" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuCircle className="mr-2" /> Record Trim Purchase
                                 </NavLink>
                                 <NavLink to="/store-manager/trim-stock-intake" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                                    <LuClipboardList className="mr-2" /> Trim Stock Intake
+                                    <LuClipboardList className="mr-2" /> Purchase History
                                 </NavLink>
-                                 <NavLink to="/store-manager/trim-orders" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                                    <LuClipboardList className="mr-2" /> Trim Orders
-                                </NavLink>
+                                {/* <NavLink to="/store-manager/trim-stock-report" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuFileText className="mr-2" /> Trim Stock Report
+                                </NavLink> */}
                             </NavDropdown>
                         </nav>
                     </div>
@@ -149,9 +152,9 @@ const StoreManagerLayout = () => {
                     <div className="md:hidden bg-white shadow-md">
                         <nav className="flex flex-col p-4 space-y-4">
                             {/* Re-using NavLink for consistency */}
-                            <NavLink to="/store-manager/fabric-stock" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                            {/* <NavLink to="/store-manager/fabric-stock" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuLayers className="mr-2" /> Fabric Intake & Stock
-                            </NavLink>
+                            </NavLink> */}
                             <NavLink to="/store-manager/trim-management" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuScissors className="mr-2" /> Trim Management
                             </NavLink>

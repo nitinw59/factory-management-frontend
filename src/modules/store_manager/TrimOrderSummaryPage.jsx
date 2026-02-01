@@ -47,19 +47,47 @@ const TrimOrderSummaryPage = () => {
 
     const handleDownloadPDF = () => {
         if (!data) return;
-        const { order, consumption_report } = data;
+        const { order, items, consumption_report } = data;
         const doc = new jsPDF();
 
         // 1. Header
         doc.setFontSize(18);
         doc.setTextColor(0, 0, 0);
-        doc.text(`Inventory Consumption Report - Order #${order.id}`, 14, 20);
+        doc.text(`Trim Order Summary #${order.id}`, 14, 20);
 
         doc.setFontSize(10);
         doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 26);
-        doc.text(`Batch: ${order.batch_code} | Product: ${order.product_name}`, 14, 32);
 
-        // 2. Consumption Report Table
+        // 2. Batch & Order Info Table
+        autoTable(doc, {
+            startY: 32,
+            head: [['Batch Information', 'Order Information']],
+            body: [[
+                `Batch Code: ${order.batch_code}\nProduct: ${order.product_name}`,
+                `Status: ${order.status}\nRequested By: ${order.requested_by}\nDate: ${new Date(order.created_at).toLocaleDateString()}`
+            ]],
+            theme: 'grid', // Black borders
+            headStyles: { 
+                fillColor: 255, 
+                textColor: 0, 
+                lineWidth: 0.1, 
+                lineColor: 0,
+                fontStyle: 'bold'
+            },
+            styles: { 
+                textColor: 0, 
+                lineWidth: 0.1, 
+                lineColor: 0, 
+                cellPadding: 4,
+                fontSize: 10
+            },
+        });
+
+        // 3. Consumption Report Table
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.text("Inventory Consumption Report", 14, doc.lastAutoTable.finalY + 15);
+        
         const consumptionRows = consumption_report.map(report => [
             `${report.item_name}\n${report.brand}`,
             report.color_name,
@@ -67,18 +95,86 @@ const TrimOrderSummaryPage = () => {
         ]);
 
         autoTable(doc, {
-            startY: 40,
+            startY: doc.lastAutoTable.finalY + 20,
             head: [['Item / Brand', 'Color', 'Total Consumed']],
             body: consumptionRows,
             theme: 'grid',
-            headStyles: { fillColor: [240, 240, 240], textColor: 0, lineWidth: 0.1, lineColor: 0 },
+            headStyles: { fillColor: 255, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold' },
             styles: { textColor: 0, lineWidth: 0.1, lineColor: 0 },
             columnStyles: {
                 2: { halign: 'right', fontStyle: 'bold' }
             }
         });
 
-        doc.save(`Trim_Consumption_Report_${order.id}.pdf`);
+        // // 4. Request Details Table
+        // doc.setFontSize(14);
+        // doc.text("Fulfillment Details", 14, doc.lastAutoTable.finalY + 15);
+
+        // const itemRows = items.map(item => [
+        //      `${item.item_name}\n${item.brand}`,
+        //      item.color_name,
+        //      item.quantity_required,
+        //      item.quantity_fulfilled,
+        //      item.is_fulfilled ? 'Yes' : 'No'
+        // ]);
+
+        // autoTable(doc, {
+        //     startY: doc.lastAutoTable.finalY + 20,
+        //     head: [['Item / Brand', 'Color', 'Required', 'Fulfilled', 'Complete']],
+        //     body: itemRows,
+        //     theme: 'grid',
+        //     headStyles: { fillColor: 255, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold' },
+        //     styles: { textColor: 0, lineWidth: 0.1, lineColor: 0 },
+        //     columnStyles: {
+        //         2: { halign: 'right' },
+        //         3: { halign: 'right' },
+        //         4: { halign: 'center' }
+        //     }
+        // });
+
+        // 5. PENDING ITEMS REPORT (New Section)
+        const pendingItems = items.filter(item => item.quantity_fulfilled < item.quantity_required);
+
+        if (pendingItems.length > 0) {
+            // Check for page break
+            if (doc.lastAutoTable.finalY > 250) {
+                doc.addPage();
+                doc.lastAutoTable.finalY = 20; 
+            }
+
+            doc.setFontSize(14);
+            doc.text("Pending Items (Action Required)", 14, doc.lastAutoTable.finalY + 15);
+
+            const pendingRows = pendingItems.map(item => [
+                `${item.item_name}\n${item.brand}`,
+                item.color_name,
+                item.quantity_required,
+                item.quantity_fulfilled,
+                (item.quantity_required - item.quantity_fulfilled) // Calculated Pending Qty
+            ]);
+
+            autoTable(doc, {
+                startY: doc.lastAutoTable.finalY + 20,
+                head: [['Item / Brand', 'Color', 'Required', 'Fulfilled', 'Pending Qty']],
+                body: pendingRows,
+                theme: 'grid',
+                headStyles: { 
+                    fillColor: 255, 
+                    textColor: 0, 
+                    lineWidth: 0.1, 
+                    lineColor: 0, 
+                    fontStyle: 'bold' 
+                },
+                styles: { textColor: 0, lineWidth: 0.1, lineColor: 0 },
+                columnStyles: {
+                    2: { halign: 'right' },
+                    3: { halign: 'right' },
+                    4: { halign: 'right', fontStyle: 'bold' } // Highlight pending qty
+                }
+            });
+        }
+
+        doc.save(`Trim_Order_${order.id}_Summary.pdf`);
     };
 
     if (loading) return <div className="flex justify-center p-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
