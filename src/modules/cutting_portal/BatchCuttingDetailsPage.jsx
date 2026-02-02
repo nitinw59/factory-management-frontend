@@ -61,6 +61,7 @@ const BatchCuttingDetailsPage = () => {
         setError(null);
         try {
             const response = await cuttingPortalApi.getBatchCuttingDetails(batchId);
+            console.log("Fetched Batch Details:", response.data);
             setDetails(response.data);
         } catch (err) {
             console.error("Failed to fetch batch details:", err);
@@ -85,11 +86,24 @@ const BatchCuttingDetailsPage = () => {
 
         (details.rolls || []).forEach(roll => {
             totalMeters += parseFloat(roll.meter || 0);
+            
+            // Helper to track unique sizes for this roll to avoid double counting parts
+            const uniqueCutsForRoll = {};
+
             (roll.cuts || []).forEach(cut => {
-                const qty = parseInt(cut.quantity_cut || 0);
-                totalPieces += qty;
-                sizeTotals[cut.size] = (sizeTotals[cut.size] || 0) + qty;
+                // Only take the quantity if we haven't counted this size for this roll yet
+                // (Assuming all parts for the same size/roll have the same quantity)
+                if (uniqueCutsForRoll[cut.size] === undefined) {
+                    const qty = parseInt(cut.quantity_cut || 0);
+                    uniqueCutsForRoll[cut.size] = qty;
+                }
                 allSizesSet.add(cut.size);
+            });
+
+            // Sum up the unique counts for this roll
+            Object.entries(uniqueCutsForRoll).forEach(([size, qty]) => {
+                totalPieces += qty;
+                sizeTotals[size] = (sizeTotals[size] || 0) + qty;
             });
         });
         
@@ -109,53 +123,56 @@ const BatchCuttingDetailsPage = () => {
     const handleGeneratePDF = () => {
         if (!details) return;
 
-        // 1. Landscape Orientation, Millimeters, A4
-        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        const marginLeft = 10;
-        const marginRight = 10;
+        // 1. Landscape Orientation
+        const doc = new jsPDF({ orientation: 'landscape' });
 
-        // 2. Report Header
+        // 2. Report Header & Prominent Batch Info
+        const pageWidth = doc.internal.pageSize.getWidth();
         const now = new Date().toLocaleString();
 
-        doc.setFontSize(8);
-        doc.setTextColor(100);
-        doc.text(`Generated: ${now}`, pageWidth - marginRight, 10, { align: 'right' });
+        doc.setFontSize(10);
+        doc.setTextColor(0);
+        doc.text(`Generated: ${now}`, pageWidth - 14, 15, { align: 'right' });
 
-        // Batch Code & Product
-        doc.setFontSize(22);
+        // Batch Code - Larger and Bold
+        doc.setFontSize(30);
         doc.setTextColor(0);
         doc.setFont("helvetica", "bold");
-        doc.text(`Batch: ${details.batch_code || `#${batchId}`}`, marginLeft, 15);
+        doc.text(`Batch: ${details.batch_code || `#${batchId}`}`, 14, 25);
 
+        // Product Name - Medium and Bold
+        doc.setFontSize(18);
+        doc.setTextColor(0);
+        doc.text(`${details.product_name}`, 14, 35);
+
+        // Other Details - Normal
         doc.setFontSize(14);
-        doc.setTextColor(50);
-        doc.text(`${details.product_name}`, marginLeft, 22);
-
-        doc.setFontSize(10);
         doc.setFont("helvetica", "normal");
-        doc.setTextColor(80);
-        doc.text(`Layer Length: ${details.length_of_layer_inches || '0'} in`, marginLeft, 28);
+        doc.setTextColor(0);
+        doc.text(`Layer Length: ${details.length_of_layer_inches || '0'} in`, 14, 42);
 
-        let finalY = 32;
+        let finalY = 50;
 
         // 3. Detailed Cut Log Table
-        // Need to fit many columns (sizes), so we use a small font size.
         const cutLogHead = [
             "Roll ID", 
             "Fabric Type",
             "Color", 
             "Meters", 
+            "Lays",
             ...summaryStats.allSizes.map(getSizeLabel), 
-            "Total"
+            "Total Pcs"
         ];
 
         const cutLogBody = (details.rolls || []).map(roll => {
+            // Deduplicate cuts by size for this roll
             const rollCutsBySize = (roll.cuts || []).reduce((acc, cut) => {
-                acc[cut.size] = (acc[cut.size] || 0) + parseInt(cut.quantity_cut || 0);
+                if (acc[cut.size] === undefined) {
+                    acc[cut.size] = parseInt(cut.quantity_cut || 0);
+                }
                 return acc;
             }, {});
+            
             const rollTotalPieces = Object.values(rollCutsBySize).reduce((sum, qty) => sum + qty, 0);
 
             return [
@@ -163,6 +180,7 @@ const BatchCuttingDetailsPage = () => {
                 roll.type_name || '-',
                 `${roll.color_name || ''} ${roll.color_number ? `(${roll.color_number})` : ''}`,
                 parseFloat(roll.meter || 0).toFixed(2),
+                roll.lays || 0,
                 ...summaryStats.allSizes.map(size => rollCutsBySize[size] || 0),
                 rollTotalPieces
             ];
@@ -172,23 +190,24 @@ const BatchCuttingDetailsPage = () => {
         const footerRow = [
             "TOTAL", "", "", 
             summaryStats.totalMeters.toFixed(2),
+            "",
             ...summaryStats.allSizes.map(size => summaryStats.sizeTotals[size] || 0),
             summaryStats.totalPieces
         ];
 
-        doc.setFontSize(12);
+        doc.setFontSize(14);
         doc.setTextColor(0);
         doc.setFont("helvetica", "bold");
-        doc.text("Cut Log Details", marginLeft, finalY);
+        doc.text("Cut Log Details", 14, finalY);
         
         autoTable(doc, {
-            startY: finalY + 2,
+            startY: finalY + 5,
             head: [cutLogHead],
             body: [...cutLogBody, footerRow],
-            theme: 'grid', // Plain borders
+            theme: 'grid', 
             styles: { 
-                fontSize: 7, // Small font to fit 16+ rows and many columns
-                cellPadding: 1, 
+                fontSize: 10, 
+                cellPadding: 3, 
                 textColor: 0, 
                 lineWidth: 0.1, 
                 lineColor: 0 
@@ -204,10 +223,11 @@ const BatchCuttingDetailsPage = () => {
             columnStyles: {
                 0: { fontStyle: 'bold' }, // Roll ID bold
                 3: { halign: 'right' }, // Meters right align
+                4: { halign: 'center' }, // Lays center
                 [cutLogHead.length - 1]: { fontStyle: 'bold', halign: 'right' } // Total right align
             },
             footStyles: {
-                fillColor: 240,
+                fillColor: 255,
                 textColor: 0,
                 fontStyle: 'bold',
                 lineWidth: 0.1,
@@ -215,26 +235,24 @@ const BatchCuttingDetailsPage = () => {
                 halign: 'center'
             },
             didParseCell: (data) => {
-                // Highlight Footer Row manually if needed, though footStyles covers it mostly
                 if (data.row.index === cutLogBody.length) {
                     data.cell.styles.fontStyle = 'bold';
-                    data.cell.styles.fillColor = [230, 230, 230];
                 }
             }
         });
 
-        finalY = doc.lastAutoTable.finalY + 10;
+        finalY = doc.lastAutoTable.finalY + 15;
 
         // 4. Shortages Table (if exists)
         if (details.shortages && details.shortages.length > 0) {
-             // Check space for Shortage table
-             if (finalY > pageHeight - 30) {
+             // Page break check
+             if (finalY > doc.internal.pageSize.getHeight() - 40) {
                 doc.addPage();
-                finalY = 15;
+                finalY = 20;
             }
 
-            doc.setFontSize(12);
-            doc.text("Reported Shortages", marginLeft, finalY);
+            doc.setFontSize(14);
+            doc.text("Reported Shortages", 14, finalY);
             
             const shortageBody = details.shortages.map(s => [
                 s.roll_identifier,
@@ -256,49 +274,34 @@ const BatchCuttingDetailsPage = () => {
             finalY = doc.lastAutoTable.finalY + 10;
         }
 
-        // 5. Summary Statistics (Plain text, bottom of page)
-        // Check if we need a new page for the summary (needs approx 30mm)
-        if (finalY > pageHeight - 35) {
+        // 5. Summary Statistics (Row wise at the bottom)
+        if (finalY > doc.internal.pageSize.getHeight() - 45) {
             doc.addPage();
-            finalY = 15;
+            finalY = 20;
         }
 
-        doc.setFontSize(12);
+        doc.setFontSize(14);
         doc.setTextColor(0);
         doc.setFont("helvetica", "bold");
-        doc.text("Summary Statistics", marginLeft, finalY);
+        doc.text("Summary Statistics", 14, finalY);
         
         const summaryY = finalY + 6;
         const lineHeight = 6;
-        const valueX = marginLeft + 60; // Indent values
+        const valueX = 10 + 60; 
 
-        doc.setFontSize(10);
+        const printSummaryLine = (label, value, y) => {
+            doc.setFont("helvetica", "normal");
+            doc.text(label, 14, y);
+            doc.setFont("helvetica", "bold");
+            doc.text(value, 14 + 60, y);
+        };
         
-        // Line 1
-        doc.setFont("helvetica", "normal");
-        doc.text("Total Fabric Assigned:", marginLeft, summaryY);
-        doc.setFont("helvetica", "bold");
-        doc.text(`${summaryStats.totalMeters.toFixed(2)} m`, valueX, summaryY);
+        doc.setFontSize(12);
+        printSummaryLine("Total Fabric Assigned:", `${summaryStats.totalMeters.toFixed(2)} m`, summaryY);
+        printSummaryLine("Total Pieces Cut:", `${summaryStats.totalPieces}`, summaryY + lineHeight);
+        printSummaryLine("Avg. Consumption:", `${summaryStats.avgConsumption.toFixed(3)} m/pc`, summaryY + (lineHeight * 2));
+        printSummaryLine("Total Shortage:", `${summaryStats.totalShortage.toFixed(2)} m`, summaryY + (lineHeight * 3));
 
-        // Line 2
-        doc.setFont("helvetica", "normal");
-        doc.text("Total Pieces Cut:", marginLeft, summaryY + lineHeight);
-        doc.setFont("helvetica", "bold");
-        doc.text(`${summaryStats.totalPieces}`, valueX, summaryY + lineHeight);
-
-        // Line 3
-        doc.setFont("helvetica", "normal");
-        doc.text("Avg. Consumption:", marginLeft, summaryY + (lineHeight * 2));
-        doc.setFont("helvetica", "bold");
-        doc.text(`${summaryStats.avgConsumption.toFixed(3)} m/pc`, valueX, summaryY + (lineHeight * 2));
-
-        // Line 4
-        doc.setFont("helvetica", "normal");
-        doc.text("Total Shortage:", marginLeft, summaryY + (lineHeight * 3));
-        doc.setFont("helvetica", "bold");
-        doc.text(`${summaryStats.totalShortage.toFixed(2)} m`, valueX, summaryY + (lineHeight * 3));
-
-        // Save PDF
         doc.save(`Cutting_Report_${details.batch_code || batchId}.pdf`);
     };
 
@@ -316,10 +319,6 @@ const BatchCuttingDetailsPage = () => {
         } else {
             alert("Sharing is not supported on this browser/device.");
         }
-    };
-
-    const handlePrint = () => {
-        window.print();
     };
 
     if (isLoading) return <Spinner />;
@@ -353,12 +352,6 @@ const BatchCuttingDetailsPage = () => {
                             className="flex items-center px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
                         >
                             <FiShare2 className="mr-2"/> Share
-                        </button>
-                        <button 
-                             onClick={handlePrint}
-                             className="flex items-center px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
-                        >
-                            <FiPrinter className="mr-2"/> Browser Print
                         </button>
                         <button 
                             onClick={handleGeneratePDF}
@@ -429,7 +422,7 @@ const BatchCuttingDetailsPage = () => {
                                 <th className="py-3 px-4 text-left">Color</th>
                                 <th className="py-3 px-4 text-left">Type</th>
                                 <th className="py-3 px-4 text-right">Meters</th>
-                                {/* Dynamically create size columns in SORTED order with Formatted Label */}
+                                <th className="py-3 px-4 text-center font-bold text-blue-700 bg-blue-50/50 border-x border-blue-100/50">Lays</th> {/* New Lays Header */}
                                 {summaryStats.allSizes.map(size => (
                                     <th key={size} className="py-3 px-4 text-center font-bold text-indigo-700 bg-indigo-50/50 border-x border-indigo-100/50">{getSizeLabel(size)}</th>
                                 ))}
@@ -438,17 +431,25 @@ const BatchCuttingDetailsPage = () => {
                         </thead>
                         <tbody className="divide-y divide-gray-200 text-sm">
                             {(details.rolls || []).map(roll => {
+                                // Logic Fix: Deduplicate cuts by size for this roll
                                 const rollCutsBySize = (roll.cuts || []).reduce((acc, cut) => {
-                                    acc[cut.size] = (acc[cut.size] || 0) + parseInt(cut.quantity_cut || 0);
+                                    if (acc[cut.size] === undefined) {
+                                        acc[cut.size] = parseInt(cut.quantity_cut || 0);
+                                    }
                                     return acc;
                                 }, {});
+                                
                                 const rollTotalPieces = Object.values(rollCutsBySize).reduce((sum, qty) => sum + qty, 0);
+                                
                                 return (
                                     <tr key={roll.id} className="hover:bg-gray-50">
                                         <td className="py-3 px-4 font-medium">{roll.roll_identifier}</td>
                                         <td className="py-3 px-4">{roll.color_name || 'N/A'}({roll.color_number || 'N/A'  })</td>
                                         <td className="py-3 px-4">{roll.type_name || 'N/A'}</td>
                                         <td className="py-3 px-4 text-right">{parseFloat(roll.meter || 0).toFixed(2)}</td>
+                                        <td className="py-3 px-4 text-center font-bold text-blue-700 bg-blue-50/20 border-x border-blue-100/30">
+                                            {roll.lays || 0}
+                                        </td>
                                         {summaryStats.allSizes.map(size => (
                                             <td key={size} className="py-3 px-4 text-center text-gray-700 border-x border-gray-100/50">
                                                 {rollCutsBySize[size] || <span className="text-gray-300">-</span>}
@@ -463,6 +464,7 @@ const BatchCuttingDetailsPage = () => {
                         <tfoot className="bg-gray-100 border-t-2 border-gray-300">
                              <tr className="font-bold text-gray-700">
                                  <td colSpan="4" className="py-3 px-4 text-right uppercase text-xs">Total Pieces Cut:</td>
+                                 <td className="py-3 px-4"></td>
                                  {summaryStats.allSizes.map(size => (
                                      <td key={size} className="py-3 px-4 text-center text-indigo-700 border-x border-gray-300/30">
                                          {summaryStats.sizeTotals[size] || 0}

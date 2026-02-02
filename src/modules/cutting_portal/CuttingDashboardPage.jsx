@@ -163,6 +163,7 @@ const CuttingDashboardPage = () => {
     cuttingPortalApi.getMyQueue()
       .then(res => {
         const fetchedBatches = res.data || [];
+        console.log("Fetched Batches:", fetchedBatches);
         setAllBatches(fetchedBatches);
         setFilteredBatches(fetchedBatches);
       })
