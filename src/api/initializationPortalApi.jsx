@@ -14,5 +14,7 @@ export const initializationPortalApi = {
     getAlterPiecesData: () => api.get('/initialization-portal/alter-dashboard'),
     rejectAltered: (data) => api.post('/initialization-portal/reject-altered', data),
 
+    getBatchProgressReport: (batchId) => api.get(`/initialization-portal/batch-progress/${batchId}`),
 
+    getDailyReport: (startDate, endDate) => api.get(`/initialization-portal/reports/daily?startDate=${startDate}&endDate=${endDate}`),
 };

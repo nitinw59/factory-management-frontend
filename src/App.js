@@ -34,6 +34,7 @@ import AssemblyLayout from './shared/AssemblyLayout';
 import AssemblyProtectedRoute from './shared/AssemblyProtectedRoute'; 
 
 
+
 // --- PUBLIC PAGES ---
 import LoginPage from './login/LoginPage';
 import AuthCallbackPage from './login/AuthCallbackPage';
@@ -85,7 +86,7 @@ import TrimOrderSummaryPage from './modules/store_manager/TrimOrderSummaryPage';
 import NumberingCheckerSummaryPage from './modules/numbering_portal/NumberingCheckerSummaryPage';
 import SewingMachineComplaintPage from './modules/asset/SewingMachineComplaintPage';
 import ListTrimStockIntake from './modules/store_manager/ListTrimStockIntake';  
-
+import CuttingManagerReportPage from './modules/initialisation_portal/CuttingManagerReportPage';
 
 function App() {
   return (
@@ -212,6 +213,7 @@ function App() {
           <Route path="alter-pieces" element={<AlterPiecesDashboardPage />} />  
           <Route path="summary" element={<NumberingBatchDetailsPage />} />
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+          <Route path="reports" element={<CuttingManagerReportPage />} />
 
       </Route>
 
