@@ -17,4 +17,6 @@ export const initializationPortalApi = {
     getBatchProgressReport: (batchId) => api.get(`/initialization-portal/batch-progress/${batchId}`),
 
     getDailyReport: (startDate, endDate) => api.get(`/initialization-portal/reports/daily?startDate=${startDate}&endDate=${endDate}`),
+
+    getBatchCuttingDetails: (batchId) => api.get(`/cutting-portal/batch-cutting-details/${batchId}`),
 };

@@ -214,6 +214,7 @@ function App() {
           <Route path="summary" element={<NumberingBatchDetailsPage />} />
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
           <Route path="reports" element={<CuttingManagerReportPage />} />
+          <Route path="batch-details/:batchId" element={<BatchCuttingDetailsPage />} />
 
       </Route>
 

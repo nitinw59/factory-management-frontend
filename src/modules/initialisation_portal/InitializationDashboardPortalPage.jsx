@@ -5,7 +5,7 @@ import Modal from '../../shared/Modal';
 import { 
     Play, Layers, Info, MoreHorizontal, Square, CheckSquare, 
     ChevronDown, ChevronRight, Loader2, AlertCircle, Box, 
-    BarChart2, Scissors, ClipboardCheck, Package,Wrench, FileText
+    BarChart2, Scissors, ClipboardCheck, Package,Wrench, FileText, Eye
 } from 'lucide-react';
 
 // --- SHARED COMPONENTS ---
@@ -288,7 +288,7 @@ const BatchCard = ({ batch, onStartClick, onViewProgress }) => {
     const isPending = status === 'PENDING';
     const isCompleted = status === 'COMPLETED';
     const isInProgress = status === 'IN_PROGRESS';
-
+    console.log("Rendering BatchCard for batch:", batch.batch_id, "with status:", status);
     // Pastel Status Styling
     let statusBadge = "bg-slate-100 text-slate-600 border-slate-200";
     let accentColor = "border-t-slate-300";
@@ -385,6 +385,14 @@ const BatchCard = ({ batch, onStartClick, onViewProgress }) => {
             </div>
 
             <div className="p-4 bg-white border-t border-slate-100 rounded-b-2xl flex gap-3">
+                <div className="p-3 bg-white border-t border-slate-100 flex justify-center">
+                 <Link 
+                    to={`/cutting-portal/batch-details/${batch.batch_id}`} 
+                    className="text-xs font-bold text-slate-500 hover:text-blue-600 flex items-center transition-colors px-4 py-2 rounded-lg hover:bg-slate-50 w-full justify-center"
+                 >
+                    View Details <Eye size={14} className="ml-2"/>
+                 </Link>
+                    </div>
                 {/* View Progress Button - Available if IN_PROGRESS or COMPLETED */}
                 {!isPending && (
                     <button
