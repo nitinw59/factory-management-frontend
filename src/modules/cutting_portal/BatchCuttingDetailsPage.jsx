@@ -123,45 +123,49 @@ const BatchCuttingDetailsPage = () => {
     const handleGeneratePDF = () => {
         if (!details) return;
 
-        // 1. Landscape Orientation
-        const doc = new jsPDF({ orientation: 'landscape' });
-
-        // 2. Report Header & Prominent Batch Info
+        // 1. Portrait Orientation, A4
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
         const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const marginLeft = 10;
+        const marginRight = 10;
+
+        // 2. Report Header
         const now = new Date().toLocaleString();
 
-        doc.setFontSize(10);
-        doc.setTextColor(0);
-        doc.text(`Generated: ${now}`, pageWidth - 14, 15, { align: 'right' });
+        doc.setFontSize(8);
+        doc.setTextColor(100);
+        doc.text(`Generated: ${now}`, pageWidth - marginRight, 10, { align: 'right' });
 
-        // Batch Code - Larger and Bold
-        doc.setFontSize(30);
+        // Batch Code - Large and Bold
+        doc.setFontSize(20);
         doc.setTextColor(0);
         doc.setFont("helvetica", "bold");
-        doc.text(`Batch: ${details.batch_code || `#${batchId}`}`, 14, 25);
+        doc.text(`Batch: ${details.batch_code || `#${batchId}`}`, marginLeft, 15);
 
         // Product Name - Medium and Bold
-        doc.setFontSize(18);
+        doc.setFontSize(14);
         doc.setTextColor(0);
-        doc.text(`${details.product_name}`, 14, 35);
+        doc.text(`${details.product_name}`, marginLeft, 22);
 
         // Other Details - Normal
-        doc.setFontSize(14);
+        doc.setFontSize(10);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(0);
-        doc.text(`Layer Length: ${details.length_of_layer_inches || '0'} in`, 14, 42);
+        doc.text(`Layer Length: ${details.length_of_layer_inches || '0'} in`, marginLeft, 27);
 
-        let finalY = 50;
+        let finalY = 32;
 
         // 3. Detailed Cut Log Table
+        // Need to fit many columns (sizes) in portrait, so we use very small font.
         const cutLogHead = [
             "Roll ID", 
-            "Fabric Type",
+            "Fabric", 
             "Color", 
-            "Meters", 
+            "Mtrs", 
             "Lays",
             ...summaryStats.allSizes.map(getSizeLabel), 
-            "Total Pcs"
+            "Tot"
         ];
 
         const cutLogBody = (details.rolls || []).map(roll => {
@@ -186,7 +190,7 @@ const BatchCuttingDetailsPage = () => {
             ];
         });
 
-        // Footer Row
+        // Footer Row for Cut Log
         const footerRow = [
             "TOTAL", "", "", 
             summaryStats.totalMeters.toFixed(2),
@@ -195,19 +199,19 @@ const BatchCuttingDetailsPage = () => {
             summaryStats.totalPieces
         ];
 
-        doc.setFontSize(14);
+        doc.setFontSize(12);
         doc.setTextColor(0);
         doc.setFont("helvetica", "bold");
-        doc.text("Cut Log Details", 14, finalY);
+        doc.text("Cut Log Details", marginLeft, finalY);
         
         autoTable(doc, {
-            startY: finalY + 5,
+            startY: finalY + 2,
             head: [cutLogHead],
             body: [...cutLogBody, footerRow],
             theme: 'grid', 
             styles: { 
-                fontSize: 10, 
-                cellPadding: 3, 
+                fontSize: 6, // Reduced font for portrait
+                cellPadding: 1, 
                 textColor: 0, 
                 lineWidth: 0.1, 
                 lineColor: 0 
@@ -221,10 +225,12 @@ const BatchCuttingDetailsPage = () => {
                 halign: 'center'
             },
             columnStyles: {
-                0: { fontStyle: 'bold' }, // Roll ID bold
-                3: { halign: 'right' }, // Meters right align
-                4: { halign: 'center' }, // Lays center
-                [cutLogHead.length - 1]: { fontStyle: 'bold', halign: 'right' } // Total right align
+                0: { fontStyle: 'bold', cellWidth: 15 }, // Roll ID
+                1: { cellWidth: 15 }, // Fabric
+                2: { cellWidth: 15 }, // Color
+                3: { halign: 'right', cellWidth: 10 }, // Meters
+                4: { halign: 'center', cellWidth: 8 }, // Lays
+                [cutLogHead.length - 1]: { fontStyle: 'bold', halign: 'right', cellWidth: 10 } // Total
             },
             footStyles: {
                 fillColor: 255,
@@ -241,18 +247,18 @@ const BatchCuttingDetailsPage = () => {
             }
         });
 
-        finalY = doc.lastAutoTable.finalY + 15;
+        finalY = doc.lastAutoTable.finalY + 10;
 
         // 4. Shortages Table (if exists)
         if (details.shortages && details.shortages.length > 0) {
-             // Page break check
-             if (finalY > doc.internal.pageSize.getHeight() - 40) {
+             // Check space
+             if (finalY > pageHeight - 30) {
                 doc.addPage();
-                finalY = 20;
+                finalY = 15;
             }
 
-            doc.setFontSize(14);
-            doc.text("Reported Shortages", 14, finalY);
+            doc.setFontSize(12);
+            doc.text("Reported Shortages", marginLeft, finalY);
             
             const shortageBody = details.shortages.map(s => [
                 s.roll_identifier,
@@ -274,29 +280,30 @@ const BatchCuttingDetailsPage = () => {
             finalY = doc.lastAutoTable.finalY + 10;
         }
 
-        // 5. Summary Statistics (Row wise at the bottom)
-        if (finalY > doc.internal.pageSize.getHeight() - 45) {
+        // 5. Summary Statistics (Row wise at the bottom, 4 plain text lines)
+        // Check if we need a new page for the summary (needs approx 30mm)
+        if (finalY > pageHeight - 35) {
             doc.addPage();
-            finalY = 20;
+            finalY = 15;
         }
 
-        doc.setFontSize(14);
+        doc.setFontSize(12);
         doc.setTextColor(0);
         doc.setFont("helvetica", "bold");
-        doc.text("Summary Statistics", 14, finalY);
+        doc.text("Summary Statistics", marginLeft, finalY);
         
         const summaryY = finalY + 6;
         const lineHeight = 6;
-        const valueX = 10 + 60; 
+        const valueX = marginLeft + 60; 
 
         const printSummaryLine = (label, value, y) => {
             doc.setFont("helvetica", "normal");
-            doc.text(label, 14, y);
+            doc.text(label, marginLeft, y);
             doc.setFont("helvetica", "bold");
-            doc.text(value, 14 + 60, y);
+            doc.text(value, valueX, y);
         };
         
-        doc.setFontSize(12);
+        doc.setFontSize(10);
         printSummaryLine("Total Fabric Assigned:", `${summaryStats.totalMeters.toFixed(2)} m`, summaryY);
         printSummaryLine("Total Pieces Cut:", `${summaryStats.totalPieces}`, summaryY + lineHeight);
         printSummaryLine("Avg. Consumption:", `${summaryStats.avgConsumption.toFixed(3)} m/pc`, summaryY + (lineHeight * 2));
@@ -327,7 +334,7 @@ const BatchCuttingDetailsPage = () => {
 
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
-            {/* Print Styles for Browser Print */}
+            {/* Print Styles */}
             <style>
                 {`
                     @media print {
@@ -335,7 +342,6 @@ const BatchCuttingDetailsPage = () => {
                         .print-p-0 { padding: 0 !important; }
                         .print-bg-white { background-color: white !important; }
                         body { background-color: white; -webkit-print-color-adjust: exact; }
-                        @page { size: landscape; margin: 10mm; }
                     }
                 `}
             </style>
@@ -422,7 +428,8 @@ const BatchCuttingDetailsPage = () => {
                                 <th className="py-3 px-4 text-left">Color</th>
                                 <th className="py-3 px-4 text-left">Type</th>
                                 <th className="py-3 px-4 text-right">Meters</th>
-                                <th className="py-3 px-4 text-center font-bold text-blue-700 bg-blue-50/50 border-x border-blue-100/50">Lays</th> {/* New Lays Header */}
+                                <th className="py-3 px-4 text-center font-bold text-blue-700 bg-blue-50/50 border-x border-blue-100/50">Lays</th>
+                                {/* Dynamically create size columns in SORTED order with Formatted Label */}
                                 {summaryStats.allSizes.map(size => (
                                     <th key={size} className="py-3 px-4 text-center font-bold text-indigo-700 bg-indigo-50/50 border-x border-indigo-100/50">{getSizeLabel(size)}</th>
                                 ))}
