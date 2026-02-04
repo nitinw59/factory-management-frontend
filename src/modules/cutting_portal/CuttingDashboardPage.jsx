@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { cuttingPortalApi } from '../../api/cuttingPortalApi';
 import { 
     CheckCircle, Loader2, Package, Filter, X, Eye, 
-    ChevronDown, ChevronRight, Scissors, Ruler, AlertCircle, Box, CircleDashed 
+    ChevronDown, Scissors, Ruler, AlertCircle, Box, CircleDashed 
 } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import CuttingForm from './CuttingForm';
@@ -102,8 +102,8 @@ const BatchCard = ({ batch, onOpenCutForm }) => {
                                     <CircleDashed size={14} className="text-slate-300 shrink-0"/>
                                 )}
                                 <span className={`font-semibold text-sm truncate ${roll.is_cut ? 'text-slate-600' : 'text-slate-800'}`}>
-                                    {/* Updated Roll Identifier to include Color Number */}
                                     {roll.roll_identifier}
+                                    {/* Added Color Number */}
                                     {roll.color_number && <span className="text-slate-500 font-normal ml-1">({roll.color_number})</span>}
                                 </span>
                             </div>
@@ -187,8 +187,12 @@ const CuttingDashboardPage = () => {
   const [error, setError] = useState(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [selectedCutInfo, setSelectedCutInfo] = useState(null);
+  
+  // Filter States
   const [filterText, setFilterText] = useState('');
-  const [meterFilter, setMeterFilter] = useState(''); // New State for Meter Filter
+  const [meterFilter, setMeterFilter] = useState('');
+  // New State for Mobile Filter Toggle
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   
   // State for collapsible sections
   const [expandedSections, setExpandedSections] = useState({
@@ -231,14 +235,11 @@ const CuttingDashboardPage = () => {
       );
     }
 
-    // Filter by Meter (New)
+    // Filter by Meter
     if (meterFilter) {
         const meterVal = parseFloat(meterFilter);
         if (!isNaN(meterVal)) {
             result = result.filter(batch => 
-                // Keep batch if ANY roll matches the meter length exactly or closely (e.g. 100 vs 100.5)
-                // For strict equality use: r.meter == meterVal
-                // For "contains" string match: r.meter.toString().includes(meterFilter)
                 batch.rolls.some(r => r.meter.toString().includes(meterFilter))
             );
         }
@@ -284,59 +285,82 @@ const CuttingDashboardPage = () => {
     fetchQueue();
   };
 
+  const hasActiveFilters = filterText || meterFilter;
+
   return (
     <div className="min-h-screen bg-slate-50 font-inter text-slate-800 pb-20">
-      <header className="bg-white border-b border-slate-200 px-4 py-5 md:px-8 md:py-6 sticky top-0 z-10 shadow-sm">
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-                <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center">
-                    <Scissors className="mr-3 text-indigo-600" size={28}/> Cutting Queue
-                </h1>
-                <p className="text-slate-500 text-sm mt-1">Manage roll cuts and layer assignments.</p>
+      {/* Responsive Header:
+        - Reduced vertical padding (py-3).
+        - Stacking logic changed to keep top bar accessible.
+      */}
+      <header className="bg-white border-b border-slate-200 px-4 py-3 md:px-8 md:py-4 sticky top-0 z-10 shadow-sm transition-all">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between">
+            
+            {/* Title Row */}
+            <div className="flex justify-between items-center w-full md:w-auto mb-2 md:mb-0">
+                <div>
+                    <h1 className="text-xl md:text-2xl font-extrabold text-slate-900 tracking-tight flex items-center">
+                        <Scissors className="mr-2 text-indigo-600" size={24}/> Cutting Queue
+                    </h1>
+                    {/* Hide description on mobile to save space */}
+                    <p className="text-slate-500 text-sm mt-0.5 hidden sm:block">Manage roll cuts and layer assignments.</p>
+                </div>
+
+                {/* Mobile Toggle Button for Filters */}
+                <button 
+                    onClick={() => setShowMobileFilters(!showMobileFilters)}
+                    className={`md:hidden p-2 rounded-lg transition-colors relative ${showMobileFilters || hasActiveFilters ? 'bg-indigo-50 text-indigo-600' : 'text-slate-400 hover:bg-slate-100'}`}
+                >
+                    <Filter size={20} />
+                    {hasActiveFilters && !showMobileFilters && (
+                        <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+                    )}
+                </button>
             </div>
             
-            {/* Search Bar Container */}
-            <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+            {/* Search Bar Container - Collapsible on Mobile */}
+            <div className={`flex flex-col sm:flex-row gap-3 w-full md:w-auto transition-all duration-300 ease-in-out ${showMobileFilters ? 'max-h-40 opacity-100 mt-2' : 'max-h-0 opacity-0 md:max-h-none md:opacity-100 md:mt-0'} overflow-hidden md:overflow-visible`}>
+                
                 {/* Batch Search */}
                 <div className="relative flex-grow md:w-64">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Filter className="text-slate-400" size={18}/>
+                        <Filter className="text-slate-400" size={16}/>
                     </div>
                     <input 
                         type="text"
                         placeholder="Search Batch ID..."
                         value={filterText}
                         onChange={(e) => setFilterText(e.target.value)}
-                        className="w-full pl-10 pr-10 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 focus:bg-white transition-all shadow-sm"
+                        className="w-full pl-9 pr-9 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 focus:bg-white transition-all shadow-sm text-sm"
                     />
                     {filterText && (
                         <button 
                             onClick={() => setFilterText('')} 
                             className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
                         >
-                            <X size={18}/>
+                            <X size={16}/>
                         </button>
                     )}
                 </div>
 
-                {/* Meter Filter (New) */}
+                {/* Meter Filter */}
                 <div className="relative flex-grow md:w-48">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Ruler className="text-slate-400" size={18}/>
+                        <Ruler className="text-slate-400" size={16}/>
                     </div>
                     <input 
                         type="number"
                         placeholder="Filter by Meter..."
                         value={meterFilter}
                         onChange={(e) => setMeterFilter(e.target.value)}
-                        className="w-full pl-10 pr-10 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 focus:bg-white transition-all shadow-sm"
+                        className="w-full pl-9 pr-9 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 focus:bg-white transition-all shadow-sm text-sm"
                     />
                     {meterFilter && (
                         <button 
                             onClick={() => setMeterFilter('')} 
                             className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
                         >
-                            <X size={18}/>
+                            <X size={16}/>
                         </button>
                     )}
                 </div>
