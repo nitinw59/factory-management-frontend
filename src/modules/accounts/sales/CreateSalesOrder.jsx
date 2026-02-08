@@ -5,7 +5,7 @@ import { accountingApi } from '../../../api/accountingApi';
 
 const CreateSalesOrder = () => {
   const navigate = useNavigate();
-  const SIZES = ['S', 'M', 'L', 'XL', 'XXL'];
+  const SIZES = ['S', 'M', 'L', 'XL', 'XXL', `XXXL`, '4XL', '5XL', '6XL'];  
 
   // --- State ---
   const [options, setOptions] = useState({ customers: [], products: [], fabricTypes: [], fabricColors: [] });
