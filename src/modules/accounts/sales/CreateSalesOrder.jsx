@@ -32,7 +32,7 @@ const CreateSalesOrder = () => {
       { 
         productId: '', 
         fabricTypeId: '', 
-        sizeRatio: { S: 0, M: 0, L: 0, XL: 0, XXL: 0 }, 
+        sizeRatio: { S: 0, M: 0, L: 0, XL: 0, XXL: 0 , XXXL: 0, "4XL": 0, "5XL": 0, "6XL": 0}, 
         colors: [{ colorId: '', quantity: '', price: '' }] 
       }
     ]);
