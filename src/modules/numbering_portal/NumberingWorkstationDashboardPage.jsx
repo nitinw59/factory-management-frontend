@@ -422,6 +422,7 @@ const NumberingCheckerDashboardPage = () => {
         setIsLoading(true);
         try {
             const res = await numberingCheckerApi.getMyQueue();
+            console.log("Fetched Queue Data:", res.data);
             let fetchedBatches = res.data.batches || [];
             fetchedBatches.sort((a, b) => a.batch_id - b.batch_id);
             setBatches(fetchedBatches);
