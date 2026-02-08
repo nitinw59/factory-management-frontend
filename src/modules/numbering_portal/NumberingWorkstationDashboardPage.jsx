@@ -1,14 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { numberingCheckerApi } from '../../api/numberingCheckerApi';
-import { Shirt, Layers, ClipboardCheck, Component, Check, X, Hammer, Wrench, Loader2, ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
-
-
+import { Shirt, Layers, ClipboardCheck, Component, Check, X, Hammer, Wrench, Loader2, ChevronDown, ChevronRight, CheckCircle2, Search } from 'lucide-react';
 
 // --- UI & LOGIC COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
 const ErrorDisplay = ({ message }) => <div className="p-4 bg-red-100 text-red-700 rounded-lg">{message}</div>;
 
-// --- LOGIC HELPERS (Used for Grouping/Collapsing) ---
+// --- LOGIC HELPERS ---
 
 const checkSizeStatus = (detail) => {
     const total_cut = parseInt(detail.total_cut, 10) || 0;
@@ -27,21 +25,15 @@ const checkSizeStatus = (detail) => {
 
 const checkRollStatus = (roll) => {
     if (!roll.parts_details) return false;
-    // A roll is complete if EVERY size in EVERY part is complete
     return roll.parts_details.every(part => 
         part.size_details.every(size => checkSizeStatus(size).isComplete)
     );
 };
 
-// --- OPTIMIZATION HELPER: Predict if an action finishes the roll ---
+// --- OPTIMIZATION HELPER ---
 const willActionCompleteRoll = (roll, action) => {
-    // action: { partId, size, quantity, qcStatus }
-    
-    // We iterate through every part/size in the roll.
-    // If ANY size is incomplete (after simulation), return false.
     return roll.parts_details.every(part => {
         return part.size_details.every(detail => {
-            // Is this the row being updated?
             const isTarget = part.part_id === action.partId && detail.size === action.size;
             
             let { total_validated, total_rejected, total_repaired, total_altered, total_cut } = detail;
@@ -51,24 +43,17 @@ const willActionCompleteRoll = (roll, action) => {
             total_altered = parseInt(total_altered || 0);
             total_cut = parseInt(total_cut || 0);
 
-            // Apply simulation
             if (isTarget) {
                 const qty = parseInt(action.quantity || 0);
                 if (action.qcStatus === 'APPROVED') total_validated += qty;
                 else if (action.qcStatus === 'REJECT') total_rejected += qty;
                 else if (action.qcStatus === 'ALTER') total_altered += qty;
-                else if (action.qcStatus === 'REPAIRED') {
-                    // Moving from Alter -> Repaired
-                    // Note: In DB logic, 'Altered' count stays high, 'Repaired' count goes up.
-                    // Pending is calculated as Altered - (Repaired + Rejected).
-                    total_repaired += qty;
-                }
+                else if (action.qcStatus === 'REPAIRED') total_repaired += qty;
             }
 
             const total_processed = total_validated + total_rejected + total_repaired;
             const pending_alter = Math.max(0, total_altered - (total_repaired + total_rejected));
             
-            // Check completion conditions
             const allAccountedFor = (total_processed + pending_alter) >= total_cut;
             const noPendingAlter = pending_alter === 0;
 
@@ -77,13 +62,12 @@ const willActionCompleteRoll = (roll, action) => {
     });
 };
 
-// Check if data exists (for initial filtering)
 const hasPartData = (part) => part.size_details && part.size_details.some(detail => (parseInt(detail.total_cut, 10) || 0) > 0);
 const hasRollData = (roll) => roll.parts_details && roll.parts_details.some(part => hasPartData(part));
 const hasBatchData = (batch) => batch.rolls && batch.rolls.some(roll => hasRollData(roll));
 
 
-// --- MODAL COMPONENTS (Unchanged Logic) ---
+// --- MODAL COMPONENTS ---
 const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) => {
     const total_cut_num = parseInt(itemInfo.total_cut, 10) || 0;
     const total_validated_num = parseInt(itemInfo.total_validated, 10) || 0;
@@ -186,7 +170,6 @@ const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick })
     const { total_cut, total_processed, pending_alter, isComplete } = checkSizeStatus(sizeDetail);
     if (total_cut === 0) return null;
 
-    // Calc percentages
     const approvedPercent = total_cut > 0 ? (parseInt(sizeDetail.total_validated||0) / total_cut) * 100 : 0;
     const repairedPercent = total_cut > 0 ? (parseInt(sizeDetail.total_repaired||0) / total_cut) * 100 : 0;
     const rejectedPercent = total_cut > 0 ? (parseInt(sizeDetail.total_rejected||0) / total_cut) * 100 : 0;
@@ -223,7 +206,6 @@ const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick })
                 </div>
             </div>
 
-            {/* Stacked Progress Bar */}
             <div className="w-full h-2 bg-gray-200 rounded-full flex overflow-hidden">
                 <div className="bg-green-500 h-full" style={{ width: `${approvedPercent}%` }} title="Approved"></div>
                 <div className="bg-orange-500 h-full" style={{ width: `${repairedPercent}%` }} title="Repaired"></div>
@@ -239,7 +221,6 @@ const PrimaryPartCard = ({ part, rollId, onValidateClick, onApproveAlterClick })
     const [isExpanded, setIsExpanded] = useState(false);
     if (!hasPartData(part)) return null;
 
-    // Calculate aggregate part progress for summary
     const partStats = part.size_details.reduce((acc, curr) => {
         const stats = checkSizeStatus(curr);
         return { 
@@ -294,7 +275,6 @@ const PrimaryPartCard = ({ part, rollId, onValidateClick, onApproveAlterClick })
 };
 
 const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick }) => {
-    // Collapsing Logic: Filter parts first.
     const validParts = roll.parts_details.filter(hasPartData);
     if (validParts.length === 0) return null;
 
@@ -316,23 +296,24 @@ const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick }) => {
     );
 };
 
-// --- BATCH CARD with GROUPED ROLLS ---
+// --- BATCH CARD with GROUPED ROLLS (Now Collapsible) ---
 const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick }) => {
-    // Hooks must be at the top
+    const [isExpanded, setIsExpanded] = useState(false);
     const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
 
-    // Collapsing Logic
     const validRolls = batch.rolls.filter(hasRollData);
     if (validRolls.length === 0) return null;
 
-    // Group rolls: Completed vs Pending
     const completedRolls = validRolls.filter(r => checkRollStatus(r));
     const activeRolls = validRolls.filter(r => !checkRollStatus(r));
 
     return (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
-            {/* Batch Header */}
-            <div className="bg-white border-b border-gray-100 p-4">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow mb-4">
+            {/* Batch Header - Click to toggle */}
+            <div 
+                className="bg-white border-b border-gray-100 p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                onClick={() => setIsExpanded(!isExpanded)}
+            >
                 <div className="flex justify-between items-center">
                     <div className="flex items-center">
                         <div className="p-2 bg-blue-50 text-blue-600 rounded-lg mr-3">
@@ -340,69 +321,76 @@ const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick }) =>
                         </div>
                         <div>
                             <h2 className="text-lg font-bold text-gray-900">Batch #{batch.batch_id}</h2>
-                            <p className="text-xs text-gray-500 font-mono mt-0.5">{batch.batch_code}</p>
+                            <p className="text-xs text-gray-500 font-mono mt-0.5">{batch.batch_code || 'No Code'}</p>
                         </div>
                     </div>
-                    <div className="text-right">
-                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Pending Rolls</span>
-                        <div className="text-xl font-bold text-blue-600 leading-none mt-1">{activeRolls.length}</div>
+                    <div className="flex items-center gap-6">
+                        <div className="text-right">
+                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide block">Pending Rolls</span>
+                            <span className="text-lg font-bold text-blue-600 leading-none">{activeRolls.length}</span>
+                        </div>
+                        <div className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''} text-gray-400`}>
+                            <ChevronDown size={20} />
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <div className="p-4 bg-gray-50/30">
-                {/* ACTIVE ROLLS SECTION */}
-                {activeRolls.length > 0 ? (
-                    <div className="space-y-4 mb-4">
-                        <h4 className="text-xs font-bold text-gray-500 uppercase flex items-center mb-3">
-                            <span className="w-2 h-2 rounded-full bg-blue-500 mr-2"></span>
-                            Active / Pending Rolls
-                        </h4>
-                        {activeRolls.map(roll => (
-                            <FabricRollCard key={roll.fabric_roll_id} roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} />
-                        ))}
-                    </div>
-                ) : (
-                    <div className="p-4 text-center text-sm text-gray-500 italic bg-white rounded border border-dashed mb-4">
-                        All active rolls completed!
-                    </div>
-                )}
-
-                {/* COMPLETED ROLLS SECTION (COLLAPSIBLE) */}
-                {completedRolls.length > 0 && (
-                    <div className="mt-6 pt-4 border-t border-gray-200">
-                        <button 
-                            onClick={() => setIsCompletedExpanded(!isCompletedExpanded)}
-                            className="flex items-center justify-between w-full text-left group"
-                        >
-                            <h4 className="text-xs font-bold text-gray-400 uppercase flex items-center group-hover:text-gray-600 transition-colors">
-                                <span className="w-2 h-2 rounded-full bg-green-500 mr-2"></span>
-                                Completed Rolls ({completedRolls.length})
+            {isExpanded && (
+                <div className="p-4 bg-gray-50/30">
+                    {/* ACTIVE ROLLS SECTION */}
+                    {activeRolls.length > 0 ? (
+                        <div className="space-y-4 mb-4">
+                            <h4 className="text-xs font-bold text-gray-500 uppercase flex items-center mb-3">
+                                <span className="w-2 h-2 rounded-full bg-blue-500 mr-2"></span>
+                                Active / Pending Rolls
                             </h4>
-                            <div className="p-1 rounded hover:bg-gray-200 text-gray-400 transition-colors">
-                                {isCompletedExpanded ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}
-                            </div>
-                        </button>
-                        
-                        {isCompletedExpanded && (
-                            <div className="mt-3 space-y-4 animate-in slide-in-from-top-2 duration-200">
-                                {completedRolls.map(roll => (
-                                    <div key={roll.fabric_roll_id} className="opacity-80">
-                                        <div className="border border-green-100 p-2 rounded-lg bg-green-50/20">
-                                            <div className="flex items-center justify-between mb-2">
-                                                <span className="text-sm font-bold text-green-800 flex items-center"><CheckCircle2 className="w-4 h-4 mr-2"/> Roll #{roll.fabric_roll_id}</span>
-                                                <span className="text-xs font-medium text-green-600">Complete</span>
+                            {activeRolls.map(roll => (
+                                <FabricRollCard key={roll.fabric_roll_id} roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} />
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="p-4 text-center text-sm text-gray-500 italic bg-white rounded border border-dashed mb-4">
+                            All active rolls completed!
+                        </div>
+                    )}
+
+                    {/* COMPLETED ROLLS SECTION (COLLAPSIBLE) */}
+                    {completedRolls.length > 0 && (
+                        <div className="mt-6 pt-4 border-t border-gray-200">
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); setIsCompletedExpanded(!isCompletedExpanded); }}
+                                className="flex items-center justify-between w-full text-left group"
+                            >
+                                <h4 className="text-xs font-bold text-gray-400 uppercase flex items-center group-hover:text-gray-600 transition-colors">
+                                    <span className="w-2 h-2 rounded-full bg-green-500 mr-2"></span>
+                                    Completed Rolls ({completedRolls.length})
+                                </h4>
+                                <div className="p-1 rounded hover:bg-gray-200 text-gray-400 transition-colors">
+                                    {isCompletedExpanded ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}
+                                </div>
+                            </button>
+                            
+                            {isCompletedExpanded && (
+                                <div className="mt-3 space-y-4 animate-in slide-in-from-top-2 duration-200">
+                                    {completedRolls.map(roll => (
+                                        <div key={roll.fabric_roll_id} className="opacity-80">
+                                            <div className="border border-green-100 p-2 rounded-lg bg-green-50/20">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="text-sm font-bold text-green-800 flex items-center"><CheckCircle2 className="w-4 h-4 mr-2"/> Roll #{roll.fabric_roll_id}</span>
+                                                    <span className="text-xs font-medium text-green-600">Complete</span>
+                                                </div>
+                                                {/* Render details for context even if completed */}
+                                                <FabricRollCard roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} />
                                             </div>
-                                            {/* Render details for context even if completed */}
-                                            <FabricRollCard roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} />
                                         </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
@@ -415,6 +403,7 @@ const NumberingCheckerDashboardPage = () => {
     const [error, setError] = useState(null);
     const [modalState, setModalState] = useState({ type: null, data: null });
     const [headerInfo, setHeaderInfo] = useState({ lineName: 'N/A', processType: 'unknown' });
+    const [batchFilter, setBatchFilter] = useState('');
 
     useEffect(() => { const savedMode = localStorage.getItem('unloadMode') || 'bundle'; setUnloadMode(savedMode); }, []);
 
@@ -422,7 +411,6 @@ const NumberingCheckerDashboardPage = () => {
         setIsLoading(true);
         try {
             const res = await numberingCheckerApi.getMyQueue();
-            console.log("Fetched Queue Data:", res.data);
             let fetchedBatches = res.data.batches || [];
             fetchedBatches.sort((a, b) => a.batch_id - b.batch_id);
             setBatches(fetchedBatches);
@@ -447,21 +435,15 @@ const NumberingCheckerDashboardPage = () => {
 
     const handleValidationSubmit = async (validationData) => {
         try {
-            // 1. Log to DB (Always)
             await numberingCheckerApi.logNumberingCheck(validationData);
 
-            // 2. Optimization: Check if this action completes the Batch
             const currentBatch = batches.find(b => b.batch_id === modalState.data.batchId);
             if (currentBatch) {
-                // Find pending rolls in the CURRENT state (before this update)
                 const pendingRolls = currentBatch.rolls.filter(r => !checkRollStatus(r));
                 const currentRoll = pendingRolls.find(r => r.fabric_roll_id === validationData.rollId);
 
-                // If only 1 roll is pending, and it's this one
                 if (pendingRolls.length === 1 && currentRoll) {
-                    // Check if this action will flip the roll to complete
                     if (willActionCompleteRoll(currentRoll, { ...validationData })) {
-                        console.log("Optimization: Completing batch via frontend trigger");
                         await numberingCheckerApi.checkAndCompleteStages({
                             rollId: validationData.rollId,
                             batchId: modalState.data.batchId,
@@ -470,7 +452,6 @@ const NumberingCheckerDashboardPage = () => {
                     }
                 }
             }
-
             closeModal();
             fetchQueue();
         } catch (err) { alert(`Error: ${err.message}`); }
@@ -481,21 +462,18 @@ const NumberingCheckerDashboardPage = () => {
             const { itemInfo } = modalState.data;
             await numberingCheckerApi.approveAlteredPieces({ ...itemInfo, quantity });
             
-            // Apply same optimization logic for Repair workflow
             const currentBatch = batches.find(b => b.batch_id === modalState.data.batchId);
             if (currentBatch) {
                 const pendingRolls = currentBatch.rolls.filter(r => !checkRollStatus(r));
                 const currentRoll = pendingRolls.find(r => r.fabric_roll_id === itemInfo.rollId);
 
                 if (pendingRolls.length === 1 && currentRoll) {
-                    // Moving to REPAIRED
                     if (willActionCompleteRoll(currentRoll, { 
                         partId: itemInfo.partId, 
                         size: itemInfo.size, 
                         quantity: quantity, 
                         qcStatus: 'REPAIRED' 
                     })) {
-                        console.log("Optimization: Completing batch via frontend trigger (Repair)");
                         await numberingCheckerApi.checkAndCompleteStages({
                             rollId: itemInfo.rollId,
                             batchId: modalState.data.batchId,
@@ -504,13 +482,16 @@ const NumberingCheckerDashboardPage = () => {
                     }
                 }
             }
-
             closeModal();
             fetchQueue();
         } catch (err) { alert(`Error: ${err.message}`); }
     };
 
-    const validBatchesToRender = batches.filter(hasBatchData);
+    const validBatches = batches.filter(hasBatchData);
+    const filteredBatches = validBatches.filter(b => 
+        (b.batch_id?.toString() || '').includes(batchFilter) || 
+        (b.batch_code?.toLowerCase() || '').includes(batchFilter.toLowerCase())
+    );
 
     return (
         <div className="p-6 bg-gray-100 min-h-screen font-inter text-slate-800">
@@ -521,21 +502,35 @@ const NumberingCheckerDashboardPage = () => {
                             <h1 className="text-3xl font-extrabold text-slate-900 flex items-center tracking-tight"><ClipboardCheck className="w-8 h-8 mr-3 text-blue-600"/>Numbering Check</h1>
                             <p className="text-slate-500 mt-1">Station: <strong className="text-slate-700">{headerInfo.lineName}</strong></p>
                         </div>
-                        <div className="flex flex-col items-end">
-                            <label className="text-xs font-semibold text-slate-500 uppercase mb-1.5 tracking-wider">Validation Mode</label>
-                            <div onClick={handleModeToggle} className="cursor-pointer relative w-36 h-9 flex items-center bg-slate-200 rounded-full p-1 shadow-inner transition-colors hover:bg-slate-300">
-                                <div className={`absolute left-1 top-1 w-[4.25rem] h-7 bg-white rounded-full shadow-sm transform transition-all duration-300 ease-out ${unloadMode === 'bundle' ? 'translate-x-0' : 'translate-x-[4.25rem]'}`}></div>
-                                <div className={`w-1/2 text-center z-10 text-xs font-bold transition-colors ${unloadMode === 'bundle' ? 'text-blue-700' : 'text-slate-500'}`}>Bundle</div>
-                                <div className={`w-1/2 text-center z-10 text-xs font-bold transition-colors ${unloadMode === 'single' ? 'text-blue-700' : 'text-slate-500'}`}>Single</div>
+                        <div className="flex flex-col md:flex-row gap-4 items-end md:items-center">
+                            {/* Search Box */}
+                            <div className="relative">
+                                <Search className="absolute left-3 top-2.5 text-gray-400 w-4 h-4" />
+                                <input 
+                                    type="text" 
+                                    placeholder="Filter Batch ID..." 
+                                    value={batchFilter}
+                                    onChange={(e) => setBatchFilter(e.target.value)}
+                                    className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-48"
+                                />
+                            </div>
+
+                            <div className="flex flex-col items-end">
+                                <label className="text-xs font-semibold text-slate-500 uppercase mb-1.5 tracking-wider">Validation Mode</label>
+                                <div onClick={handleModeToggle} className="cursor-pointer relative w-36 h-9 flex items-center bg-slate-200 rounded-full p-1 shadow-inner transition-colors hover:bg-slate-300">
+                                    <div className={`absolute left-1 top-1 w-[4.25rem] h-7 bg-white rounded-full shadow-sm transform transition-all duration-300 ease-out ${unloadMode === 'bundle' ? 'translate-x-0' : 'translate-x-[4.25rem]'}`}></div>
+                                    <div className={`w-1/2 text-center z-10 text-xs font-bold transition-colors ${unloadMode === 'bundle' ? 'text-blue-700' : 'text-slate-500'}`}>Bundle</div>
+                                    <div className={`w-1/2 text-center z-10 text-xs font-bold transition-colors ${unloadMode === 'single' ? 'text-blue-700' : 'text-slate-500'}`}>Single</div>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </header>
                 
                 {isLoading ? <Spinner /> : error ? <ErrorDisplay message={error} /> : (
-                    <div className="space-y-8">
-                        {validBatchesToRender.length > 0 ? (
-                            validBatchesToRender.map(batch => (
+                    <div className="space-y-4">
+                        {filteredBatches.length > 0 ? (
+                            filteredBatches.map(batch => (
                                 <ProductionBatchCard key={batch.batch_id} batch={batch} onValidateClick={openValidationModal} onApproveAlterClick={openAlterModal} />
                             ))
                         ) : (
