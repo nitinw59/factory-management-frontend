@@ -2,18 +2,19 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { initializationPortalApi } from '../../api/initializationPortalApi';
 import Modal from '../../shared/Modal';
+import CuttingForm from '../cutting_portal/CuttingForm'; 
 import { 
     Play, Layers, Info, MoreHorizontal, Square, CheckSquare, 
     ChevronDown, ChevronRight, Loader2, AlertCircle, Box, 
-    BarChart2, Scissors, ClipboardCheck, Package,Wrench, FileText, Eye
+    BarChart2, Scissors, ShoppingBag, Package, Wrench, FileText, Eye, Ruler, Filter, X
 } from 'lucide-react';
 
 // --- SHARED COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><Loader2 className="animate-spin h-8 w-8 text-indigo-400" /></div>;
 const ErrorDisplay = ({ message }) => <div className="text-center p-4 text-rose-600 bg-rose-50 rounded-xl border border-rose-100 font-medium">{message}</div>;
 
-// --- ROLL ACCORDION COMPONENT ---
-const RollProgressRow = ({ roll }) => {
+// --- ROLL ACCORDION COMPONENT (For Progress Modal) ---
+const RollProgressRow = ({ roll, batchId, onEditCutData }) => {
     const [isOpen, setIsOpen] = useState(false);
     
     // Status visual
@@ -22,10 +23,12 @@ const RollProgressRow = ({ roll }) => {
     return (
         <div className="border border-slate-200 rounded-lg mb-2 overflow-hidden">
             <div 
-                onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center justify-between p-3 bg-white hover:bg-slate-50 cursor-pointer transition-colors"
+                className="flex items-center justify-between p-3 bg-white hover:bg-slate-50 transition-colors"
             >
-                <div className="flex items-center space-x-3">
+                <div 
+                    onClick={() => setIsOpen(!isOpen)}
+                    className="flex items-center space-x-3 cursor-pointer flex-1"
+                >
                     {isOpen ? <ChevronDown size={16} className="text-slate-400"/> : <ChevronRight size={16} className="text-slate-400"/>}
                     <div>
                         <span className="text-sm font-mono font-semibold text-slate-700 block">Roll #{Number(roll.roll_id) % 1000}</span>
@@ -34,24 +37,33 @@ const RollProgressRow = ({ roll }) => {
                 </div>
                 
                 <div className="flex items-center space-x-4 text-xs">
-                    <div className="text-right">
+                    <div className="text-right hidden sm:block">
                         <span className="block text-slate-400">Garments</span>
                         <span className="font-bold text-slate-700">{roll.garments_cut}</span>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right hidden sm:block">
                         <span className="block text-slate-400">Checked</span>
                         <span className="font-bold text-indigo-600">{roll.parts_processed}</span>
                     </div>
-                     <div className="text-right w-12">
+                     <div className="text-right w-12 hidden sm:block">
                         <span className="block text-slate-400">WIP</span>
                         <span className={`font-bold ${roll.wip > 0 ? 'text-amber-600' : 'text-slate-300'}`}>{roll.wip}</span>
                     </div>
-                    <div>
+                    <div className="flex items-center gap-2">
                         {isComplete ? (
                             <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-[10px] font-bold">DONE</span>
                         ) : (
                             <span className="bg-slate-100 text-slate-500 px-2 py-1 rounded text-[10px] font-bold">WIP</span>
                         )}
+                        
+                        {/* Edit Cut Data Button */}
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); onEditCutData(batchId, roll.roll_id, roll.meter); }}
+                            className="p-1.5 bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 hover:text-indigo-700 transition-colors border border-indigo-100"
+                            title="Edit Cut Data"
+                        >
+                            <Scissors size={14} />
+                        </button>
                     </div>
                 </div>
             </div>
@@ -59,6 +71,20 @@ const RollProgressRow = ({ roll }) => {
             {/* Expanded Size Details */}
             {isOpen && (
                 <div className="bg-slate-50 p-3 border-t border-slate-100">
+                    <div className="sm:hidden grid grid-cols-3 gap-2 mb-3 text-xs text-center pb-2 border-b border-slate-200">
+                         <div>
+                            <span className="block text-slate-400">Garments</span>
+                            <span className="font-bold text-slate-700">{roll.garments_cut}</span>
+                        </div>
+                        <div>
+                            <span className="block text-slate-400">Checked</span>
+                            <span className="font-bold text-indigo-600">{roll.parts_processed}</span>
+                        </div>
+                        <div>
+                            <span className="block text-slate-400">WIP</span>
+                            <span className={`font-bold ${roll.wip > 0 ? 'text-amber-600' : 'text-slate-300'}`}>{roll.wip}</span>
+                        </div>
+                    </div>
                     <table className="w-full text-xs text-left">
                         <thead className="text-slate-400 font-medium uppercase border-b border-slate-200">
                             <tr>
@@ -70,7 +96,7 @@ const RollProgressRow = ({ roll }) => {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {roll.sizes.map((size, idx) => {
-                                const sizeComplete = parseInt(size.parts_processed) >= parseInt(size.garments_cut); // Simplified assumption 1:1 if unknown
+                                const sizeComplete = parseInt(size.parts_processed) >= parseInt(size.garments_cut);
                                 return (
                                     <tr key={idx}>
                                         <td className="py-2 font-bold text-slate-600">{size.size}</td>
@@ -93,23 +119,25 @@ const RollProgressRow = ({ roll }) => {
 
 
 // --- PROGRESS REPORT MODAL ---
-const BatchProgressModal = ({ batchId, onClose }) => {
+const BatchProgressModal = ({ batchId, onClose, onCutRoll }) => {
     const [data, setData] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
 
-    useEffect(() => {
-        const fetchData = async () => {
-            try {
-                const res = await initializationPortalApi.getBatchProgressReport(batchId);
-                setData(res.data);
-            } catch (err) {
-                console.error("Failed to load progress report:", err);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-        fetchData();
+    const fetchReport = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            const res = await initializationPortalApi.getBatchProgressReport(batchId);
+            setData(res.data);
+        } catch (err) {
+            console.error("Failed to load progress report:", err);
+        } finally {
+            setIsLoading(false);
+        }
     }, [batchId]);
+
+    useEffect(() => {
+        fetchReport();
+    }, [fetchReport]);
 
     if (isLoading) return <Modal title="Loading Report..." onClose={onClose}><div className="flex justify-center p-12"><Spinner/></div></Modal>;
     if (!data) return <Modal title="Error" onClose={onClose}><ErrorDisplay message="Could not load report data."/></Modal>;
@@ -175,7 +203,12 @@ const BatchProgressModal = ({ batchId, onClose }) => {
                     </div>
                     <div className="max-h-[50vh] overflow-y-auto pr-1">
                         {rolls.map(roll => (
-                            <RollProgressRow key={roll.roll_id} roll={roll} />
+                            <RollProgressRow 
+                                key={roll.roll_id} 
+                                roll={roll} 
+                                batchId={batchId}
+                                onEditCutData={onCutRoll} 
+                            />
                         ))}
                     </div>
                 </div>
@@ -188,8 +221,7 @@ const BatchProgressModal = ({ batchId, onClose }) => {
     );
 };
 
-// ... (Rest of the file: StartBatchModal, BatchCard, InitializationDashboardPortalPage remains same) ...
-
+// --- START BATCH MODAL ---
 const StartBatchModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave }) => {
     const [rolls, setRolls] = useState([]);
     const [selectedRolls, setSelectedRolls] = useState(new Set());
@@ -281,14 +313,14 @@ const StartBatchModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave })
 };
 
 // --- BATCH CARD COMPONENT ---
-// Updated to include View Progress Button
-const BatchCard = ({ batch, onStartClick, onViewProgress }) => {
+// Updated to include detailed Roll List and Cut Action
+const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll }) => {
     const progress = batch.progress_for_seq1;
     const status = progress ? progress.status : 'N/A';
     const isPending = status === 'PENDING';
     const isCompleted = status === 'COMPLETED';
     const isInProgress = status === 'IN_PROGRESS';
-    console.log("Rendering BatchCard for batch:", batch.batch_id, "with status:", status);
+
     // Pastel Status Styling
     let statusBadge = "bg-slate-100 text-slate-600 border-slate-200";
     let accentColor = "border-t-slate-300";
@@ -307,11 +339,27 @@ const BatchCard = ({ batch, onStartClick, onViewProgress }) => {
     return (
         <div className={`bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-all duration-300 border-t-[6px] ${accentColor}`}>
             <div className="p-5 border-b border-slate-50 relative">
+                {/* --- Hierarchy Context --- */}
+                {(batch.sales_order_number || batch.po_code) && (
+                    <div className="mb-3 flex flex-wrap gap-2 text-[10px] font-bold tracking-wide uppercase">
+                        {batch.sales_order_number && (
+                            <span className="flex items-center text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                                <FileText size={10} className="mr-1"/> {batch.sales_order_number}
+                            </span>
+                        )}
+                        {batch.po_code && (
+                            <span className="flex items-center text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
+                                <ShoppingBag size={10} className="mr-1"/> {batch.po_code}
+                            </span>
+                        )}
+                    </div>
+                )}
+                
                 <div className="flex justify-between items-start mb-3">
                     <div className="flex items-center">
                         <div className="bg-slate-50 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-100 flex items-center shadow-sm">
                             <Box size={14} className="mr-2 opacity-60" />
-                            <span className="text-sm font-bold font-mono tracking-tight">#{batch.batch_id}</span>
+                            <span className="text-sm font-bold font-mono tracking-tight">#{batch.batch_code || batch.batch_id}</span>
                         </div>
                     </div>
                     <span className={`px-3 py-1 text-[10px] uppercase font-bold tracking-wider rounded-full border ${statusBadge}`}>
@@ -322,7 +370,6 @@ const BatchCard = ({ batch, onStartClick, onViewProgress }) => {
                 <div>
                     <h2 className="font-bold text-lg text-slate-800 leading-tight mb-1">{batch.product_name}</h2>
                     <div className="flex items-center justify-between">
-                        <p className="font-mono text-xs text-slate-400">{batch.batch_code}</p>
                         {progress?.line_name && (
                             <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
                                 {progress.line_name}
@@ -370,36 +417,61 @@ const BatchCard = ({ batch, onStartClick, onViewProgress }) => {
                     <div className="p-2 bg-teal-50 text-teal-600 rounded-lg shrink-0 mt-0.5 border border-teal-100 group-hover:bg-teal-100 transition-colors">
                         <Layers size={14} />
                     </div>
-                    <div className="flex-1">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wide">Rolls Assigned</p>
-                        <div className="flex flex-wrap gap-1.5">
-                            {(batch.rolls || []).map((roll, idx) => (
-                                <span key={idx} className="text-[10px] font-mono bg-white text-teal-700 border border-slate-200 px-2 py-0.5 rounded-md shadow-sm">
-                                    R-{Number(roll.id) % 100}
-                                </span>
+                    <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-wide flex justify-between items-center">
+                            <span>Rolls Assigned</span>
+                            <span className="text-slate-300 font-medium">{batch.rolls?.length || 0}</span>
+                        </p>
+                        
+                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                            {(batch.rolls || []).map((roll) => (
+                                <div key={roll.id} className="bg-white p-2.5 rounded-lg border border-slate-100 shadow-sm flex items-center justify-between group/roll hover:border-indigo-100 transition-colors">
+                                    <div className="flex flex-col min-w-0 pr-2">
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="font-bold text-slate-700 text-xs font-mono">R-{Number(roll.id)%1000}</span>
+                                            <span className="text-[10px] text-slate-400 px-1.5 rounded bg-slate-50 border border-slate-100">{roll.meter}m</span>
+                                        </div>
+                                        <span className="text-[10px] text-slate-500 truncate mt-0.5">
+                                            {roll.type} • {roll.color || 'Generic'}
+                                        </span>
+                                    </div>
+                                    
+                                    {/* Action Button - Only show if batch is in progress or pending (depending on workflow) */}
+                                    {!isCompleted && (
+                                        <button 
+                                            onClick={() => onCutRoll(batch.batch_id, roll.id, roll.meter)}
+                                            className="p-1.5 bg-indigo-50 text-indigo-600 rounded-md hover:bg-indigo-100 hover:text-indigo-700 transition-colors border border-indigo-100"
+                                            title="Enter Cutting Data"
+                                        >
+                                            <Scissors size={14} />
+                                        </button>
+                                    )}
+                                </div>
                             ))}
-                            {(!batch.rolls || batch.rolls.length === 0) && <span className="text-xs text-slate-400">None assigned</span>}
+                            {(!batch.rolls || batch.rolls.length === 0) && (
+                                <p className="text-xs text-slate-400 italic">No rolls assigned.</p>
+                            )}
                         </div>
                     </div>
                 </div>
             </div>
 
             <div className="p-4 bg-white border-t border-slate-100 rounded-b-2xl flex gap-3">
-                <div className="p-3 bg-white border-t border-slate-100 flex justify-center">
-                 <Link 
-                    to={`/cutting-portal/batch-details/${batch.batch_id}`} 
-                    className="text-xs font-bold text-slate-500 hover:text-blue-600 flex items-center transition-colors px-4 py-2 rounded-lg hover:bg-slate-50 w-full justify-center"
-                 >
-                    View Details <Eye size={14} className="ml-2"/>
-                 </Link>
-                    </div>
-                {/* View Progress Button - Available if IN_PROGRESS or COMPLETED */}
-                {!isPending && (
+                {/* --- NEW: View Details Button --- */}
+                <Link 
+                    to={`/initialization-portal/batch-details/${batch.batch_id}`} 
+                    className="flex-1 px-4 py-2.5 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 hover:text-slate-800 rounded-xl flex items-center justify-center transition-all border border-slate-200 hover:border-slate-300"
+                >
+                    <Eye className="mr-2 w-4 h-4"/> Details
+                </Link>
+
+                {/* VIEW PROGRESS - Show for IN_PROGRESS or COMPLETED */}
+                {(isInProgress || isCompleted) && (
                     <button
                         onClick={onViewProgress}
                         className="flex-1 px-4 py-2.5 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 hover:text-slate-800 rounded-xl flex items-center justify-center transition-all"
                     >
-                        <BarChart2 className="mr-2 w-4 h-4"/> View Progress
+                        <BarChart2 className="mr-2 w-4 h-4"/> Report
                     </button>
                 )}
 
@@ -408,10 +480,10 @@ const BatchCard = ({ batch, onStartClick, onViewProgress }) => {
                     <button 
                         onClick={onStartClick} 
                         disabled={!batch.first_cycle_flow} 
-                        className={`group w-full px-4 py-2.5 text-sm font-bold text-white rounded-xl flex items-center justify-center transition-all shadow-sm hover:shadow-md bg-indigo-500 hover:bg-indigo-600 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed disabled:shadow-none`}
+                        className={`flex-1 px-4 py-2.5 text-sm font-bold text-white rounded-xl flex items-center justify-center transition-all shadow-sm hover:shadow-md bg-indigo-500 hover:bg-indigo-600 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed disabled:shadow-none`}
                     >
-                        <Play className="mr-2 w-4 h-4 fill-current group-hover:scale-110 transition-transform"/>
-                        Start Batch
+                        <Play className="mr-2 w-4 h-4 fill-current"/>
+                        Start
                     </button>
                 )}
             </div>
@@ -457,6 +529,7 @@ const InitializationDashboardPortalPage = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
     const [modalState, setModalState] = useState({ type: null, data: null });
+    const [cuttingModal, setCuttingModal] = useState(null); // { batchId, rollId, meter }
     
     const [expandedSections, setExpandedSections] = useState({
         PENDING: true,
@@ -513,13 +586,25 @@ const InitializationDashboardPortalPage = () => {
 
     const hasAnyBatches = batches.length > 0;
 
+    // Handler to open cutting form
+    const handleCutRollClick = (batchId, rollId, meter) => {
+        setCuttingModal({ batchId, rollId, meter });
+    };
+
+    // Callback after cutting is saved
+    const handleCutSaved = () => {
+        setCuttingModal(null);
+        fetchDashboardData(); // Refresh data to update progress
+    };
+
     return (
         <div className="p-8 bg-slate-50 min-h-screen font-inter text-slate-800">
-            <header className="mb-10 pl-2 border-l-4 border-indigo-500">
-                <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Cutting Manager Dashboard</h1>
-                <p className="text-slate-500 mt-2 font-medium">Manage and initialize batch production cycles.</p>
-
-                  <div className="flex gap-3">
+            <header className="mb-10 pl-2 border-l-4 border-indigo-500 flex flex-col md:flex-row md:items-end justify-between gap-6">
+                <div>
+                    <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Cutting Manager Dashboard</h1>
+                    <p className="text-slate-500 mt-2 font-medium">Manage and initialize batch production cycles.</p>
+                </div>
+                 <div className="flex gap-3">
                      <Link 
                         to="/initialization-portal/reports" 
                         className="flex items-center px-5 py-2.5 bg-white text-indigo-700 border border-indigo-200 rounded-xl hover:bg-indigo-50 hover:border-indigo-300 font-bold shadow-sm transition-all"
@@ -556,6 +641,7 @@ const InitializationDashboardPortalPage = () => {
                                     batch={batch}
                                     onStartClick={() => setModalState({ type: 'start', data: batch })}
                                     onViewProgress={() => setModalState({ type: 'progress', data: batch })}
+                                    onCutRoll={handleCutRollClick}
                                 />
                             ))}
                         </BatchStatusGroup>
@@ -578,6 +664,7 @@ const InitializationDashboardPortalPage = () => {
                                     batch={batch}
                                     onStartClick={() => setModalState({ type: 'start', data: batch })}
                                     onViewProgress={() => setModalState({ type: 'progress', data: batch })}
+                                    onCutRoll={handleCutRollClick}
                                 />
                             ))}
                         </BatchStatusGroup>
@@ -600,6 +687,7 @@ const InitializationDashboardPortalPage = () => {
                                     batch={batch}
                                     onStartClick={() => setModalState({ type: 'start', data: batch })}
                                     onViewProgress={() => setModalState({ type: 'progress', data: batch })}
+                                    onCutRoll={handleCutRollClick}
                                 />
                             ))}
                         </BatchStatusGroup>
@@ -622,7 +710,21 @@ const InitializationDashboardPortalPage = () => {
                 <BatchProgressModal
                     batchId={modalState.data.batch_id}
                     onClose={() => setModalState({ type: null, data: null })}
+                    onCutRoll={handleCutRollClick} // Pass the handler
                 />
+            )}
+
+            {/* NEW: Cutting Form Modal */}
+            {cuttingModal && (
+                <Modal title={`Enter Cut Data: Roll #${Number(cuttingModal.rollId) % 1000}`} onClose={() => setCuttingModal(null)}>
+                    <CuttingForm 
+                        batchId={cuttingModal.batchId}
+                        rollId={cuttingModal.rollId}
+                        meter={cuttingModal.meter}
+                        onSaveSuccess={handleCutSaved}
+                        onClose={() => setCuttingModal(null)}
+                    />
+                </Modal>
             )}
         </div>
     );

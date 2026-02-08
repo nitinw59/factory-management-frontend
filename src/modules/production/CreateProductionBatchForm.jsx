@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate, Link, useParams } from 'react-router-dom';
-import { Package, Ruler, Layers, ArrowLeft, Info, Loader2, ChevronDown, ChevronRight, Hash } from 'lucide-react';
-import { productionManagerApi } from '../../api/productionManagerApi'; 
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Package, Ruler, Layers, ArrowLeft, Info, Loader2, ChevronDown, ChevronRight, Hash, ShoppingBag } from 'lucide-react';
+import { productionManagerApi } from '../../api/productionManagerApi';
+import { accountingApi } from '../../api/accountingApi'; 
+import { Link } from 'react-router-dom';
 
 const Spinner = () => <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
 const ErrorDisplay = ({ message }) => <div className="p-3 mb-4 bg-red-100 text-red-700 rounded-md border border-red-200">{message}</div>;
@@ -24,13 +26,10 @@ const TabButton = ({ label, icon: Icon, isActive, onClick }) => (
 // --- COLLAPSIBLE GROUP COMPONENT ---
 const RollGroup = ({ referenceNumber, rolls, selectedRolls, onToggleRoll }) => {
     const [isOpen, setIsOpen] = useState(true);
-    
-    // Check if all visible rolls in this group are selected
     const allSelected = rolls.length > 0 && rolls.every(r => selectedRolls.includes(r.id));
     
     const handleGroupToggle = (e) => {
-        e.stopPropagation(); // Prevent accordion toggle
-        // If all selected, deselect all. Else, select all.
+        e.stopPropagation();
         rolls.forEach(r => {
             if (allSelected) {
                 if (selectedRolls.includes(r.id)) onToggleRoll(r.id);
@@ -64,7 +63,6 @@ const RollGroup = ({ referenceNumber, rolls, selectedRolls, onToggleRoll }) => {
                     {allSelected ? 'Deselect All' : 'Select All'}
                 </button>
             </div>
-            
             {isOpen && (
                 <div className="p-2 bg-white grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                     {rolls.map(roll => (
@@ -91,14 +89,15 @@ const RollGroup = ({ referenceNumber, rolls, selectedRolls, onToggleRoll }) => {
     );
 };
 
-
 const CreateProductionBatchForm = () => {
-    // Fixed: Call hooks unconditionally
     const navigate = useNavigate();
     const { batchId } = useParams();
+    const [searchParams] = useSearchParams();
+    const prefillPoId = searchParams.get('poId');
     const isEditMode = Boolean(batchId);
 
     // --- State ---
+    const [purchaseOrderId, setPurchaseOrderId] = useState('');
     const [productId, setProductId] = useState('');
     const [productionLineId, setProductionLineId] = useState('');
     const [layerLength, setLayerLength] = useState('');
@@ -110,7 +109,17 @@ const CreateProductionBatchForm = () => {
     ], []);
     const [sizeRatios, setSizeRatios] = useState( SIZES.map(s => ({ size: s.key, ratio: '' })) );
     const [selectedRolls, setSelectedRolls] = useState([]);
-    const [options, setOptions] = useState({ products: [], availableRolls: [], fabricTypes: [], fabricColors: [], productionLines: [] });
+    
+    // Combined options from all APIs
+    const [options, setOptions] = useState({ 
+        products: [], 
+        availableRolls: [], 
+        fabricTypes: [], 
+        fabricColors: [], 
+        productionLines: [],
+        purchaseOrders: []
+    });
+    
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState(null);
@@ -124,16 +133,18 @@ const CreateProductionBatchForm = () => {
             setIsLoading(true);
             setError(null);
             try {
-                const [typesRes, colorsRes, linesRes] = await Promise.all([
+                const [typesRes, colorsRes, linesRes, poRes] = await Promise.all([
                     productionManagerApi.getFabricTypes(),
                     productionManagerApi.getFabricColors(),
                     productionManagerApi.getLinesWithLoaders(),
+                    accountingApi.getPurchaseOrders() 
                 ]);
                 
                 const commonOptions = {
                     fabricTypes: typesRes.data || [],
                     fabricColors: colorsRes.data || [],
                     productionLines: linesRes.data || [],
+                    purchaseOrders: poRes.data || []
                 };
 
                 if (isEditMode) {
@@ -142,6 +153,7 @@ const CreateProductionBatchForm = () => {
                     if (!data || !data.batchDetails) throw new Error("Batch data not found.");
 
                     setProductId(data.batchDetails.product_id || '');
+                    setPurchaseOrderId(data.batchDetails.purchase_order_id || '');
                     setProductionLineId(data.batchDetails.assigned_production_line_id || ''); 
                     setLayerLength(data.batchDetails.length_of_layer_inches || '');
                     setNotes(data.batchDetails.notes || '');
@@ -168,6 +180,8 @@ const CreateProductionBatchForm = () => {
                      setSizeRatios(SIZES.map(s => ({ size: s.key, ratio: '' })));
                      setSelectedRolls([]);
                      setProductId('');
+                     // Pre-fill PO ID from URL if available
+                     setPurchaseOrderId(prefillPoId || ''); 
                      setProductionLineId('');
                      setLayerLength('');
                      setNotes('');
@@ -178,7 +192,7 @@ const CreateProductionBatchForm = () => {
             } finally { setIsLoading(false); }
         };
         loadData();
-    }, [batchId, isEditMode, SIZES]);
+    }, [batchId, isEditMode, SIZES, prefillPoId]);
 
     // --- Filter Logic ---
     const filteredFabricRolls = useMemo(() => {
@@ -188,11 +202,15 @@ const CreateProductionBatchForm = () => {
 
             const typeMatch = !fabricTypeFilter || rollType === fabricTypeFilter;
             const colorMatch = !fabricColorFilter || rollColor === fabricColorFilter;
+            
+            // Optional: Filter by selected PO if you want strict enforcement
+            // const poMatch = !purchaseOrderId || roll.reference_number?.includes(purchaseOrderId) ... logic depends on data structure
+            
             return typeMatch && colorMatch;
         });
     }, [options.availableRolls, fabricTypeFilter, fabricColorFilter]);
 
-    // --- Grouping Logic (New) ---
+    // --- Grouping Logic ---
     const groupedRolls = useMemo(() => {
         const groups = {};
         filteredFabricRolls.forEach(roll => {
@@ -228,6 +246,8 @@ const CreateProductionBatchForm = () => {
     // --- Submit Handler ---
     const handleSubmit = async (e) => {
         e.preventDefault();
+        // Validation updates
+        if (!purchaseOrderId) { setError("Purchase Order selection is required for Batch Coding."); return; }
         if (!productId) { setError("Product selection is required."); return; }
         if (!productionLineId) { setError("Production Line assignment is required."); return; }
         if (selectedRolls.length === 0) { setError("At least one fabric roll must be selected."); return; }
@@ -236,6 +256,7 @@ const CreateProductionBatchForm = () => {
         setError(null);
         try {
             const payload = {
+                purchase_order_id: purchaseOrderId, // Send PO ID
                 product_id: productId,
                 assigned_production_line_id: productionLineId, 
                 length_of_layer_inches: layerLength || null,
@@ -264,13 +285,13 @@ const CreateProductionBatchForm = () => {
 
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
-            <Link to="/production-manager/dashboard" className="text-sm text-blue-600 hover:underline flex items-center mb-4">
-                 <ArrowLeft className="mr-2 h-4 w-4" /> Back to Planning Dashboard
+            <Link to="/production-manager/production-workflow" className="text-sm text-blue-600 hover:underline flex items-center mb-4">
+                 <ArrowLeft className="mr-2 h-4 w-4" /> Back to production-workflow
             </Link>
             <form onSubmit={handleSubmit} className="flex flex-col bg-white rounded-lg shadow border overflow-hidden">
                 <div className="p-4 border-b">
                      <h1 className="text-2xl font-bold text-gray-800">{isEditMode ? 'Edit Production Batch' : 'Create New Production Batch'}</h1>
-                     <p className="text-sm text-gray-500">{isEditMode ? `Updating Batch ID: ${batchId}` : 'Fill in the details and assign fabric.'}</p>
+                     <p className="text-sm text-gray-500">{isEditMode ? `Updating Batch ID: ${batchId}` : 'Define batch hierarchy (PO -> Batch) and assign resources.'}</p>
                 </div>
 
                 <div className="flex border-b">
@@ -283,10 +304,47 @@ const CreateProductionBatchForm = () => {
                     {error && <ErrorDisplay message={error} />}
 
                     {activeTab === 'details' && (
-                        <div className="space-y-4">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Product & Specifications</h3>
+                        <div className="space-y-6">
+                            
+                            {/* Hierarchy Section */}
+                            <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+                                <h4 className="text-sm font-bold text-indigo-800 mb-3 flex items-center"><ShoppingBag size={16} className="mr-2"/> Batch Context</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700">Purchase Order (Link)*</label>
+                                        <select 
+                                            value={purchaseOrderId} 
+                                            onChange={e => setPurchaseOrderId(e.target.value)} 
+                                            className="mt-1 p-2 w-full border rounded-md focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                            required
+                                        >
+                                            <option value="">Select Purchase Order...</option>
+                                            {(options.purchaseOrders || []).map(po => (
+                                                <option key={po.id} value={po.id}>
+                                                    {po.po_code || `PO-${po.id}`} (Ref: {po.sales_order_number || 'N/A'})
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="text-xs text-gray-500 mt-1">This determines the Batch Code prefix (e.g. SO-PO-B1).</p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700">Product*</label>
+                                        <select 
+                                            value={productId} 
+                                            onChange={e => setProductId(e.target.value)} 
+                                            className="mt-1 p-2 w-full border rounded-md" 
+                                            required
+                                        >
+                                            <option value="">Select Product</option>
+                                            {(options.products || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr className="border-gray-200"/>
+
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div><label className="block text-sm font-medium">Product*</label><select value={productId} onChange={e => setProductId(e.target.value)} className="mt-1 p-2 w-full border rounded-md" required><option value="">Select Product</option>{(options.products || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
                                 <div>
                                      <label className="block text-sm font-medium">Assign to Line*</label>
                                      <select value={productionLineId} onChange={e => setProductionLineId(e.target.value)} className="mt-1 p-2 w-full border rounded-md" required>
@@ -334,7 +392,7 @@ const CreateProductionBatchForm = () => {
                                      </select>
                                  </div>
                                  
-                                 {/* NEW: Grouped Roll Display */}
+                                 {/* Grouped Roll Display */}
                                  <div className="mt-2 max-h-96 overflow-y-auto p-2 border rounded-md bg-gray-50/50">
                                      {sortedGroupKeys.length > 0 ? sortedGroupKeys.map(refNum => (
                                          <RollGroup 

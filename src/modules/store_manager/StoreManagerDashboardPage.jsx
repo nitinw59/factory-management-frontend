@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { storeManagerApi } from '../../api/storeManagerApi';
-import FabricIntakeForm from './FabricIntakeForm';
+// import FabricIntakeForm from '../accounts/purchase/FabricIntakeForm';
 import { 
     Package, List, FileText, Plus, Filter, X, Clock, Truck, 
     CheckCircle, Archive, ChevronDown, ChevronRight, Hash, Layers 
@@ -374,8 +374,8 @@ const StoreManagerDashboardPage = () => {
                     </section>
                 </>
             )}
-      
-            {isModalOpen && <Modal title="Record New Fabric Intake" onClose={() => setIsModalOpen(false)}><FabricIntakeForm onSave={handleSaveIntake} onClose={() => setIsModalOpen(false)} /></Modal>}
+
+           {/* {isModalOpen && <Modal title="Record New Fabric Intake" onClose={() => setIsModalOpen(false)}><FabricIntakeForm onSave={handleSaveIntake} onClose={() => setIsModalOpen(false)} /></Modal>} */}
         </div>
     );
 };

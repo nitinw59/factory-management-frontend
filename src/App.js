@@ -32,8 +32,8 @@ import SewingManagerLayout from './shared/SewingPartLayout';
 import SewingManagerProtectedRoute from './shared/SewingManagerProtectedRoute'; 
 import AssemblyLayout from './shared/AssemblyLayout';
 import AssemblyProtectedRoute from './shared/AssemblyProtectedRoute'; 
-
-
+import AccountsLayout from './shared/AccountsLayout';
+import SalesAccessProtectedRoute from './shared/SalesAccessProtectedRoute'; // <--- NEW IMPORT
 
 // --- PUBLIC PAGES ---
 import LoginPage from './login/LoginPage';
@@ -87,6 +87,11 @@ import NumberingCheckerSummaryPage from './modules/numbering_portal/NumberingChe
 import SewingMachineComplaintPage from './modules/asset/SewingMachineComplaintPage';
 import ListTrimStockIntake from './modules/store_manager/ListTrimStockIntake';  
 import CuttingManagerReportPage from './modules/initialisation_portal/CuttingManagerReportPage';
+import CreateSalesOrder from './modules/accounts/sales/CreateSalesOrder';
+//import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
+import ProductionWorkflowDashboard from './modules/production/ProductionWorkflowDashboard';
+
+import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
 
 function App() {
   return (
@@ -158,9 +163,21 @@ function App() {
           <Route path="batches/new" element={<CreateProductionBatchForm />} />
           <Route path="batches/edit/:batchId" element={<CreateProductionBatchForm />} />
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+          <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
+          <Route path="batch-cutting-details/:batchId" element={<BatchCuttingDetailsPage />} />
 
         </Route>
       </Route>
+
+
+      <Route path="/accounts" element={<SalesAccessProtectedRoute><AccountsLayout /></SalesAccessProtectedRoute>}>
+            {/* Redirect /accounts to the orders list */}
+            <Route index element={<Navigate to="sales/orders" />} />
+            
+            {/* Sales Order Routes */}
+            <Route path="sales/new" element={<CreateSalesOrder />} />
+            <Route path="sales/orders" element={<SalesOrderListPage />} />
+        </Route>
 
       <Route path="/cutting-portal" element={<CuttingOperatorProtectedRoute><CuttingPortalLayout /></CuttingOperatorProtectedRoute>}>
           <Route index element={<CuttingDashboardPage />} />
@@ -215,6 +232,7 @@ function App() {
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
           <Route path="reports" element={<CuttingManagerReportPage />} />
           <Route path="batch-details/:batchId" element={<BatchCuttingDetailsPage />} />
+          <Route path="batch-cutting-details/:batchId" element={<BatchCuttingDetailsPage />} />
 
       </Route>
 

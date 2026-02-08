@@ -62,5 +62,9 @@ export const productionManagerApi = {
   updateBatch: (batchId, batchData) => api.put(`/production-batch-api/production-batches/${batchId}`, batchData),
 
 
+// WORKFLOW FUNCTIONS
+  getWorkflowData: () => api.get('/production-manager/production-workflow-data'),
+
+
 };
 

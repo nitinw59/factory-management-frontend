@@ -5,7 +5,7 @@ export const storeManagerApi = {
     getFabricInventory: () => api.get('/store-manager/fabric-inventory'),
     createFabricIntake: (data) => api.post('/store-manager/fabric-intake', data),
     getFabricIntakeFormData: () => api.get('/store-manager/form-data/fabric-intake'),
-
+    getFabricRollsByPO: (poId) => api.get(`/store-manager/fabric-rolls/po/${poId}`),
     // Trims
     getVariantsByTrimItem: (trimItemId) => api.get(`/store-manager/trim-item-variants/${trimItemId}`),
 

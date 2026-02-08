@@ -75,8 +75,15 @@ const InitialRedirect = () => {
         case 'assembly_operator':
             // Assembly Operators are sent to their assembly operator dashboard.
             return <Navigate to="/assembly-portal/dashboard" replace />;
-        
+        case 'accountant':
+            // Accountants are sent to their accounting dashboard.
+            return <Navigate to="/accounts/sales/orders" replace />;
 
+         case 'sales_manager':
+            // Sales Managers are sent to their sales management dashboard.
+            return <Navigate to="/accounts/sales/dashboard" replace />;
+
+        
         default:
             // If a user has a valid login but their role is not recognized
             // by the application's portals, they are sent to an unauthorized page.

@@ -48,8 +48,13 @@ const ProductionManagerLayout = () => {
           <div className="flex items-center space-x-8">
             <div className="text-xl font-bold text-gray-800">Production Portal</div>
             <nav className="hidden md:flex items-center space-x-6">
-                <NavDropdown title="Batches">
-                <NavLink to="/production-manager/dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+
+
+                <NavDropdown title="WORKFLOW">
+                  <NavLink to="/production-manager/production-workflow" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                   Workflow Dashboard
+                </NavLink>
+                  <NavLink to="/production-manager/dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                    Batches
                 </NavLink>
                 </NavDropdown>

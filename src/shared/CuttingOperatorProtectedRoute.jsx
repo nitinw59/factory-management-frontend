@@ -9,7 +9,7 @@ const CuttingOperatorProtectedRoute = ({ children }) => {
     return <Navigate to="/login" replace />;
   }
 
-  if (user.role !== 'cutting_operator' && user.role !== 'cutting_manager') {
+  if (user.role !== 'cutting_operator' && user.role !== 'cutting_manager' && user.role !== 'admin'&& user.role !== 'production_manager') {
     return <Navigate to="/unauthorized" replace />;
   }
 

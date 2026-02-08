@@ -1,0 +1,94 @@
+const BatchProgressModal = ({ batchId, onClose }) => {
+    const [data, setData] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            try {
+                const res = await initializationPortalApi.getBatchProgressReport(batchId);
+                setData(res.data);
+            } catch (err) {
+                console.error("Failed to load progress report:", err);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        fetchData();
+    }, [batchId]);
+
+    if (isLoading) return <Modal title="Loading Report..." onClose={onClose}><div className="flex justify-center p-12"><Spinner/></div></Modal>;
+    if (!data) return <Modal title="Error" onClose={onClose}><ErrorDisplay message="Could not load report data."/></Modal>;
+
+    const { batch, stats, rolls } = data;
+    
+    // Progress Percent based on Parts Checked vs Total Parts Needed
+    const progressPercent = stats.total_parts_to_process > 0 
+        ? Math.min(100, Math.round((stats.total_parts_processed / stats.total_parts_to_process) * 100)) 
+        : 0;
+
+    return (
+        <Modal title={`Progress Report: ${batch.batch_code}`} onClose={onClose}>
+            <div className="space-y-6">
+                
+                {/* 1. High Level KPIs */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {/* GARMENTS CUT */}
+                    <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-center">
+                        <div className="text-2xl font-bold text-blue-700">{stats.garments_cut}</div>
+                        <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Garments Cut</div>
+                    </div>
+                    
+                    {/* PARTS TO PROCESS */}
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                        <div className="text-2xl font-bold text-slate-700">{stats.total_parts_to_process}</div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Parts</div>
+                    </div>
+
+                    {/* PARTS CHECKED */}
+                    <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100 text-center relative overflow-hidden">
+                        <div className="text-2xl font-bold text-indigo-700">{stats.total_parts_processed}</div>
+                        <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Parts Checked</div>
+                        <div className="absolute bottom-0 left-0 w-full h-1 bg-indigo-200">
+                             <div className="h-full bg-indigo-500" style={{ width: `${progressPercent}%` }}></div>
+                        </div>
+                    </div>
+
+                    {/* WIP */}
+                    <div className="bg-amber-50 p-3 rounded-xl border border-amber-100 text-center">
+                        <div className="text-2xl font-bold text-amber-700">{stats.wip}</div>
+                        <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Pending (WIP)</div>
+                    </div>
+                </div>
+
+                {/* 2. Bottlenecks / Alerts */}
+                <div className="flex space-x-3">
+                     <div className="flex-1 bg-rose-50 px-3 py-2 rounded-lg border border-rose-100 flex justify-between items-center">
+                        <span className="text-xs font-medium text-rose-700 flex items-center"><AlertCircle size={14} className="mr-1.5"/> Rejected</span>
+                        <span className="font-bold text-rose-800 text-sm">{stats.rejected}</span>
+                     </div>
+                     <div className="flex-1 bg-orange-50 px-3 py-2 rounded-lg border border-orange-100 flex justify-between items-center">
+                        <span className="text-xs font-medium text-orange-700 flex items-center"><Wrench size={14} className="mr-1.5"/> Alteration</span>
+                        <span className="font-bold text-orange-800 text-sm">{stats.pending_alter}</span>
+                     </div>
+                </div>
+
+                {/* 3. Detailed Roll List (Accordion) */}
+                <div className="mt-2">
+                    <div className="flex justify-between items-center mb-3 px-1">
+                        <h4 className="font-bold text-slate-700 text-sm">Roll Breakdown</h4>
+                        <span className="text-xs text-slate-400">{rolls.length} Rolls</span>
+                    </div>
+                    <div className="max-h-[50vh] overflow-y-auto pr-1">
+                        {rolls.map(roll => (
+                            <RollProgressRow key={roll.roll_id} roll={roll} />
+                        ))}
+                    </div>
+                </div>
+
+            </div>
+            <div className="mt-6 flex justify-end">
+                <button onClick={onClose} className="px-5 py-2 bg-slate-100 text-slate-700 font-medium rounded-lg hover:bg-slate-200 transition-colors text-sm">Close Report</button>
+            </div>
+        </Modal>
+    );
+};
