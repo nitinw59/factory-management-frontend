@@ -66,6 +66,17 @@ const hasPartData = (part) => part.size_details && part.size_details.some(detail
 const hasRollData = (roll) => roll.parts_details && roll.parts_details.some(part => hasPartData(part));
 const hasBatchData = (batch) => batch.rolls && batch.rolls.some(roll => hasRollData(roll));
 
+// Fuzzy search for roll numbers
+const isRollMatch = (text, pattern) => {
+    if (!pattern) return true;
+    try {
+        const regex = new RegExp(pattern, 'i');
+        return regex.test(text.toString());
+    } catch (e) {
+        return text.toString().toLowerCase().includes(pattern.toLowerCase());
+    }
+};
+
 
 // --- MODAL COMPONENTS ---
 const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) => {
@@ -85,7 +96,8 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
             try {
                 await onValidationSubmit({ rollId: itemInfo.rollId, partId: itemInfo.partId, size: itemInfo.size, quantity, qcStatus });
             } finally {
-                setIsSubmitting(false);
+                // Keep submitting state true until unmounted or parent handles it to prevent double taps
+                // Note: Logic in parent closes modal which unmounts this.
             }
         }
     };
@@ -96,7 +108,22 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
                 <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
                     <div>
                         <h3 className="text-lg font-bold text-gray-800">Validate: {itemInfo.partName}</h3>
-                        <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Size {itemInfo.size}</p>
+                        <div className="text-sm mt-1 text-gray-600">
+                             Batch: <span className="font-bold text-gray-900">{itemInfo.batchCode || itemInfo.batchId}</span>
+                             <span className="mx-2">|</span>
+                             Roll: <span className="font-bold text-indigo-700">#{itemInfo.rollId}</span>
+                        </div>
+                        {/* Display Color/Type if available */}
+                        {(itemInfo.rollColor || itemInfo.rollType) && (
+                            <div className="text-xs text-gray-500 mt-0.5">
+                                {itemInfo.rollType} &bull; <span className="font-semibold text-gray-700">{itemInfo.rollColor}</span>
+                            </div>
+                        )}
+                        <div className="mt-2">
+                             <span className="text-xs font-bold uppercase tracking-wide bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                                Size: {itemInfo.size}
+                             </span>
+                        </div>
                     </div>
                     <button onClick={onClose} disabled={isSubmitting}><X className="w-5 h-5 text-gray-400 hover:text-gray-600"/></button>
                 </div>
@@ -111,10 +138,18 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
                     <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2">QC Decision</label>
                         <div className="grid grid-cols-2 gap-3">
-                            <button onClick={() => handleStatusClick('APPROVED')} disabled={isSubmitting} className="py-3 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 font-bold shadow-sm flex items-center justify-center transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed">
+                            <button 
+                                onClick={() => handleStatusClick('APPROVED')} 
+                                disabled={isSubmitting || quantity <= 0} 
+                                className={`py-3 px-4 bg-green-600 text-white rounded-lg font-bold shadow-sm flex items-center justify-center transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-green-700 active:scale-95'}`}
+                            >
                                 {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin"/> : <><Check className="w-5 h-5 mr-2"/> APPROVE</>}
                             </button>
-                            <button onClick={() => handleStatusClick('ALTER')} disabled={isSubmitting} className="py-3 px-4 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-bold shadow-sm flex items-center justify-center transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed">
+                            <button 
+                                onClick={() => handleStatusClick('ALTER')} 
+                                disabled={isSubmitting || quantity <= 0} 
+                                className={`py-3 px-4 bg-amber-500 text-white rounded-lg font-bold shadow-sm flex items-center justify-center transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-amber-600 active:scale-95'}`}
+                            >
                                 {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin"/> : <><Hammer className="w-5 h-5 mr-2"/> ALTER</>}
                             </button>
                         </div>
@@ -136,7 +171,7 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
         try {
             await onSave(quantity);
         } finally {
-            setIsSubmitting(false);
+            setIsSubmitting(false); // Only reset if not unmounted (though this usually unmounts)
         }
     };
 
@@ -155,7 +190,11 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
                 </div>
                 <div className="px-6 py-4 border-t bg-gray-50 flex justify-end space-x-3">
                     <button onClick={onClose} disabled={isSubmitting} className="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50">Cancel</button>
-                    <button onClick={handleSave} disabled={isSubmitting} className="px-4 py-2 bg-amber-600 text-white font-bold rounded-lg hover:bg-amber-700 shadow-sm disabled:opacity-70 disabled:cursor-not-allowed">
+                    <button 
+                        onClick={handleSave} 
+                        disabled={isSubmitting || quantity <= 0} 
+                        className={`px-4 py-2 bg-amber-600 text-white font-bold rounded-lg shadow-sm flex items-center ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-amber-700'}`}
+                    >
                         {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin"/> : "Confirm"}
                     </button>
                 </div>
@@ -303,8 +342,8 @@ const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick, activeCont
                         key={part.part_id} 
                         part={part} 
                         rollId={roll.fabric_roll_id} 
-                        onValidateClick={onValidateClick} 
-                        onApproveAlterClick={onApproveAlterClick} 
+                        onValidateClick={(partInfo) => onValidateClick({ ...partInfo, rollColor: roll.fabric_color || roll.color, rollType: roll.fabric_type || roll.type })} 
+                        onApproveAlterClick={(partInfo) => onApproveAlterClick({ ...partInfo, rollColor: roll.fabric_color || roll.color, rollType: roll.fabric_type || roll.type })} 
                         activeContext={activeContext}
                     />
                 ))}
@@ -314,23 +353,34 @@ const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick, activeCont
 };
 
 // --- BATCH CARD with GROUPED ROLLS (Collapsible) ---
-const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick, activeContext }) => {
+const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick, activeContext, rollFilter }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
 
     const validRolls = batch.rolls.filter(hasRollData);
-    const completedRolls = validRolls.filter(r => checkRollStatus(r));
-    const activeRolls = validRolls.filter(r => !checkRollStatus(r));
+    
+    // Apply Roll Filter here (Regex/Search)
+    const filteredRolls = useMemo(() => {
+        if (!rollFilter) return validRolls;
+        return validRolls.filter(r => isRollMatch(r.fabric_roll_id, rollFilter));
+    }, [validRolls, rollFilter]);
 
-    // Auto-expand if this batch contains the active context
+ 
+
+    const completedRolls = filteredRolls.filter(r => checkRollStatus(r));
+    const activeRolls = filteredRolls.filter(r => !checkRollStatus(r));
+
+    // Auto-expand if this batch contains the active context or matches search
     useEffect(() => {
-        if (activeContext && String(activeContext.batchId) === String(batch.batch_id)) {
+        if ((activeContext && String(activeContext.batchId) === String(batch.batch_id)) || rollFilter) {
             setIsExpanded(true);
         }
-    }, [activeContext, batch.batch_id]);
+    }, [activeContext, batch.batch_id, rollFilter]);
 
+       // If filter is applied and no rolls match, don't render batch
+    if (filteredRolls.length === 0 && rollFilter) return null;
     if (validRolls.length === 0) return null;
-
+    
     return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow mb-4">
             {/* Batch Header - Click to toggle */}
@@ -373,7 +423,7 @@ const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick, acti
                                 <FabricRollCard 
                                     key={roll.fabric_roll_id} 
                                     roll={roll} 
-                                    onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} 
+                                    onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, batch.batch_code, itemInfo)} 
                                     onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} 
                                     activeContext={activeContext}
                                 />
@@ -381,7 +431,7 @@ const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick, acti
                         </div>
                     ) : (
                         <div className="p-4 text-center text-sm text-gray-500 italic bg-white rounded border border-dashed mb-4">
-                            All active rolls completed!
+                            {rollFilter ? "No active rolls match your search." : "All active rolls completed!"}
                         </div>
                     )}
 
@@ -410,12 +460,8 @@ const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick, acti
                                                     <span className="text-sm font-bold text-green-800 flex items-center"><CheckCircle2 className="w-4 h-4 mr-2"/> Roll #{roll.fabric_roll_id}</span>
                                                     <span className="text-xs font-medium text-green-600">Complete</span>
                                                 </div>
-                                                <FabricRollCard 
-                                                    roll={roll} 
-                                                    onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} 
-                                                    onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} 
-                                                    activeContext={activeContext}
-                                                />
+                                                {/* Render details for context even if completed */}
+                                                <FabricRollCard roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, batch.batch_code, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} activeContext={activeContext} />
                                             </div>
                                         </div>
                                     ))}
@@ -439,6 +485,7 @@ const NumberingCheckerDashboardPage = () => {
     const [modalState, setModalState] = useState({ type: null, data: null });
     const [headerInfo, setHeaderInfo] = useState({ lineName: 'N/A', processType: 'unknown' });
     const [batchFilter, setBatchFilter] = useState('');
+    const [rollFilter, setRollFilter] = useState('');
     
     // Track context of last action to maintain expanded state
     const [lastActiveContext, setLastActiveContext] = useState(null);
@@ -473,13 +520,12 @@ const NumberingCheckerDashboardPage = () => {
         localStorage.setItem('unloadMode', newMode);
     };
 
-    const openValidationModal = (batchId, itemInfo) => setModalState({ type: 'validate', data: { batchId, itemInfo } });
+    const openValidationModal = (batchId, batchCode, itemInfo) => setModalState({ type: 'validate', data: { batchId, itemInfo: { ...itemInfo, batchCode } } });
     const openAlterModal = (batchId, itemInfo) => setModalState({ type: 'alter', data: { batchId, itemInfo } });
     const closeModal = () => setModalState({ type: null, data: null });
 
     const handleValidationSubmit = async (validationData) => {
         try {
-            // Set context BEFORE fetching to ensure expanded state is preserved/set for the next render
             const batchId = modalState.data.batchId;
             setLastActiveContext({ 
                 batchId: batchId,
@@ -489,7 +535,6 @@ const NumberingCheckerDashboardPage = () => {
 
             await numberingCheckerApi.logNumberingCheck(validationData);
 
-            // Optimization logic (keep as is)
             const currentBatch = batches.find(b => b.batch_id === batchId);
             if (currentBatch) {
                 const pendingRolls = currentBatch.rolls.filter(r => !checkRollStatus(r));
@@ -512,8 +557,6 @@ const NumberingCheckerDashboardPage = () => {
     const handleApproveAlterSubmit = async (quantity) => {
         try {
             const { itemInfo, batchId } = modalState.data;
-            
-            // Set context
             setLastActiveContext({ 
                 batchId: batchId,
                 rollId: itemInfo.rollId,
@@ -522,7 +565,6 @@ const NumberingCheckerDashboardPage = () => {
 
             await numberingCheckerApi.approveAlteredPieces({ ...itemInfo, quantity });
             
-            // Optimization logic
             const currentBatch = batches.find(b => b.batch_id === batchId);
             if (currentBatch) {
                 const pendingRolls = currentBatch.rolls.filter(r => !checkRollStatus(r));
@@ -571,10 +613,20 @@ const NumberingCheckerDashboardPage = () => {
                                 <Search className="absolute left-3 top-2.5 text-gray-400 w-4 h-4" />
                                 <input 
                                     type="text" 
-                                    placeholder="Filter Batch ID..." 
+                                    placeholder="Filter Batch..." 
                                     value={batchFilter}
                                     onChange={(e) => setBatchFilter(e.target.value)}
-                                    className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-48"
+                                    className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-40"
+                                />
+                            </div>
+                            <div className="relative">
+                                <Search className="absolute left-3 top-2.5 text-gray-400 w-4 h-4" />
+                                <input 
+                                    type="text" 
+                                    placeholder="Find Roll #..." 
+                                    value={rollFilter}
+                                    onChange={(e) => setRollFilter(e.target.value)}
+                                    className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-40"
                                 />
                             </div>
 
@@ -599,12 +651,15 @@ const NumberingCheckerDashboardPage = () => {
                                     batch={batch} 
                                     onValidateClick={openValidationModal} 
                                     onApproveAlterClick={openAlterModal} 
-                                    activeContext={lastActiveContext} // Pass context down
+                                    activeContext={lastActiveContext} 
+                                    rollFilter={rollFilter}
                                 />
                             ))
                         ) : (
                             <div className="text-center py-20 bg-white rounded-xl border border-dashed border-gray-300">
-                                <p className="text-slate-400 font-medium">No active batches available for checking.</p>
+                                <p className="text-slate-400 font-medium">
+                                    {batchFilter || rollFilter ? "No batches match your filter." : "No active batches available for checking."}
+                                </p>
                             </div>
                         )}
                     </div>
