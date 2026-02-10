@@ -217,8 +217,18 @@ const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick })
 };
 
 // Expandable Part Card
-const PrimaryPartCard = ({ part, rollId, onValidateClick, onApproveAlterClick }) => {
+const PrimaryPartCard = ({ part, rollId, onValidateClick, onApproveAlterClick, activeContext }) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    
+    // Auto-expand if this is the last acted upon part
+    useEffect(() => {
+        if (activeContext && 
+            String(activeContext.rollId) === String(rollId) && 
+            String(activeContext.partId) === String(part.part_id)) {
+            setIsExpanded(true);
+        }
+    }, [activeContext, rollId, part.part_id]);
+
     if (!hasPartData(part)) return null;
 
     const partStats = part.size_details.reduce((acc, curr) => {
@@ -274,7 +284,7 @@ const PrimaryPartCard = ({ part, rollId, onValidateClick, onApproveAlterClick })
     );
 };
 
-const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick }) => {
+const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick, activeContext }) => {
     const validParts = roll.parts_details.filter(hasPartData);
     if (validParts.length === 0) return null;
 
@@ -289,34 +299,48 @@ const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick }) => {
             </div>
             <div className="pl-2 space-y-2 border-l-2 border-indigo-100 ml-4">
                 {validParts.map(part => (
-                    <PrimaryPartCard key={part.part_id} part={part} rollId={roll.fabric_roll_id} onValidateClick={onValidateClick} onApproveAlterClick={onApproveAlterClick} />
+                    <PrimaryPartCard 
+                        key={part.part_id} 
+                        part={part} 
+                        rollId={roll.fabric_roll_id} 
+                        onValidateClick={onValidateClick} 
+                        onApproveAlterClick={onApproveAlterClick} 
+                        activeContext={activeContext}
+                    />
                 ))}
             </div>
         </div>
     );
 };
 
-// --- BATCH CARD with GROUPED ROLLS (Now Collapsible) ---
-const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick }) => {
+// --- BATCH CARD with GROUPED ROLLS (Collapsible) ---
+const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick, activeContext }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
 
     const validRolls = batch.rolls.filter(hasRollData);
-    if (validRolls.length === 0) return null;
-
     const completedRolls = validRolls.filter(r => checkRollStatus(r));
     const activeRolls = validRolls.filter(r => !checkRollStatus(r));
+
+    // Auto-expand if this batch contains the active context
+    useEffect(() => {
+        if (activeContext && String(activeContext.batchId) === String(batch.batch_id)) {
+            setIsExpanded(true);
+        }
+    }, [activeContext, batch.batch_id]);
+
+    if (validRolls.length === 0) return null;
 
     return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow mb-4">
             {/* Batch Header - Click to toggle */}
             <div 
-                className="bg-white border-b border-gray-100 p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                className={`bg-white border-b border-gray-100 p-4 cursor-pointer hover:bg-gray-50 transition-colors ${isExpanded ? 'bg-blue-50/30' : ''}`}
                 onClick={() => setIsExpanded(!isExpanded)}
             >
                 <div className="flex justify-between items-center">
                     <div className="flex items-center">
-                        <div className="p-2 bg-blue-50 text-blue-600 rounded-lg mr-3">
+                        <div className={`p-2 rounded-lg mr-3 transition-colors ${isExpanded ? 'bg-blue-100 text-blue-700' : 'bg-blue-50 text-blue-600'}`}>
                             <Shirt className="w-6 h-6" />
                         </div>
                         <div>
@@ -346,7 +370,13 @@ const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick }) =>
                                 Active / Pending Rolls
                             </h4>
                             {activeRolls.map(roll => (
-                                <FabricRollCard key={roll.fabric_roll_id} roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} />
+                                <FabricRollCard 
+                                    key={roll.fabric_roll_id} 
+                                    roll={roll} 
+                                    onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} 
+                                    onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} 
+                                    activeContext={activeContext}
+                                />
                             ))}
                         </div>
                     ) : (
@@ -380,8 +410,12 @@ const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick }) =>
                                                     <span className="text-sm font-bold text-green-800 flex items-center"><CheckCircle2 className="w-4 h-4 mr-2"/> Roll #{roll.fabric_roll_id}</span>
                                                     <span className="text-xs font-medium text-green-600">Complete</span>
                                                 </div>
-                                                {/* Render details for context even if completed */}
-                                                <FabricRollCard roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} />
+                                                <FabricRollCard 
+                                                    roll={roll} 
+                                                    onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} 
+                                                    onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} 
+                                                    activeContext={activeContext}
+                                                />
                                             </div>
                                         </div>
                                     ))}
@@ -400,15 +434,21 @@ const NumberingCheckerDashboardPage = () => {
     const [batches, setBatches] = useState([]);
     const [unloadMode, setUnloadMode] = useState('bundle');
     const [isLoading, setIsLoading] = useState(true);
+    const [isRefetching, setIsRefetching] = useState(false);
     const [error, setError] = useState(null);
     const [modalState, setModalState] = useState({ type: null, data: null });
     const [headerInfo, setHeaderInfo] = useState({ lineName: 'N/A', processType: 'unknown' });
     const [batchFilter, setBatchFilter] = useState('');
+    
+    // Track context of last action to maintain expanded state
+    const [lastActiveContext, setLastActiveContext] = useState(null);
 
     useEffect(() => { const savedMode = localStorage.getItem('unloadMode') || 'bundle'; setUnloadMode(savedMode); }, []);
 
-    const fetchQueue = useCallback(async () => {
-        setIsLoading(true);
+    const fetchQueue = useCallback(async (isInitial = false) => {
+        if (isInitial) setIsLoading(true);
+        else setIsRefetching(true);
+        
         try {
             const res = await numberingCheckerApi.getMyQueue();
             let fetchedBatches = res.data.batches || [];
@@ -417,11 +457,15 @@ const NumberingCheckerDashboardPage = () => {
             setHeaderInfo({ lineName: res.data.production_line_name || 'N/A', processType: res.data.workstation_process_type || 'unknown', lineId: res.data.production_line_id || null });
             setError(null);
         } catch (err) {
-            setError("Could not load your assigned queue.");
-        } finally { setIsLoading(false); }
+            if (isInitial) setError("Could not load your assigned queue.");
+            else console.error("Background refresh failed", err);
+        } finally { 
+            setIsLoading(false); 
+            setIsRefetching(false);
+        }
     }, []);
 
-    useEffect(() => { fetchQueue(); }, [fetchQueue]);
+    useEffect(() => { fetchQueue(true); }, [fetchQueue]);
     
     const handleModeToggle = () => {
         const newMode = unloadMode === 'bundle' ? 'single' : 'bundle';
@@ -435,38 +479,54 @@ const NumberingCheckerDashboardPage = () => {
 
     const handleValidationSubmit = async (validationData) => {
         try {
+            // Set context BEFORE fetching to ensure expanded state is preserved/set for the next render
+            const batchId = modalState.data.batchId;
+            setLastActiveContext({ 
+                batchId: batchId,
+                rollId: validationData.rollId,
+                partId: validationData.partId
+            });
+
             await numberingCheckerApi.logNumberingCheck(validationData);
 
-            const currentBatch = batches.find(b => b.batch_id === modalState.data.batchId);
+            // Optimization logic (keep as is)
+            const currentBatch = batches.find(b => b.batch_id === batchId);
             if (currentBatch) {
                 const pendingRolls = currentBatch.rolls.filter(r => !checkRollStatus(r));
                 const currentRoll = pendingRolls.find(r => r.fabric_roll_id === validationData.rollId);
-
                 if (pendingRolls.length === 1 && currentRoll) {
                     if (willActionCompleteRoll(currentRoll, { ...validationData })) {
                         await numberingCheckerApi.checkAndCompleteStages({
                             rollId: validationData.rollId,
-                            batchId: modalState.data.batchId,
+                            batchId: batchId,
                             lineId: headerInfo.lineId
                         });
                     }
                 }
             }
             closeModal();
-            fetchQueue();
+            fetchQueue(false); // Background refresh
         } catch (err) { alert(`Error: ${err.message}`); }
     };
 
     const handleApproveAlterSubmit = async (quantity) => {
         try {
-            const { itemInfo } = modalState.data;
+            const { itemInfo, batchId } = modalState.data;
+            
+            // Set context
+            setLastActiveContext({ 
+                batchId: batchId,
+                rollId: itemInfo.rollId,
+                partId: itemInfo.partId
+            });
+
             await numberingCheckerApi.approveAlteredPieces({ ...itemInfo, quantity });
             
-            const currentBatch = batches.find(b => b.batch_id === modalState.data.batchId);
+            // Optimization logic
+            const currentBatch = batches.find(b => b.batch_id === batchId);
             if (currentBatch) {
                 const pendingRolls = currentBatch.rolls.filter(r => !checkRollStatus(r));
                 const currentRoll = pendingRolls.find(r => r.fabric_roll_id === itemInfo.rollId);
-
                 if (pendingRolls.length === 1 && currentRoll) {
                     if (willActionCompleteRoll(currentRoll, { 
                         partId: itemInfo.partId, 
@@ -476,14 +536,14 @@ const NumberingCheckerDashboardPage = () => {
                     })) {
                         await numberingCheckerApi.checkAndCompleteStages({
                             rollId: itemInfo.rollId,
-                            batchId: modalState.data.batchId,
+                            batchId: batchId,
                             lineId: headerInfo.lineId
                         });
                     }
                 }
             }
             closeModal();
-            fetchQueue();
+            fetchQueue(false);
         } catch (err) { alert(`Error: ${err.message}`); }
     };
 
@@ -499,11 +559,14 @@ const NumberingCheckerDashboardPage = () => {
                 <header className="mb-8">
                      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
                         <div>
-                            <h1 className="text-3xl font-extrabold text-slate-900 flex items-center tracking-tight"><ClipboardCheck className="w-8 h-8 mr-3 text-blue-600"/>Numbering Check</h1>
+                            <h1 className="text-3xl font-extrabold text-slate-900 flex items-center tracking-tight">
+                                <ClipboardCheck className="w-8 h-8 mr-3 text-blue-600"/>
+                                Numbering Check
+                                {isRefetching && <Loader2 className="ml-3 w-5 h-5 animate-spin text-slate-400" />}
+                            </h1>
                             <p className="text-slate-500 mt-1">Station: <strong className="text-slate-700">{headerInfo.lineName}</strong></p>
                         </div>
                         <div className="flex flex-col md:flex-row gap-4 items-end md:items-center">
-                            {/* Search Box */}
                             <div className="relative">
                                 <Search className="absolute left-3 top-2.5 text-gray-400 w-4 h-4" />
                                 <input 
@@ -531,7 +594,13 @@ const NumberingCheckerDashboardPage = () => {
                     <div className="space-y-4">
                         {filteredBatches.length > 0 ? (
                             filteredBatches.map(batch => (
-                                <ProductionBatchCard key={batch.batch_id} batch={batch} onValidateClick={openValidationModal} onApproveAlterClick={openAlterModal} />
+                                <ProductionBatchCard 
+                                    key={batch.batch_id} 
+                                    batch={batch} 
+                                    onValidateClick={openValidationModal} 
+                                    onApproveAlterClick={openAlterModal} 
+                                    activeContext={lastActiveContext} // Pass context down
+                                />
                             ))
                         ) : (
                             <div className="text-center py-20 bg-white rounded-xl border border-dashed border-gray-300">
