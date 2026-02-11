@@ -3,12 +3,17 @@ import { useParams, Link, useLocation } from 'react-router-dom';
 import { cuttingPortalApi } from '../../api/cuttingPortalApi';
 import { 
     FiArrowLeft, FiPackage, FiScissors, FiAlertTriangle, 
-    FiCheckCircle, FiFileText, FiPrinter, FiShare2, FiDownload, FiClipboard 
+    FiCheckCircle, FiFileText, FiPrinter, FiShare2, FiDownload, 
+    FiClipboard, FiLayers, FiLoader 
 } from 'react-icons/fi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-const Spinner = () => <div className="flex justify-center items-center p-12"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
+const Spinner = () => (
+    <div className="flex justify-center items-center p-12">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+    </div>
+);
 
 // Standard size sequence for sorting
 const SIZE_ORDER = [
@@ -17,36 +22,18 @@ const SIZE_ORDER = [
 ];
 
 const SIZE_LABELS = {
-    'S': 'S(28)',
-    'M': 'M(30)',
-    'L': 'L(32)',
-    'XL': 'XL(34)',
-    'XXL': 'XXL(36)',
-    '3XL': '3XL(38)',
-    '4XL': '4XL(40)',
-    '5XL': '5XL(42)',
-    '6XL': '6XL(44)'
+    'S': 'S(28)', 'M': 'M(30)', 'L': 'L(32)', 'XL': 'XL(34)', 'XXL': 'XXL(36)',
+    '3XL': '3XL(38)', '4XL': '4XL(40)', '5XL': '5XL(42)', '6XL': '6XL(44)'
 };
 
 const getSizeLabel = (size) => SIZE_LABELS[size] || size;
 
 const sortSizes = (a, b) => {
-    // Exact match in predefined list
     const indexA = SIZE_ORDER.indexOf(a);
     const indexB = SIZE_ORDER.indexOf(b);
-
     if (indexA !== -1 && indexB !== -1) return indexA - indexB;
     if (indexA !== -1) return -1;
     if (indexB !== -1) return 1;
-
-    // Try parsing as simple numbers if not in list
-    const numA = parseFloat(a);
-    const numB = parseFloat(b);
-    if (!isNaN(numA) && !isNaN(numB)) {
-        return numA - numB;
-    }
-
-    // Fallback to alphabetical
     return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 };
 
@@ -55,16 +42,19 @@ const BatchCuttingDetailsPage = () => {
     const location = useLocation(); 
     const [details, setDetails] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [isGeneratingReport, setIsGeneratingReport] = useState(false);
     const [error, setError] = useState(null);
 
-    // Logic: Determine back link based on current path
+    const isProductionManager = location.pathname.includes('/production-manager');
+    const isInitPortal = location.pathname.includes('/initialization-portal');
+    
     let backLink = '/cutting-portal/dashboard';
     let backLabel = 'Back to Cutting Queue';
-
-    if (location.pathname.includes('/production-manager')) {
+    
+    if (isProductionManager) {
         backLink = '/production-manager/dashboard';
         backLabel = 'Back to Production Dashboard';
-    } else if (location.pathname.includes('/initialization-portal')) {
+    } else if (isInitPortal) {
         backLink = '/initialization-portal/dashboard';
         backLabel = 'Back to Initialization Dashboard';
     }
@@ -83,13 +73,11 @@ const BatchCuttingDetailsPage = () => {
         }
     }, [batchId]);
 
-    useEffect(() => {
-        fetchDetails();
-    }, [fetchDetails]);
+    useEffect(() => { fetchDetails(); }, [fetchDetails]);
 
-    // --- Calculations using useMemo ---
+    // --- Calculations ---
     const summaryStats = useMemo(() => {
-        if (!details) return { totalMeters: 0, totalPieces: 0, avgConsumption: 0, totalShortage: 0, allSizes: [] };
+        if (!details) return { totalMeters: 0, totalPieces: 0, avgConsumption: 0, totalShortage: 0, allSizes: [], sizeTotals: {} };
 
         let totalMeters = 0;
         let totalPieces = 0;
@@ -98,10 +86,7 @@ const BatchCuttingDetailsPage = () => {
 
         (details.rolls || []).forEach(roll => {
             totalMeters += parseFloat(roll.meter || 0);
-            
-            // Helper to track unique sizes for this roll to avoid double counting parts
             const uniqueCutsForRoll = {};
-
             (roll.cuts || []).forEach(cut => {
                 if (uniqueCutsForRoll[cut.size] === undefined) {
                     const qty = parseInt(cut.quantity_cut || 0);
@@ -109,273 +94,273 @@ const BatchCuttingDetailsPage = () => {
                 }
                 allSizesSet.add(cut.size);
             });
-
             Object.entries(uniqueCutsForRoll).forEach(([size, qty]) => {
                 totalPieces += qty;
                 sizeTotals[size] = (sizeTotals[size] || 0) + qty;
             });
         });
         
-        const totalShortage = (details.shortages || []).reduce((sum, shortage) => {
-            return sum + parseFloat(shortage.meter || 0);
-        }, 0);
-
+        const totalShortage = (details.shortages || []).reduce((sum, s) => sum + parseFloat(s.meter || 0), 0);
         const avgConsumption = totalPieces > 0 ? (totalMeters - totalShortage) / totalPieces : 0;
-        
         const allSizes = Array.from(allSizesSet).sort(sortSizes);
 
         return { totalMeters, totalPieces, avgConsumption, totalShortage, allSizes, sizeTotals };
-
     }, [details]);
 
-    // --- Action Handlers ---
+    // --- REPORT GENERATORS ---
 
-    // 1. Generate Lay Sheet (A5, Template Format)
+    const handleGenerateNumberingPDF = async () => {
+        if (!details) return;
+        setIsGeneratingReport(true);
+
+        try {
+            // 1. Fetch Numbering Data
+            const res = await cuttingPortalApi.getBatchNumberingDetails(batchId);
+            const numberingDetails = res.data;
+
+            // 2. Generate PDF
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            
+            // Header
+            const now = new Date().toLocaleString();
+            doc.setFontSize(8); doc.setTextColor(100);
+            doc.text(`Generated: ${now}`, 280, 10, { align: 'right' });
+            
+            doc.setFontSize(18); doc.setTextColor(0); doc.setFont("helvetica", "bold");
+            doc.text(`Numbering & QC Report: Batch ${numberingDetails.batch_code || batchId}`, 14, 15);
+            
+            doc.setFontSize(12); doc.setFont("helvetica", "normal");
+            doc.text(`Product: ${numberingDetails.product_name}`, 14, 22);
+
+            let finalY = 30;
+            // Use summaryStats from cutting data to ensure consistent columns, 
+            // but fallback to numberingDetails keys if needed (rare case of disjoint data)
+            const head = ["Roll ID", "Type", ...summaryStats.allSizes.map(getSizeLabel), "Total OK"];
+            
+            let grandTotalOk = 0;
+            let totalRejected = 0;
+            let totalAltered = 0;
+            const defectsBody = [];
+
+            // Body: Rows showing Validated (Approved + Repaired) pieces
+            const validatedBody = (numberingDetails.rolls || []).map(roll => {
+                const statsBySize = {};
+                let rollGoodTotal = 0;
+                
+                (roll.numbering_details || []).forEach(stat => {
+                    const qty = parseInt(stat.quantity || 0);
+                    if (!statsBySize[stat.size]) statsBySize[stat.size] = 0;
+                    
+                    // Count Good: Approved or Repaired
+                    if (stat.qc_status === 'APPROVED' || stat.qc_status === 'REPAIRED') {
+                        statsBySize[stat.size] += qty;
+                        rollGoodTotal += qty;
+                    }
+                });
+
+                grandTotalOk += rollGoodTotal;
+
+                return [
+                    roll.roll_identifier,
+                    roll.type_name,
+                    ...summaryStats.allSizes.map(size => statsBySize[size] || 0),
+                    rollGoodTotal
+                ];
+            });
+
+            // Calculate Defects Aggregates (Batch Level)
+            summaryStats.allSizes.forEach(size => {
+                let sizeRej = 0;
+                let sizeAlt = 0;
+                
+                (numberingDetails.rolls || []).forEach(roll => {
+                    (roll.numbering_details || []).forEach(stat => {
+                        if (stat.size === size) {
+                            if (stat.qc_status === 'REJECT') sizeRej += parseInt(stat.quantity);
+                            if (stat.qc_status === 'ALTER') sizeAlt += parseInt(stat.quantity);
+                        }
+                    });
+                });
+                
+                if (sizeRej > 0 || sizeAlt > 0) {
+                    defectsBody.push([getSizeLabel(size), sizeAlt, sizeRej]);
+                    totalAltered += sizeAlt;
+                    totalRejected += sizeRej;
+                }
+            });
+
+            // Draw Validated Table
+            doc.setFontSize(12); doc.setFont("helvetica", "bold");
+            doc.text("Validated Garments (Approved + Repaired)", 14, finalY);
+            
+            autoTable(doc, {
+                startY: finalY + 2,
+                head: [head],
+                body: validatedBody,
+                theme: 'grid',
+                styles: { fontSize: 8, cellPadding: 1, textColor: 0, lineWidth: 0.1, lineColor: 0 },
+                headStyles: { fillColor: [46, 204, 113], textColor: 255, fontStyle: 'bold' }, // Green header
+                columnStyles: { 0: { fontStyle: 'bold' } }
+            });
+            
+            finalY = doc.lastAutoTable.finalY + 15;
+
+            // Draw Summary Statistics Box
+            doc.setFillColor(245, 245, 245);
+            doc.rect(14, finalY, 120, 25, 'F');
+            
+            doc.setFontSize(10); doc.setTextColor(0);
+            doc.text(`Total Garments OK: ${grandTotalOk}`, 18, finalY + 8);
+            
+            doc.setTextColor(200, 100, 0); // Orange
+            doc.text(`Pending Alteration: ${totalAltered}`, 18, finalY + 14);
+            
+            doc.setTextColor(200, 0, 0); // Red
+            doc.text(`Total Rejected: ${totalRejected}`, 18, finalY + 20);
+            
+            // Draw Defects Table (if any)
+            if (defectsBody.length > 0) {
+                autoTable(doc, {
+                    startY: finalY + 30,
+                    head: [["Size", "Pending Alteration", "Rejected"]],
+                    body: defectsBody,
+                    theme: 'grid',
+                    styles: { fontSize: 9 },
+                    tableWidth: 120,
+                    headStyles: { fillColor: [231, 76, 60], textColor: 255 } // Red header
+                });
+            }
+
+            doc.save(`Numbering_Report_${numberingDetails.batch_code || batchId}.pdf`);
+
+        } catch (err) {
+            console.error(err);
+            alert("Failed to generate Numbering Report.");
+        } finally {
+            setIsGeneratingReport(false);
+        }
+    };
+
     const handleGenerateLaySheet = () => {
         if (!details) return;
-
-        // A5 Portrait (148mm x 210mm)
         const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a5' });
-        
-        // Header
-        doc.setFontSize(14);
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(0);
-        doc.text("MATRIX OVERSEAS", 74, 15, { align: 'center' }); // Centered
+        doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(0);
+        doc.text("MATRIX OVERSEAS", 74, 15, { align: 'center' });
 
-        // Batch Info Box
         const ratioString = details.ratios ? details.ratios.map(r => `${r.size}-${r.ratio}`).join(' / ') : '-';
-        
-        // Attempt to extract PO from batch code if available (e.g. SO-PO-BATCH) or use batch info
-        const poText = details.po_code || 'N/A'; // Assuming backend might provide this later, or we leave it blank
+        // Try to infer PO code from batch code if not explicitly available
+        const poText = details.po_code || (details.batch_code ? details.batch_code.split('-').slice(0, 3).join('-') : 'N/A');
 
         autoTable(doc, {
             startY: 20,
             body: [
                 [`PO NUMBER - ${poText}`], 
                 [`BATCH NO - ${details.batch_code || batchId}`],
-                [`CODE NAME - ${details.product_name}`],
+                [`CODE NAME - ${details.product_name}`], 
                 [`LAYER LENGTH: ${details.length_of_layer_inches || 0} INCHES`],
                 [`SIZE RATIO - ${ratioString}`]
             ],
             theme: 'plain',
-            styles: { 
-                fontSize: 9, 
-                cellPadding: 1, 
-                lineWidth: 0.1, 
-                lineColor: 0,
-                textColor: 0,
-                fontStyle: 'bold' 
-            },
-            columnStyles: {
-                0: { cellWidth: 90 } 
-            }
+            styles: { fontSize: 9, cellPadding: 1, lineWidth: 0.1, lineColor: 0, textColor: 0, fontStyle: 'bold' },
+            columnStyles: { 0: { cellWidth: 90 } }
         });
 
-        // Cutting Lay Details Table Header
-        doc.setFontSize(10);
-        doc.text("CUTTING LAY DETAILS", 10, doc.lastAutoTable.finalY + 8);
+        doc.setFontSize(10); doc.text("CUTTING LAY DETAILS", 10, doc.lastAutoTable.finalY + 8);
 
-        // Prepare Table Data (Blank columns for manual entry)
         let totalAssigned = 0;
         const tableBody = (details.rolls || []).map(roll => {
             const meter = parseFloat(roll.meter || 0);
             totalAssigned += meter;
             return [
-                roll.roll_identifier,
-                roll.type_name || '-',
+                roll.roll_identifier, 
+                roll.type_name || '-', 
                 `${roll.color_name || ''} ${roll.color_number || ''}`,
-                meter.toFixed(2),
-                "", // No of Lays (Blank)
-                "", // Shortages (Blank)
-                "", // Consumed fabric (Blank)
-                "Mtr"
+                meter.toFixed(2), 
+                "", "", "", "Mtr"
             ];
         });
-
-        // Footer Row
-        tableBody.push([
-            "TOTAL", "", "", totalAssigned.toFixed(2), "", "", "", "Mtr"
-        ]);
+        tableBody.push(["TOTAL", "", "", totalAssigned.toFixed(2), "", "", "", "Mtr"]);
 
         autoTable(doc, {
             startY: doc.lastAutoTable.finalY + 10,
             head: [["Roll ID", "Fabric", "Color", "Asigned", "Lays", "Shortage", "Cons", "UOM"]],
             body: tableBody,
             theme: 'grid',
-            headStyles: { 
-                fillColor: 255, 
-                textColor: 0, 
-                lineWidth: 0.1, 
-                lineColor: 0, 
-                fontStyle: 'bold',
-                fontSize: 7,
-                halign: 'center'
-            },
-            styles: { 
-                fontSize: 7, 
-                cellPadding: 1.5, 
-                textColor: 0, 
-                lineWidth: 0.1, 
-                lineColor: 0,
-                halign: 'center',
-                valign: 'middle'
-            },
-            columnStyles: {
-                0: { halign: 'left', cellWidth: 15 },
-                1: { halign: 'left', cellWidth: 12 },
-                2: { halign: 'left', cellWidth: 20 },
-                3: { halign: 'right', fontStyle: 'bold', cellWidth: 15 }, // Assigned
-                4: { cellWidth: 12 }, // Lays
-                5: { cellWidth: 15 }, // Shortage
-                6: { cellWidth: 15 }, // Consumed
-                7: { cellWidth: 10 }, // UOM
-            },
-            didParseCell: (data) => {
-                // Bold the footer row
-                if (data.row.index === tableBody.length - 1) {
-                    data.cell.styles.fontStyle = 'bold';
-                }
-            }
+            headStyles: { fillColor: 255, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold', fontSize: 7, halign: 'center' },
+            styles: { fontSize: 7, cellPadding: 1.5, textColor: 0, lineWidth: 0.1, lineColor: 0, halign: 'center', valign: 'middle' },
+            columnStyles: { 0: { halign: 'left', cellWidth: 15 }, 1: { halign: 'left', cellWidth: 12 }, 2: { halign: 'left', cellWidth: 20 }, 3: { halign: 'right', fontStyle: 'bold', cellWidth: 15 }, 4: { cellWidth: 12 }, 5: { cellWidth: 15 }, 6: { cellWidth: 15 }, 7: { cellWidth: 10 } },
+            didParseCell: (data) => { if (data.row.index === tableBody.length - 1) data.cell.styles.fontStyle = 'bold'; }
         });
 
-        // Summary Statistics (Bottom Left)
         let finalY = doc.lastAutoTable.finalY + 10;
-        
-        // Page break check for A5
-        if (finalY > 180) {
-            doc.addPage();
-            finalY = 20;
-        }
+        if (finalY > 180) { doc.addPage(); finalY = 20; }
 
-        doc.setFontSize(10);
-        doc.text("SUMMARY STATISTICS", 10, finalY);
-
+        doc.setFontSize(10); doc.text("SUMMARY STATISTICS", 10, finalY);
         autoTable(doc, {
             startY: finalY + 2,
             body: [
-                ["TOTAL FABRIC ASSIGNED :", totalAssigned.toFixed(2)],
+                ["TOTAL FABRIC ASSIGNED :", totalAssigned.toFixed(2)], 
                 ["TOTAL FABRIC CONSUMED :", ""],
-                ["TOTAL SHORTAGE QTY :", ""],
-                ["TOTAL NO OF LAY :", ""],
+                ["TOTAL SHORTAGE QTY :", ""], 
+                ["TOTAL NO OF LAY :", ""], 
                 ["TOTAL CUT QTY :", ""]
             ],
             theme: 'grid',
-            styles: {
-                fontSize: 7, // Reduced font size for compactness
-                cellPadding: 1, // Reduced padding for compactness
-                textColor: 0,
-                lineWidth: 0.1,
-                lineColor: 0,
-                fontStyle: 'bold'
-            },
-            columnStyles: {
-                0: { cellWidth: 40 }, // Reduced width
-                1: { cellWidth: 20 }  // Reduced width
-            }
+            styles: { fontSize: 7, cellPadding: 1, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold' },
+            columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 20 } }
         });
-
         doc.save(`Lay_Sheet_${details.batch_code || batchId}.pdf`);
     };
 
-    // 2. Generate Cut Report (Portrait, All Data)
-    const handleGeneratePDF = () => {
+    const handleGenerateCutReport = () => {
         if (!details) return;
-
         const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
         const marginLeft = 10;
         
-        // Report Header
-        const now = new Date().toLocaleString();
-        doc.setFontSize(8);
-        doc.setTextColor(100);
-        doc.text(`Generated: ${now}`, 200, 10, { align: 'right' });
-
-        doc.setFontSize(20);
-        doc.setTextColor(0);
-        doc.setFont("helvetica", "bold");
-        doc.text(`Batch: ${details.batch_code || `#${batchId}`}`, marginLeft, 15);
-
-        doc.setFontSize(14);
-        doc.text(`${details.product_name}`, marginLeft, 22);
-
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "normal");
-        doc.text(`Layer Length: ${details.length_of_layer_inches || '0'} in`, marginLeft, 27);
+        doc.setFontSize(8); doc.setTextColor(100); doc.text(`Generated: ${new Date().toLocaleString()}`, 200, 10, { align: 'right' });
+        doc.setFontSize(20); doc.setTextColor(0); doc.setFont("helvetica", "bold"); doc.text(`Batch: ${details.batch_code || `#${batchId}`}`, marginLeft, 15);
+        doc.setFontSize(14); doc.text(`${details.product_name}`, marginLeft, 22);
+        doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.text(`Layer Length: ${details.length_of_layer_inches || '0'} in`, marginLeft, 27);
 
         let finalY = 32;
-
-        const cutLogHead = [
-            "Roll ID", "Fabric", "Color", "Mtrs", "Lays",
-            ...summaryStats.allSizes.map(getSizeLabel), 
-            "Tot"
-        ];
-
+        const cutLogHead = ["Roll ID", "Fabric", "Color", "Mtrs", "Lays", ...summaryStats.allSizes.map(getSizeLabel), "Tot"];
+        
         const cutLogBody = (details.rolls || []).map(roll => {
             const rollCutsBySize = (roll.cuts || []).reduce((acc, cut) => {
                 if (acc[cut.size] === undefined) acc[cut.size] = parseInt(cut.quantity_cut || 0);
                 return acc;
             }, {});
-            
             const rollTotalPieces = Object.values(rollCutsBySize).reduce((sum, qty) => sum + qty, 0);
-
             return [
-                roll.roll_identifier,
-                roll.type_name || '-',
-                `${roll.color_name || ''} ${roll.color_number ? `(${roll.color_number})` : ''}`,
-                parseFloat(roll.meter || 0).toFixed(2),
-                roll.lays || 0,
-                ...summaryStats.allSizes.map(size => rollCutsBySize[size] || 0),
-                rollTotalPieces
+                roll.roll_identifier, roll.type_name || '-', `${roll.color_name || ''} ${roll.color_number ? `(${roll.color_number})` : ''}`,
+                parseFloat(roll.meter || 0).toFixed(2), roll.lays || 0,
+                ...summaryStats.allSizes.map(size => rollCutsBySize[size] || 0), rollTotalPieces
             ];
         });
 
-        const footerRow = [
-            "TOTAL", "", "", 
-            summaryStats.totalMeters.toFixed(2),
-            "",
-            ...summaryStats.allSizes.map(size => summaryStats.sizeTotals[size] || 0),
-            summaryStats.totalPieces
-        ];
+        const footerRow = ["TOTAL", "", "", summaryStats.totalMeters.toFixed(2), "", ...summaryStats.allSizes.map(size => (details.rolls || []).reduce((sum, roll) => {
+             const cut = (roll.cuts || []).find(c => c.size === size);
+             return sum + (cut ? parseInt(cut.quantity_cut) : 0);
+        }, 0)), summaryStats.totalPieces];
 
-        doc.setFontSize(12);
-        doc.setFont("helvetica", "bold");
-        doc.text("Cut Log Details", marginLeft, finalY);
-        
+        doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.text("Cut Log Details", marginLeft, finalY);
         autoTable(doc, {
-            startY: finalY + 2,
-            head: [cutLogHead],
-            body: [...cutLogBody, footerRow],
-            theme: 'grid', 
-            styles: { fontSize: 6, cellPadding: 1, textColor: 0, lineWidth: 0.1, lineColor: 0 },
+            startY: finalY + 2, head: [cutLogHead], body: [...cutLogBody, footerRow],
+            theme: 'grid', styles: { fontSize: 6, cellPadding: 1, textColor: 0, lineWidth: 0.1, lineColor: 0 },
             headStyles: { fillColor: 255, textColor: 0, fontStyle: 'bold', lineWidth: 0.1, lineColor: 0, halign: 'center' },
-            didParseCell: (data) => {
-                if (data.row.index === cutLogBody.length) {
-                    data.cell.styles.fontStyle = 'bold';
-                }
-            }
+            didParseCell: (data) => { if (data.row.index === cutLogBody.length) data.cell.styles.fontStyle = 'bold'; }
         });
 
         finalY = doc.lastAutoTable.finalY + 10;
-
-        // Summary
         doc.text("Summary Statistics", marginLeft, finalY);
-        const summaryY = finalY + 6;
-        const lineHeight = 6;
-        const valueX = marginLeft + 60; 
-
-        doc.setFontSize(10);
-        const printSummaryLine = (label, value, y) => {
-            doc.setFont("helvetica", "normal");
-            doc.text(label, marginLeft, y);
-            doc.setFont("helvetica", "bold");
-            doc.text(value, valueX, y);
-        };
+        const summaryY = finalY + 6; const lineHeight = 6; const valueX = marginLeft + 60;
         
-        printSummaryLine("Total Fabric Assigned:", `${summaryStats.totalMeters.toFixed(2)} m`, summaryY);
-        printSummaryLine("Total Pieces Cut:", `${summaryStats.totalPieces}`, summaryY + lineHeight);
-        printSummaryLine("Avg. Consumption:", `${summaryStats.avgConsumption.toFixed(3)} m/pc`, summaryY + (lineHeight * 2));
-        printSummaryLine("Total Shortage:", `${summaryStats.totalShortage.toFixed(2)} m`, summaryY + (lineHeight * 3));
+        doc.setFontSize(10);
+        const printLine = (label, value, y) => { doc.setFont("helvetica", "normal"); doc.text(label, marginLeft, y); doc.setFont("helvetica", "bold"); doc.text(value, valueX, y); };
+        printLine("Total Fabric Assigned:", `${summaryStats.totalMeters.toFixed(2)} m`, summaryY);
+        printLine("Total Pieces Cut:", `${summaryStats.totalPieces}`, summaryY + lineHeight);
+        printLine("Avg. Consumption:", `${summaryStats.avgConsumption.toFixed(3)} m/pc`, summaryY + (lineHeight * 2));
+        printLine("Total Shortage:", `${summaryStats.totalShortage.toFixed(2)} m`, summaryY + (lineHeight * 3));
 
         doc.save(`Cutting_Report_${details.batch_code || batchId}.pdf`);
     };
@@ -397,8 +382,17 @@ const BatchCuttingDetailsPage = () => {
                         <button onClick={handleGenerateLaySheet} className="flex items-center px-3 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-900 transition-colors shadow-sm">
                             <FiClipboard className="mr-2"/> Lay Sheet (A5)
                         </button>
-                        <button onClick={handleGeneratePDF} className="flex items-center px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm">
+                        <button onClick={handleGenerateCutReport} className="flex items-center px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm">
                             <FiDownload className="mr-2"/> Cut Report
+                        </button>
+                        {/* ✅ NEW BUTTON */}
+                        <button 
+                            onClick={handleGenerateNumberingPDF} 
+                            disabled={isGeneratingReport}
+                            className="flex items-center px-3 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm disabled:opacity-70 disabled:cursor-not-allowed"
+                        >
+                            {isGeneratingReport ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div> : <FiLayers className="mr-2"/>}
+                            Numbering Report
                         </button>
                     </div>
                 </div>

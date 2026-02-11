@@ -25,5 +25,8 @@ export const cuttingPortalApi = {
   logCutPieces: (data) => api.post('/cutting-portal/log-cut', data),
 
   getBatchCuttingDetails: (batchId) => api.get(`/cutting-portal/batch-cutting-details/${batchId}`),
+
+  getBatchNumberingDetails: (batchId) => api.get(`/cutting-portal/batch-numbering-details/${batchId}`),
+    
 };
 
