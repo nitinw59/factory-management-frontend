@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { productionManagerApi } from '../../../api/productionManagerApi'; 
 import { storeManagerApi } from '../../../api/storeManagerApi';
-import { accountingApi } from '../../../api/accountingApi'; // ✅ Added for PO Details
+import { accountingApi } from '../../../api/accountingApi'; 
 import { 
-    FileText, ShoppingCart, Truck, ChevronDown, ChevronRight, Package, Edit3, Eye, Layers, Loader2, X, Search, Filter, Box
+    FileText, ShoppingCart, Truck, ChevronDown, ChevronRight, Package, Edit3, Eye, Layers, Loader2, X, Search, Filter, Box, Calendar, DollarSign, Info
 } from 'lucide-react';
 import Modal from '../../../shared/Modal';
 import FabricIntakeForm from '../purchase/FabricIntakeForm'; 
 import EditFabricRollModal from '../purchase/EditFabricRollModal';
 
-// --- HELPER COMPONENT: Received Rolls List (Existing) ---
+// --- HELPER COMPONENT: Received Rolls List ---
 const ReceivedRollsList = ({ purchaseOrderId }) => {
     const [rolls, setRolls] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -122,6 +122,98 @@ const ReceivedRollsList = ({ purchaseOrderId }) => {
     );
 };
 
+// --- NEW COMPONENT: Sales Order Summary & Details Section ---
+const SalesOrderExpandedDetails = ({ orderId }) => {
+    const [details, setDetails] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const load = async () => {
+            setLoading(true);
+            try {
+                const res = await accountingApi.getSalesOrderDetails(orderId);
+                setDetails(res.data);
+            } catch (err) {
+                console.error("Failed to load SO details", err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        if(orderId) load();
+    }, [orderId]);
+
+    if(loading) return <div className="p-4 flex justify-center"><Loader2 className="animate-spin text-gray-400 w-5 h-5" /></div>;
+    if(!details) return <div className="p-4 text-center text-red-500 text-sm">Failed to load details.</div>;
+
+    return (
+        <div className="mb-6 bg-white border border-blue-100 rounded-lg overflow-hidden shadow-sm">
+            {/* Summary Header */}
+            <div className="bg-blue-50/50 p-4 border-b border-blue-100 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                    <span className="block text-xs font-bold text-gray-400 uppercase mb-1">Customer Details</span>
+                    <p className="font-semibold text-gray-800">{details.customer_name}</p>
+                    <p className="text-xs text-gray-500">{details.customer_email || 'No email'}</p>
+                </div>
+                <div>
+                    <span className="block text-xs font-bold text-gray-400 uppercase mb-1">Dates</span>
+                    <p className="text-gray-700"><span className="text-gray-400 text-xs mr-1">Ordered:</span> {new Date(details.order_date).toLocaleDateString()}</p>
+                    {details.delivery_date && <p className="text-gray-700"><span className="text-gray-400 text-xs mr-1">Delivery:</span> {new Date(details.delivery_date).toLocaleDateString()}</p>}
+                </div>
+                <div>
+                    <span className="block text-xs font-bold text-gray-400 uppercase mb-1">Financials</span>
+                    <p className="font-bold text-emerald-700 flex items-center">
+                        <DollarSign size={14} className="mr-0.5"/> {details.total_amount || '0.00'}
+                    </p>
+                </div>
+                <div>
+                    <span className="block text-xs font-bold text-gray-400 uppercase mb-1">Notes</span>
+                    <p className="text-xs text-gray-500 italic line-clamp-2">{details.notes || 'No notes provided.'}</p>
+                </div>
+            </div>
+
+            {/* Products Table */}
+            <div className="p-0">
+                <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase flex items-center">
+                    <Box size={14} className="mr-2"/> Order Items
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-white text-gray-500 border-b border-gray-100">
+                            <tr>
+                                <th className="px-4 py-2 font-medium w-1/3">Product Style</th>
+                                <th className="px-4 py-2 font-medium">Fabric</th>
+                                <th className="px-4 py-2 font-medium">Size Breakdown</th>
+                                <th className="px-4 py-2 font-medium text-right">Total Qty</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                            {details.products.map((prod, idx) => {
+                                const totalQty = prod.colors ? prod.colors.reduce((sum, c) => sum + parseInt(c.quantity || 0), 0) : 0;
+                                return (
+                                    <tr key={idx} className="hover:bg-gray-50/50">
+                                        <td className="px-4 py-3 font-medium text-gray-800">{prod.product_name}</td>
+                                        <td className="px-4 py-3 text-gray-600">{prod.fabric_type}</td>
+                                        <td className="px-4 py-3">
+                                            <div className="flex flex-wrap gap-1">
+                                                {prod.size_breakdown && Object.entries(prod.size_breakdown).map(([size, ratio]) => (
+                                                    <span key={size} className="text-[10px] bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded text-gray-600">
+                                                        {size}: <span className="font-bold">{ratio}</span>
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3 text-right font-bold text-gray-800">{totalQty}</td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // --- NEW COMPONENT: Purchase Order Details Modal ---
 const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
     const [po, setPo] = useState(null);
@@ -206,10 +298,9 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
                     </h4>
                      <ReceivedRollsList purchaseOrderId={po.id} />
                 </div>
-
-                <div className="flex justify-end pt-4 border-t">
-                    <button onClick={onClose} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-md font-medium">Close</button>
-                </div>
+            </div>
+            <div className="flex justify-end pt-4 border-t mt-4">
+                <button onClick={onClose} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-md font-medium">Close</button>
             </div>
         </Modal>
     );
@@ -225,15 +316,18 @@ const SalesOrderListPage = () => {
     const [intakeModalOpen, setIntakeModalOpen] = useState(false);
     const [poDetailsModalOpen, setPoDetailsModalOpen] = useState(false);
     
-    const [selectedPO, setSelectedPO] = useState(null); // Used for both Intake and Details
+    const [selectedPO, setSelectedPO] = useState(null); 
+    const [expandedPO, setExpandedPO] = useState({});
     const [searchTerm, setSearchTerm] = useState('');
 
     const fetchData = async () => {
         setLoading(true);
         try {
             const res = await productionManagerApi.getWorkflowData();
-            setWorkflowData(res.data);
-            setFilteredData(res.data);
+            // Sort by order_date descending by default
+            const sortedData = (res.data || []).sort((a, b) => new Date(b.order_date) - new Date(a.order_date));
+            setWorkflowData(sortedData);
+            setFilteredData(sortedData);
         } catch (err) {
             console.error("Failed to load orders", err);
         } finally {
@@ -262,9 +356,13 @@ const SalesOrderListPage = () => {
     const toggleSO = (id) => {
         setExpandedSO(prev => ({ ...prev, [id]: !prev[id] }));
     };
+    
+    const togglePO = (id) => {
+        setExpandedPO(prev => ({ ...prev, [id]: !prev[id] }));
+    };
 
     const handleReceiveFabricClick = (e, po) => {
-        e.stopPropagation(); // Prevent opening details
+        e.stopPropagation(); 
         setSelectedPO(po);
         setIntakeModalOpen(true);
     };
@@ -302,21 +400,21 @@ const SalesOrderListPage = () => {
                         placeholder="Search Sales Order..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow focus:shadow-sm"
                     />
                 </div>
             </header>
 
             <div className="space-y-4">
                 {filteredData.map(so => (
-                    <div key={so.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div key={so.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden transition-shadow hover:shadow-md">
                         {/* Sales Order Header */}
                         <div 
                             onClick={() => toggleSO(so.id)}
-                            className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-50 transition-colors select-none"
+                            className={`flex items-center justify-between p-4 cursor-pointer transition-colors select-none ${expandedSO[so.id] ? 'bg-slate-50 border-b border-slate-100' : 'hover:bg-slate-50'}`}
                         >
                             <div className="flex items-center gap-4">
-                                <button className={`p-1 rounded hover:bg-slate-200 text-slate-500 transition-transform duration-200 ${expandedSO[so.id] ? 'rotate-180' : ''}`}>
+                                <button className={`p-1 rounded hover:bg-slate-200 text-slate-500 transition-transform duration-300 ${expandedSO[so.id] ? 'rotate-180' : ''}`}>
                                     <ChevronDown size={20}/>
                                 </button>
                                 <div>
@@ -327,70 +425,104 @@ const SalesOrderListPage = () => {
                                     <p className="text-sm text-slate-500">{so.customer_name}</p>
                                 </div>
                             </div>
-                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100">
-                                {so.status}
-                            </span>
+                            <div className="flex items-center gap-4">
+                                <div className="text-right hidden md:block">
+                                     <p className="text-xs text-slate-400">Date</p>
+                                     <p className="text-sm font-medium text-slate-700">{new Date(so.order_date).toLocaleDateString()}</p>
+                                </div>
+                                <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100">
+                                    {so.status}
+                                </span>
+                            </div>
                         </div>
 
-                        {/* Expanded Purchase Orders */}
+                        {/* Expanded Content */}
                         {expandedSO[so.id] && (
-                            <div className="bg-slate-50 border-t border-slate-100 p-4 space-y-3 animate-in slide-in-from-top-2">
-                                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Linked Purchase Orders</h4>
+                            <div className="bg-white p-4 space-y-4 animate-in slide-in-from-top-1 fade-in duration-200">
                                 
-                                {so.purchase_orders && so.purchase_orders.length > 0 ? (
-                                    so.purchase_orders.map(po => (
-                                        <div 
-                                            key={po.id} 
-                                            onClick={() => handleViewPODetails(po)} // Click card to view details
-                                            className="bg-white p-4 rounded-lg border border-slate-200 transition-all hover:shadow-md cursor-pointer group"
-                                        >
-                                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="p-2 bg-amber-50 text-amber-600 rounded-lg mt-1 group-hover:bg-amber-100 transition-colors">
-                                                        <ShoppingCart size={18}/>
-                                                    </div>
-                                                    <div>
-                                                        <p className="font-bold text-slate-700 text-sm flex items-center">
-                                                            {po.po_code || po.po_number}
-                                                            <span className="ml-2 text-xs font-normal text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity flex items-center">
-                                                                <Eye size={12} className="mr-1"/> View Details
-                                                            </span>
-                                                        </p>
-                                                        <p className="text-xs text-slate-500 mt-0.5 flex items-center">
-                                                            <Truck size={12} className="mr-1"/> {po.supplier_name}
-                                                        </p>
-                                                        <p className="text-xs text-slate-400 mt-1 truncate max-w-md">
-                                                            {po.material_summary || 'No material details'}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                
-                                                <div className="flex items-center gap-3">
-                                                    <span className={`px-2 py-0.5 text-[10px] font-bold rounded border ${
-                                                        po.status === 'RECEIVED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'
-                                                    }`}>
-                                                        {po.status}
-                                                    </span>
+                                {/* 1. Sales Order Details Summary */}
+                                <SalesOrderExpandedDetails orderId={so.id} />
 
-                                                    {/* Action: Receive Fabric */}
-                                                    <button 
-                                                        onClick={(e) => handleReceiveFabricClick(e, po)}
-                                                        className="flex items-center px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+                                {/* 2. Linked Purchase Orders */}
+                                <div>
+                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 ml-1 flex items-center">
+                                        <ShoppingCart size={14} className="mr-1.5"/> Linked Purchase Orders
+                                    </h4>
+                                    
+                                    {so.purchase_orders && so.purchase_orders.length > 0 ? (
+                                        <div className="space-y-3">
+                                            {so.purchase_orders.map(po => (
+                                                <div key={po.id} className="bg-white p-0 rounded-lg border border-slate-200 overflow-hidden">
+                                                    {/* PO Row Header */}
+                                                    <div 
+                                                        className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 hover:bg-slate-50 transition-colors cursor-pointer"
+                                                        onClick={() => handleViewPODetails(po)}
                                                     >
-                                                        <Package size={14} className="mr-1.5"/> Receive
-                                                    </button>
+                                                        <div className="flex items-start gap-3">
+                                                            <div className="p-2 bg-amber-50 text-amber-600 rounded-lg mt-1">
+                                                                <Truck size={18}/>
+                                                            </div>
+                                                            <div>
+                                                                <p className="font-bold text-slate-700 text-sm flex items-center hover:text-amber-700 transition-colors">
+                                                                    {po.po_code || po.po_number}
+                                                                    <span className="ml-2 text-[10px] text-slate-400 font-normal border px-1 rounded flex items-center bg-white"><Eye size={10} className="mr-1"/> Details</span>
+                                                                </p>
+                                                                <p className="text-xs text-slate-500 mt-0.5 font-medium">
+                                                                    {po.supplier_name}
+                                                                </p>
+                                                                <p className="text-xs text-slate-400 mt-1 truncate max-w-md">
+                                                                    {po.material_summary || 'No material summary available'}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div className="flex items-center gap-3 self-end md:self-center">
+                                                            <span className={`px-2 py-0.5 text-[10px] font-bold rounded border uppercase ${
+                                                                po.status === 'RECEIVED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+                                                            }`}>
+                                                                {po.status}
+                                                            </span>
+
+                                                            <button 
+                                                                onClick={(e) => { e.stopPropagation(); togglePO(po.id); }}
+                                                                className={`flex items-center px-3 py-1.5 border border-slate-200 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-100 transition-colors ${expandedPO[po.id] ? 'bg-slate-100' : 'bg-white'}`}
+                                                            >
+                                                                <Layers size={14} className="mr-1.5"/> {expandedPO[po.id] ? 'Hide Rolls' : 'View Rolls'}
+                                                            </button>
+
+                                                            <button 
+                                                                onClick={(e) => handleReceiveFabricClick(e, po)}
+                                                                className="flex items-center px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+                                                            >
+                                                                <Package size={14} className="mr-1.5"/> Receive
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Expanded Rolls List for this PO (Inline) */}
+                                                    {expandedPO[po.id] && (
+                                                        <div className="px-4 pb-4 bg-slate-50 border-t border-slate-100">
+                                                            <ReceivedRollsList purchaseOrderId={po.id} />
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            </div>
+                                            ))}
                                         </div>
-                                    ))
-                                ) : (
-                                    <div className="text-center p-4 text-sm text-slate-400 italic">No Purchase Orders linked to this Sales Order.</div>
-                                )}
+                                    ) : (
+                                        <div className="text-center p-6 text-sm text-slate-400 italic border-2 border-dashed border-slate-100 rounded-lg bg-slate-50/50">
+                                            No Purchase Orders linked to this Sales Order.
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
                     </div>
                 ))}
-                {filteredData.length === 0 && <div className="text-center p-12 text-slate-400">No sales orders found matching "{searchTerm}"</div>}
+                {filteredData.length === 0 && (
+                    <div className="text-center py-20 bg-white rounded-xl border border-dashed border-slate-200">
+                        <p className="text-slate-400 text-lg font-medium">No sales orders found matching "{searchTerm}"</p>
+                    </div>
+                )}
             </div>
 
             {/* Modal for Fabric Intake */}

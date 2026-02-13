@@ -50,6 +50,11 @@ const InitializationPortalLayout = () => {
                     
                     {/* Desktop Navigation */}
                     <nav className="hidden md:flex items-center space-x-6">
+
+                        <NavLink to="/initialization-portal/production-workflow" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                            Workflow Dashboard
+                        </NavLink>
+
                         <NavLink to="/initialization-portal/dashboard" className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                             <LuLayoutDashboard className="mr-2" /> Initialization Queue
                         </NavLink>
@@ -87,6 +92,10 @@ const InitializationPortalLayout = () => {
                 {isMobileMenuOpen && (
                     <div className="md:hidden bg-white shadow-md">
                         <nav className="flex flex-col p-4 space-y-4">
+                            
+                            <NavLink to="/initialization-portal/production-workflow" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                                               Workflow Dashboard
+                            </NavLink>
                             <NavLink to="/initialization-portal/dashboard" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuLayoutDashboard className="mr-2" /> Initialization Queue
                             </NavLink>

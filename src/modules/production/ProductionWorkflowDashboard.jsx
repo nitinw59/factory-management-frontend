@@ -1,23 +1,28 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
     Search, Filter, Plus, Box, FileText, ShoppingCart, 
-    Scissors, ChevronRight, CheckCircle, Clock, AlertCircle, 
+    Scissors, ChevronRight, Printer, Clock, AlertCircle, 
     ZoomIn, ZoomOut, Maximize, Loader2, X, User, Calendar, Trash2, Layers
 } from 'lucide-react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { accountingApi } from '../../api/accountingApi'; 
 import { storeManagerApi } from '../../api/storeManagerApi'; 
 import Modal from '../../shared/Modal';
+import { useAuth } from '../../context/AuthContext';
+import jsPDF from 'jspdf'; // Import jsPDF
+import autoTable from 'jspdf-autotable'; // Import autoTable
+
 const Spinner = () => <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
 
 // --- CONSTANTS & STYLES ---
 const NODE_WIDTH = 280;
-const NODE_HEIGHT = 150;
+const NODE_HEIGHT = 160; 
 const GAP_X = 120;
 const GAP_Y = 50;
+const VIEWPORT_BUFFER = 400; // Pixel buffer to render outside viewport (prevents pop-in)
 
-// ... (Keep StatusBadge component same as before) ...
+// ... (Keep StatusBadge component same) ...
 const StatusBadge = ({ status }) => {
     const colors = {
         'CONFIRMED': 'bg-blue-100 text-blue-700 border-blue-200',
@@ -47,8 +52,7 @@ const Connector = ({ start, end }) => {
     return <path d={path} fill="none" stroke="#cbd5e1" strokeWidth="2" />;
 };
 
-// --- NODES ---
-
+// --- NODES (Identical to previous, just ensuring they are defined) ---
 const SalesOrderNode = ({ data, x, y, onDetails, onAddPO }) => (
     <div 
         className="absolute bg-white rounded-xl shadow-sm border border-l-4 border-l-blue-500 border-slate-200 p-4 hover:shadow-md transition-all cursor-pointer group"
@@ -78,34 +82,60 @@ const SalesOrderNode = ({ data, x, y, onDetails, onAddPO }) => (
     </div>
 );
 
-const PurchaseOrderNode = ({ data, x, y, onDetails, onCreateBatch }) => (
-    <div 
-        className="absolute bg-white rounded-xl shadow-sm border border-l-4 border-l-amber-500 border-slate-200 p-4 hover:shadow-md transition-all cursor-pointer group"
-        style={{ width: NODE_WIDTH, height: NODE_HEIGHT, left: x, top: y }}
-        onClick={() => onDetails(data.id)} 
-    >
-        <div className="flex justify-between items-start mb-3">
-            <div className="flex items-center gap-2">
-                <div className="p-1.5 bg-amber-50 rounded-lg">
-                    <ShoppingCart className="text-amber-600" size={16} />
-                </div>
-                <span className="font-bold text-slate-700 text-sm">{data.po_code || data.po_number}</span>
-            </div>
-            <StatusBadge status={data.status} />
-        </div>
-        <p className="text-sm text-slate-800 font-medium truncate">{data.supplier_name}</p>
-        <p className="text-xs text-slate-500 mt-1 truncate">Delivery: {data.expected_delivery_date ? new Date(data.expected_delivery_date).toLocaleDateString() : 'N/A'}</p>
+const PurchaseOrderNode = ({ data, x, y, onDetails, onCreateBatch }) => {
+    const { user } = useAuth();
+    const ordered = parseFloat(data.total_ordered_qty || 0);
+    const received = parseFloat(data.total_received_qty || 0);
+    const percent = ordered > 0 ? Math.min(100, Math.round((received / ordered) * 100)) : 0;
+    
+    // Check user permissions
+   const canPlanBatch = user && ['production_manager', 'factory_admin','cutting_manager'].includes(user.role);
+    console.log('User r ole:', user, 'Can plan batch:', canPlanBatch);
+    let progressColor = 'bg-amber-500';
+    if (percent >= 100) progressColor = 'bg-green-500';
+    else if (percent > 0) progressColor = 'bg-blue-500';
 
-        <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button 
-                onClick={(e) => { e.stopPropagation(); onCreateBatch(data.id); }}
-                className="flex items-center gap-1 text-xs bg-amber-600 text-white px-3 py-1.5 rounded-lg hover:bg-amber-700 font-medium shadow-sm transition-colors"
-            >
-                <Plus size={12} /> Plan Batch
-            </button>
+    return (
+        <div 
+            className="absolute bg-white rounded-xl shadow-sm border border-l-4 border-l-amber-500 border-slate-200 p-4 hover:shadow-md transition-all cursor-pointer group"
+            style={{ width: NODE_WIDTH, height: NODE_HEIGHT, left: x, top: y }}
+            onClick={() => onDetails(data.id)} 
+        >
+            <div className="flex justify-between items-start mb-2">
+                <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-amber-50 rounded-lg">
+                        <ShoppingCart className="text-amber-600" size={16} />
+                    </div>
+                    <span className="font-bold text-slate-700 text-sm">{data.po_code || data.po_number}</span>
+                </div>
+                <StatusBadge status={data.status} />
+            </div>
+            <p className="text-sm text-slate-800 font-medium truncate">{data.supplier_name}</p>
+            <p className="text-xs text-slate-500 mt-0.5 truncate">Delivery: {data.expected_delivery_date ? new Date(data.expected_delivery_date).toLocaleDateString() : 'N/A'}</p>
+
+            <div className="mt-3">
+                <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+                    <span>Recv: {received} / {ordered}</span>
+                    <span className="font-bold">{percent}%</span>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                    <div className={`h-full rounded-full transition-all duration-500 ${progressColor}`} style={{ width: `${percent}%` }}></div>
+                </div>
+            </div>
+
+            {canPlanBatch && (
+                <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); onCreateBatch(data.id); }}
+                        className="flex items-center gap-1 text-xs bg-amber-600 text-white px-3 py-1.5 rounded-lg hover:bg-amber-700 font-medium shadow-sm transition-colors"
+                    >
+                        <Plus size={12} /> Plan Batch
+                    </button>
+                </div>
+            )}
         </div>
-    </div>
-);
+    );
+};
 
 const BatchNode = ({ data, x, y, onViewDetails }) => (
     <div 
@@ -128,10 +158,7 @@ const BatchNode = ({ data, x, y, onViewDetails }) => (
                 <span>{data.overall_status === 'COMPLETED' ? '100%' : 'In Progress'}</span>
             </div>
             <div className="w-full bg-slate-100 rounded-full h-1.5">
-                <div 
-                    className={`h-1.5 rounded-full ${data.overall_status === 'COMPLETED' ? 'bg-emerald-500' : 'bg-indigo-500'}`} 
-                    style={{ width: data.overall_status === 'COMPLETED' ? '100%' : '40%' }}
-                ></div>
+                <div className={`h-1.5 rounded-full ${data.overall_status === 'COMPLETED' ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: data.overall_status === 'COMPLETED' ? '100%' : '40%' }}></div>
             </div>
         </div>
 
@@ -222,7 +249,7 @@ const SalesOrderDetailsModal = ({ orderId, onClose }) => {
     );
 };
 
-// --- HELPER: Received Rolls List ---
+// --- HELPER: Received Rolls List (Reused for PO Details) ---
 const ReceivedRollsList = ({ purchaseOrderId }) => {
     const [rolls, setRolls] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -295,14 +322,59 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
             try {
                 const res = await accountingApi.getPurchaseOrderDetails(poId);
                 setPo(res.data);
-            } catch (err) {
-                console.error(err);
-            } finally {
-                setLoading(false);
-            }
+            } catch (err) { console.error(err); } finally { setLoading(false); }
         };
         load();
     }, [poId]);
+    
+    // --- PDF Generation Logic ---
+    const handleGeneratePDF = () => {
+        if (!po) return;
+        const doc = new jsPDF();
+
+        // Header
+        doc.setFontSize(18);
+        doc.text("Purchase Order", 14, 20);
+        doc.setFontSize(10);
+        doc.text(`PO Number: ${po.po_code || po.po_number}`, 14, 28);
+        doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 33);
+        
+        // Supplier Details
+        doc.setFontSize(12);
+        doc.text("Supplier Details:", 14, 45);
+        doc.setFontSize(10);
+        doc.text(`Name: ${po.supplier_name}`, 14, 52);
+        doc.text(`Email: ${po.supplier_email || 'N/A'}`, 14, 57);
+
+        // Items Table
+        const tableColumn = ["Fabric Type", "Color", "Qty", "Unit", "Unit Price", "Total"];
+        const tableRows = [];
+
+        po.items.forEach(item => {
+            const itemData = [
+                item.fabric_type,
+                `${item.fabric_color} (${item.color_number})`,
+                item.quantity,
+                item.uom,
+                `$${item.unit_price || 0}`,
+                `$${item.total_price || 0}`
+            ];
+            tableRows.push(itemData);
+        });
+
+        autoTable(doc, {
+            head: [tableColumn],
+            body: tableRows,
+            startY: 65,
+        });
+
+        // Grand Total (Calculate if not available in header or just sum items)
+        const grandTotal = po.items.reduce((sum, item) => sum + parseFloat(item.total_price || 0), 0);
+        
+        doc.text(`Grand Total: $${grandTotal.toFixed(2)}`, 14, doc.lastAutoTable.finalY + 10);
+        
+        doc.save(`PO_${po.po_code || po.po_number}.pdf`);
+    };
 
     if (loading) return <Modal title="Loading PO..." onClose={onClose}><div className="flex justify-center p-8"><Loader2 className="animate-spin text-indigo-600"/></div></Modal>;
     if (!po) return null;
@@ -324,9 +396,18 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
                 </div>
 
                 <div>
-                    <h4 className="text-sm font-bold text-gray-700 mb-3 flex items-center">
-                        <Box size={16} className="mr-2"/> Ordered Items (Requirements)
-                    </h4>
+                    <div className="flex justify-between items-center mb-3">
+                        <h4 className="text-sm font-bold text-gray-700 flex items-center">
+                            <Box size={16} className="mr-2"/> Ordered Items (Requirements)
+                        </h4>
+                        {/* ✅ NEW: Print Button */}
+                        <button 
+                            onClick={handleGeneratePDF}
+                            className="flex items-center text-xs bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 shadow-sm transition-colors"
+                        >
+                            <Printer size={14} className="mr-1.5"/> Print PO
+                        </button>
+                    </div>
                     <div className="border rounded-lg overflow-hidden">
                         <table className="w-full text-sm text-left">
                             <thead className="bg-gray-100 text-gray-600 border-b">
@@ -354,9 +435,7 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
                 </div>
 
                 <div>
-                    <h4 className="text-sm font-bold text-gray-700 mb-2 flex items-center">
-                        <Layers size={16} className="mr-2"/> Received Rolls
-                    </h4>
+                    <h4 className="text-sm font-bold text-gray-700 mb-2 flex items-center"><Layers size={16} className="mr-2"/> Received Rolls</h4>
                      <ReceivedRollsList purchaseOrderId={po.id} />
                 </div>
                 
@@ -368,12 +447,14 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
     );
 };
 
+// CreatePOModal remains the same (just simplified for brevity here)
 const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
-    const [soDetails, setSoDetails] = useState(null);
+    // ... (Keep existing implementation from previous step, ensure imports are correct) ...
     const [suppliers, setSuppliers] = useState([]);
     const [fabricTypes, setFabricTypes] = useState([]);
     const [fabricColors, setFabricColors] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
     const [supplierId, setSupplierId] = useState('');
     const [expectedDate, setExpectedDate] = useState('');
     const [items, setItems] = useState([]);
@@ -381,8 +462,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
     useEffect(() => {
         const load = async () => {
             try {
-                const soRes = await accountingApi.getSalesOrderDetails(salesOrderId);
-                setSoDetails(soRes.data);
+                // Reuse existing endpoints to fetch dropdowns
                 const formDataRes = await storeManagerApi.getFabricIntakeFormData();
                 if (formDataRes.data) {
                     setSuppliers(formDataRes.data.suppliers || []);
@@ -393,7 +473,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
             } catch (err) { console.error(err); } finally { setIsLoading(false); }
         };
         load();
-    }, [salesOrderId]);
+    }, []);
 
     const handleItemChange = (index, field, value) => {
         const newItems = [...items];
@@ -406,12 +486,10 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSave({
-            sales_order_id: salesOrderId,
-            supplier_id: supplierId,
-            expected_delivery_date: expectedDate,
-            items: items.filter(i => i.fabric_type_id && i.quantity)
-        });
+        if (isSaving) return;
+        setIsSaving(true);
+        onSave({ sales_order_id: salesOrderId, supplier_id: supplierId, expected_delivery_date: expectedDate, items });
+        // NOTE: Parent handles saving state reset or modal close
     };
 
     if (isLoading) return <Modal title="Loading..." onClose={onClose}><Spinner/></Modal>;
@@ -432,7 +510,6 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                         <input type="date" className="w-full p-2 border rounded" value={expectedDate} onChange={e => setExpectedDate(e.target.value)} />
                     </div>
                 </div>
-                 {/* Simplified Items Input */}
                  <div className="border-t pt-4">
                     <label className="block text-sm font-bold text-gray-800 mb-2">Fabric Requirements</label>
                     {items.map((item, idx) => (
@@ -445,19 +522,27 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                                 <option value="">Color</option>
                                 {fabricColors.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </select>
-                            <input type="number" placeholder="Qty" className="p-2 border rounded w-16 text-sm" value={item.quantity} onChange={e => handleItemChange(idx, 'quantity', e.target.value)} required />
+                            <input 
+                                type="number" placeholder="Qty" className="p-2 border rounded w-16 text-sm" value={item.quantity} onChange={e => handleItemChange(idx, 'quantity', e.target.value)} 
+                                onWheel={e => e.target.blur()} required 
+                            />
                             <select className="p-2 border rounded w-16 text-sm" value={item.uom} onChange={e => handleItemChange(idx, 'uom', e.target.value)}>
                                 <option value="meter">m</option><option value="yard">yd</option><option value="kg">kg</option>
                             </select>
-                            <input type="number" placeholder="$" className="p-2 border rounded w-16 text-sm" value={item.unit_price} onChange={e => handleItemChange(idx, 'unit_price', e.target.value)} />
+                            <input 
+                                type="number" placeholder="$" className="p-2 border rounded w-16 text-sm" value={item.unit_price} onChange={e => handleItemChange(idx, 'unit_price', e.target.value)} 
+                                onWheel={e => e.target.blur()}
+                            />
                             <button type="button" onClick={() => removeItem(idx)} className="text-red-500"><Trash2 size={16}/></button>
                         </div>
                     ))}
                     <button type="button" onClick={addItem} className="text-sm text-indigo-600 font-medium">+ Add Item</button>
                 </div>
                 <div className="flex justify-end gap-3 pt-4 border-t">
-                    <button type="button" onClick={onClose} className="px-4 py-2 border rounded">Cancel</button>
-                    <button type="submit" className="px-6 py-2 bg-amber-600 text-white font-bold rounded">Create PO</button>
+                    <button type="button" onClick={onClose} disabled={isSaving} className="px-4 py-2 border rounded">Cancel</button>
+                    <button type="submit" disabled={isSaving} className="px-6 py-2 bg-amber-600 text-white font-bold rounded flex items-center">
+                        {isSaving && <Loader2 className="animate-spin mr-2 h-4 w-4"/>} Create PO
+                    </button>
                 </div>
             </form>
         </Modal>
@@ -472,12 +557,16 @@ const ProductionWorkflowDashboard = () => {
     const [loading, setLoading] = useState(true);
     const [zoom, setZoom] = useState(1);
     const [filterStatus, setFilterStatus] = useState('ALL');
-    const [searchText, setSearchText] = useState(''); // ✅ NEW: Search Filter
+    const [searchText, setSearchText] = useState(''); 
+
+    // Scroll Virtualization State
+    const containerRef = useRef(null);
+    const [viewport, setViewport] = useState({ top: 0, left: 0, width: 0, height: 0 });
 
     // Modal States
     const [selectedSOId, setSelectedSOId] = useState(null); 
     const [poModalSOId, setPoModalSOId] = useState(null);  
-    const [selectedPOId, setSelectedPOId] = useState(null); // ✅ NEW: For PO Details
+    const [selectedPOId, setSelectedPOId] = useState(null); 
 
     const fetchData = async () => {
         setLoading(true);
@@ -495,7 +584,7 @@ const ProductionWorkflowDashboard = () => {
 
     // --- Action Handlers ---
     const handleAddPO = (salesOrderId) => setPoModalSOId(salesOrderId);
-    const handleViewPODetails = (poId) => setSelectedPOId(poId); // ✅ Open PO Modal
+    const handleViewPODetails = (poId) => setSelectedPOId(poId); 
     
     const handleCreatePOSubmit = async (formData) => {
         try {
@@ -506,24 +595,19 @@ const ProductionWorkflowDashboard = () => {
     };
 
     const handleCreateBatch = (purchaseOrderId) => {
-         // ✅ Updated Navigation to include PO ID
-         navigate(`/production-manager/batches/new?poId=${purchaseOrderId}`);
+         navigate(`/initialization-portal/batches/new?poId=${purchaseOrderId}`);
     };
 
     const handleViewBatchDetails = (batchId) => {
-        navigate(`/production-manager/batch-cutting-details/${batchId}`);
+        navigate(`/initialization-portal/batch-details/${batchId}`); // Pointing to initialization portal route as discussed
     };
 
-    // --- Layout & Filter Logic ---
+    // --- Layout Calculation ---
     const filteredData = useMemo(() => {
         let result = data;
-        
-        // 1. Status Filter
         if (filterStatus !== 'ALL') {
             result = result.filter(so => so.status === filterStatus);
         }
-
-        // 2. Text Search Filter (Order # or Customer Name)
         if (searchText) {
             const lowerText = searchText.toLowerCase();
             result = result.filter(so => 
@@ -535,8 +619,6 @@ const ProductionWorkflowDashboard = () => {
     }, [data, filterStatus, searchText]);
 
     const layout = useMemo(() => {
-        // ... (Keep existing layout calculation logic unchanged) ...
-        // Copying the calculateLayout function logic from previous response here for completeness context
         const nodes = [];
         const connectors = [];
         let currentY = 60;
@@ -600,10 +682,80 @@ const ProductionWorkflowDashboard = () => {
         return { nodes, connectors, height: currentY };
     }, [filteredData]);
 
+    // --- Virtualization Logic ---
+    
+    // 1. Handle Scroll
+    const handleScroll = useCallback(() => {
+        if (containerRef.current) {
+            setViewport({
+                top: containerRef.current.scrollTop,
+                left: containerRef.current.scrollLeft,
+                width: containerRef.current.clientWidth,
+                height: containerRef.current.clientHeight
+            });
+        }
+    }, []);
+
+    // 2. Initial Measure
+    useEffect(() => {
+        if (containerRef.current) handleScroll();
+        window.addEventListener('resize', handleScroll);
+        return () => window.removeEventListener('resize', handleScroll);
+    }, [handleScroll]);
+
+    // 3. Filter Visible Items
+    const visibleItems = useMemo(() => {
+        // If viewport isn't set yet (initial load), render everything or nothing? 
+        // Rendering nothing prevents jump. Rendering everything might be slow. 
+        // Let's render everything if viewport is 0 (safe fallback) or handle via loading state.
+        if (viewport.width === 0) return { nodes: layout.nodes, connectors: layout.connectors };
+
+        const vTop = viewport.top / zoom;
+        const vLeft = viewport.left / zoom;
+        const vBottom = (viewport.top + viewport.height) / zoom;
+        const vRight = (viewport.left + viewport.width) / zoom;
+        
+        const buffer = VIEWPORT_BUFFER;
+
+        const visibleNodes = layout.nodes.filter(node => {
+            const nTop = node.y;
+            const nBottom = node.y + NODE_HEIGHT;
+            const nLeft = node.x;
+            const nRight = node.x + NODE_WIDTH;
+
+            return (
+                nBottom >= vTop - buffer &&
+                nTop <= vBottom + buffer &&
+                nRight >= vLeft - buffer &&
+                nLeft <= vRight + buffer
+            );
+        });
+
+        // Simple Connector Logic: If start OR end node is visible, show connector
+        // Optimisation: Map node ID/Coordinates to visibility for O(1) lookup could be done but iterating layout.connectors is O(N) which is fine for <5000 lines
+        // A better approach for connectors: Check bounding box of the line
+        const visibleConnectors = layout.connectors.filter(conn => {
+            const minX = Math.min(conn.start.x, conn.end.x);
+            const maxX = Math.max(conn.start.x, conn.end.x);
+            const minY = Math.min(conn.start.y, conn.end.y);
+            const maxY = Math.max(conn.start.y, conn.end.y);
+
+             return (
+                maxY >= vTop - buffer &&
+                minY <= vBottom + buffer &&
+                maxX >= vLeft - buffer &&
+                minX <= vRight + buffer
+            );
+        });
+
+        return { nodes: visibleNodes, connectors: visibleConnectors };
+    }, [layout, viewport, zoom]);
+
+
     return (
         <div className="flex h-screen bg-slate-50 overflow-hidden font-inter">
             {/* Sidebar / Filter Panel */}
-            <div className="w-72 bg-white border-r border-slate-200 p-6 flex flex-col z-10 shadow-sm">
+            <div className="w-72 bg-white border-r border-slate-200 p-6 flex flex-col z-10 shadow-sm shrink-0">
                 <h2 className="text-xl font-extrabold text-slate-800 mb-6 flex items-center">
                     <Box className="mr-2 text-indigo-600" size={24}/> Workflow View
                 </h2>
@@ -638,6 +790,13 @@ const ProductionWorkflowDashboard = () => {
                             ))}
                         </div>
                     </div>
+
+                     <div className="pt-6 mt-auto">
+                        <div className="text-xs text-slate-400 flex justify-between">
+                            <span>Nodes Visible:</span>
+                            <span className="font-mono">{visibleItems.nodes.length} / {layout.nodes.length}</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -651,8 +810,12 @@ const ProductionWorkflowDashboard = () => {
                     <button onClick={() => setZoom(1)} className="p-2 hover:bg-slate-100 rounded-md text-slate-600 ml-1 border-l pl-3"><Maximize size={18}/></button>
                 </div>
 
-                {/* Graph */}
-                <div className="w-full h-full overflow-auto p-0 cursor-grab active:cursor-grabbing bg-dots">
+                {/* Graph Container */}
+                <div 
+                    ref={containerRef}
+                    onScroll={handleScroll}
+                    className="w-full h-full overflow-auto p-0 cursor-grab active:cursor-grabbing bg-dots"
+                >
                     <style>{`.bg-dots { background-image: radial-gradient(#cbd5e1 1px, transparent 1px); background-size: 20px 20px; }`}</style>
                     
                     {loading ? (
@@ -661,21 +824,37 @@ const ProductionWorkflowDashboard = () => {
                         <div 
                             className="relative origin-top-left transition-transform duration-200 ease-out"
                             style={{ 
-                                width: '2500px', 
-                                height: `${Math.max(1000, layout.height + 100)}px`,
+                                width: '3000px', // Ensure this is large enough or dynamic based on content
+                                height: `${Math.max(1000, layout.height + 300)}px`,
                                 transform: `scale(${zoom})`,
                                 padding: '50px'
                             }}
                         >
+                            {/* SVG Layer */}
                             <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{zIndex: 0}}>
-                                {layout.connectors.map((conn, i) => <Connector key={i} start={conn.start} end={conn.end} />)}
+                                <defs>
+                                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                                        <polygon points="0 0, 10 3.5, 0 7" fill="#cbd5e1" />
+                                    </marker>
+                                </defs>
+                                {visibleItems.connectors.map((conn, i) => (
+                                    <Connector key={i} start={conn.start} end={conn.end} />
+                                ))}
                             </svg>
-                            {layout.nodes.map((node, i) => {
+
+                            {/* Node Layer */}
+                            {visibleItems.nodes.map((node, i) => {
                                 if (node.type === 'SALES_ORDER') return <SalesOrderNode key={i} {...node} onDetails={setSelectedSOId} onAddPO={handleAddPO} />;
                                 if (node.type === 'PURCHASE_ORDER') return <PurchaseOrderNode key={i} {...node} onDetails={handleViewPODetails} onCreateBatch={handleCreateBatch} />; 
                                 if (node.type === 'BATCH') return <BatchNode key={i} {...node} onViewDetails={handleViewBatchDetails} />;
                                 return null;
                             })}
+                            
+                            {layout.nodes.length === 0 && (
+                                <div className="absolute top-20 left-20 text-slate-400 text-lg font-medium">
+                                    No workflow data found for the selected filter.
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

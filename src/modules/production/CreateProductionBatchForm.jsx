@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Package, Ruler, Layers, ArrowLeft, Info, Loader2, ChevronDown, ChevronRight, Hash, ShoppingBag } from 'lucide-react';
+import { useNavigate, useParams, useSearchParams, Link, useLocation } from 'react-router-dom';
+import { Package, Ruler, Layers, ArrowLeft, Info, Loader2, ChevronDown, ChevronRight, Hash, ShoppingBag, FileText, User, List } from 'lucide-react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { accountingApi } from '../../api/accountingApi'; 
-import { Link } from 'react-router-dom';
 
 const Spinner = () => <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
 const ErrorDisplay = ({ message }) => <div className="p-3 mb-4 bg-red-100 text-red-700 rounded-md border border-red-200">{message}</div>;
@@ -91,10 +90,15 @@ const RollGroup = ({ referenceNumber, rolls, selectedRolls, onToggleRoll }) => {
 
 const CreateProductionBatchForm = () => {
     const navigate = useNavigate();
+    const location = useLocation(); 
     const { batchId } = useParams();
     const [searchParams] = useSearchParams();
     const prefillPoId = searchParams.get('poId');
     const isEditMode = Boolean(batchId);
+
+    const isInitPortal = location.pathname.includes('/initialization-portal');
+    const returnPath = isInitPortal ? '/initialization-portal/dashboard' : '/production-manager/dashboard';
+    const returnLabel = isInitPortal ? 'Back to Dashboard' : 'Back to Workflow';
 
     // --- State ---
     const [purchaseOrderId, setPurchaseOrderId] = useState('');
@@ -102,15 +106,18 @@ const CreateProductionBatchForm = () => {
     const [productionLineId, setProductionLineId] = useState('');
     const [layerLength, setLayerLength] = useState('');
     const [notes, setNotes] = useState('');
+    
+    // Size Ratios State - Defined in Ascending Order
     const SIZES = useMemo(() => [
        { key: '28', value: '28' }, { key: '30', value: '30' }, { key: '32', value: '32' },
        { key: '34', value: '34' }, { key: '36', value: '36' }, { key: '38', value: '38' },
        { key: '40', value: '40' }, { key: '42', value: '42' }, { key: '44', value: '44' },
     ], []);
     const [sizeRatios, setSizeRatios] = useState( SIZES.map(s => ({ size: s.key, ratio: '' })) );
+    
     const [selectedRolls, setSelectedRolls] = useState([]);
     
-    // Combined options from all APIs
+    // Combined options
     const [options, setOptions] = useState({ 
         products: [], 
         availableRolls: [], 
@@ -120,6 +127,9 @@ const CreateProductionBatchForm = () => {
         purchaseOrders: []
     });
     
+    // Sales Order Context
+    const [linkedSO, setLinkedSO] = useState(null); // Stores full SO details
+
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState(null);
@@ -127,7 +137,7 @@ const CreateProductionBatchForm = () => {
     const [fabricColorFilter, setFabricColorFilter] = useState('');
     const [activeTab, setActiveTab] = useState('details');
 
-    // --- Data Fetching ---
+    // --- 1. Initial Data Fetching ---
     useEffect(() => {
         const loadData = async () => {
             setIsLoading(true);
@@ -177,10 +187,10 @@ const CreateProductionBatchForm = () => {
                         products: formDataRes.data.products || [],
                         availableRolls: formDataRes.data.fabricRolls || [],
                     });
+                     // Reset form
                      setSizeRatios(SIZES.map(s => ({ size: s.key, ratio: '' })));
                      setSelectedRolls([]);
                      setProductId('');
-                     // Pre-fill PO ID from URL if available
                      setPurchaseOrderId(prefillPoId || ''); 
                      setProductionLineId('');
                      setLayerLength('');
@@ -194,6 +204,52 @@ const CreateProductionBatchForm = () => {
         loadData();
     }, [batchId, isEditMode, SIZES, prefillPoId]);
 
+    // --- 2. Sales Order Lookup Effect ---
+    // When a PO is selected, find the linked SO and fetch its details (product, ratios)
+    useEffect(() => {
+        const fetchSODetails = async () => {
+            if (!purchaseOrderId) {
+                setLinkedSO(null);
+                return;
+            }
+
+            // Find the PO object from our options list to get the sales_order_id
+            const selectedPO = options.purchaseOrders.find(po => String(po.id) === String(purchaseOrderId));
+            
+            if (selectedPO && selectedPO.sales_order_id) {
+                try {
+                    const soRes = await accountingApi.getSalesOrderDetails(selectedPO.sales_order_id);
+                    const soData = soRes.data;
+                    setLinkedSO(soData);
+
+                    // Auto-fill Ratios if available and we are in Create Mode (don't overwrite Edit mode unless empty)
+                    if (!isEditMode && soData.products && soData.products.length > 0) {
+                        // Assuming batch is for the first product in SO for simplicity, or handle multiple
+                        const primaryProduct = soData.products[0]; 
+                        
+                        // Auto-select product if matches
+                        // const matchingProductOption = options.products.find(p => p.name === primaryProduct.product_name);
+                        // if (matchingProductOption) setProductId(matchingProductOption.id);
+
+                        // Map SO breakdown to our ratio state
+                        if (primaryProduct.size_breakdown) {
+                            const newRatios = SIZES.map(s => ({
+                                size: s.key,
+                                ratio: primaryProduct.size_breakdown[s.key] || ''
+                            }));
+                            setSizeRatios(newRatios);
+                        }
+                    }
+                } catch (err) {
+                    console.error("Failed to fetch linked SO details", err);
+                }
+            }
+        };
+
+        fetchSODetails();
+    }, [purchaseOrderId, options.purchaseOrders, isEditMode, SIZES]);
+
+
     // --- Filter Logic ---
     const filteredFabricRolls = useMemo(() => {
          return (options.availableRolls || []).filter(roll => {
@@ -202,9 +258,6 @@ const CreateProductionBatchForm = () => {
 
             const typeMatch = !fabricTypeFilter || rollType === fabricTypeFilter;
             const colorMatch = !fabricColorFilter || rollColor === fabricColorFilter;
-            
-            // Optional: Filter by selected PO if you want strict enforcement
-            // const poMatch = !purchaseOrderId || roll.reference_number?.includes(purchaseOrderId) ... logic depends on data structure
             
             return typeMatch && colorMatch;
         });
@@ -246,7 +299,6 @@ const CreateProductionBatchForm = () => {
     // --- Submit Handler ---
     const handleSubmit = async (e) => {
         e.preventDefault();
-        // Validation updates
         if (!purchaseOrderId) { setError("Purchase Order selection is required for Batch Coding."); return; }
         if (!productId) { setError("Product selection is required."); return; }
         if (!productionLineId) { setError("Production Line assignment is required."); return; }
@@ -256,7 +308,7 @@ const CreateProductionBatchForm = () => {
         setError(null);
         try {
             const payload = {
-                purchase_order_id: purchaseOrderId, // Send PO ID
+                purchase_order_id: purchaseOrderId, 
                 product_id: productId,
                 assigned_production_line_id: productionLineId, 
                 length_of_layer_inches: layerLength || null,
@@ -272,22 +324,24 @@ const CreateProductionBatchForm = () => {
             } else {
                 await productionManagerApi.create(payload);
             }
-            navigate('/production-manager/dashboard');
+            navigate(returnPath);
         } catch (err) {
              setError(err.response?.data?.error || err.message || 'An unexpected error occurred.');
              setIsSaving(false); 
         }
     };
 
-    const handleCancel = () => { navigate('/production-manager/dashboard'); };
+    const handleCancel = () => { navigate(returnPath); };
 
     if (isLoading) return <Spinner />;
 
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
-            <Link to="/production-manager/production-workflow" className="text-sm text-blue-600 hover:underline flex items-center mb-4">
-                 <ArrowLeft className="mr-2 h-4 w-4" /> Back to production-workflow
+            {/* ✅ Dynamic Back Link */}
+            <Link to={returnPath} className="text-sm text-blue-600 hover:underline flex items-center mb-4">
+                 <ArrowLeft className="mr-2 h-4 w-4" /> {returnLabel}
             </Link>
+            
             <form onSubmit={handleSubmit} className="flex flex-col bg-white rounded-lg shadow border overflow-hidden">
                 <div className="p-4 border-b">
                      <h1 className="text-2xl font-bold text-gray-800">{isEditMode ? 'Edit Production Batch' : 'Create New Production Batch'}</h1>
@@ -296,6 +350,7 @@ const CreateProductionBatchForm = () => {
 
                 <div className="flex border-b">
                      <TabButton label="Details" icon={Package} isActive={activeTab === 'details'} onClick={() => setActiveTab('details')} />
+                     <TabButton label="Sales Order" icon={FileText} isActive={activeTab === 'sales_order'} onClick={() => setActiveTab('sales_order')} />
                      <TabButton label="Size Ratios" icon={Ruler} isActive={activeTab === 'ratios'} onClick={() => setActiveTab('ratios')} />
                      <TabButton label="Fabric Rolls" icon={Layers} isActive={activeTab === 'rolls'} onClick={() => setActiveTab('rolls')} />
                 </div>
@@ -362,9 +417,76 @@ const CreateProductionBatchForm = () => {
                         </div>
                     )}
 
+                    {activeTab === 'sales_order' && (
+                        <div className="space-y-6">
+                            {linkedSO ? (
+                                <div className="bg-white p-6 rounded-lg border border-blue-100 shadow-sm space-y-6">
+                                    <div className="flex justify-between items-start border-b border-gray-100 pb-4">
+                                        <div>
+                                            <h5 className="font-bold text-lg text-gray-800 flex items-center">
+                                                <FileText size={20} className="text-blue-600 mr-2" />
+                                                Sales Order: {linkedSO.order_number}
+                                            </h5>
+                                            <p className="text-sm text-gray-500 mt-1">Customer: <span className="font-medium text-gray-700">{linkedSO.customer_name}</span></p>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="text-xs text-gray-400 font-bold uppercase">Date</span>
+                                            <p className="text-sm font-medium text-gray-700">{new Date(linkedSO.order_date).toLocaleDateString()}</p>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <h4 className="text-sm font-bold text-gray-700 uppercase mb-3 flex items-center">
+                                            <List size={16} className="mr-2"/> Order Items Breakdown
+                                        </h4>
+                                        <div className="overflow-x-auto border rounded-lg">
+                                            <table className="min-w-full text-sm text-left">
+                                                <thead className="bg-gray-50 text-gray-600 font-medium border-b">
+                                                    <tr>
+                                                        <th className="px-4 py-3">Product</th>
+                                                        <th className="px-4 py-3">Fabric</th>
+                                                        <th className="px-4 py-3">Color Info</th>
+                                                        <th className="px-4 py-3 text-right">Qty</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100">
+                                                    {linkedSO.products.map((prod, idx) => (
+                                                        <React.Fragment key={idx}>
+                                                            {(prod.colors || []).map((color, cIdx) => (
+                                                                <tr key={`${idx}-${cIdx}`} className="hover:bg-blue-50/30">
+                                                                    <td className="px-4 py-3 font-medium text-gray-800">{prod.product_name}</td>
+                                                                    <td className="px-4 py-3 text-gray-600">{prod.fabric_type}</td>
+                                                                    <td className="px-4 py-3">
+                                                                        <span className="inline-flex items-center px-2 py-1 rounded-md bg-white border border-gray-200 shadow-sm">
+                                                                            <span className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: color.color_name.toLowerCase() }}></span>
+                                                                            {color.color_name} ({color.color_number})
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-4 py-3 text-right font-bold text-gray-800">{color.quantity}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </React.Fragment>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
+                                    <ShoppingBag className="mx-auto h-10 w-10 text-gray-300 mb-3" />
+                                    <p className="text-gray-500 font-medium">Select a Purchase Order in the "Details" tab to view Sales Order context.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {activeTab === 'ratios' && (
                         <div className="space-y-4">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Size Ratios</h3>
+                            <div className="flex justify-between items-center mb-2">
+                                <h3 className="text-lg font-semibold text-gray-800">Size Ratios</h3>
+                                {linkedSO && <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100 flex items-center"><Info size={12} className="mr-1"/> Auto-filled from Sales Order</span>}
+                            </div>
                             <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4">
                                 {sizeRatios.map((ratio, index) => (
                                     <div key={ratio.size}><label className="block text-sm font-medium text-center">{ratio.size}</label><input type="number" placeholder="0" min="0" value={ratio.ratio} onChange={e => handleRatioChange(index, e.target.value)} className="mt-1 block w-full p-2 border rounded-md text-center" /></div>

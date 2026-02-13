@@ -19,4 +19,11 @@ export const initializationPortalApi = {
     getDailyReport: (startDate, endDate) => api.get(`/initialization-portal/reports/daily?startDate=${startDate}&endDate=${endDate}`),
 
     getBatchCuttingDetails: (batchId) => api.get(`/cutting-portal/batch-cutting-details/${batchId}`),
+
+
+
+  getBatchForEdit: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/edit-data`),
+  updateBatch: (batchId, batchData) => api.put(`/production-batch-api/production-batches/${batchId}`, batchData),
+
+
 };

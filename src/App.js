@@ -233,7 +233,11 @@ function App() {
           <Route path="reports" element={<CuttingManagerReportPage />} />
           <Route path="batch-details/:batchId" element={<BatchCuttingDetailsPage />} />
           <Route path="batch-cutting-details/:batchId" element={<BatchCuttingDetailsPage />} />
+          <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
+          <Route path="batches/new" element={<CreateProductionBatchForm />} />
+          <Route path="batches/edit/:batchId" element={<CreateProductionBatchForm />} />
 
+          
       </Route>
 
       <Route path="/preparation-unload-portal" element={<PreparationUnloadProtectedRoute><PreparationUnloadLayout /></PreparationUnloadProtectedRoute>}>

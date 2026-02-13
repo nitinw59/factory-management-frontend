@@ -1,4 +1,3 @@
-// Import useCallback and useMemo
 import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import { jwtDecode } from 'jwt-decode';
 import api from '../utils/api';
@@ -29,6 +28,8 @@ export const AuthProvider = ({ children }) => {
         setToken(null);
         setUser(null);
       }
+    } else {
+      setUser(null); // Ensure user is null if no token
     }
     setIsLoading(false);
   }, [token]);
@@ -37,10 +38,14 @@ export const AuthProvider = ({ children }) => {
   const login = useCallback((jwt) => {
     localStorage.setItem('factory_token', jwt);
     api.defaults.headers.common['Authorization'] = `Bearer ${jwt}`;
-    const decodedUser = jwtDecode(jwt);
-    console.log("Decoded user on login:", decodedUser); 
-    setUser(decodedUser);
-    setToken(jwt); // Call setToken last to avoid race conditions with useEffect
+    try {
+      const decodedUser = jwtDecode(jwt);
+      console.log("Decoded user on login:", decodedUser); 
+      setUser(decodedUser);
+      setToken(jwt); // Call setToken last to avoid race conditions with useEffect
+    } catch (e) {
+      console.error("Invalid token provided to login:", e);
+    }
   }, []); // Empty dependencies means this function is created only ONCE
 
   // ✅ Also wrap logout in useCallback for consistency
