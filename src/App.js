@@ -92,6 +92,7 @@ import CreateSalesOrder from './modules/accounts/sales/CreateSalesOrder';
 import ProductionWorkflowDashboard from './modules/production/ProductionWorkflowDashboard';
 
 import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
+import CuttingDailyReportPage from './modules/initialisation_portal/CuttingDailyReportPage';
 
 function App() {
   return (
@@ -236,7 +237,7 @@ function App() {
           <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
           <Route path="batches/new" element={<CreateProductionBatchForm />} />
           <Route path="batches/edit/:batchId" element={<CreateProductionBatchForm />} />
-
+          <Route path="reports/daily" element={<CuttingDailyReportPage />} />
           
       </Route>
 

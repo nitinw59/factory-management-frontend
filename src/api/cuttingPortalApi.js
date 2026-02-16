@@ -27,6 +27,8 @@ export const cuttingPortalApi = {
   getBatchCuttingDetails: (batchId) => api.get(`/cutting-portal/batch-cutting-details/${batchId}`),
 
   getBatchNumberingDetails: (batchId) => api.get(`/cutting-portal/batch-numbering-details/${batchId}`),
+
+  getDailyReport: () => api.get('/cutting-portal/reports/daily-status'),
     
 };
 

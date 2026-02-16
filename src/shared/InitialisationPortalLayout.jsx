@@ -65,7 +65,7 @@ const InitializationPortalLayout = () => {
                                 <LuFileText className="mr-2" /> Batch QC Summary
                         </NavLink>
                         <NavDropdown title="Reports">
-                            <NavLink to="/initialization-portal/reports/cutting-manager" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Cutting Manager Report</NavLink>
+                            <NavLink to="/initialization-portal/reports/daily" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Cutting Manager Report</NavLink>
                             {/* Add more report links as needed */}
                         </NavDropdown>
                     </nav>

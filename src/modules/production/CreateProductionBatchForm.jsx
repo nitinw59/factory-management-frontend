@@ -128,7 +128,7 @@ const CreateProductionBatchForm = () => {
     });
     
     // Sales Order Context
-    const [linkedSO, setLinkedSO] = useState(null); // Stores full SO details
+    const [linkedSO, setLinkedSO] = useState(null); 
 
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -205,7 +205,6 @@ const CreateProductionBatchForm = () => {
     }, [batchId, isEditMode, SIZES, prefillPoId]);
 
     // --- 2. Sales Order Lookup Effect ---
-    // When a PO is selected, find the linked SO and fetch its details (product, ratios)
     useEffect(() => {
         const fetchSODetails = async () => {
             if (!purchaseOrderId) {
@@ -213,7 +212,6 @@ const CreateProductionBatchForm = () => {
                 return;
             }
 
-            // Find the PO object from our options list to get the sales_order_id
             const selectedPO = options.purchaseOrders.find(po => String(po.id) === String(purchaseOrderId));
             
             if (selectedPO && selectedPO.sales_order_id) {
@@ -222,16 +220,9 @@ const CreateProductionBatchForm = () => {
                     const soData = soRes.data;
                     setLinkedSO(soData);
 
-                    // Auto-fill Ratios if available and we are in Create Mode (don't overwrite Edit mode unless empty)
+                    // Auto-fill Ratios if available and we are in Create Mode
                     if (!isEditMode && soData.products && soData.products.length > 0) {
-                        // Assuming batch is for the first product in SO for simplicity, or handle multiple
                         const primaryProduct = soData.products[0]; 
-                        
-                        // Auto-select product if matches
-                        // const matchingProductOption = options.products.find(p => p.name === primaryProduct.product_name);
-                        // if (matchingProductOption) setProductId(matchingProductOption.id);
-
-                        // Map SO breakdown to our ratio state
                         if (primaryProduct.size_breakdown) {
                             const newRatios = SIZES.map(s => ({
                                 size: s.key,
@@ -250,18 +241,31 @@ const CreateProductionBatchForm = () => {
     }, [purchaseOrderId, options.purchaseOrders, isEditMode, SIZES]);
 
 
-    // --- Filter Logic ---
+    // --- 3. Filter Logic (Updated to filter by PO) ---
     const filteredFabricRolls = useMemo(() => {
+         // Identify current PO details
+         const selectedPO = options.purchaseOrders.find(po => String(po.id) === String(purchaseOrderId));
+         // Get the unique identifier (Code or Number) that links rolls to PO
+         const poIdentifier = selectedPO ? (selectedPO.po_code || selectedPO.po_number) : null;
+
          return (options.availableRolls || []).filter(roll => {
+            // Standard Filters
             const rollType = roll.type || roll.fabric_type;
             const rollColor = roll.color || roll.fabric_color;
-
             const typeMatch = !fabricTypeFilter || rollType === fabricTypeFilter;
             const colorMatch = !fabricColorFilter || rollColor === fabricColorFilter;
+
+            // ✅ NEW: PO Filter
+            // If a PO is selected, we STRICTLY filter rolls that match the PO Code via reference_number
+            let poMatch = true;
+            if (purchaseOrderId && poIdentifier) {
+                // Assuming reference_number on the roll matches the PO Code
+                poMatch = roll.reference_number === poIdentifier;
+            }
             
-            return typeMatch && colorMatch;
+            return typeMatch && colorMatch && poMatch;
         });
-    }, [options.availableRolls, fabricTypeFilter, fabricColorFilter]);
+    }, [options.availableRolls, fabricTypeFilter, fabricColorFilter, purchaseOrderId, options.purchaseOrders]);
 
     // --- Grouping Logic ---
     const groupedRolls = useMemo(() => {
@@ -337,7 +341,6 @@ const CreateProductionBatchForm = () => {
 
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
-            {/* ✅ Dynamic Back Link */}
             <Link to={returnPath} className="text-sm text-blue-600 hover:underline flex items-center mb-4">
                  <ArrowLeft className="mr-2 h-4 w-4" /> {returnLabel}
             </Link>
@@ -370,7 +373,9 @@ const CreateProductionBatchForm = () => {
                                         <select 
                                             value={purchaseOrderId} 
                                             onChange={e => setPurchaseOrderId(e.target.value)} 
-                                            className="mt-1 p-2 w-full border rounded-md focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                            // ✅ DISABLED if coming from dashboard (prefill) OR editing
+                                            disabled={!!prefillPoId || isEditMode}
+                                            className={`mt-1 p-2 w-full border rounded-md focus:ring-2 focus:ring-indigo-500 outline-none ${!!prefillPoId || isEditMode ? 'bg-gray-200 text-gray-600 cursor-not-allowed' : ''}`}
                                             required
                                         >
                                             <option value="">Select Purchase Order...</option>
@@ -380,7 +385,7 @@ const CreateProductionBatchForm = () => {
                                                 </option>
                                             ))}
                                         </select>
-                                        <p className="text-xs text-gray-500 mt-1">This determines the Batch Code prefix (e.g. SO-PO-B1).</p>
+                                        <p className="text-xs text-gray-500 mt-1">Locked context: Create separate batches for different POs.</p>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700">Product*</label>
@@ -524,7 +529,9 @@ const CreateProductionBatchForm = () => {
                                              selectedRolls={selectedRolls}
                                              onToggleRoll={handleRollSelection}
                                          />
-                                     )) : <p className="text-center text-gray-500 py-6">No rolls match filters or available.</p>}
+                                     )) : <p className="text-center text-gray-500 py-6">
+                                        {purchaseOrderId ? "No available rolls for this PO." : "Select a Purchase Order first."}
+                                     </p>}
                                  </div>
                              </div>
 
