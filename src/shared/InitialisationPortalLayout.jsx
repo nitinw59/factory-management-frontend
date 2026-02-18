@@ -68,6 +68,16 @@ const InitializationPortalLayout = () => {
                             <NavLink to="/initialization-portal/reports/daily" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Cutting Manager Report</NavLink>
                             {/* Add more report links as needed */}
                         </NavDropdown>
+                        <NavDropdown title="Management">
+                            <NavLink to="/initialization-portal/management/interlining-rules" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Interlining Rules</NavLink>
+                            {/* Add more management links as needed */}
+                        </NavDropdown>
+                        <NavDropdown title="Settings">
+                            <NavLink to="/initialization-portal/settings/profile" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Profile</NavLink>
+                            <NavLink to="/initialization-portal/settings/account" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Account</NavLink>
+                           <NavLink to="/initialization-portal/settings/notifications" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Notification Preferences</NavLink>
+
+                        </NavDropdown>
                     </nav>
 
                     <div className="flex items-center space-x-4">

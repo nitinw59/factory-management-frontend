@@ -93,6 +93,7 @@ import ProductionWorkflowDashboard from './modules/production/ProductionWorkflow
 
 import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
 import CuttingDailyReportPage from './modules/initialisation_portal/CuttingDailyReportPage';
+import InterliningManagerPage from './modules/initialisation_portal/InterliningManagerPage';
 
 function App() {
   return (
@@ -238,7 +239,7 @@ function App() {
           <Route path="batches/new" element={<CreateProductionBatchForm />} />
           <Route path="batches/edit/:batchId" element={<CreateProductionBatchForm />} />
           <Route path="reports/daily" element={<CuttingDailyReportPage />} />
-          
+          <Route path="management/interlining-rules" element={<InterliningManagerPage />} />
       </Route>
 
       <Route path="/preparation-unload-portal" element={<PreparationUnloadProtectedRoute><PreparationUnloadLayout /></PreparationUnloadProtectedRoute>}>
