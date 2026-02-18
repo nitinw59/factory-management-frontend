@@ -128,7 +128,7 @@ const CreateProductionBatchForm = () => {
     });
     
     // Sales Order Context
-    const [linkedSO, setLinkedSO] = useState(null); 
+    const [linkedSO, setLinkedSO] = useState(null); // Stores full SO details
 
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -162,9 +162,11 @@ const CreateProductionBatchForm = () => {
                     const data = res.data;
                     if (!data || !data.batchDetails) throw new Error("Batch data not found.");
 
-                    setProductId(data.batchDetails.product_id || '');
-                    setPurchaseOrderId(data.batchDetails.purchase_order_id || '');
-                    setProductionLineId(data.batchDetails.assigned_production_line_id || ''); 
+                    setProductId(String(data.batchDetails.product_id || ''));
+                    // Ensure purchaseOrderId is set as a string for comparison consistency
+                    console.log("Setting purchaseOrderId with value:", data.batchDetails.purchase_order_id);
+                    setPurchaseOrderId(String(data.batchDetails.purchase_order_id || ''));
+                    setProductionLineId(String(data.batchDetails.assigned_production_line_id || '')); 
                     setLayerLength(data.batchDetails.length_of_layer_inches || '');
                     setNotes(data.batchDetails.notes || '');
                     
@@ -191,7 +193,7 @@ const CreateProductionBatchForm = () => {
                      setSizeRatios(SIZES.map(s => ({ size: s.key, ratio: '' })));
                      setSelectedRolls([]);
                      setProductId('');
-                     setPurchaseOrderId(prefillPoId || ''); 
+                     setPurchaseOrderId(prefillPoId ? String(prefillPoId) : ''); 
                      setProductionLineId('');
                      setLayerLength('');
                      setNotes('');
@@ -212,6 +214,8 @@ const CreateProductionBatchForm = () => {
                 return;
             }
 
+            // Find the PO object from our options list
+            // Ensure strict comparison by converting both to string
             const selectedPO = options.purchaseOrders.find(po => String(po.id) === String(purchaseOrderId));
             
             if (selectedPO && selectedPO.sales_order_id) {
@@ -220,9 +224,17 @@ const CreateProductionBatchForm = () => {
                     const soData = soRes.data;
                     setLinkedSO(soData);
 
-                    // Auto-fill Ratios if available and we are in Create Mode
+                    // Auto-fill Data if in Create Mode
                     if (!isEditMode && soData.products && soData.products.length > 0) {
                         const primaryProduct = soData.products[0]; 
+                        
+                        // ✅ Auto-select Product
+                        const matchingProduct = options.products.find(p => p.name === primaryProduct.product_name);
+                        if (matchingProduct) {
+                             setProductId(String(matchingProduct.id));
+                        }
+
+                        // Auto-fill Ratios
                         if (primaryProduct.size_breakdown) {
                             const newRatios = SIZES.map(s => ({
                                 size: s.key,
@@ -237,8 +249,9 @@ const CreateProductionBatchForm = () => {
             }
         };
 
+        // Added options.products to dependency to ensure product list exists for matching
         fetchSODetails();
-    }, [purchaseOrderId, options.purchaseOrders, isEditMode, SIZES]);
+    }, [purchaseOrderId, options.purchaseOrders, options.products, isEditMode, SIZES]);
 
 
     // --- 3. Filter Logic (Updated to filter by PO) ---
@@ -252,14 +265,15 @@ const CreateProductionBatchForm = () => {
             // Standard Filters
             const rollType = roll.type || roll.fabric_type;
             const rollColor = roll.color || roll.fabric_color;
+
             const typeMatch = !fabricTypeFilter || rollType === fabricTypeFilter;
             const colorMatch = !fabricColorFilter || rollColor === fabricColorFilter;
 
-            // ✅ NEW: PO Filter
-            // If a PO is selected, we STRICTLY filter rolls that match the PO Code via reference_number
+            // ✅ PO Filter: STRICTLY filter rolls matching PO Code
             let poMatch = true;
             if (purchaseOrderId && poIdentifier) {
-                // Assuming reference_number on the roll matches the PO Code
+                // Check against reference_number; ensure strict equality or includes depending on data
+                // Assuming reference_number exactly matches PO Code for now based on previous context
                 poMatch = roll.reference_number === poIdentifier;
             }
             
@@ -303,6 +317,7 @@ const CreateProductionBatchForm = () => {
     // --- Submit Handler ---
     const handleSubmit = async (e) => {
         e.preventDefault();
+        // Ensure values are checked as strings or numbers appropriately
         if (!purchaseOrderId) { setError("Purchase Order selection is required for Batch Coding."); return; }
         if (!productId) { setError("Product selection is required."); return; }
         if (!productionLineId) { setError("Production Line assignment is required."); return; }
@@ -341,6 +356,7 @@ const CreateProductionBatchForm = () => {
 
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
+            {/* ✅ Dynamic Back Link */}
             <Link to={returnPath} className="text-sm text-blue-600 hover:underline flex items-center mb-4">
                  <ArrowLeft className="mr-2 h-4 w-4" /> {returnLabel}
             </Link>
@@ -353,6 +369,7 @@ const CreateProductionBatchForm = () => {
 
                 <div className="flex border-b">
                      <TabButton label="Details" icon={Package} isActive={activeTab === 'details'} onClick={() => setActiveTab('details')} />
+                     {/* ✅ NEW TAB */}
                      <TabButton label="Sales Order" icon={FileText} isActive={activeTab === 'sales_order'} onClick={() => setActiveTab('sales_order')} />
                      <TabButton label="Size Ratios" icon={Ruler} isActive={activeTab === 'ratios'} onClick={() => setActiveTab('ratios')} />
                      <TabButton label="Fabric Rolls" icon={Layers} isActive={activeTab === 'rolls'} onClick={() => setActiveTab('rolls')} />
@@ -422,6 +439,7 @@ const CreateProductionBatchForm = () => {
                         </div>
                     )}
 
+                    {/* ✅ NEW TAB CONTENT: Sales Order Summary */}
                     {activeTab === 'sales_order' && (
                         <div className="space-y-6">
                             {linkedSO ? (

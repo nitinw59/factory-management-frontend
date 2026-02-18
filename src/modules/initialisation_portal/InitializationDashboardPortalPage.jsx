@@ -357,10 +357,22 @@ const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll }) => {
                 
                 <div className="flex justify-between items-start mb-3">
                     <div className="flex items-center">
-                        <div className="bg-slate-50 text-slate-500 px-3 py-1.5 rounded-lg border border-slate-100 flex items-center shadow-sm">
-                            <Box size={14} className="mr-2 opacity-60" />
-                            <span className="text-sm font-bold font-mono tracking-tight">#{batch.batch_code || batch.batch_id}</span>
-                        </div>
+                        {/* Batch ID */}
+<div className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg border border-blue-200 flex items-center shadow-sm">
+  <Box size={14} className="mr-2 opacity-70" />
+  <span className="text-sm font-bold font-mono tracking-tight">
+    #{batch.batch_id}
+  </span>
+</div>
+
+{/* Batch Code */}
+<div className="bg-green-50 text-green-600 px-3 py-1.5 rounded-lg border border-green-200 flex items-center shadow-sm">
+  <Box size={14} className="mr-2 opacity-70" />
+  <span className="text-sm font-bold font-mono tracking-tight">
+    #{batch.batch_code || batch.batch_id}
+  </span>
+</div>
+
                     </div>
                     <span className={`px-3 py-1 text-[10px] uppercase font-bold tracking-wider rounded-full border ${statusBadge}`}>
                         {status.replace('_', ' ')}

@@ -60,7 +60,7 @@ export const productionManagerApi = {
 
   getBatchForEdit: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/edit-data`),
   updateBatch: (batchId, batchData) => api.put(`/production-batch-api/production-batches/${batchId}`, batchData),
-
+  deleteBatch: (batchId) => api.delete(`/production-batch-api/production-batches/${batchId}`),
 
 // WORKFLOW FUNCTIONS
   getWorkflowData: () => api.get('/production-manager/production-workflow-data'),
