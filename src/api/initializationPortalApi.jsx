@@ -22,8 +22,14 @@ export const initializationPortalApi = {
 
 
 
-  getBatchForEdit: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/edit-data`),
-  updateBatch: (batchId, batchData) => api.put(`/production-batch-api/production-batches/${batchId}`, batchData),
+    getBatchForEdit: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/edit-data`),
+    updateBatch: (batchId, batchData) => api.put(`/production-batch-api/production-batches/${batchId}`, batchData),
 
+
+
+    getInterliningTemplates: () => api.get('/initialization-portal/interlining/templates'),
+    createInterliningTemplate: (templateData) => api.post('/initialization-portal/interlining/templates', templateData),
+    updateInterliningTemplate: (templateId, templateData) => api.put(`/initialization-portal/interlining/templates/${templateId}`, templateData),
+    deleteInterliningTemplate: (templateId) => api.delete(`/initialization-portal/interlining/templates/${templateId}`),
 
 };

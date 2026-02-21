@@ -64,6 +64,7 @@ const BatchCuttingDetailsPage = () => {
         setError(null);
         try {
             const response = await cuttingPortalApi.getBatchCuttingDetails(batchId);
+            console.log("Batch cutting details response:", response.data);
             setDetails(response.data);
         } catch (err) {
             console.error("Failed to fetch batch details:", err);
@@ -85,6 +86,8 @@ const BatchCuttingDetailsPage = () => {
         const allSizesSet = new Set();
 
         (details.rolls || []).forEach(roll => {
+            // We can optionally filter out interlining rolls from this total if needed, 
+            // but usually they are tracked as part of total assigned fabric.
             totalMeters += parseFloat(roll.meter || 0);
             const uniqueCutsForRoll = {};
             (roll.cuts || []).forEach(cut => {
@@ -133,8 +136,6 @@ const BatchCuttingDetailsPage = () => {
             doc.text(`Product: ${numberingDetails.product_name}`, 14, 22);
 
             let finalY = 30;
-            // Use summaryStats from cutting data to ensure consistent columns, 
-            // but fallback to numberingDetails keys if needed (rare case of disjoint data)
             const head = ["Roll ID", "Type", ...summaryStats.allSizes.map(getSizeLabel), "Total OK"];
             
             let grandTotalOk = 0;
@@ -378,14 +379,12 @@ const BatchCuttingDetailsPage = () => {
                     </Link>
                     
                     <div className="flex gap-2 no-print">
-                        {/* New Button for Lay Sheet */}
                         <button onClick={handleGenerateLaySheet} className="flex items-center px-3 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-900 transition-colors shadow-sm">
-                            <FiClipboard className="mr-2"/> Lay Sheet (A5)
+                            <FiClipboard className="mr-2"/> Lay sssSheet (A5)
                         </button>
                         <button onClick={handleGenerateCutReport} className="flex items-center px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm">
                             <FiDownload className="mr-2"/> Cut Report
                         </button>
-                        {/* ✅ NEW BUTTON */}
                         <button 
                             onClick={handleGenerateNumberingPDF} 
                             disabled={isGeneratingReport}
@@ -444,7 +443,45 @@ const BatchCuttingDetailsPage = () => {
                  </div>
             </section>
 
-             {/* Detailed Table */}
+            {/* ✅ NEW: Interlining Requirements Section */}
+            {details.interlining_requirements && details.interlining_requirements.length > 0 && (
+                <section className="bg-white rounded-lg shadow-sm border overflow-hidden print-bg-white mb-6">
+                    <div className="p-4 border-b bg-amber-50/50 flex justify-between items-center">
+                        <h3 className="text-lg font-semibold text-amber-900 flex items-center">
+                            <FiLayers className="mr-3 text-amber-600"/> Interlining Requirements
+                        </h3>
+                        {details.interlining_type && (
+                            <span className="text-xs font-bold bg-white text-amber-700 border border-amber-200 px-3 py-1 rounded-full shadow-sm">
+                                {details.interlining_type} ({details.consumption_per_piece}m/pc)
+                            </span>
+                        )}
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full">
+                            <thead className="bg-amber-50/30 text-xs text-amber-800 uppercase tracking-wider">
+                                <tr>
+                                    <th className="py-3 px-4 text-left">Interlining Color</th>
+                                    <th className="py-3 px-4 text-right">Required (Meters)</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-amber-100 text-sm">
+                                {details.interlining_requirements.map((req, idx) => (
+                                    <tr key={idx} className="hover:bg-amber-50/20">
+                                        <td className="py-3 px-4 font-medium text-gray-800">
+                                            {req.color_name || 'Generic'} {req.color_number ? `(${req.color_number})` : ''}
+                                        </td>
+                                        <td className="py-3 px-4 text-right font-mono font-bold text-amber-700">
+                                            {parseFloat(req.required_meters).toFixed(2)} m
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            )}
+
+             {/* Detailed Cut Log Table */}
             <section className="bg-white rounded-lg shadow-sm border overflow-hidden print-bg-white">
                   <div className="p-4 border-b">
                     <h3 className="text-xl font-semibold text-gray-800 flex items-center"><FiFileText className="mr-3 text-gray-400"/>Cut Log Details</h3>

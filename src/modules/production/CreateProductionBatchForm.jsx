@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams, Link, useLocation } from 'react-router-dom';
-import { Package, Ruler, Layers, ArrowLeft, Info, Loader2, ChevronDown, ChevronRight, Hash, ShoppingBag, FileText, User, List } from 'lucide-react';
+import { Package, Ruler, Layers, ArrowLeft, Info, Loader2, ChevronDown, ChevronRight, Hash, ShoppingBag, FileText, User, List, Scissors, CheckCircle, AlertTriangle, CheckSquare } from 'lucide-react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { accountingApi } from '../../api/accountingApi'; 
+import { initializationPortalApi } from '../../api/initializationPortalApi';
 
 const Spinner = () => <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
 const ErrorDisplay = ({ message }) => <div className="p-3 mb-4 bg-red-100 text-red-700 rounded-md border border-red-200">{message}</div>;
@@ -23,7 +24,7 @@ const TabButton = ({ label, icon: Icon, isActive, onClick }) => (
 );
 
 // --- COLLAPSIBLE GROUP COMPONENT ---
-const RollGroup = ({ referenceNumber, rolls, selectedRolls, onToggleRoll }) => {
+const RollGroup = ({ referenceNumber, rolls, selectedRolls, onToggleRoll, isInterlining = false }) => {
     const [isOpen, setIsOpen] = useState(true);
     const allSelected = rolls.length > 0 && rolls.every(r => selectedRolls.includes(r.id));
     
@@ -39,9 +40,9 @@ const RollGroup = ({ referenceNumber, rolls, selectedRolls, onToggleRoll }) => {
     };
 
     return (
-        <div className="border border-gray-200 rounded-lg overflow-hidden mb-3">
+        <div className={`border rounded-lg overflow-hidden mb-3 ${isInterlining ? 'border-slate-200' : 'border-gray-200'}`}>
             <div 
-                className="bg-gray-100 px-3 py-2 flex justify-between items-center cursor-pointer hover:bg-gray-200 transition-colors"
+                className={`px-3 py-2 flex justify-between items-center cursor-pointer transition-colors ${isInterlining ? 'bg-slate-50 hover:bg-slate-100' : 'bg-gray-100 hover:bg-gray-200'}`}
                 onClick={() => setIsOpen(!isOpen)}
             >
                 <div className="flex items-center space-x-2">
@@ -65,19 +66,19 @@ const RollGroup = ({ referenceNumber, rolls, selectedRolls, onToggleRoll }) => {
             {isOpen && (
                 <div className="p-2 bg-white grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                     {rolls.map(roll => (
-                        <label key={roll.id} className="flex items-center p-2 border border-gray-100 rounded hover:bg-blue-50 cursor-pointer transition-colors">
+                        <label key={roll.id} className={`flex items-center p-2 border rounded cursor-pointer transition-colors ${isInterlining ? 'border-slate-100 hover:bg-slate-50' : 'border-gray-100 hover:bg-blue-50'}`}>
                             <input 
                                 type="checkbox" 
                                 checked={selectedRolls.includes(roll.id)} 
                                 onChange={() => onToggleRoll(roll.id)} 
-                                className="h-4 w-4 rounded text-blue-600 focus:ring-blue-500" 
+                                className={`h-4 w-4 rounded focus:ring-blue-500 ${isInterlining ? 'text-slate-600' : 'text-blue-600'}`}
                             />
                             <div className="ml-3 flex flex-col">
                                 <span className="text-sm font-medium text-gray-700">
                                     {roll.type || roll.fabric_type} - {roll.color || roll.fabric_color || 'Generic'}
                                 </span>
                                 <span className="text-xs text-gray-500">
-                                    Roll #{roll.id} • {roll.meter}m
+                                    Roll #{roll.id} • {roll.meter} {roll.uom === 'yard' ? 'yd' : 'm'}
                                 </span>
                             </div>
                         </label>
@@ -106,8 +107,9 @@ const CreateProductionBatchForm = () => {
     const [productionLineId, setProductionLineId] = useState('');
     const [layerLength, setLayerLength] = useState('');
     const [notes, setNotes] = useState('');
+    const [plannedCutQty, setPlannedCutQty] = useState(''); 
     
-    // Size Ratios State - Defined in Ascending Order
+    // Size Ratios State
     const SIZES = useMemo(() => [
        { key: '28', value: '28' }, { key: '30', value: '30' }, { key: '32', value: '32' },
        { key: '34', value: '34' }, { key: '36', value: '36' }, { key: '38', value: '38' },
@@ -115,7 +117,13 @@ const CreateProductionBatchForm = () => {
     ], []);
     const [sizeRatios, setSizeRatios] = useState( SIZES.map(s => ({ size: s.key, ratio: '' })) );
     
-    const [selectedRolls, setSelectedRolls] = useState([]);
+    // Roll Selection (Only Shell Rolls now)
+    const [selectedShellRolls, setSelectedShellRolls] = useState([]);
+    
+    // Interlining State
+    const [interliningTemplates, setInterliningTemplates] = useState([]);
+    const [selectedTemplateId, setSelectedTemplateId] = useState('');
+    const [interliningConfirmed, setInterliningConfirmed] = useState(false); // ✅ User approval state
     
     // Combined options
     const [options, setOptions] = useState({ 
@@ -127,8 +135,8 @@ const CreateProductionBatchForm = () => {
         purchaseOrders: []
     });
     
-    // Sales Order Context
-    const [linkedSO, setLinkedSO] = useState(null); // Stores full SO details
+    // Context
+    const [linkedSO, setLinkedSO] = useState(null);
 
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -143,11 +151,12 @@ const CreateProductionBatchForm = () => {
             setIsLoading(true);
             setError(null);
             try {
-                const [typesRes, colorsRes, linesRes, poRes] = await Promise.all([
+                const [typesRes, colorsRes, linesRes, poRes, templatesRes] = await Promise.all([
                     productionManagerApi.getFabricTypes(),
                     productionManagerApi.getFabricColors(),
                     productionManagerApi.getLinesWithLoaders(),
-                    accountingApi.getPurchaseOrders() 
+                    accountingApi.getPurchaseOrders(),
+                    initializationPortalApi.getInterliningTemplates()
                 ]);
                 
                 const commonOptions = {
@@ -157,33 +166,57 @@ const CreateProductionBatchForm = () => {
                     purchaseOrders: poRes.data || []
                 };
 
+                setInterliningTemplates(templatesRes.data || []);
+
                 if (isEditMode) {
                     const res = await productionManagerApi.getBatchForEdit(batchId);
                     const data = res.data;
                     if (!data || !data.batchDetails) throw new Error("Batch data not found.");
 
                     setProductId(String(data.batchDetails.product_id || ''));
-                    // Ensure purchaseOrderId is set as a string for comparison consistency
-                    console.log("Setting purchaseOrderId with value:", data.batchDetails.purchase_order_id);
                     setPurchaseOrderId(String(data.batchDetails.purchase_order_id || ''));
                     setProductionLineId(String(data.batchDetails.assigned_production_line_id || '')); 
                     setLayerLength(data.batchDetails.length_of_layer_inches || '');
                     setNotes(data.batchDetails.notes || '');
+                    setSelectedTemplateId(data.batchDetails.interlining_template_id ? String(data.batchDetails.interlining_template_id) : '');
                     
+                    const notesMatch = (data.batchDetails.notes || '').match(/Planned Qty: (\d+)/);
+                    if(notesMatch) setPlannedCutQty(notesMatch[1]);
+                    
+                    if (data.batchDetails.interlining_template_id) {
+                        setInterliningConfirmed(true); // Assume confirmed if previously saved
+                    }
+
                     const initialRatios = SIZES.map(s => {
                         const foundRatio = (data.size_ratios || []).find(r => r.size === s.value);
                         return { size: s.key, ratio: foundRatio ? foundRatio.ratio : '' };
                     });
                     setSizeRatios(initialRatios);
-                    setSelectedRolls(data.assigned_roll_ids || []);
+
+                    // Filter Assigned IDs for Shell Rolls
+                    const assignedIds = data.assigned_roll_ids || [];
+                    const available = data.available_rolls || [];
+                    
+                    const shellIds = [];
+
+                    assignedIds.forEach(id => {
+                         const roll = available.find(r => r.id === id);
+                         // Keep only shell rolls (exclude interlining if any were previously mixed)
+                         if(roll && !(roll.type || '').toLowerCase().includes('interlining')) {
+                             shellIds.push(id);
+                         }
+                    });
+
+                    setSelectedShellRolls(shellIds);
                     
                     setOptions({
                         ...commonOptions,
                         products: data.products || [],
-                        availableRolls: data.available_rolls || [],
+                        availableRolls: available,
                     });
                 } else {
                     const formDataRes = await productionManagerApi.getFormData(); 
+                    console.log("Form ddata response:", formDataRes.data);
                     setOptions({
                         ...commonOptions,
                         products: formDataRes.data.products || [],
@@ -191,12 +224,14 @@ const CreateProductionBatchForm = () => {
                     });
                      // Reset form
                      setSizeRatios(SIZES.map(s => ({ size: s.key, ratio: '' })));
-                     setSelectedRolls([]);
+                     setSelectedShellRolls([]);
                      setProductId('');
-                     setPurchaseOrderId(prefillPoId ? String(prefillPoId) : ''); 
+                     setPurchaseOrderId(prefillPoId || ''); 
                      setProductionLineId('');
                      setLayerLength('');
                      setNotes('');
+                     setSelectedTemplateId('');
+                     setInterliningConfirmed(false);
                 }
             } catch (err) {
                  console.error("Error loading form data:", err);
@@ -213,91 +248,126 @@ const CreateProductionBatchForm = () => {
                 setLinkedSO(null);
                 return;
             }
-
-            // Find the PO object from our options list
-            // Ensure strict comparison by converting both to string
             const selectedPO = options.purchaseOrders.find(po => String(po.id) === String(purchaseOrderId));
-            
             if (selectedPO && selectedPO.sales_order_id) {
                 try {
                     const soRes = await accountingApi.getSalesOrderDetails(selectedPO.sales_order_id);
                     const soData = soRes.data;
                     setLinkedSO(soData);
-
-                    // Auto-fill Data if in Create Mode
                     if (!isEditMode && soData.products && soData.products.length > 0) {
                         const primaryProduct = soData.products[0]; 
-                        
-                        // ✅ Auto-select Product
                         const matchingProduct = options.products.find(p => p.name === primaryProduct.product_name);
-                        if (matchingProduct) {
-                             setProductId(String(matchingProduct.id));
-                        }
-
-                        // Auto-fill Ratios
+                        if (matchingProduct) setProductId(String(matchingProduct.id));
                         if (primaryProduct.size_breakdown) {
-                            const newRatios = SIZES.map(s => ({
-                                size: s.key,
-                                ratio: primaryProduct.size_breakdown[s.key] || ''
-                            }));
+                            const newRatios = SIZES.map(s => ({ size: s.key, ratio: primaryProduct.size_breakdown[s.key] || '' }));
                             setSizeRatios(newRatios);
                         }
                     }
-                } catch (err) {
-                    console.error("Failed to fetch linked SO details", err);
-                }
+                } catch (err) { console.error("Failed to fetch linked SO details", err); }
             }
         };
-
-        // Added options.products to dependency to ensure product list exists for matching
         fetchSODetails();
     }, [purchaseOrderId, options.purchaseOrders, options.products, isEditMode, SIZES]);
 
-
-    // --- 3. Filter Logic (Updated to filter by PO) ---
-    const filteredFabricRolls = useMemo(() => {
-         // Identify current PO details
+    // --- 3. Shell Filter Logic ---
+    const filteredShellRolls = useMemo(() => {
          const selectedPO = options.purchaseOrders.find(po => String(po.id) === String(purchaseOrderId));
-         // Get the unique identifier (Code or Number) that links rolls to PO
          const poIdentifier = selectedPO ? (selectedPO.po_code || selectedPO.po_number) : null;
 
          return (options.availableRolls || []).filter(roll => {
-            // Standard Filters
-            const rollType = roll.type || roll.fabric_type;
+            const rollType = (roll.type || roll.fabric_type || '').toLowerCase();
             const rollColor = roll.color || roll.fabric_color;
+            if (rollType.includes('interlining') || rollType.includes('fusing')) return false;
 
-            const typeMatch = !fabricTypeFilter || rollType === fabricTypeFilter;
+            const typeMatch = !fabricTypeFilter || rollType === fabricTypeFilter.toLowerCase();
             const colorMatch = !fabricColorFilter || rollColor === fabricColorFilter;
-
-            // ✅ PO Filter: STRICTLY filter rolls matching PO Code
             let poMatch = true;
-            if (purchaseOrderId && poIdentifier) {
-                // Check against reference_number; ensure strict equality or includes depending on data
-                // Assuming reference_number exactly matches PO Code for now based on previous context
-                poMatch = roll.reference_number === poIdentifier;
-            }
+            if (purchaseOrderId && poIdentifier) poMatch = roll.reference_number === poIdentifier;
             
             return typeMatch && colorMatch && poMatch;
         });
     }, [options.availableRolls, fabricTypeFilter, fabricColorFilter, purchaseOrderId, options.purchaseOrders]);
 
-    // --- Grouping Logic ---
-    const groupedRolls = useMemo(() => {
+    // --- 4. Interlining Logic ---
+    const selectedTemplate = useMemo(() => 
+        interliningTemplates.find(t => String(t.id) === String(selectedTemplateId)), 
+    [interliningTemplates, selectedTemplateId]);
+    
+    // Reset confirmation if template changes
+    useEffect(() => {
+        setInterliningConfirmed(false);
+    }, [selectedTemplateId]);
+
+    const selectedShellDetails = useMemo(() => (options.availableRolls || []).filter(roll => selectedShellRolls.includes(roll.id)), [selectedShellRolls, options.availableRolls]);
+
+    const interliningRequirements = useMemo(() => {
+        // console.log("Calculating interlining requirements with:", { selectedTemplate, layerLength, sizeRatios, selectedShellDetails });
+        if (!selectedTemplate || !layerLength || sizeRatios.length === 0 || selectedShellDetails.length === 0) return [];
+        
+        const totalRatio = sizeRatios.reduce((sum, r) => sum + (parseInt(r.ratio) || 0), 0);
+        if (totalRatio === 0) return [];
+
+        const requirementsByColor = {}; 
+        
+        selectedShellDetails.forEach(roll => {
+            console.log("Processing roll for rr interlining calculation:", roll);
+            const conversionFactor = (roll.uom === 'yard') ? 36 : 39.3701; 
+            const rollInches = (parseFloat(roll.meter) || 0) * conversionFactor;
+            
+            const lays = Math.floor(rollInches / parseFloat(layerLength));
+            const rollPieces = lays * totalRatio;
+
+            const rollColorName = roll.color || roll.fabric_color;
+            // const rollColorObj = options.fabricColors.find(c => 
+            //     (c.display_name && c.display_name.includes(rollColorName)) || c.name === rollColorName
+            // );
+
+             const rollColorObj = options.fabricColors.find(c => String(c.id) === String(roll.color_id));
+
+            console.log ("rollcolfffforobj:", rollColorObj, rollColorName, options.fabricColors);
+            // console.log(`Processing Roll ID ${roll.id}: Type=${roll.type || roll.fabric_type}, Color=${rollColorName}, Inches=${rollInches.toFixed(2)}, Lays=${lays}, Pieces=${rollPieces}`);
+
+            if (rollColorObj) {
+                console.log("selected template:", selectedTemplate);
+                const mapping = selectedTemplate.mappings.find(m => m.fabric_color_id == rollColorObj.id);
+                if (mapping) {
+                    const iColorId = mapping.interlining_color_id;
+                    const consumption = parseFloat(selectedTemplate.consumption_per_piece);
+                    const reqMeters = rollPieces * consumption;
+                    console.log(`  Matched Template Mappingg : Fabric Color ID=${mapping.fabric_color_id} -> Interlining Color ID=${iColorId}, Consumption=${consumption}m/pc, Required Meters=${reqMeters.toFixed(2)}`);
+                    if (!requirementsByColor[iColorId]) {
+                        const iColorObj = options.fabricColors.find(c => c.id === iColorId);
+                        requirementsByColor[iColorId] = {
+                            id: iColorId,
+                            name: mapping.interlining_color || (iColorObj ? iColorObj.name : 'Unknown'),
+                            required: 0,
+                            potentialPieces: 0
+                        };
+                    }
+                    requirementsByColor[iColorId].required += reqMeters;
+                    requirementsByColor[iColorId].potentialPieces += rollPieces;
+                }else{
+                    console.log(`  NN o template mapping found for roll color "${rollColorName}" (ID: ${rollColorObj.id}) in selected template.`);
+                }
+            }
+            console.log(`After Roll ID ${roll.id}, Requirements:`, requirementsByColor);
+        });
+        console.log("Calculatedf Interlining Requirements:", requirementsByColor);
+        return Object.values(requirementsByColor);
+    }, [selectedTemplate, layerLength, sizeRatios, selectedShellDetails, options.fabricColors]);
+
+    // Grouping Logic
+    const groupRolls = (list) => {
         const groups = {};
-        filteredFabricRolls.forEach(roll => {
+        list.forEach(roll => {
             const ref = roll.reference_number || 'No Reference';
             if (!groups[ref]) groups[ref] = [];
             groups[ref].push(roll);
         });
         return groups;
-    }, [filteredFabricRolls]);
+    };
     
-    const sortedGroupKeys = Object.keys(groupedRolls).sort();
-
-    // --- Selected Rolls Details ---
-    const selectedRollDetails = useMemo(() => {
-        return (options.availableRolls || []).filter(roll => selectedRolls.includes(roll.id));
-    }, [selectedRolls, options.availableRolls]);
+    const shellGroups = useMemo(() => groupRolls(filteredShellRolls), [filteredShellRolls]);
 
     // --- Handlers ---
      const handleRatioChange = (index, value) => {
@@ -308,34 +378,45 @@ const CreateProductionBatchForm = () => {
         }
      };
 
-     const handleRollSelection = (rollId) => {
-        setSelectedRolls(prev =>
-          prev.includes(rollId) ? prev.filter(id => id !== rollId) : [...prev, rollId]
-        );
-     };
+     const handleShellSelection = (rollId) => setSelectedShellRolls(prev => prev.includes(rollId) ? prev.filter(id => id !== rollId) : [...prev, rollId]);
 
     // --- Submit Handler ---
     const handleSubmit = async (e) => {
         e.preventDefault();
-        // Ensure values are checked as strings or numbers appropriately
-        if (!purchaseOrderId) { setError("Purchase Order selection is required for Batch Coding."); return; }
+        if (!purchaseOrderId) { setError("Purchase Order selection is required."); return; }
         if (!productId) { setError("Product selection is required."); return; }
         if (!productionLineId) { setError("Production Line assignment is required."); return; }
-        if (selectedRolls.length === 0) { setError("At least one fabric roll must be selected."); return; }
+        if (selectedShellRolls.length === 0) { setError("At least one shell fabric roll must be selected."); return; }
+        
+        // Interlining Approval Check
+        if (selectedTemplateId && !interliningConfirmed) {
+            setError("Please approve the interlining requirements in the Interlining tab.");
+            setActiveTab('interlining');
+            return;
+        }
 
         setIsSaving(true);
         setError(null);
         try {
+            const metaNotes = `\n[System Info] Planned Qty: ${Math.round(interliningRequirements.reduce((acc, r) => acc + r.potentialPieces, 0))} | Interlining Template: ${selectedTemplate?.interlining_type || 'None'}`;
+            
+            const requirementsPayload = interliningRequirements.map(req => ({
+                interlining_color_id: req.id,
+                required_meters: req.required.toFixed(2)
+            }));
+
             const payload = {
                 purchase_order_id: purchaseOrderId, 
                 product_id: productId,
                 assigned_production_line_id: productionLineId, 
                 length_of_layer_inches: layerLength || null,
-                notes,
+                notes: (notes || '') + metaNotes,
+                interlining_template_id: selectedTemplateId || null, 
+                interlining_requirements: requirementsPayload, 
                 size_ratios: sizeRatios
                     .map(r => ({ ...r, ratio: parseInt(r.ratio, 10) }))
                     .filter(r => !isNaN(r.ratio) && r.ratio > 0),
-                rolls: selectedRolls,
+                rolls: selectedShellRolls, // Only Shell Rolls
             };
 
             if (isEditMode) {
@@ -364,15 +445,16 @@ const CreateProductionBatchForm = () => {
             <form onSubmit={handleSubmit} className="flex flex-col bg-white rounded-lg shadow border overflow-hidden">
                 <div className="p-4 border-b">
                      <h1 className="text-2xl font-bold text-gray-800">{isEditMode ? 'Edit Production Batch' : 'Create New Production Batch'}</h1>
-                     <p className="text-sm text-gray-500">{isEditMode ? `Updating Batch ID: ${batchId}` : 'Define batch hierarchy (PO -> Batch) and assign resources.'}</p>
+                     <p className="text-sm text-gray-500">{isEditMode ? `Updating Batch ID: ${batchId}` : 'Define batch hierarchy and assign fabric.'}</p>
                 </div>
 
-                <div className="flex border-b">
+                <div className="flex border-b overflow-x-auto">
                      <TabButton label="Details" icon={Package} isActive={activeTab === 'details'} onClick={() => setActiveTab('details')} />
-                     {/* ✅ NEW TAB */}
                      <TabButton label="Sales Order" icon={FileText} isActive={activeTab === 'sales_order'} onClick={() => setActiveTab('sales_order')} />
                      <TabButton label="Size Ratios" icon={Ruler} isActive={activeTab === 'ratios'} onClick={() => setActiveTab('ratios')} />
-                     <TabButton label="Fabric Rolls" icon={Layers} isActive={activeTab === 'rolls'} onClick={() => setActiveTab('rolls')} />
+                     <TabButton label="Shell Fabric" icon={Layers} isActive={activeTab === 'rolls'} onClick={() => setActiveTab('rolls')} />
+                     {/* ✅ NEW TAB */}
+                     <TabButton label="Interlining" icon={Scissors} isActive={activeTab === 'interlining'} onClick={() => setActiveTab('interlining')} />
                 </div>
 
                 <div className="p-6">
@@ -380,8 +462,6 @@ const CreateProductionBatchForm = () => {
 
                     {activeTab === 'details' && (
                         <div className="space-y-6">
-                            
-                            {/* Hierarchy Section */}
                             <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
                                 <h4 className="text-sm font-bold text-indigo-800 mb-3 flex items-center"><ShoppingBag size={16} className="mr-2"/> Batch Context</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -390,7 +470,6 @@ const CreateProductionBatchForm = () => {
                                         <select 
                                             value={purchaseOrderId} 
                                             onChange={e => setPurchaseOrderId(e.target.value)} 
-                                            // ✅ DISABLED if coming from dashboard (prefill) OR editing
                                             disabled={!!prefillPoId || isEditMode}
                                             className={`mt-1 p-2 w-full border rounded-md focus:ring-2 focus:ring-indigo-500 outline-none ${!!prefillPoId || isEditMode ? 'bg-gray-200 text-gray-600 cursor-not-allowed' : ''}`}
                                             required
@@ -402,36 +481,29 @@ const CreateProductionBatchForm = () => {
                                                 </option>
                                             ))}
                                         </select>
-                                        <p className="text-xs text-gray-500 mt-1">Locked context: Create separate batches for different POs.</p>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700">Product*</label>
-                                        <select 
-                                            value={productId} 
-                                            onChange={e => setProductId(e.target.value)} 
-                                            className="mt-1 p-2 w-full border rounded-md" 
-                                            required
-                                        >
+                                        <select value={productId} onChange={e => setProductId(e.target.value)} className="mt-1 p-2 w-full border rounded-md" required>
                                             <option value="">Select Product</option>
                                             {(options.products || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                                         </select>
                                     </div>
                                 </div>
                             </div>
-
                             <hr className="border-gray-200"/>
-
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div>
                                      <label className="block text-sm font-medium">Assign to Line*</label>
                                      <select value={productionLineId} onChange={e => setProductionLineId(e.target.value)} className="mt-1 p-2 w-full border rounded-md" required>
-                                         <option value="">Select a Line (Loader)</option>
-                                         {(options.productionLines || []).map(line => (
-                                            <option key={line.line_id} value={line.line_id}>
-                                                {line.line_name} (Loader: {line.loader_name})
-                                            </option>
-                                         ))}
+                                         <option value="">Select a Line</option>
+                                         {(options.productionLines || []).map(line => (<option key={line.line_id} value={line.line_id}>{line.line_name}</option>))}
                                      </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium">Planned Cut Quantity (Pcs)</label>
+                                    <input type="number" value={plannedCutQty} onChange={e => setPlannedCutQty(e.target.value)} placeholder="Estimated output..." className="mt-1 p-2 w-full border rounded-md" />
+                                    <p className="text-xs text-gray-400 mt-1">Used to estimate interlining requirements.</p>
                                 </div>
                                 <div><label className="block text-sm font-medium">Layer Length (inches)</label><input type="number" step="0.01" value={layerLength} onChange={e => setLayerLength(e.target.value)} className="mt-1 p-2 w-full border rounded-md" /></div>
                                 <div className="md:col-span-2"><label className="block text-sm font-medium">Notes</label><textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="mt-1 p-2 w-full border rounded-md"></textarea></div>
@@ -439,81 +511,40 @@ const CreateProductionBatchForm = () => {
                         </div>
                     )}
 
-                    {/* ✅ NEW TAB CONTENT: Sales Order Summary */}
                     {activeTab === 'sales_order' && (
                         <div className="space-y-6">
                             {linkedSO ? (
                                 <div className="bg-white p-6 rounded-lg border border-blue-100 shadow-sm space-y-6">
                                     <div className="flex justify-between items-start border-b border-gray-100 pb-4">
                                         <div>
-                                            <h5 className="font-bold text-lg text-gray-800 flex items-center">
-                                                <FileText size={20} className="text-blue-600 mr-2" />
-                                                Sales Order: {linkedSO.order_number}
-                                            </h5>
+                                            <h5 className="font-bold text-lg text-gray-800 flex items-center"><FileText size={20} className="text-blue-600 mr-2" /> Sales Order: {linkedSO.order_number}</h5>
                                             <p className="text-sm text-gray-500 mt-1">Customer: <span className="font-medium text-gray-700">{linkedSO.customer_name}</span></p>
                                         </div>
-                                        <div className="text-right">
-                                            <span className="text-xs text-gray-400 font-bold uppercase">Date</span>
-                                            <p className="text-sm font-medium text-gray-700">{new Date(linkedSO.order_date).toLocaleDateString()}</p>
-                                        </div>
+                                        <div className="text-right"><span className="text-xs text-gray-400 font-bold uppercase">Date</span><p className="text-sm font-medium text-gray-700">{new Date(linkedSO.order_date).toLocaleDateString()}</p></div>
                                     </div>
-
                                     <div>
-                                        <h4 className="text-sm font-bold text-gray-700 uppercase mb-3 flex items-center">
-                                            <List size={16} className="mr-2"/> Order Items Breakdown
-                                        </h4>
+                                        <h4 className="text-sm font-bold text-gray-700 uppercase mb-3 flex items-center"><List size={16} className="mr-2"/> Order Items Breakdown</h4>
                                         <div className="overflow-x-auto border rounded-lg">
                                             <table className="min-w-full text-sm text-left">
-                                                <thead className="bg-gray-50 text-gray-600 font-medium border-b">
-                                                    <tr>
-                                                        <th className="px-4 py-3">Product</th>
-                                                        <th className="px-4 py-3">Fabric</th>
-                                                        <th className="px-4 py-3">Color Info</th>
-                                                        <th className="px-4 py-3 text-right">Qty</th>
-                                                    </tr>
-                                                </thead>
+                                                <thead className="bg-gray-50 text-gray-600 font-medium border-b"><tr><th className="px-4 py-3">Product</th><th className="px-4 py-3">Fabric</th><th className="px-4 py-3">Color Info</th><th className="px-4 py-3 text-right">Qty</th></tr></thead>
                                                 <tbody className="divide-y divide-gray-100">
                                                     {linkedSO.products.map((prod, idx) => (
-                                                        <React.Fragment key={idx}>
-                                                            {(prod.colors || []).map((color, cIdx) => (
-                                                                <tr key={`${idx}-${cIdx}`} className="hover:bg-blue-50/30">
-                                                                    <td className="px-4 py-3 font-medium text-gray-800">{prod.product_name}</td>
-                                                                    <td className="px-4 py-3 text-gray-600">{prod.fabric_type}</td>
-                                                                    <td className="px-4 py-3">
-                                                                        <span className="inline-flex items-center px-2 py-1 rounded-md bg-white border border-gray-200 shadow-sm">
-                                                                            <span className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: color.color_name.toLowerCase() }}></span>
-                                                                            {color.color_name} ({color.color_number})
-                                                                        </span>
-                                                                    </td>
-                                                                    <td className="px-4 py-3 text-right font-bold text-gray-800">{color.quantity}</td>
-                                                                </tr>
-                                                            ))}
-                                                        </React.Fragment>
+                                                        <React.Fragment key={idx}>{(prod.colors || []).map((color, cIdx) => (<tr key={`${idx}-${cIdx}`} className="hover:bg-blue-50/30"><td className="px-4 py-3 font-medium text-gray-800">{prod.product_name}</td><td className="px-4 py-3 text-gray-600">{prod.fabric_type}</td><td className="px-4 py-3"><span className="inline-flex items-center px-2 py-1 rounded-md bg-white border border-gray-200 shadow-sm">{color.color_name} ({color.color_number})</span></td><td className="px-4 py-3 text-right font-bold text-gray-800">{color.quantity}</td></tr>))}</React.Fragment>
                                                     ))}
                                                 </tbody>
                                             </table>
                                         </div>
                                     </div>
                                 </div>
-                            ) : (
-                                <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
-                                    <ShoppingBag className="mx-auto h-10 w-10 text-gray-300 mb-3" />
-                                    <p className="text-gray-500 font-medium">Select a Purchase Order in the "Details" tab to view Sales Order context.</p>
-                                </div>
-                            )}
+                            ) : <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200"><ShoppingBag className="mx-auto h-10 w-10 text-gray-300 mb-3" /><p className="text-gray-500 font-medium">Select a Purchase Order to view Sales Order context.</p></div>}
                         </div>
                     )}
 
                     {activeTab === 'ratios' && (
                         <div className="space-y-4">
-                            <div className="flex justify-between items-center mb-2">
-                                <h3 className="text-lg font-semibold text-gray-800">Size Ratios</h3>
-                                {linkedSO && <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100 flex items-center"><Info size={12} className="mr-1"/> Auto-filled from Sales Order</span>}
-                            </div>
+                            <div className="flex justify-between items-center mb-2"><h3 className="text-lg font-semibold text-gray-800">Size Ratios</h3>{linkedSO && <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100 flex items-center"><Info size={12} className="mr-1"/> Auto-filled</span>}</div>
                             <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4">
-                                {sizeRatios.map((ratio, index) => (
-                                    <div key={ratio.size}><label className="block text-sm font-medium text-center">{ratio.size}</label><input type="number" placeholder="0" min="0" value={ratio.ratio} onChange={e => handleRatioChange(index, e.target.value)} className="mt-1 block w-full p-2 border rounded-md text-center" /></div>
-                                ))}
+                                {sizeRatios.map((ratio, index) => (<div key={ratio.size}><label className="block text-sm font-medium text-center">{ratio.size}</label><input type="number" placeholder="0" min="0" value={ratio.ratio} onChange={e => handleRatioChange(index, e.target.value)} className="mt-1 block w-full p-2 border rounded-md text-center" /></div>))}
                             </div>
                         </div>
                     )}
@@ -521,78 +552,116 @@ const CreateProductionBatchForm = () => {
                     {activeTab === 'rolls' && (
                         <div className="space-y-6">
                              <div>
-                                 <h3 className="text-lg font-semibold text-gray-800 mb-4">Assign Fabric Rolls*</h3>
+                                 <h3 className="text-lg font-semibold text-gray-800 mb-4">Assign Shell Fabric Rolls*</h3>
+                                 {/* Shell rolls are selected here. We also display a summary here so user knows what drives calculation in next tab */}
+                                 {selectedShellDetails.length > 0 && (
+                                     <div className="mb-4 bg-blue-50 p-3 rounded-md text-sm text-blue-700">
+                                         <span className="font-bold">{selectedShellDetails.length} Rolls Selected.</span> These will determine interlining requirements.
+                                     </div>
+                                 )}
                                  <div className="grid grid-cols-2 gap-4 mb-4">
-                                     <select value={fabricTypeFilter} onChange={e => setFabricTypeFilter(e.target.value)} className="p-2 border rounded-md bg-gray-50">
-                                         <option value="">Filter by Type</option>
-                                         {(options.fabricTypes || []).map(t => (
-                                             <option key={t.id} value={t.name}>{t.name}</option>
-                                         ))}
-                                     </select>
-                                     <select value={fabricColorFilter} onChange={e => setFabricColorFilter(e.target.value)} className="p-2 border rounded-md bg-gray-50">
-                                         <option value="">Filter by Color</option>
-                                         {(options.fabricColors || []).map(c => (
-                                             <option key={c.id} value={c.name}>{c.name}</option>
-                                         ))}
-                                     </select>
+                                     <select value={fabricTypeFilter} onChange={e => setFabricTypeFilter(e.target.value)} className="p-2 border rounded-md bg-gray-50"><option value="">Filter by Type</option>{(options.fabricTypes || []).map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</select>
+                                     <select value={fabricColorFilter} onChange={e => setFabricColorFilter(e.target.value)} className="p-2 border rounded-md bg-gray-50"><option value="">Filter by Color</option>{(options.fabricColors || []).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
                                  </div>
-                                 
-                                 {/* Grouped Roll Display */}
                                  <div className="mt-2 max-h-96 overflow-y-auto p-2 border rounded-md bg-gray-50/50">
-                                     {sortedGroupKeys.length > 0 ? sortedGroupKeys.map(refNum => (
-                                         <RollGroup 
-                                             key={refNum} 
-                                             referenceNumber={refNum} 
-                                             rolls={groupedRolls[refNum]} 
-                                             selectedRolls={selectedRolls}
-                                             onToggleRoll={handleRollSelection}
-                                         />
-                                     )) : <p className="text-center text-gray-500 py-6">
-                                        {purchaseOrderId ? "No available rolls for this PO." : "Select a Purchase Order first."}
-                                     </p>}
+                                     {Object.keys(shellGroups).sort().length > 0 ? Object.keys(shellGroups).sort().map(refNum => <RollGroup key={refNum} referenceNumber={refNum} rolls={shellGroups[refNum]} selectedRolls={selectedShellRolls} onToggleRoll={handleShellSelection} />) : <p className="text-center text-gray-500 py-6">{purchaseOrderId ? "No shell rolls match filters." : "Select a Purchase Order first."}</p>}
                                  </div>
                              </div>
+                        </div>
+                    )}
 
-                             <div>
-                                <h3 className="text-lg font-semibold text-gray-800 mb-2">Selected Rolls ({selectedRollDetails.length})</h3>
-                                {selectedRollDetails.length === 0 ? (
-                                    <p className="text-sm text-gray-500 italic">No rolls selected yet.</p>
-                                ) : (
-                                    <div className="overflow-x-auto border rounded-md max-h-48">
-                                        <table className="min-w-full text-sm">
-                                            <thead className="bg-gray-100 sticky top-0">
-                                                <tr>
-                                                    <th className="p-2 text-left font-medium">Ref #</th>
-                                                    <th className="p-2 text-left font-medium">Roll ID</th>
-                                                    <th className="p-2 text-left font-medium">Type</th>
-                                                    <th className="p-2 text-left font-medium">Color</th>
-                                                    <th className="p-2 text-right font-medium">Meters</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y">
-                                                {selectedRollDetails.map(roll => (
-                                                    <tr key={roll.id}>
-                                                        <td className="p-2 font-mono text-xs text-gray-500">{roll.reference_number || '-'}</td>
-                                                        <td className="p-2 font-mono text-xs">R-{roll.id}</td>
-                                                        <td className="p-2">{roll.type || roll.fabric_type}</td>
-                                                        <td className="p-2">{roll.color || roll.fabric_color || 'Generic'}</td>
-                                                        <td className="p-2 text-right font-semibold">{roll.meter}</td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
+                    {/* ✅ NEW TAB: INTERLINING ASSIGNMENT */}
+                    {activeTab === 'interlining' && (
+                        <div className="space-y-6">
+                            {/* Warning if no shell rolls selected */}
+                            {selectedShellRolls.length === 0 && (
+                                <div className="p-4 bg-amber-100 text-amber-800 rounded-lg flex items-center mb-4">
+                                    <AlertTriangle className="mr-2 h-5 w-5" />
+                                    <span>Please select Shell Fabric Rolls in the "Shell Fabric" tab first to calculate requirements.</span>
+                                </div>
+                            )}
+
+                            <div className="bg-amber-50 p-4 rounded-lg border border-amber-100">
+                                <h4 className="text-sm font-bold text-amber-800 mb-3">Interlining Calculator</h4>
+                                <div className="grid grid-cols-1 gap-6">
+                                    <div>
+                                        <label className="block text-xs font-bold text-amber-700 uppercase mb-1">Select Template</label>
+                                        <select 
+                                            value={selectedTemplateId} 
+                                            onChange={e => setSelectedTemplateId(e.target.value)} 
+                                            className="w-full p-2 border border-amber-300 rounded bg-white text-sm"
+                                        >
+                                            <option value="">-- Choose Interlining Rule --</option>
+                                            {interliningTemplates
+                                                .filter(t => !productId || String(t.product_id) === String(productId))
+                                                .map(t => (
+                                                <option key={t.id} value={t.id}>{t.interlining_type} ({t.consumption_per_piece}m/pc)</option>
+                                            ))}
+                                        </select>
                                     </div>
-                                )}
-                                {selectedRolls.length === 0 && <p className="mt-2 text-xs text-red-600 flex items-center"><Info className="mr-1 h-4 w-4"/> Selection required.</p>}
-                             </div>
+                                    
+                                    {/* Requirement Table */}
+                                    {selectedTemplate && (
+                                        <div className="bg-white rounded-md border border-amber-200 overflow-hidden">
+                                            <table className="w-full text-sm text-left">
+                                                <thead className="bg-amber-100/50 text-amber-900">
+                                                    <tr>
+                                                        <th className="p-2">Interlining Color</th>
+                                                        <th className="p-2 text-right">Est. Pieces</th>
+                                                        <th className="p-2 text-right">Required (m)</th>
+                                                        <th className="p-2 text-center">Shell Basis</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-amber-50">
+                                                    {interliningRequirements.map((req, idx) => (
+                                                        <tr key={idx} className="bg-white">
+                                                            <td className="p-2 font-medium">{req.name}</td>
+                                                            <td className="p-2 text-right">{Math.round(req.potentialPieces)}</td>
+                                                            <td className="p-2 text-right font-mono font-bold text-amber-700">{req.required.toFixed(2)}</td>
+                                                            <td className="p-2 text-center text-xs text-gray-500">
+                                                                Calculated from {req.potentialPieces > 0 ? 'Selected Rolls' : 'No rolls'}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                    {interliningRequirements.length === 0 && (
+                                                        <tr><td colSpan="4" className="p-4 text-center text-gray-400">Select Shell Rolls and define Layer Length to calculate requirements.</td></tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            {/* APPROVAL CHECKBOX */}
+                            {selectedTemplate && interliningRequirements.length > 0 && (
+                                <div className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm">
+                                    <label className="flex items-start cursor-pointer">
+                                        <div className="flex items-center h-5">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={interliningConfirmed} 
+                                                onChange={(e) => setInterliningConfirmed(e.target.checked)}
+                                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                            />
+                                        </div>
+                                        <div className="ml-3 text-sm">
+                                            <span className="font-bold text-slate-800">I verify and approve the above interlining requirements.</span>
+                                            <p className="text-gray-500 text-xs mt-1">
+                                                Checking this confirms that the calculated interlining quantity is sufficient and available for production.
+                                            </p>
+                                        </div>
+                                    </label>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
 
                 <div className="flex justify-end space-x-4 p-4 border-t bg-gray-50">
                     <button type="button" onClick={handleCancel} className="px-6 py-2 bg-gray-200 text-gray-800 rounded-md font-semibold hover:bg-gray-300">Cancel</button>
-                    <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded-md font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed hover:bg-blue-700" disabled={isSaving || isLoading}>
-                        {isSaving ? (isEditMode ? 'Saving Changes...' : 'Creating...') : (isEditMode ? 'Save Changes' : 'Create Batch')}
+                    <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded-md font-semibold disabled:bg-gray-400 hover:bg-blue-700" disabled={isSaving || isLoading}>
+                        {isSaving ? 'Saving...' : (isEditMode ? 'Save Changes' : 'Create Batch')}
                     </button>
                 </div>
             </form>
