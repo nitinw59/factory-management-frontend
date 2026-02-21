@@ -259,6 +259,7 @@ const CreateProductionBatchForm = () => {
                         const matchingProduct = options.products.find(p => p.name === primaryProduct.product_name);
                         if (matchingProduct) setProductId(String(matchingProduct.id));
                         if (primaryProduct.size_breakdown) {
+                            console.log("Auto-filling size ratios based on SO breakdown:", primaryProduct.size_breakdown);
                             const newRatios = SIZES.map(s => ({ size: s.key, ratio: primaryProduct.size_breakdown[s.key] || '' }));
                             setSizeRatios(newRatios);
                         }
@@ -511,7 +512,7 @@ const CreateProductionBatchForm = () => {
                         </div>
                     )}
 
-                    {activeTab === 'sales_order' && (
+                   {activeTab === 'sales_order' && (
                         <div className="space-y-6">
                             {linkedSO ? (
                                 <div className="bg-white p-6 rounded-lg border border-blue-100 shadow-sm space-y-6">
@@ -526,10 +527,41 @@ const CreateProductionBatchForm = () => {
                                         <h4 className="text-sm font-bold text-gray-700 uppercase mb-3 flex items-center"><List size={16} className="mr-2"/> Order Items Breakdown</h4>
                                         <div className="overflow-x-auto border rounded-lg">
                                             <table className="min-w-full text-sm text-left">
-                                                <thead className="bg-gray-50 text-gray-600 font-medium border-b"><tr><th className="px-4 py-3">Product</th><th className="px-4 py-3">Fabric</th><th className="px-4 py-3">Color Info</th><th className="px-4 py-3 text-right">Qty</th></tr></thead>
+                                                <thead className="bg-gray-50 text-gray-600 font-medium border-b">
+                                                    <tr>
+                                                        <th className="px-4 py-3">Product</th>
+                                                        <th className="px-4 py-3">Fabric</th>
+                                                        <th className="px-4 py-3">Size Breakdown</th>
+                                                        <th className="px-4 py-3">Color Info</th>
+                                                        <th className="px-4 py-3 text-right">Qty</th>
+                                                    </tr>
+                                                </thead>
                                                 <tbody className="divide-y divide-gray-100">
                                                     {linkedSO.products.map((prod, idx) => (
-                                                        <React.Fragment key={idx}>{(prod.colors || []).map((color, cIdx) => (<tr key={`${idx}-${cIdx}`} className="hover:bg-blue-50/30"><td className="px-4 py-3 font-medium text-gray-800">{prod.product_name}</td><td className="px-4 py-3 text-gray-600">{prod.fabric_type}</td><td className="px-4 py-3"><span className="inline-flex items-center px-2 py-1 rounded-md bg-white border border-gray-200 shadow-sm">{color.color_name} ({color.color_number})</span></td><td className="px-4 py-3 text-right font-bold text-gray-800">{color.quantity}</td></tr>))}</React.Fragment>
+                                                        <React.Fragment key={idx}>
+                                                            {(prod.colors || []).map((color, cIdx) => (
+                                                                <tr key={`${idx}-${cIdx}`} className="hover:bg-blue-50/30">
+                                                                    <td className="px-4 py-3 font-medium text-gray-800">{prod.product_name}</td>
+                                                                    <td className="px-4 py-3 text-gray-600">{prod.fabric_type}</td>
+                                                                    <td className="px-4 py-3">
+                                                                        <div className="flex flex-wrap gap-1">
+                                                                            {prod.size_breakdown && Object.entries(prod.size_breakdown).map(([size, ratio]) => (
+                                                                                <span key={size} className="text-[10px] bg-white border border-gray-200 px-1.5 py-0.5 rounded shadow-sm text-gray-600">
+                                                                                    {size}: <span className="font-bold">{ratio}</span>
+                                                                                </span>
+                                                                            ))}
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-4 py-3">
+                                                                        <span className="inline-flex items-center px-2 py-1 rounded-md bg-white border border-gray-200 shadow-sm">
+                                                                            <span className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: color.color_name.toLowerCase() }}></span>
+                                                                            {color.color_name} ({color.color_number})
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-4 py-3 text-right font-bold text-gray-800">{color.quantity}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </React.Fragment>
                                                     ))}
                                                 </tbody>
                                             </table>

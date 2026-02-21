@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layers, Plus, Save, ArrowRight, Loader2, AlertCircle, FileText, X, Check, AlertTriangle } from 'lucide-react';
+import { Layers, Plus, Save, ArrowRight, Loader2, AlertCircle, FileText, X, Check, AlertTriangle, Edit3 } from 'lucide-react';
 import api from '../../utils/api'; 
 
 const Spinner = () => <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-indigo-600" /></div>;
@@ -8,7 +8,7 @@ const InterliningManagerPage = () => {
     // Data State
     const [templates, setTemplates] = useState([]);
     const [products, setProducts] = useState([]);
-    const [fabricTypes, setFabricTypes] = useState([]); // Interlining types
+    const [fabricTypes, setFabricTypes] = useState([]); 
     const [colors, setColors] = useState([]);
     
     // UI State
@@ -16,6 +16,7 @@ const InterliningManagerPage = () => {
     const [showForm, setShowForm] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
+    const [editingId, setEditingId] = useState(null); // ✅ NEW: Track if we are editing
 
     // Form State
     const [formData, setFormData] = useState({
@@ -59,32 +60,60 @@ const InterliningManagerPage = () => {
         }));
     };
 
-    // Helper to auto-fill (optional feature: match names)
     const autoMatchColors = () => {
         const newMappings = {};
         colors.forEach(shellColor => {
-            // Find a color with the exact same name for interlining
             const match = colors.find(c => c.id === shellColor.id); 
             if (match) newMappings[shellColor.id] = match.id;
         });
         setMappingSelections(newMappings);
     };
 
+    // ✅ NEW: Handle Editing Population
+    const handleEdit = (template) => {
+        setFormData({
+            product_id: template.product_id,
+            interlining_fabric_type_id: template.interlining_fabric_type_id,
+            consumption: template.consumption_per_piece,
+        });
+
+        const initialMappings = {};
+        if (template.mappings) {
+            template.mappings.forEach(m => {
+                initialMappings[m.fabric_color_id] = m.interlining_color_id;
+            });
+        }
+        setMappingSelections(initialMappings);
+        setEditingId(template.id);
+        setShowForm(true);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleCancel = () => {
+        setShowForm(false);
+        setEditingId(null);
+        setFormData({
+            product_id: '',
+            interlining_fabric_type_id: '',
+            consumption: ''
+        });
+        setMappingSelections({});
+        setError('');
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         
-        // Basic Validation
         if (!formData.product_id || !formData.interlining_fabric_type_id || !formData.consumption) {
             setError('Please fill in all required fields.');
             return;
         }
 
-        // Convert selections object to array payload
         const validMappings = Object.entries(mappingSelections).map(([shellId, interliningId]) => ({
             fabric_color_id: parseInt(shellId),
             interlining_color_id: parseInt(interliningId)
-        })).filter(m => m.interlining_color_id); // Remove entries where user selected "Select..." (empty)
+        })).filter(m => m.interlining_color_id); 
 
         if (validMappings.length === 0) {
             setError('Please map at least one shell fabric color to an interlining color.');
@@ -93,23 +122,24 @@ const InterliningManagerPage = () => {
 
         setIsSaving(true);
         try {
-            await api.post('/initialization-portal/interlining/templates', {
-                ...formData,
-                mappings: validMappings
-            });
+            // ✅ Handle PUT for Edit, POST for Create
+            if (editingId) {
+                await api.put(`/initialization-portal/interlining/templates/${editingId}`, {
+                    ...formData,
+                    mappings: validMappings
+                });
+            } else {
+                await api.post('/initialization-portal/interlining/templates', {
+                    ...formData,
+                    mappings: validMappings
+                });
+            }
             
-            // Reset and Reload
-            setShowForm(false);
-            setFormData({
-                product_id: '',
-                interlining_fabric_type_id: '',
-                consumption: ''
-            });
-            setMappingSelections({});
+            handleCancel();
             fetchInitialData();
         } catch (err) {
             console.error(err);
-            setError('Failed to save template. It might already exist for this product/type combination.');
+            setError(err.response?.data?.error || 'Failed to save template. It might already exist for this product/type combination.');
         } finally {
             setIsSaving(false);
         }
@@ -128,7 +158,10 @@ const InterliningManagerPage = () => {
                 </div>
                 {!showForm && (
                     <button 
-                        onClick={() => setShowForm(true)}
+                        onClick={() => {
+                            handleCancel(); // clear any edit state
+                            setShowForm(true);
+                        }}
                         className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm font-medium"
                     >
                         <Plus className="w-4 h-4 mr-2" /> New Template
@@ -136,12 +169,14 @@ const InterliningManagerPage = () => {
                 )}
             </header>
 
-            {/* --- CREATE FORM --- */}
+            {/* --- CREATE / EDIT FORM --- */}
             {showForm && (
                 <div className="bg-white rounded-xl shadow-md border border-slate-200 p-6 mb-8 animate-in slide-in-from-top-4">
                     <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-                        <h2 className="text-lg font-bold text-slate-800">Create New Interlining Rule</h2>
-                        <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
+                        <h2 className="text-lg font-bold text-slate-800">
+                            {editingId ? 'Edit Interlining Rule' : 'Create New Interlining Rule'}
+                        </h2>
+                        <button onClick={handleCancel} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
                     </div>
 
                     {error && (
@@ -156,10 +191,11 @@ const InterliningManagerPage = () => {
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Product Style</label>
                                 <select 
-                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-slate-100"
                                     value={formData.product_id}
                                     onChange={e => setFormData({...formData, product_id: e.target.value})}
                                     required
+                                    disabled={editingId !== null} // Prevent changing product on edit
                                 >
                                     <option value="">Select Product...</option>
                                     {products.map(p => (
@@ -170,10 +206,11 @@ const InterliningManagerPage = () => {
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Interlining Fabric Type</label>
                                 <select 
-                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-slate-100"
                                     value={formData.interlining_fabric_type_id}
                                     onChange={e => setFormData({...formData, interlining_fabric_type_id: e.target.value})}
                                     required
+                                    disabled={editingId !== null} // Prevent changing type on edit
                                 >
                                     <option value="">Select Interlining Type...</option>
                                     {fabricTypes.map(t => (
@@ -254,7 +291,7 @@ const InterliningManagerPage = () => {
                         <div className="mt-6 flex justify-end gap-3">
                             <button 
                                 type="button"
-                                onClick={() => setShowForm(false)}
+                                onClick={handleCancel}
                                 className="px-5 py-2.5 border border-slate-300 rounded-lg text-slate-600 font-medium hover:bg-slate-50 transition-colors"
                             >
                                 Cancel
@@ -265,7 +302,7 @@ const InterliningManagerPage = () => {
                                 className="px-6 py-2.5 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 shadow-sm disabled:opacity-70 flex items-center"
                             >
                                 {isSaving ? <Loader2 className="animate-spin w-4 h-4 mr-2"/> : <Save className="w-4 h-4 mr-2"/>}
-                                Save Template
+                                {editingId ? 'Update Template' : 'Save Template'}
                             </button>
                         </div>
                     </form>
@@ -275,7 +312,6 @@ const InterliningManagerPage = () => {
             {/* --- LIST OF TEMPLATES --- */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {templates.map(tmpl => {
-                    // Check for missing mappings
                     const mappedCount = tmpl.mappings ? tmpl.mappings.length : 0;
                     const totalColors = colors.length;
                     const isMissingMappings = mappedCount < totalColors;
@@ -287,8 +323,17 @@ const InterliningManagerPage = () => {
                                     <h3 className="font-bold text-slate-800">{tmpl.product_name}</h3>
                                     <p className="text-xs text-slate-500">{tmpl.style_code}</p>
                                 </div>
-                                <div className="bg-white px-2 py-1 rounded border border-slate-200 text-xs font-mono text-indigo-600">
-                                    {tmpl.consumption_per_piece}m
+                                <div className="flex items-center gap-2">
+                                    <button 
+                                        onClick={() => handleEdit(tmpl)}
+                                        className="text-slate-400 hover:text-indigo-600 p-1 bg-white rounded border border-slate-200 shadow-sm transition-colors"
+                                        title="Edit Template"
+                                    >
+                                        <Edit3 size={14}/>
+                                    </button>
+                                    <div className="bg-white px-2 py-1 rounded border border-slate-200 text-xs font-mono text-indigo-600 shadow-sm">
+                                        {tmpl.consumption_per_piece}m
+                                    </div>
                                 </div>
                             </div>
                             
