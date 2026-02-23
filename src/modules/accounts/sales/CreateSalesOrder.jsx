@@ -186,7 +186,7 @@ const CreateSalesOrder = () => {
                         required
                       >
                          <option value="">Select Color</option>
-                         {options.fabricColors.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                         {options.fabricColors.map(c => <option key={c.id} value={c.id}>{c.color_number} -  {c.name}</option>)}
                       </select>
                       <input 
                         type="number" 
