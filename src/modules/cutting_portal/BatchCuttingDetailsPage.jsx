@@ -243,19 +243,21 @@ const BatchCuttingDetailsPage = () => {
     };
 
     const handleGenerateLaySheet = () => {
+        
         if (!details) return;
         const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a5' });
+        const pageWidth = doc.internal.pageSize.width; // A5 width is 148mm
+        const pageHeight = doc.internal.pageSize.height; // A5 height is 210mm
+
         doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(0);
-        doc.text("MATRIX OVERSEAS", 74, 15, { align: 'center' });
+        doc.text("MATRIX OVERSEAS", pageWidth / 2, 15, { align: 'center' });
 
         const ratioString = details.ratios ? details.ratios.map(r => `${r.size}-${r.ratio}`).join(' / ') : '-';
-        // Try to infer PO code from batch code if not explicitly available
-        const poText = details.po_code || (details.batch_code ? details.batch_code.split('-').slice(0, 3).join('-') : 'N/A');
 
         autoTable(doc, {
             startY: 20,
             body: [
-                [`PO NUMBER - ${poText}`], 
+                [`ID - ${details.id || batchId}`],
                 [`BATCH NO - ${details.batch_code || batchId}`],
                 [`CODE NAME - ${details.product_name}`], 
                 [`LAYER LENGTH: ${details.length_of_layer_inches || 0} INCHES`],
@@ -269,11 +271,12 @@ const BatchCuttingDetailsPage = () => {
         doc.setFontSize(10); doc.text("CUTTING LAY DETAILS", 10, doc.lastAutoTable.finalY + 8);
 
         let totalAssigned = 0;
+        console.log("Rolls for lay sheet:", details.rolls);
         const tableBody = (details.rolls || []).map(roll => {
             const meter = parseFloat(roll.meter || 0);
             totalAssigned += meter;
             return [
-                roll.roll_identifier, 
+                roll.id%100, 
                 roll.type_name || '-', 
                 `${roll.color_name || ''} ${roll.color_number || ''}`,
                 meter.toFixed(2), 
@@ -310,16 +313,38 @@ const BatchCuttingDetailsPage = () => {
             styles: { fontSize: 7, cellPadding: 1, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold' },
             columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 20 } }
         });
+
+        // --- ADDED: Signature Lines ---
+        let sigY = doc.lastAutoTable.finalY + 25; // 25mm below the summary box
+        
+        // Safety check to ensure signatures don't print off the bottom of the page
+        if (sigY > pageHeight - 15) { 
+            doc.addPage();
+            sigY = 25;
+        }
+
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        
+        // Bottom Left
+        doc.text("Prepared By ___________________", 10, sigY);
+        
+        // Bottom Right (pageWidth - 10mm right margin)
+        doc.text("Authorised By ___________________", pageWidth - 10, sigY, { align: 'right' });
+
         doc.save(`Lay_Sheet_${details.batch_code || batchId}.pdf`);
     };
 
-    const handleGenerateCutReport = () => {
+const handleGenerateCutReport = () => {
         if (!details) return;
         const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
         const marginLeft = 10;
+        const pageWidth = doc.internal.pageSize.width;
+        const pageHeight = doc.internal.pageSize.height;
         
         doc.setFontSize(8); doc.setTextColor(100); doc.text(`Generated: ${new Date().toLocaleString()}`, 200, 10, { align: 'right' });
         doc.setFontSize(20); doc.setTextColor(0); doc.setFont("helvetica", "bold"); doc.text(`Batch: ${details.batch_code || `#${batchId}`}`, marginLeft, 15);
+        doc.setFontSize(20); doc.setTextColor(0); doc.setFont("helvetica", "bold"); doc.text(`Batch: ${details.id || `#${batchId}`}`, marginLeft+150, 18);
         doc.setFontSize(14); doc.text(`${details.product_name}`, marginLeft, 22);
         doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.text(`Layer Length: ${details.length_of_layer_inches || '0'} in`, marginLeft, 27);
 
@@ -362,6 +387,24 @@ const BatchCuttingDetailsPage = () => {
         printLine("Total Pieces Cut:", `${summaryStats.totalPieces}`, summaryY + lineHeight);
         printLine("Avg. Consumption:", `${summaryStats.avgConsumption.toFixed(3)} m/pc`, summaryY + (lineHeight * 2));
         printLine("Total Shortage:", `${summaryStats.totalShortage.toFixed(2)} m`, summaryY + (lineHeight * 3));
+
+        // --- ADDED: Signature Lines ---
+        let sigY = summaryY + (lineHeight * 3) + 30; // 30mm below the last summary line
+        
+        // Safety check to ensure signatures don't print off the bottom of the A4 page
+        if (sigY > pageHeight - 20) { 
+            doc.addPage();
+            sigY = 30;
+        }
+
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        
+        // Bottom Left
+        doc.text("Prepared By ___________________", marginLeft, sigY);
+        
+        // Bottom Right
+        doc.text("Authorised By ___________________", pageWidth - marginLeft, sigY, { align: 'right' });
 
         doc.save(`Cutting_Report_${details.batch_code || batchId}.pdf`);
     };

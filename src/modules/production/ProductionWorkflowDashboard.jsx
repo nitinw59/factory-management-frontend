@@ -323,15 +323,7 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
                      {expanded ? <ChevronUp size={16} className="text-blue-600"/> : <ChevronDown size={16} className="text-slate-400 group-hover:text-slate-600"/>}
                 </td>
                 <td className="px-6 py-4">
-                    <div className="font-bold text-slate-800 text-sm"> <h3 className="font-bold text-lg text-slate-800 flex items-center">
-                                                            <FileText size={18} className="mr-2 text-blue-600"/> 
-                                                            {so.order_number}
-                                                            {so.buyer_po_number && (
-                                                                <span className="ml-3 px-2 py-0.5 bg-slate-200 text-slate-700 text-[10px] rounded-md border border-slate-300 font-bold uppercase tracking-wider shadow-sm">
-                                                                    Ref: {so.buyer_po_number}
-                                                                </span>
-                                                            )}
-                                                        </h3></div>
+                    <div className="font-bold text-slate-800 text-sm">{so.order_number}</div>
                     <div className="text-xs text-slate-500">{new Date(so.order_date).toLocaleDateString()}</div>
                 </td>
                 <td className="px-6 py-4 text-sm text-slate-700 font-medium">
@@ -538,27 +530,98 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
     if (loading) return <Modal title="Loading PO..." onClose={onClose}><Spinner/></Modal>;
     if (!po) return null;
     
+    // --- UPDATED PDF GENERATOR WITH MATRIX OVERSEAS LETTERHEAD ---
     const handlePrintPO = () => {
         const doc = new jsPDF();
-        doc.setFontSize(18);
-        doc.text(`Purchase Order: ${po.po_code}`, 14, 20);
-        doc.setFontSize(12);
-        doc.text(`Supplier: ${po.supplier_name}`, 14, 30);
+        const pageWidth = doc.internal.pageSize.width;
         
+        // --- LETTERHEAD ---
+        // Company Name
+        doc.setFontSize(22);
+        doc.setFont("helvetica", "bold");
+        doc.text("MATRIX OVERSEAS", pageWidth / 2, 20, { align: "center" });
+
+        // Address & Phone
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        const addressLines = [
+            "PLOT NO. 24,26,27, K T STEEL PLOT PREMISSES,",
+            "R K CNG PUMP, WIMCO NAKA, AMBERNATH 421505.",
+            "Phone: +918591383476"
+        ];
+        doc.text(addressLines, pageWidth / 2, 28, { align: "center", lineHeightFactor: 1.5 });
+
+        // Separator Line
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.5);
+        doc.line(14, 45, pageWidth - 14, 45);
+
+        // --- PO HEADER INFO ---
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.text("PURCHASE ORDER", 14, 55);
+
+        // Left Side (PO Details)
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.text("PO Number:", 14, 65);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${po.po_code || po.po_number}`, 40, 65);
+
+        doc.setFont("helvetica", "bold");
+        doc.text("Date:", 14, 72);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${new Date(po.created_at || Date.now()).toLocaleDateString()}`, 40, 72);
+        
+        doc.setFont("helvetica", "bold");
+        doc.text("Ref (SO):", 14, 79);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${po.sales_order_number || 'N/A'}`, 40, 79);
+
+        // Right Side (Supplier Details)
+        doc.setFont("helvetica", "bold");
+        doc.text("To (Supplier):", 120, 55);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${po.supplier_name}`, 120, 62);
+        
+        if (po.supplier_address) {
+            const splitAddress = doc.splitTextToSize(po.supplier_address, 75);
+            doc.text(splitAddress, 120, 69);
+        }
+
+        // --- ITEMS TABLE ---
         autoTable(doc, { 
-            startY: 40, 
-            head: [['Fabric', 'Color', 'Qty', 'Unit', 'Price', 'Total']], 
+            startY: 90, 
+            head: [['Fabric Type', 'Color Details', 'Quantity', 'UOM', 'Unit Price', 'Total']], 
             body: po.items.map(i => [
                 i.fabric_type, 
                 `${i.fabric_color} (${i.color_number || ''})`, 
                 i.quantity, 
                 i.uom, 
-                `$${i.unit_price}`, 
-                `$${i.total_price}`
+                `₹${i.unit_price}`, 
+                `₹${i.total_price}`
             ]),
             theme: 'grid',
-            headStyles: { fillColor: [63, 81, 181] }
+            headStyles: { fillColor: [40, 40, 40], textColor: [255, 255, 255] },
+            styles: { fontSize: 9, cellPadding: 3 },
+            columnStyles: {
+                2: { halign: 'right' },
+                3: { halign: 'center' },
+                4: { halign: 'right' },
+                5: { halign: 'right', fontStyle: 'bold' }
+            },
+            foot: [[
+                { content: 'Grand Total', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold' } },
+                { content: `₹${po.items.reduce((sum, item) => sum + parseFloat(item.total_price || 0), 0).toFixed(2)}`, styles: { fontStyle: 'bold' } }
+            ]]
         });
+
+        // --- FOOTER SIGNATURES ---
+        const finalY = doc.lastAutoTable.finalY + 30;
+        doc.setFont("helvetica", "bold");
+        doc.text("Authorized Signature", 14, finalY);
+        doc.line(14, finalY + 1, 60, finalY + 1);
+
         doc.save(`PO_${po.po_code}.pdf`);
     };
 
@@ -626,8 +689,8 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
                                             <span className="font-extrabold text-blue-700 text-base">{item.quantity}</span> 
                                             <span className="text-xs text-gray-500 ml-1">{item.uom}</span>
                                         </td>
-                                        <td className="px-4 py-3 text-right text-gray-600 font-medium">${item.unit_price}</td>
-                                        <td className="px-4 py-3 text-right font-bold text-emerald-700 bg-emerald-50/30">${item.total_price}</td>
+                                        <td className="px-4 py-3 text-right text-gray-600 font-medium">₹{item.unit_price}</td>
+                                        <td className="px-4 py-3 text-right font-bold text-emerald-700 bg-emerald-50/30">₹{item.total_price}</td>
                                     </tr>
                                 ))}
                                 {po.items.length === 0 && (
@@ -678,15 +741,20 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
     );
 };
 
-// --- REFACTORED CREATE PO MODAL (Grouped UI) ---
+// --- REFACTORED CREATE PO MODAL (Grouped UI + Tabs + UOM) ---
 const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
+    const [activeTab, setActiveTab] = useState('form'); // 'form' or 'details'
+    const [soDetails, setSoDetails] = useState(null);
+    const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+
     const [supplierId, setSupplierId] = useState('');
     const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
     
-    // New Grouped State Structure
+    // Updated Grouped State Structure to include UOM
     const [fabricGroups, setFabricGroups] = useState([
         {
             fabric_type_id: '',
+            uom: 'meter', // Default UOM
             unit_price: '',
             colors: [{ fabric_color_id: '', quantity: '' }]
         }
@@ -697,6 +765,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
     const [fabricColors, setFabricColors] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
+    // Fetch options for the form
     useEffect(() => {
         const loadOptions = async () => {
             try {
@@ -717,9 +786,27 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
         loadOptions();
     }, []);
 
+    // Fetch SO Details for the reference tab
+    useEffect(() => {
+        const fetchSoDetails = async () => {
+            if (!salesOrderId) return;
+            setIsLoadingDetails(true);
+            try {
+                const res = await accountingApi.getSalesOrderDetails(salesOrderId);
+                setSoDetails(res.data);
+            } catch (error) {
+                console.error("Failed to load SO Details for PO modal", error);
+            } finally {
+                setIsLoadingDetails(false);
+            }
+        };
+        fetchSoDetails();
+    }, [salesOrderId]);
+
+
     // Handlers for Fabric Groups
     const addFabricGroup = () => {
-        setFabricGroups([...fabricGroups, { fabric_type_id: '', unit_price: '', colors: [{ fabric_color_id: '', quantity: '' }] }]);
+        setFabricGroups([...fabricGroups, { fabric_type_id: '', uom: 'meter', unit_price: '', colors: [{ fabric_color_id: '', quantity: '' }] }]);
     };
 
     const removeFabricGroup = (index) => {
@@ -772,7 +859,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                         fabric_type_id: parseInt(group.fabric_type_id, 10),
                         fabric_color_id: parseInt(color.fabric_color_id, 10),
                         quantity: parseFloat(color.quantity),
-                        uom: 'meter', // Hardcoded context
+                        uom: group.uom, // Pass dynamic UOM
                         unit_price: group.unit_price ? parseFloat(group.unit_price) : 0
                     });
                 }
@@ -794,167 +881,278 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
     if (isLoading) return <Modal title="Loading..." onClose={onClose}><Spinner/></Modal>;
 
     return (
-        <Modal title="Create Detailed Purchase Order" onClose={onClose} size="max-w-4xl">
-            <form onSubmit={handleSubmit} className="space-y-6">
-                
-                {/* Basic Info Section */}
-                <div className="bg-gray-50 p-5 rounded-xl border border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-5 shadow-sm">
-                    <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Supplier *</label>
-                        <select 
-                            className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white" 
-                            value={supplierId} 
-                            onChange={e => setSupplierId(e.target.value)} 
-                            required
-                        >
-                            <option value="">Select a Supplier</option>
-                            {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Expected Delivery (Optional)</label>
-                        <input 
-                            type="date" 
-                            className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white"
-                            value={expectedDeliveryDate}
-                            onChange={e => setExpectedDeliveryDate(e.target.value)}
-                        />
-                    </div>
-                </div>
+        <Modal title="Create Purchase Order" onClose={onClose} size="max-w-5xl">
+            {/* Modal Tabs Header */}
+            <div className="flex border-b border-gray-200 mb-6">
+                <button
+                    className={`py-3 px-6 font-bold text-sm border-b-2 transition-colors ${activeTab === 'form' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                    onClick={() => setActiveTab('form')}
+                >
+                    Order Form
+                </button>
+                <button
+                    className={`py-3 px-6 font-bold text-sm border-b-2 transition-colors flex items-center ${activeTab === 'details' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                    onClick={() => setActiveTab('details')}
+                >
+                    Reference: Sales Order {soDetails?.order_number ? `(${soDetails.order_number})` : ''}
+                </button>
+            </div>
 
-                {/* Fabric Groups Section */}
-                <div className="max-h-[60vh] overflow-y-auto pr-2 space-y-6 pb-4">
-                    {fabricGroups.map((group, groupIdx) => (
-                        <div key={groupIdx} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
-                            {/* Group Header (Fabric Type & Price) */}
-                            <div className="bg-slate-50 p-4 border-b border-slate-200 flex flex-col md:flex-row md:items-end gap-4">
-                                <div className="flex-1">
-                                    <label className="block text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1.5">Fabric Type *</label>
-                                    <select 
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium"
-                                        value={group.fabric_type_id}
-                                        onChange={e => updateFabricGroup(groupIdx, 'fabric_type_id', e.target.value)}
-                                        required
-                                    >
-                                        <option value="">Select Fabric Type</option>
-                                        {fabricTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                                    </select>
-                                </div>
-                                <div className="w-full md:w-48">
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Unit Price (₹/m)</label>
-                                    <div className="relative">
-                                        <span className="absolute left-3 top-2.5 text-slate-400 text-sm">$</span>
-                                        <input 
-                                            type="number" 
-                                            min="0" 
-                                            step="0.01"
-                                            placeholder="0.00"
-                                            className="w-full p-2.5 pl-7 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
-                                            value={group.unit_price}
-                                            onChange={e => updateFabricGroup(groupIdx, 'unit_price', e.target.value)}
-                                        />
+            {/* TAB 1: FORM */}
+            {activeTab === 'form' && (
+                <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in duration-200">
+                    
+                    {/* Basic Info Section */}
+                    <div className="bg-gray-50 p-5 rounded-xl border border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-5 shadow-sm">
+                        <div>
+                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Supplier *</label>
+                            <select 
+                                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white" 
+                                value={supplierId} 
+                                onChange={e => setSupplierId(e.target.value)} 
+                                required
+                            >
+                                <option value="">Select a Supplier</option>
+                                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Expected Delivery (Optional)</label>
+                            <input 
+                                type="date" 
+                                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white"
+                                value={expectedDeliveryDate}
+                                onChange={e => setExpectedDeliveryDate(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Fabric Groups Section */}
+                    <div className="max-h-[50vh] overflow-y-auto pr-2 space-y-6 pb-4">
+                        {fabricGroups.map((group, groupIdx) => (
+                            <div key={groupIdx} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
+                                {/* Group Header (Fabric Type, UOM, Price) */}
+                                <div className="bg-slate-50 p-4 border-b border-slate-200 flex flex-col md:flex-row md:items-end gap-4">
+                                    <div className="flex-1">
+                                        <label className="block text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1.5">Fabric Type *</label>
+                                        <select 
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium"
+                                            value={group.fabric_type_id}
+                                            onChange={e => updateFabricGroup(groupIdx, 'fabric_type_id', e.target.value)}
+                                            required
+                                        >
+                                            <option value="">Select Fabric Type</option>
+                                            {fabricTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="w-full md:w-32">
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Unit (UOM)</label>
+                                        <select 
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                                            value={group.uom}
+                                            onChange={e => updateFabricGroup(groupIdx, 'uom', e.target.value)}
+                                            required
+                                        >
+                                            <option value="meter">Meter</option>
+                                            <option value="kg">Kg</option>
+                                            <option value="yard">Yard</option>
+                                            <option value="pcs">Pieces</option>
+                                        </select>
+                                    </div>
+                                    <div className="w-full md:w-40">
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Unit Price (₹)</label>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-2.5 text-slate-400 text-sm">₹</span>
+                                            <input 
+                                                type="number" 
+                                                min="0" 
+                                                step="0.01"
+                                                placeholder="0.00"
+                                                className="w-full p-2.5 pl-7 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                                                value={group.unit_price}
+                                                onChange={e => updateFabricGroup(groupIdx, 'unit_price', e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="md:self-center pt-2 md:pt-0">
+                                        {fabricGroups.length > 1 && (
+                                            <button 
+                                                type="button" 
+                                                onClick={() => removeFabricGroup(groupIdx)}
+                                                className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors flex items-center text-sm font-bold"
+                                                title="Remove Fabric Block"
+                                            >
+                                                <Trash2 size={16} className="md:mr-0 mr-2" /> <span className="md:hidden">Remove Block</span>
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
-                                <div className="md:self-center pt-2 md:pt-0">
-                                    {fabricGroups.length > 1 && (
-                                        <button 
-                                            type="button" 
-                                            onClick={() => removeFabricGroup(groupIdx)}
-                                            className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors flex items-center text-sm font-bold"
-                                            title="Remove Fabric Block"
-                                        >
-                                            <Trash2 size={16} className="md:mr-0 mr-2" /> <span className="md:hidden">Remove Block</span>
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
 
-                            {/* Colors inside this Fabric Group */}
-                            <div className="p-4 bg-white">
-                                <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center">
-                                    <Palette size={14} className="mr-2"/> Colors & Quantities
-                                </h5>
-                                <div className="space-y-3">
-                                    {group.colors.map((color, colorIdx) => (
-                                        <div key={colorIdx} className="flex flex-wrap md:flex-nowrap items-center gap-3">
-                                            <div className="flex-1 min-w-[200px]">
-                                                <select 
-                                                    className="w-full p-2 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                                                    value={color.fabric_color_id}
-                                                    onChange={e => updateColorInGroup(groupIdx, colorIdx, 'fabric_color_id', e.target.value)}
-                                                    required
-                                                >
-                                                    <option value="" disabled>Select Color</option>
-                                                    {fabricColors.map(c => <option key={c.id} value={c.id}>{c.color_number} - {c.name}</option>)}
-                                                </select>
-                                            </div>
-                                            <div className="w-full md:w-40 relative">
-                                                <span className="absolute right-3 top-2 text-slate-400 text-sm">m</span>
-                                                <input 
-                                                    type="number" 
-                                                    min="0.1" 
-                                                    step="0.1"
-                                                    placeholder="Qty"
-                                                    className="w-full p-2 pr-8 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                                                    value={color.quantity}
-                                                    onChange={e => updateColorInGroup(groupIdx, colorIdx, 'quantity', e.target.value)}
-                                                    required
-                                                />
-                                            </div>
-                                            <div className="w-8 flex justify-center">
-                                                {group.colors.length > 1 && (
-                                                    <button 
-                                                        type="button" 
-                                                        onClick={() => removeColorFromGroup(groupIdx, colorIdx)}
-                                                        className="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-md transition-colors"
-                                                        title="Remove Color"
+                                {/* Colors inside this Fabric Group */}
+                                <div className="p-4 bg-white">
+                                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center">
+                                        <Palette size={14} className="mr-2"/> Colors & Quantities
+                                    </h5>
+                                    <div className="space-y-3">
+                                        {group.colors.map((color, colorIdx) => (
+                                            <div key={colorIdx} className="flex flex-wrap md:flex-nowrap items-center gap-3">
+                                                <div className="flex-1 min-w-[200px]">
+                                                    <select 
+                                                        className="w-full p-2 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                                        value={color.fabric_color_id}
+                                                        onChange={e => updateColorInGroup(groupIdx, colorIdx, 'fabric_color_id', e.target.value)}
+                                                        required
                                                     >
-                                                        <X size={16} />
-                                                    </button>
-                                                )}
+                                                        <option value="" disabled>Select Color</option>
+                                                        {fabricColors.map(c => <option key={c.id} value={c.id}>{c.color_number} - {c.name}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="w-full md:w-48 relative">
+                                                    <span className="absolute right-3 top-2 text-slate-400 text-sm font-medium">{group.uom}</span>
+                                                    <input 
+                                                        type="number" 
+                                                        min="0.1" 
+                                                        step="0.1"
+                                                        placeholder="Qty Required"
+                                                        className="w-full p-2 pr-12 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                                        value={color.quantity}
+                                                        onChange={e => updateColorInGroup(groupIdx, colorIdx, 'quantity', e.target.value)}
+                                                        required
+                                                    />
+                                                </div>
+                                                <div className="w-8 flex justify-center">
+                                                    {group.colors.length > 1 && (
+                                                        <button 
+                                                            type="button" 
+                                                            onClick={() => removeColorFromGroup(groupIdx, colorIdx)}
+                                                            className="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-md transition-colors"
+                                                            title="Remove Color"
+                                                        >
+                                                            <X size={16} />
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                    ))}
+                                        ))}
+                                    </div>
+                                    <button 
+                                        type="button" 
+                                        onClick={() => addColorToGroup(groupIdx)}
+                                        className="mt-3 text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
+                                    >
+                                        <Plus size={14} className="mr-1" /> Add Color Variant
+                                    </button>
                                 </div>
-                                <button 
-                                    type="button" 
-                                    onClick={() => addColorToGroup(groupIdx)}
-                                    className="mt-3 text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
-                                >
-                                    <Plus size={14} className="mr-1" /> Add Color Variant
-                                </button>
                             </div>
-                        </div>
-                    ))}
+                        ))}
 
-                    <div className="pt-2">
+                        <div className="pt-2">
+                            <button 
+                                type="button" 
+                                onClick={addFabricGroup}
+                                className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 font-bold hover:bg-slate-50 hover:text-slate-700 transition-colors flex items-center justify-center"
+                            >
+                                <Layers size={18} className="mr-2" /> Add Another Fabric Type
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Footer Actions */}
+                    <div className="flex justify-end pt-4 border-t border-gray-100 gap-3">
                         <button 
                             type="button" 
-                            onClick={addFabricGroup}
-                            className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 font-bold hover:bg-slate-50 hover:text-slate-700 transition-colors flex items-center justify-center"
+                            onClick={onClose} 
+                            className="px-5 py-2.5 text-sm font-bold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
                         >
-                            <Layers size={18} className="mr-2" /> Add Another Fabric Type
+                            Cancel
+                        </button>
+                        <button 
+                            type="submit" 
+                            className="px-6 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-md shadow-blue-600/20 transition-all flex items-center"
+                        >
+                            <ShoppingCart size={16} className="mr-2"/> Create Purchase Order
                         </button>
                     </div>
-                </div>
+                </form>
+            )}
 
-                {/* Footer Actions */}
-                <div className="flex justify-end pt-4 border-t border-gray-100 gap-3">
-                    <button 
-                        type="button" 
-                        onClick={onClose} 
-                        className="px-5 py-2.5 text-sm font-bold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                    >
-                        Cancel
-                    </button>
-                    <button 
-                        type="submit" 
-                        className="px-6 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-md shadow-blue-600/20 transition-all flex items-center"
-                    >
-                        <ShoppingCart size={16} className="mr-2"/> Create Purchase Order
-                    </button>
+            {/* TAB 2: REFERENCE DETAILS */}
+            {activeTab === 'details' && (
+                <div className="max-h-[60vh] overflow-y-auto animate-in fade-in duration-200 pr-2">
+                    {isLoadingDetails ? (
+                        <div className="flex justify-center p-12"><Loader2 className="animate-spin text-indigo-600" /></div>
+                    ) : !soDetails ? (
+                        <div className="text-center p-12 text-gray-500 italic border-2 border-dashed border-gray-200 rounded-xl">Failed to load Sales Order details.</div>
+                    ) : (
+                        <div className="space-y-4">
+                            {/* Summary Header */}
+                            <div className="bg-slate-50 p-4 border border-slate-200 rounded-xl grid grid-cols-2 md:grid-cols-4 gap-4 text-sm shadow-sm">
+                                <div>
+                                    <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Customer</span>
+                                    <p className="font-semibold text-gray-800">{soDetails.customer_name}</p>
+                                </div>
+                                <div>
+                                    <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Buyer PO</span>
+                                    <p className="font-bold text-indigo-700">{soDetails.buyer_po_number || 'N/A'}</p>
+                                </div>
+                                <div>
+                                    <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Date Ordered</span>
+                                    <p className="text-gray-700">{new Date(soDetails.order_date).toLocaleDateString()}</p>
+                                </div>
+                                <div>
+                                    <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Total Pieces</span>
+                                    <p className="font-bold text-emerald-700">{soDetails.total_quantity || 0} pcs</p>
+                                </div>
+                            </div>
+
+                            {/* Detailed Products List */}
+                            <h4 className="text-sm font-bold text-gray-800 border-b border-gray-200 pb-2 flex items-center">
+                                <Box size={16} className="mr-2 text-indigo-500"/> Products in this Order
+                            </h4>
+                            <div className="space-y-4">
+                                {soDetails.products?.map((prod, idx) => {
+                                    const totalQty = prod.colors ? prod.colors.reduce((sum, c) => sum + parseInt(c.quantity || 0), 0) : 0;
+                                    return (
+                                        <div key={idx} className="border border-gray-200 rounded-lg overflow-hidden shadow-sm">
+                                            <div className="bg-gray-100 px-4 py-2 flex justify-between items-center border-b border-gray-200">
+                                                <div>
+                                                    <span className="font-bold text-gray-800 mr-3">{prod.product_name}</span>
+                                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-medium border border-indigo-200">Fabric: {prod.fabric_type}</span>
+                                                </div>
+                                                <span className="text-sm font-bold text-gray-700">{totalQty} pcs total</span>
+                                            </div>
+                                            <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6 bg-white">
+                                                <div>
+                                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Size Breakdown Ratio</p>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {prod.size_breakdown && Object.entries(prod.size_breakdown).map(([size, ratio]) => (
+                                                            <span key={size} className="text-[10px] bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded text-slate-700 flex flex-col items-center min-w-[2rem]">
+                                                                <span className="font-bold opacity-70 text-[8px] leading-tight">{size}</span>
+                                                                <span className="font-extrabold leading-tight">{ratio}</span>
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Ordered Colors</p>
+                                                    <div className="space-y-1.5">
+                                                        {prod.colors?.map((c, i) => (
+                                                            <div key={i} className="flex justify-between text-xs bg-slate-50 px-2 py-1 rounded border border-slate-100">
+                                                                <span className="font-medium text-gray-700">{c.color_name} ({c.color_number})</span>
+                                                                <span className="font-bold text-indigo-600">{c.quantity} pcs</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
                 </div>
-            </form>
+            )}
         </Modal>
     );
 };
