@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
     Search, Filter, Plus, Box, FileText, ShoppingCart, 
     Scissors, ChevronRight, ChevronDown, Clock, AlertCircle, 
-    Loader2, X, Calendar, Layers, Eye, Printer, LayoutList, ChevronUp, Edit3, Trash2
+    Loader2, X, Truck, Layers, Package, Printer, LayoutList, ChevronUp, Edit3, Trash2, DollarSign, Palette
 } from 'lucide-react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { accountingApi } from '../../api/accountingApi'; 
@@ -81,18 +81,13 @@ const SalesOrderNode = ({ data, x, y, onDetails, onAddPO }) => (
     </div>
 );
 
-
 const PurchaseOrderNode = ({ data, x, y, onDetails, onCreateBatch, onDeletePO }) => {
     const { user } = useAuth();
     const ordered = parseFloat(data.total_ordered_qty || 0);
     const received = parseFloat(data.total_received_qty || 0);
     const percent = ordered > 0 ? Math.min(100, Math.round((received / ordered) * 100)) : 0;
     
-    // ✅ Updated Permissions:
-    // Plan Batch: HIDDEN for production_manager. Visible for admin/cutting_manager.
-    const canPlanBatch = user && ['factory_admin', 'cutting_manager'].includes(user.role);
-    
-    // Delete PO: Visible for production_manager and admin
+    const canPlanBatch = user && ['factory_admin', 'cutting_manager', 'production_manager'].includes(user.role);
     const canDeletePO = user && ['production_manager', 'factory_admin'].includes(user.role);
     
     let progressColor = 'bg-amber-500';
@@ -185,7 +180,6 @@ const BatchNode = ({ data, x, y, onViewDetails, onEditBatch, onDeleteBatch }) =>
             </div>
 
             <div className="mt-3 flex justify-end gap-1.5">
-                 {/* Delete Button */}
                  {canManage && (
                     <button 
                         onClick={(e) => { 
@@ -223,7 +217,7 @@ const BatchNode = ({ data, x, y, onViewDetails, onEditBatch, onDeleteBatch }) =>
 };
 
 // --- GRAPH COMPONENT FOR SINGLE SALES ORDER ---
-const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch }) => {
+const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO }) => {
     // Calculate Layout just for this SO tree
     const { nodes, connectors, height } = useMemo(() => {
         const nodesList = [];
@@ -237,7 +231,6 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
 
         const purchaseOrders = so.purchase_orders || [];
         
-        // 1. Calculate positions
         let soCenterY = currentY;
 
         if (purchaseOrders.length === 0) {
@@ -258,10 +251,8 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
                     batchYPositions.push(currentY);
                     currentY += NODE_HEIGHT + GAP_Y;
                 });
-                // Center PO relative to its batches
                 poY = (batchYPositions[0] + batchYPositions[batchYPositions.length - 1]) / 2;
                 
-                // Connect PO to Batches
                 batchYPositions.forEach(bY => {
                     connList.push({
                         start: { x: poX + NODE_WIDTH, y: poY + (NODE_HEIGHT / 2) },
@@ -276,14 +267,12 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
             poYPositions.push(poY);
         });
 
-        // Center SO relative to POs
         const firstPOY = poYPositions[0];
         const lastPOY = poYPositions[poYPositions.length - 1];
         soCenterY = (firstPOY + lastPOY) / 2;
 
         nodesList.push({ type: 'SALES_ORDER', data: so, x: soX, y: soCenterY });
 
-        // Connect SO to POs
         poYPositions.forEach(pY => {
             connList.push({
                 start: { x: soX + NODE_WIDTH, y: soCenterY + (NODE_HEIGHT / 2) },
@@ -309,7 +298,7 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
             </svg>
             {nodes.map((node, i) => {
                 if (node.type === 'SALES_ORDER') return <SalesOrderNode key={i} {...node} onDetails={onDetails} onAddPO={onAddPO} />;
-                if (node.type === 'PURCHASE_ORDER') return <PurchaseOrderNode key={i} {...node} onDetails={onPODetails} onCreateBatch={onCreateBatch} />; 
+                if (node.type === 'PURCHASE_ORDER') return <PurchaseOrderNode key={i} {...node} onDetails={onPODetails} onCreateBatch={onCreateBatch} onDeletePO={onDeletePO} />; 
                 if (node.type === 'BATCH') return <BatchNode key={i} {...node} onViewDetails={onViewBatchDetails} onEditBatch={onEditBatch} onDeleteBatch={onDeleteBatch} />;
                 return null;
             })}
@@ -318,10 +307,9 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
 };
 
 // --- TABLE ROW COMPONENT ---
-const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch }) => {
+const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO }) => {
     const [expanded, setExpanded] = useState(false);
     
-    // Summary Metrics
     const poCount = so.purchase_orders?.length || 0;
     const batchCount = so.purchase_orders?.reduce((acc, po) => acc + (po.production_batches?.length || 0), 0) || 0;
 
@@ -335,7 +323,15 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
                      {expanded ? <ChevronUp size={16} className="text-blue-600"/> : <ChevronDown size={16} className="text-slate-400 group-hover:text-slate-600"/>}
                 </td>
                 <td className="px-6 py-4">
-                    <div className="font-bold text-slate-800 text-sm">{so.order_number}</div>
+                    <div className="font-bold text-slate-800 text-sm"> <h3 className="font-bold text-lg text-slate-800 flex items-center">
+                                                            <FileText size={18} className="mr-2 text-blue-600"/> 
+                                                            {so.order_number}
+                                                            {so.buyer_po_number && (
+                                                                <span className="ml-3 px-2 py-0.5 bg-slate-200 text-slate-700 text-[10px] rounded-md border border-slate-300 font-bold uppercase tracking-wider shadow-sm">
+                                                                    Ref: {so.buyer_po_number}
+                                                                </span>
+                                                            )}
+                                                        </h3></div>
                     <div className="text-xs text-slate-500">{new Date(so.order_date).toLocaleDateString()}</div>
                 </td>
                 <td className="px-6 py-4 text-sm text-slate-700 font-medium">
@@ -374,6 +370,7 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
                                 onViewBatchDetails={onViewBatchDetails}
                                 onEditBatch={onEditBatch}
                                 onDeleteBatch={onDeleteBatch}
+                                onDeletePO={onDeletePO}
                             />
                         </div>
                     </td>
@@ -383,6 +380,584 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
     );
 };
 
+
+// --- MODALS FOR DETAILED VIEW ---
+
+const SalesOrderDetailsModal = ({ orderId, onClose }) => {
+    const [order, setOrder] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => { 
+        accountingApi.getSalesOrderDetails(orderId)
+            .then(res => setOrder(res.data))
+            .catch(console.error)
+            .finally(() => setIsLoading(false)); 
+    }, [orderId]);
+
+    if (isLoading) return <Modal title="Loading Sales Order..." onClose={onClose}><Spinner/></Modal>;
+    if (!order) return null;
+
+    return (
+        <Modal title={`Sales Order: ${order.order_number}`} onClose={onClose} size="max-w-4xl">
+             <div className="space-y-6">
+                
+                {/* Header Information Grid */}
+                <div className="bg-blue-50/50 p-5 rounded-xl border border-blue-100 grid grid-cols-2 md:grid-cols-4 gap-6 text-sm">
+                    <div>
+                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Customer</span>
+                        <p className="font-semibold text-gray-800 text-base">{order.customer_name}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{order.customer_email || 'No email provided'}</p>
+                    </div>
+                    <div>
+                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Order Refs</span>
+                        <p className="text-gray-700 flex items-center">
+                            <span className="text-gray-400 text-xs mr-2">Buyer PO:</span> 
+                            <span className="font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                                {order.buyer_po_number || 'N/A'}
+                            </span>
+                        </p>
+                        <p className="text-gray-700 mt-1.5 flex items-center">
+                            <span className="text-gray-400 text-xs mr-2">Status:</span> 
+                            <StatusBadge status={order.status} />
+                        </p>
+                    </div>
+                    <div>
+                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Key Dates</span>
+                        <p className="text-gray-700"><span className="text-gray-400 text-xs mr-1">Ordered:</span> {new Date(order.order_date).toLocaleDateString()}</p>
+                        <p className="text-gray-700 mt-1"><span className="text-gray-400 text-xs mr-1">Delivery:</span> {order.delivery_date ? new Date(order.delivery_date).toLocaleDateString() : 'TBD'}</p>
+                    </div>
+                    <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-100 text-center flex flex-col justify-center">
+                        <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Total Amount</span>
+                        <p className="font-extrabold text-emerald-600 text-xl flex items-center justify-center">
+                            <DollarSign size={20} className="mr-0.5"/> {order.total_amount || '0.00'}
+                        </p>
+                    </div>
+                </div>
+
+                {/* Notes Section (if any) */}
+                {order.notes && (
+                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Order Notes</span>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{order.notes}</p>
+                    </div>
+                )}
+
+                {/* Detailed Products Table */}
+                <div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center">
+                        <Box size={20} className="mr-2 text-indigo-500"/> Order Items & Configuration
+                    </h3>
+                    <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-gray-100 text-gray-600 border-b border-gray-200">
+                                <tr>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider w-1/4">Product Style</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider w-1/6">Fabric Required</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider w-1/4">Size Breakdown</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Color Details & Qty</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right w-24">Item Total</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 bg-white">
+                                {order.products.map((prod, idx) => {
+                                    const totalQty = prod.colors ? prod.colors.reduce((sum, c) => sum + parseInt(c.quantity || 0), 0) : 0;
+                                    return (
+                                        <tr key={idx} className="hover:bg-gray-50/50 align-top transition-colors">
+                                            <td className="px-4 py-4">
+                                                <p className="font-bold text-gray-900">{prod.product_name}</p>
+                                            </td>
+                                            <td className="px-4 py-4 text-gray-600 font-medium">{prod.fabric_type}</td>
+                                            <td className="px-4 py-4">
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {prod.size_breakdown && Object.entries(prod.size_breakdown).map(([size, ratio]) => (
+                                                        <span key={size} className="flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-md min-w-[2.5rem] overflow-hidden shadow-sm">
+                                                            <span className="w-full text-center bg-indigo-100 text-indigo-800 text-[9px] font-bold uppercase py-0.5">{size}</span>
+                                                            <span className="text-indigo-900 font-extrabold text-xs py-1">{ratio}</span>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-4">
+                                                <div className="flex flex-col gap-2">
+                                                    {prod.colors && prod.colors.length > 0 ? prod.colors.map((c, i) => (
+                                                        <div key={i} className="flex justify-between items-center bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm">
+                                                            <span className="text-gray-700 font-medium flex items-center text-xs">
+                                                                <Palette size={14} className="text-gray-400 mr-2"/>
+                                                                {c.color_name} <span className="text-gray-400 font-normal ml-1">({c.color_number})</span>
+                                                            </span>
+                                                            <div className="flex items-center gap-3">
+                                                                <span className="text-xs text-gray-500">${c.unit_price} /ea</span>
+                                                                <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs">{c.quantity} pcs</span>
+                                                            </div>
+                                                        </div>
+                                                    )) : <span className="text-xs text-gray-400 italic">No colors defined</span>}
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-4 text-right">
+                                                <span className="font-extrabold text-gray-800 text-lg">{totalQty}</span>
+                                                <span className="block text-[10px] text-gray-500 uppercase mt-0.5">Pieces</span>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                                {order.products.length === 0 && (
+                                    <tr><td colSpan="5" className="px-4 py-8 text-center text-gray-500 italic">No products configured for this order.</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div className="flex justify-end pt-5 border-t border-gray-100 mt-6">
+                <button onClick={onClose} className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-bold transition-colors">Close</button>
+            </div>
+        </Modal>
+    );
+};
+
+const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
+    const [po, setPo] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [rolls, setRolls] = useState([]);
+    
+    useEffect(() => { 
+        accountingApi.getPurchaseOrderDetails(poId)
+            .then(res => setPo(res.data))
+            .catch(console.error)
+            .finally(() => setLoading(false)); 
+    }, [poId]);
+
+    useEffect(() => { 
+        if (poId) {
+            storeManagerApi.getFabricRollsByPO(poId)
+                .then(res => setRolls(res.data))
+                .catch(console.error); 
+        }
+    }, [poId]);
+
+    if (loading) return <Modal title="Loading PO..." onClose={onClose}><Spinner/></Modal>;
+    if (!po) return null;
+    
+    const handlePrintPO = () => {
+        const doc = new jsPDF();
+        doc.setFontSize(18);
+        doc.text(`Purchase Order: ${po.po_code}`, 14, 20);
+        doc.setFontSize(12);
+        doc.text(`Supplier: ${po.supplier_name}`, 14, 30);
+        
+        autoTable(doc, { 
+            startY: 40, 
+            head: [['Fabric', 'Color', 'Qty', 'Unit', 'Price', 'Total']], 
+            body: po.items.map(i => [
+                i.fabric_type, 
+                `${i.fabric_color} (${i.color_number || ''})`, 
+                i.quantity, 
+                i.uom, 
+                `$${i.unit_price}`, 
+                `$${i.total_price}`
+            ]),
+            theme: 'grid',
+            headStyles: { fillColor: [63, 81, 181] }
+        });
+        doc.save(`PO_${po.po_code}.pdf`);
+    };
+
+    return (
+        <Modal title={`Purchase Order: ${po.po_code || po.po_number}`} onClose={onClose} size="max-w-4xl">
+             <div className="space-y-6">
+                
+                {/* Header Actions & Info */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-amber-50 p-5 rounded-xl border border-amber-100">
+                    <div className="flex items-start gap-4">
+                        <div className="p-3 bg-white rounded-lg shadow-sm text-amber-600">
+                            <Truck size={24}/>
+                        </div>
+                        <div>
+                            <p className="text-xs text-amber-700 font-bold uppercase tracking-wider mb-1">Supplier Info</p>
+                            <p className="font-extrabold text-gray-900 text-lg">{po.supplier_name}</p>
+                            <p className="text-sm text-gray-600">{po.supplier_email || 'No Email'} • {po.supplier_phone || 'No Phone'}</p>
+                            <p className="text-xs text-gray-500 mt-1">{po.supplier_address}</p>
+                        </div>
+                    </div>
+                    <div className="text-left md:text-right w-full md:w-auto bg-white p-4 rounded-lg shadow-sm border border-amber-100 flex flex-col justify-center">
+                        <div className="flex justify-between md:justify-end items-center mb-2">
+                            <span className="text-xs text-gray-500 font-bold uppercase mr-3">Status:</span>
+                            <StatusBadge status={po.status} />
+                        </div>
+                        <p className="text-sm text-gray-700 font-medium">
+                            <span className="text-gray-400 text-xs mr-1">Delivery:</span> 
+                            {po.expected_delivery_date ? new Date(po.expected_delivery_date).toLocaleDateString() : 'N/A'}
+                        </p>
+                        <button 
+                            onClick={handlePrintPO} 
+                            className="mt-3 w-full flex items-center justify-center text-sm bg-indigo-600 text-white font-bold px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+                        >
+                            <Printer size={16} className="mr-2"/> Download PO PDF
+                        </button>
+                    </div>
+                </div>
+
+                {/* Items Table */}
+                <div>
+                    <h4 className="text-lg font-bold text-gray-800 mb-3 flex items-center">
+                        <ShoppingCart size={20} className="mr-2 text-indigo-500"/> Order Requirements
+                    </h4>
+                    <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-gray-100 text-gray-600 border-b border-gray-200">
+                                <tr>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Fabric Type</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Color Details</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right">Quantity</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right">Unit Price</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right bg-gray-50">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 bg-white">
+                                {po.items.map((item, idx) => (
+                                    <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
+                                        <td className="px-4 py-3 font-bold text-gray-800">{item.fabric_type}</td>
+                                        <td className="px-4 py-3">
+                                            <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-slate-50 border border-slate-200 text-slate-700 font-medium text-xs">
+                                                {item.fabric_color} <span className="text-slate-400 font-normal ml-1">({item.color_number})</span>
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-right">
+                                            <span className="font-extrabold text-blue-700 text-base">{item.quantity}</span> 
+                                            <span className="text-xs text-gray-500 ml-1">{item.uom}</span>
+                                        </td>
+                                        <td className="px-4 py-3 text-right text-gray-600 font-medium">${item.unit_price}</td>
+                                        <td className="px-4 py-3 text-right font-bold text-emerald-700 bg-emerald-50/30">${item.total_price}</td>
+                                    </tr>
+                                ))}
+                                {po.items.length === 0 && (
+                                    <tr><td colSpan="5" className="px-4 py-8 text-center text-gray-500 italic">No items listed for this Purchase Order.</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* Received Rolls Summary */}
+                <div>
+                    <h4 className="text-lg font-bold text-gray-800 mb-3 flex items-center">
+                        <Layers size={20} className="mr-2 text-indigo-500"/> Received Rolls Log
+                    </h4>
+                    <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+                        {rolls.length === 0 ? (
+                            <div className="text-center py-6">
+                                <Package className="mx-auto h-8 w-8 text-gray-300 mb-2"/>
+                                <p className="italic text-sm text-gray-500">No rolls have been received against this PO yet.</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-60 overflow-y-auto pr-2">
+                                {rolls.map(r => (
+                                    <div key={r.id} className="flex justify-between items-center p-3 border border-gray-100 rounded-lg bg-gray-50 hover:border-blue-200 hover:bg-blue-50/50 transition-colors">
+                                        <div>
+                                            <span className="font-mono font-bold text-indigo-700 text-sm block">R-{r.id}</span>
+                                            <span className="text-xs text-gray-600 truncate block max-w-[120px]" title={r.fabric_type}>{r.fabric_type}</span>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="font-extrabold text-gray-800 block">{r.meter}<span className="text-xs text-gray-400 font-normal ml-0.5">m</span></span>
+                                            <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${r.status === 'IN_STOCK' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                {r.status === 'IN_STOCK' ? 'Stock' : 'Prod'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+             </div>
+             
+             <div className="flex justify-end pt-5 border-t border-gray-100 mt-6">
+                <button onClick={onClose} className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-bold transition-colors">Close Viewer</button>
+            </div>
+        </Modal>
+    );
+};
+
+// --- REFACTORED CREATE PO MODAL (Grouped UI) ---
+const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
+    const [supplierId, setSupplierId] = useState('');
+    const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
+    
+    // New Grouped State Structure
+    const [fabricGroups, setFabricGroups] = useState([
+        {
+            fabric_type_id: '',
+            unit_price: '',
+            colors: [{ fabric_color_id: '', quantity: '' }]
+        }
+    ]);
+    
+    const [suppliers, setSuppliers] = useState([]);
+    const [fabricTypes, setFabricTypes] = useState([]);
+    const [fabricColors, setFabricColors] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        const loadOptions = async () => {
+            try {
+                const [intakeData, typesRes, colorsRes] = await Promise.all([
+                    storeManagerApi.getFabricIntakeFormData(),
+                    productionManagerApi.getFabricTypes(),
+                    productionManagerApi.getFabricColors()
+                ]);
+                setSuppliers(intakeData.data.suppliers || []);
+                setFabricTypes(typesRes.data || []);
+                setFabricColors(colorsRes.data || []);
+            } catch (error) {
+                console.error("Failed to load PO form options", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        loadOptions();
+    }, []);
+
+    // Handlers for Fabric Groups
+    const addFabricGroup = () => {
+        setFabricGroups([...fabricGroups, { fabric_type_id: '', unit_price: '', colors: [{ fabric_color_id: '', quantity: '' }] }]);
+    };
+
+    const removeFabricGroup = (index) => {
+        if (fabricGroups.length > 1) {
+            setFabricGroups(fabricGroups.filter((_, i) => i !== index));
+        }
+    };
+
+    const updateFabricGroup = (index, field, value) => {
+        const newGroups = [...fabricGroups];
+        newGroups[index][field] = value;
+        setFabricGroups(newGroups);
+    };
+
+    // Handlers for Colors within a Group
+    const addColorToGroup = (groupIndex) => {
+        const newGroups = [...fabricGroups];
+        newGroups[groupIndex].colors.push({ fabric_color_id: '', quantity: '' });
+        setFabricGroups(newGroups);
+    };
+
+    const removeColorFromGroup = (groupIndex, colorIndex) => {
+        const newGroups = [...fabricGroups];
+        if (newGroups[groupIndex].colors.length > 1) {
+            newGroups[groupIndex].colors = newGroups[groupIndex].colors.filter((_, i) => i !== colorIndex);
+            setFabricGroups(newGroups);
+        }
+    };
+
+    const updateColorInGroup = (groupIndex, colorIndex, field, value) => {
+        const newGroups = [...fabricGroups];
+        newGroups[groupIndex].colors[colorIndex][field] = value;
+        setFabricGroups(newGroups);
+    };
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        
+        if (!supplierId) return alert("Please select a supplier.");
+        
+        // Flatten the grouped structure into the flat array expected by the backend
+        const formattedItems = [];
+        
+        fabricGroups.forEach(group => {
+            if (!group.fabric_type_id) return; // Skip empty groups
+            
+            group.colors.forEach(color => {
+                if (color.fabric_color_id && color.quantity) {
+                    formattedItems.push({
+                        fabric_type_id: parseInt(group.fabric_type_id, 10),
+                        fabric_color_id: parseInt(color.fabric_color_id, 10),
+                        quantity: parseFloat(color.quantity),
+                        uom: 'meter', // Hardcoded context
+                        unit_price: group.unit_price ? parseFloat(group.unit_price) : 0
+                    });
+                }
+            });
+        });
+
+        if (formattedItems.length === 0) {
+            return alert("Please ensure you have selected at least one Fabric Type, Color, and Quantity.");
+        }
+
+        onSave({
+            sales_order_id: salesOrderId,
+            supplier_id: parseInt(supplierId, 10),
+            expected_delivery_date: expectedDeliveryDate || null,
+            items: formattedItems
+        });
+    };
+
+    if (isLoading) return <Modal title="Loading..." onClose={onClose}><Spinner/></Modal>;
+
+    return (
+        <Modal title="Create Detailed Purchase Order" onClose={onClose} size="max-w-4xl">
+            <form onSubmit={handleSubmit} className="space-y-6">
+                
+                {/* Basic Info Section */}
+                <div className="bg-gray-50 p-5 rounded-xl border border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-5 shadow-sm">
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Supplier *</label>
+                        <select 
+                            className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white" 
+                            value={supplierId} 
+                            onChange={e => setSupplierId(e.target.value)} 
+                            required
+                        >
+                            <option value="">Select a Supplier</option>
+                            {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Expected Delivery (Optional)</label>
+                        <input 
+                            type="date" 
+                            className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white"
+                            value={expectedDeliveryDate}
+                            onChange={e => setExpectedDeliveryDate(e.target.value)}
+                        />
+                    </div>
+                </div>
+
+                {/* Fabric Groups Section */}
+                <div className="max-h-[60vh] overflow-y-auto pr-2 space-y-6 pb-4">
+                    {fabricGroups.map((group, groupIdx) => (
+                        <div key={groupIdx} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
+                            {/* Group Header (Fabric Type & Price) */}
+                            <div className="bg-slate-50 p-4 border-b border-slate-200 flex flex-col md:flex-row md:items-end gap-4">
+                                <div className="flex-1">
+                                    <label className="block text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1.5">Fabric Type *</label>
+                                    <select 
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium"
+                                        value={group.fabric_type_id}
+                                        onChange={e => updateFabricGroup(groupIdx, 'fabric_type_id', e.target.value)}
+                                        required
+                                    >
+                                        <option value="">Select Fabric Type</option>
+                                        {fabricTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                    </select>
+                                </div>
+                                <div className="w-full md:w-48">
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Unit Price (₹/m)</label>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-2.5 text-slate-400 text-sm">$</span>
+                                        <input 
+                                            type="number" 
+                                            min="0" 
+                                            step="0.01"
+                                            placeholder="0.00"
+                                            className="w-full p-2.5 pl-7 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                                            value={group.unit_price}
+                                            onChange={e => updateFabricGroup(groupIdx, 'unit_price', e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="md:self-center pt-2 md:pt-0">
+                                    {fabricGroups.length > 1 && (
+                                        <button 
+                                            type="button" 
+                                            onClick={() => removeFabricGroup(groupIdx)}
+                                            className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors flex items-center text-sm font-bold"
+                                            title="Remove Fabric Block"
+                                        >
+                                            <Trash2 size={16} className="md:mr-0 mr-2" /> <span className="md:hidden">Remove Block</span>
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Colors inside this Fabric Group */}
+                            <div className="p-4 bg-white">
+                                <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center">
+                                    <Palette size={14} className="mr-2"/> Colors & Quantities
+                                </h5>
+                                <div className="space-y-3">
+                                    {group.colors.map((color, colorIdx) => (
+                                        <div key={colorIdx} className="flex flex-wrap md:flex-nowrap items-center gap-3">
+                                            <div className="flex-1 min-w-[200px]">
+                                                <select 
+                                                    className="w-full p-2 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                                    value={color.fabric_color_id}
+                                                    onChange={e => updateColorInGroup(groupIdx, colorIdx, 'fabric_color_id', e.target.value)}
+                                                    required
+                                                >
+                                                    <option value="" disabled>Select Color</option>
+                                                    {fabricColors.map(c => <option key={c.id} value={c.id}>{c.color_number} - {c.name}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="w-full md:w-40 relative">
+                                                <span className="absolute right-3 top-2 text-slate-400 text-sm">m</span>
+                                                <input 
+                                                    type="number" 
+                                                    min="0.1" 
+                                                    step="0.1"
+                                                    placeholder="Qty"
+                                                    className="w-full p-2 pr-8 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                                    value={color.quantity}
+                                                    onChange={e => updateColorInGroup(groupIdx, colorIdx, 'quantity', e.target.value)}
+                                                    required
+                                                />
+                                            </div>
+                                            <div className="w-8 flex justify-center">
+                                                {group.colors.length > 1 && (
+                                                    <button 
+                                                        type="button" 
+                                                        onClick={() => removeColorFromGroup(groupIdx, colorIdx)}
+                                                        className="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-md transition-colors"
+                                                        title="Remove Color"
+                                                    >
+                                                        <X size={16} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button 
+                                    type="button" 
+                                    onClick={() => addColorToGroup(groupIdx)}
+                                    className="mt-3 text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
+                                >
+                                    <Plus size={14} className="mr-1" /> Add Color Variant
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+
+                    <div className="pt-2">
+                        <button 
+                            type="button" 
+                            onClick={addFabricGroup}
+                            className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 font-bold hover:bg-slate-50 hover:text-slate-700 transition-colors flex items-center justify-center"
+                        >
+                            <Layers size={18} className="mr-2" /> Add Another Fabric Type
+                        </button>
+                    </div>
+                </div>
+
+                {/* Footer Actions */}
+                <div className="flex justify-end pt-4 border-t border-gray-100 gap-3">
+                    <button 
+                        type="button" 
+                        onClick={onClose} 
+                        className="px-5 py-2.5 text-sm font-bold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                    >
+                        Cancel
+                    </button>
+                    <button 
+                        type="submit" 
+                        className="px-6 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-md shadow-blue-600/20 transition-all flex items-center"
+                    >
+                        <ShoppingCart size={16} className="mr-2"/> Create Purchase Order
+                    </button>
+                </div>
+            </form>
+        </Modal>
+    );
+};
 
 // --- MAIN DASHBOARD ---
 const ProductionWorkflowDashboard = () => {
@@ -443,42 +1018,53 @@ const ProductionWorkflowDashboard = () => {
     };
 
     const handleCreateBatch = (purchaseOrderId) => {
-         navigate(`/initialization-portal/batches/new?poId=${purchaseOrderId}`);
+         navigate(`/production-manager/batches/new?poId=${purchaseOrderId}`);
     };
     
     const handleEditBatch = (batchId) => {
-        navigate(`/initialization-portal/batches/edit/${batchId}`);
+        navigate(`/production-manager/batches/edit/${batchId}`);
     };
 
     const handleViewBatchDetails = (batchId) => {
-        navigate(`/initialization-portal/batch-details/${batchId}`);
+        navigate(`/production-manager/batch-details/${batchId}`);
     };
 
     const handleDeleteBatch = async (batchId) => {
         try {
-            // Need to ensure API method exists in frontend utils if not already
-            // Assuming direct call or adding method to productionManagerApi.deleteBatch(id)
-            // For now, I'll use a generic delete or assume it exists. 
-            // If it doesn't, this needs to be added to the api file.
-            // Since I cannot edit the api file here, I will assume it's available or use a direct fetch/axios if needed, 
-            // but consistency suggests using the api wrapper.
-            // I'll call `productionManagerApi.deleteBatch(batchId)` 
-            
-            // Note: Since I didn't add deleteBatch to the api file in previous turns (only controller), 
-            // the user might need to add it manually to `src/api/productionManagerApi.js`:
-            // deleteBatch: (id) => api.delete(`/production-manager/batches/${id}`),
-
             if (productionManagerApi.deleteBatch) {
                 await productionManagerApi.deleteBatch(batchId);
             } else {
-                // Fallback if method missing in frontend wrapper but backend exists
-                // This is a temporary fix for the preview environment
                 const token = localStorage.getItem('factory_token');
-                await fetch(productionManagerApi.deleteBatch(batchId));
+                await fetch(`http://localhost:5000/api/production-manager/batches/${batchId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
             }
-            fetchData(); // Refresh
+            fetchData(); 
         } catch (err) {
             alert("Failed to delete batch. It may have progressed too far.");
+            console.error(err);
+        }
+    };
+
+    const handleDeletePO = async (poId) => {
+        try {
+            if (accountingApi.deletePurchaseOrder) {
+                await accountingApi.deletePurchaseOrder(poId);
+            } else {
+                const token = localStorage.getItem('factory_token');
+                const res = await fetch(`http://localhost:5000/api/accounts/purchase-orders/${poId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.error || "Failed to delete PO");
+                }
+            }
+            fetchData();
+        } catch (err) {
+            alert(err.message || "Failed to delete Purchase Order.");
             console.error(err);
         }
     };
@@ -551,6 +1137,7 @@ const ProductionWorkflowDashboard = () => {
                                             onViewBatchDetails={handleViewBatchDetails}
                                             onEditBatch={handleEditBatch}
                                             onDeleteBatch={handleDeleteBatch}
+                                            onDeletePO={handleDeletePO}
                                         />
                                     ))
                                 ) : (
@@ -571,97 +1158,6 @@ const ProductionWorkflowDashboard = () => {
             {selectedPOId && <PurchaseOrderDetailsModal poId={selectedPOId} onClose={() => setSelectedPOId(null)} />}
             {poModalSOId && <CreatePOModal salesOrderId={poModalSOId} onClose={() => setPoModalSOId(null)} onSave={handleCreatePOSubmit} />}
         </div>
-    );
-};
-
-// --- Re-including Modal Components (Identical logic as before, just kept for completeness) ---
-
-const SalesOrderDetailsModal = ({ orderId, onClose }) => {
-    const [order, setOrder] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
-    useEffect(() => { accountingApi.getSalesOrderDetails(orderId).then(res => setOrder(res.data)).catch(console.error).finally(() => setIsLoading(false)); }, [orderId]);
-    if (isLoading) return <Modal title="Loading..." onClose={onClose}><Spinner/></Modal>;
-    if (!order) return null;
-    return (
-        <Modal title={`Sales Order: ${order.order_number}`} onClose={onClose}>
-             <div className="space-y-6">
-                <div className="grid grid-cols-2 gap-4 bg-blue-50 p-4 rounded-lg border border-blue-100">
-                    <div><p className="text-xs font-bold text-blue-500 uppercase mb-1">Customer</p><p className="font-semibold text-gray-800">{order.customer_name}</p></div>
-                    <div className="text-right"><StatusBadge status={order.status} /><p className="text-xs text-gray-500 mt-2">{new Date(order.order_date).toLocaleDateString()}</p></div>
-                </div>
-                <div>
-                    <h3 className="font-bold text-gray-700 mb-3 flex items-center"><Box size={16} className="mr-2"/> Ordered Products</h3>
-                    <div className="space-y-2">
-                        {order.products.map((prod, idx) => (
-                            <div key={idx} className="border rounded p-3 bg-gray-50">
-                                <div className="flex justify-between font-medium text-sm"><span>{prod.product_name}</span><span className="text-gray-500">{prod.fabric_type}</span></div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </div>
-        </Modal>
-    );
-};
-
-const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
-    const [po, setPo] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [rolls, setRolls] = useState([]);
-    
-    // Load PO Details
-    useEffect(() => { accountingApi.getPurchaseOrderDetails(poId).then(res => setPo(res.data)).catch(console.error).finally(() => setLoading(false)); }, [poId]);
-    
-    // Load Rolls (Reusing logic for visual consistency inside modal)
-    useEffect(() => { if (poId) storeManagerApi.getFabricRollsByPO(poId).then(res => setRolls(res.data)).catch(console.error); }, [poId]);
-
-    if (loading) return <Modal title="Loading..." onClose={onClose}><Spinner/></Modal>;
-    
-    const handlePrintPO = () => {
-        if (!po) return;
-        const doc = new jsPDF();
-        doc.text(`Purchase Order: ${po.po_code}`, 14, 20);
-        autoTable(doc, { startY: 30, head: [['Fabric', 'Color', 'Qty', 'Unit', 'Price', 'Total']], body: po.items.map(i => [i.fabric_type, i.fabric_color, i.quantity, i.uom, i.unit_price, i.total_price]) });
-        doc.save(`PO_${po.po_code}.pdf`);
-    };
-
-    return (
-        <Modal title={`PO: ${po?.po_code}`} onClose={onClose}>
-             <div className="space-y-4">
-                <div className="flex justify-between items-center bg-amber-50 p-3 rounded border border-amber-100">
-                    <div><p className="font-bold text-slate-800">{po?.supplier_name}</p><p className="text-xs text-slate-500">{po?.supplier_email}</p></div>
-                    <button onClick={handlePrintPO} className="flex items-center text-xs bg-white border border-slate-300 px-3 py-1.5 rounded hover:bg-slate-50"><Printer size={14} className="mr-1.5"/> Print</button>
-                </div>
-                <h4 className="text-xs font-bold text-slate-500 uppercase mt-4">Order Items</h4>
-                <table className="w-full text-xs text-left border rounded">
-                    <thead className="bg-gray-100 font-medium"><tr><th className="p-2">Item</th><th className="p-2 text-right">Qty</th></tr></thead>
-                    <tbody>{po?.items.map((i, idx) => <tr key={idx} className="border-t"><td className="p-2">{i.fabric_type} - {i.fabric_color}</td><td className="p-2 text-right">{i.quantity} {i.uom}</td></tr>)}</tbody>
-                </table>
-                <h4 className="text-xs font-bold text-slate-500 uppercase mt-4">Received Rolls ({rolls.length})</h4>
-                <div className="max-h-32 overflow-y-auto border rounded bg-gray-50 p-2">
-                    {rolls.length === 0 ? <p className="text-center italic text-xs text-gray-400">No rolls received yet.</p> : 
-                    rolls.map(r => <div key={r.id} className="text-xs p-1 border-b last:border-0 border-gray-200 flex justify-between"><span>R-{r.id} ({r.fabric_type})</span><span>{r.meter}m</span></div>)}
-                </div>
-             </div>
-        </Modal>
-    );
-};
-
-const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
-    const [supplierId, setSupplierId] = useState('');
-    const [suppliers, setSuppliers] = useState([]);
-    useEffect(() => { storeManagerApi.getFabricIntakeFormData().then(res => setSuppliers(res.data.suppliers || [])); }, []);
-    const handleSubmit = (e) => { e.preventDefault(); onSave({ sales_order_id: salesOrderId, supplier_id: supplierId, items: [] }); };
-    return (
-        <Modal title="Create PO" onClose={onClose}>
-            <form onSubmit={handleSubmit} className="space-y-4">
-                <select className="w-full p-2 border rounded" value={supplierId} onChange={e => setSupplierId(e.target.value)} required>
-                    <option value="">Select Supplier</option>
-                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-                <div className="flex justify-end"><button className="bg-blue-600 text-white px-4 py-2 rounded">Create</button></div>
-            </form>
-        </Modal>
     );
 };
 

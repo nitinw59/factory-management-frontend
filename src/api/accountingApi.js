@@ -50,4 +50,5 @@ export const accountingApi = {
 
   updatePurchaseOrder: (id, data) => {return api.put(`/accounting/purchase-orders/${id}`, data);},  
   getPurchaseOrderDetails: (id) => api.get(`/accounting/purchase-orders/${id}`),
+  deletePurchaseOrder: (id) => api.delete(`/accounting/purchase-orders/${id}`),
 };

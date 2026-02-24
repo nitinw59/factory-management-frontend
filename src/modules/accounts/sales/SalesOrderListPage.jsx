@@ -3,7 +3,7 @@ import { productionManagerApi } from '../../../api/productionManagerApi';
 import { storeManagerApi } from '../../../api/storeManagerApi';
 import { accountingApi } from '../../../api/accountingApi'; 
 import { 
-    FileText, ShoppingCart, Truck, ChevronDown, ChevronRight, Package, Edit3, Eye, Layers, Loader2, X, Search, Filter, Box, Calendar, DollarSign, Info
+    FileText, ShoppingCart, Truck, ChevronDown, ChevronRight, Package, Edit3, Eye, Layers, Loader2, X, Search, Filter, Box, Calendar, DollarSign, Info, Palette
 } from 'lucide-react';
 import Modal from '../../../shared/Modal';
 import FabricIntakeForm from '../purchase/FabricIntakeForm'; 
@@ -122,7 +122,7 @@ const ReceivedRollsList = ({ purchaseOrderId }) => {
     );
 };
 
-// --- NEW COMPONENT: Sales Order Summary & Details Section ---
+// --- COMPONENT: Sales Order Summary & Details Section ---
 const SalesOrderExpandedDetails = ({ orderId }) => {
     const [details, setDetails] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -155,14 +155,18 @@ const SalesOrderExpandedDetails = ({ orderId }) => {
                     <p className="text-xs text-gray-500">{details.customer_email || 'No email'}</p>
                 </div>
                 <div>
-                    <span className="block text-xs font-bold text-gray-400 uppercase mb-1">Dates</span>
+                    <span className="block text-xs font-bold text-gray-400 uppercase mb-1">Order Refs & Dates</span>
+                    <p className="text-gray-700">
+                        <span className="text-gray-400 text-xs mr-1">Buyer PO:</span> 
+                        <span className="font-semibold text-indigo-700">{details.buyer_po_number || 'N/A'}</span>
+                    </p>
                     <p className="text-gray-700"><span className="text-gray-400 text-xs mr-1">Ordered:</span> {new Date(details.order_date).toLocaleDateString()}</p>
                     {details.delivery_date && <p className="text-gray-700"><span className="text-gray-400 text-xs mr-1">Delivery:</span> {new Date(details.delivery_date).toLocaleDateString()}</p>}
                 </div>
                 <div>
                     <span className="block text-xs font-bold text-gray-400 uppercase mb-1">Financials</span>
-                    <p className="font-bold text-emerald-700 flex items-center">
-                        <DollarSign size={14} className="mr-0.5"/> {details.total_amount || '0.00'}
+                    <p className="font-bold text-emerald-700 flex items-center text-lg">
+                        <DollarSign size={16} className="mr-0.5"/> {details.total_amount || '0.00'}
                     </p>
                 </div>
                 <div>
@@ -171,38 +175,55 @@ const SalesOrderExpandedDetails = ({ orderId }) => {
                 </div>
             </div>
 
-            {/* Products Table */}
+            {/* Detailed Products Table */}
             <div className="p-0">
                 <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase flex items-center">
-                    <Box size={14} className="mr-2"/> Order Items
+                    <Box size={14} className="mr-2"/> Order Items & Color Breakdown
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                         <thead className="bg-white text-gray-500 border-b border-gray-100">
                             <tr>
-                                <th className="px-4 py-2 font-medium w-1/3">Product Style</th>
-                                <th className="px-4 py-2 font-medium">Fabric</th>
-                                <th className="px-4 py-2 font-medium">Size Breakdown</th>
-                                <th className="px-4 py-2 font-medium text-right">Total Qty</th>
+                                <th className="px-4 py-3 font-medium w-1/4">Product Style</th>
+                                <th className="px-4 py-3 font-medium w-1/6">Fabric</th>
+                                <th className="px-4 py-3 font-medium w-1/4">Size Breakdown</th>
+                                <th className="px-4 py-3 font-medium">Color Details & Quantities</th>
+                                <th className="px-4 py-3 font-medium text-right w-20">Total</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-50">
+                        <tbody className="divide-y divide-gray-100">
                             {details.products.map((prod, idx) => {
                                 const totalQty = prod.colors ? prod.colors.reduce((sum, c) => sum + parseInt(c.quantity || 0), 0) : 0;
                                 return (
-                                    <tr key={idx} className="hover:bg-gray-50/50">
-                                        <td className="px-4 py-3 font-medium text-gray-800">{prod.product_name}</td>
+                                    <tr key={idx} className="hover:bg-gray-50/30 align-top">
+                                        <td className="px-4 py-3">
+                                            <p className="font-semibold text-gray-800">{prod.product_name}</p>
+                                        </td>
                                         <td className="px-4 py-3 text-gray-600">{prod.fabric_type}</td>
                                         <td className="px-4 py-3">
-                                            <div className="flex flex-wrap gap-1">
+                                            <div className="flex flex-wrap gap-1.5">
                                                 {prod.size_breakdown && Object.entries(prod.size_breakdown).map(([size, ratio]) => (
-                                                    <span key={size} className="text-[10px] bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded text-gray-600">
-                                                        {size}: <span className="font-bold">{ratio}</span>
+                                                    <span key={size} className="text-[10px] bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded text-indigo-700 shadow-sm flex flex-col items-center min-w-[2rem]">
+                                                        <span className="font-bold opacity-60 text-[8px] leading-tight">{size}</span>
+                                                        <span className="font-extrabold leading-tight">{ratio}</span>
                                                     </span>
                                                 ))}
                                             </div>
                                         </td>
-                                        <td className="px-4 py-3 text-right font-bold text-gray-800">{totalQty}</td>
+                                        <td className="px-4 py-3">
+                                            <div className="flex flex-col gap-1.5">
+                                                {prod.colors && prod.colors.length > 0 ? prod.colors.map((c, i) => (
+                                                    <div key={i} className="text-xs bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-md flex justify-between items-center w-full max-w-[240px] shadow-sm">
+                                                        <span className="text-slate-700 font-medium flex items-center">
+                                                            <Palette size={12} className="text-slate-400 mr-1.5"/>
+                                                            {c.color_name} <span className="text-slate-400 font-normal ml-1">({c.color_number})</span>
+                                                        </span>
+                                                        <span className="font-bold text-blue-700">{c.quantity} pcs</span>
+                                                    </div>
+                                                )) : <span className="text-xs text-gray-400 italic">No colors defined</span>}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3 text-right font-extrabold text-gray-800 text-base">{totalQty}</td>
                                     </tr>
                                 );
                             })}
@@ -214,7 +235,7 @@ const SalesOrderExpandedDetails = ({ orderId }) => {
     );
 };
 
-// --- NEW COMPONENT: Purchase Order Details Modal ---
+// --- COMPONENT: Purchase Order Details Modal ---
 const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
     const [po, setPo] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -347,7 +368,8 @@ const SalesOrderListPage = () => {
             const lowerTerm = searchTerm.toLowerCase();
             const filtered = workflowData.filter(so => 
                 so.order_number.toLowerCase().includes(lowerTerm) || 
-                so.customer_name.toLowerCase().includes(lowerTerm)
+                so.customer_name.toLowerCase().includes(lowerTerm) ||
+                (so.buyer_po_number && so.buyer_po_number.toLowerCase().includes(lowerTerm))
             );
             setFilteredData(filtered);
         }
@@ -397,7 +419,7 @@ const SalesOrderListPage = () => {
                     </div>
                     <input 
                         type="text"
-                        placeholder="Search Sales Order..."
+                        placeholder="Search SO, PO or Customer..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow focus:shadow-sm"
@@ -421,6 +443,11 @@ const SalesOrderListPage = () => {
                                     <h3 className="font-bold text-lg text-slate-800 flex items-center">
                                         <FileText size={18} className="mr-2 text-blue-600"/> 
                                         {so.order_number}
+                                        {so.buyer_po_number && (
+                                            <span className="ml-3 px-2 py-0.5 bg-slate-200 text-slate-700 text-[10px] rounded-md border border-slate-300 font-bold uppercase tracking-wider shadow-sm">
+                                                Ref: {so.buyer_po_number}
+                                            </span>
+                                        )}
                                     </h3>
                                     <p className="text-sm text-slate-500">{so.customer_name}</p>
                                 </div>
@@ -452,7 +479,7 @@ const SalesOrderListPage = () => {
                                     {so.purchase_orders && so.purchase_orders.length > 0 ? (
                                         <div className="space-y-3">
                                             {so.purchase_orders.map(po => (
-                                                <div key={po.id} className="bg-white p-0 rounded-lg border border-slate-200 overflow-hidden">
+                                                <div key={po.id} className="bg-white p-0 rounded-lg border border-slate-200 overflow-hidden shadow-sm">
                                                     {/* PO Row Header */}
                                                     <div 
                                                         className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 hover:bg-slate-50 transition-colors cursor-pointer"
@@ -519,7 +546,7 @@ const SalesOrderListPage = () => {
                     </div>
                 ))}
                 {filteredData.length === 0 && (
-                    <div className="text-center py-20 bg-white rounded-xl border border-dashed border-slate-200">
+                    <div className="text-center py-20 bg-white rounded-xl border border-dashed border-slate-200 shadow-sm">
                         <p className="text-slate-400 text-lg font-medium">No sales orders found matching "{searchTerm}"</p>
                     </div>
                 )}
