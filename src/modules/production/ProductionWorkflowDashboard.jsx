@@ -1216,15 +1216,15 @@ const ProductionWorkflowDashboard = () => {
     };
 
     const handleCreateBatch = (purchaseOrderId) => {
-         navigate(`/production-manager/batches/new?poId=${purchaseOrderId}`);
+         navigate(`/initialization-portal/batches/new?poId=${purchaseOrderId}`);
     };
     
     const handleEditBatch = (batchId) => {
-        navigate(`/production-manager/batches/edit/${batchId}`);
+        navigate(`/initialization-portal/batches/edit/${batchId}`);
     };
 
     const handleViewBatchDetails = (batchId) => {
-        navigate(`/production-manager/batch-details/${batchId}`);
+        navigate(`/initialization-portal/batch-details/${batchId}`);
     };
 
     const handleDeleteBatch = async (batchId) => {
