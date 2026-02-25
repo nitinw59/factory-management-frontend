@@ -28,7 +28,10 @@ export const cuttingPortalApi = {
 
   getBatchNumberingDetails: (batchId) => api.get(`/cutting-portal/batch-numbering-details/${batchId}`),
 
-  getDailyReport: () => api.get('/cutting-portal/reports/daily-status'),
-    
+   getDailyReport: (startDate, endDate) => {
+        return api.get('/initialization-portal/reports/daily-status', {
+            params: { startDate, endDate }
+        });
+    },
 };
 

@@ -1,8 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { initializationPortalApi } from '../../api/initializationPortalApi';
 import { Loader2, Download, Search, Calendar, FileText } from 'lucide-react';
+
+
+import { cuttingPortalApi } from '../../api/cuttingPortalApi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+
+
 
 const CuttingDailyReportPage = () => {
     const [data, setData] = useState([]);
@@ -17,7 +22,7 @@ const CuttingDailyReportPage = () => {
         if (e) e.preventDefault(); // Prevent form submission refresh
         setIsLoading(true);
         try {
-            const res = await initializationPortalApi.getDailyReport(startDate, endDate);
+            const res = await cuttingPortalApi.getDailyReport(startDate, endDate);
             setData(res.data); 
         } catch (err) {
             console.error(err);
@@ -57,8 +62,8 @@ const CuttingDailyReportPage = () => {
             return;
         }
 
-        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' }); // A3 for wide table
-        
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' }); 
+
         doc.setFontSize(18);
         doc.text("CUTTING MANAGER DAILY REPORT", 14, 15);
         doc.setFontSize(10);
@@ -67,7 +72,7 @@ const CuttingDailyReportPage = () => {
 
         const tableColumn = [
             "PO No", "Batch", "Len", "Sizes", "Style", 
-            "Cut Date", "Cut Qty", "Load Qty", "Line", "Cut WIP", "Stage",
+            "Cut Date", "Cut Qty\n(By Part)", "Load Qty\n(By Part)", "Line", "Cut WIP", "Stage",
             "Assigned Fab", "Cons. Fab", "Rej", "Fab Stock", "Avg/Pc"
         ];
 
@@ -76,61 +81,56 @@ const CuttingDailyReportPage = () => {
             const fabStock = row.assigned_fabric - row.consumed_fabric - row.rejection;
             const avg = row.cut_qty > 0 ? (row.consumed_fabric / row.cut_qty).toFixed(2) : "0";
             
-            // Determine Stage based on status
             let stage = "PLANNING";
             if (row.cut_qty > 0) stage = "IN CUTTING";
             if (row.load_qty > 0) stage = "LOADING";
             if (row.batch_status === 'COMPLETED') stage = "COMPLETED";
 
+            // Format Parts for PDF Cell
+            const cutPartsStr = row.cut_qty + " Pcs\n" + (row.cut_parts || []).map(p => `- ${p.part_name}: ${p.part_qty}`).join('\n');
+            const loadPartsStr = row.load_qty + " Pcs\n" + (row.load_parts || []).map(p => `- ${p.part_name}: ${p.part_qty}`).join('\n');
+
             return [
-                row.po_code || '-',
-                row.batch_code || `#${row.batch_id}`,
+                row.po_code || '-', 
+                row.batch_code || `#${row.batch_id}`, 
                 row.length_of_layer_inches || '-',
-                row.sizes || '-',
-                row.style_name,
+                row.sizes || '-', 
+                row.style_name, 
                 row.cut_date ? new Date(row.cut_date).toLocaleDateString() : '-',
-                row.cut_qty,
-                row.load_qty,
-                row.line_name || '-',
-                wip,
+                cutPartsStr, 
+                loadPartsStr, 
+                row.line_name || '-', 
+                wip, 
                 stage,
-                parseFloat(row.assigned_fabric).toFixed(2),
+                parseFloat(row.assigned_fabric).toFixed(2), 
                 parseFloat(row.consumed_fabric).toFixed(2),
-                parseFloat(row.rejection).toFixed(2),
-                fabStock.toFixed(2),
+                parseFloat(row.rejection).toFixed(2), 
+                fabStock.toFixed(2), 
                 avg
             ];
         });
 
-        // Summary Row
         const summaryRow = [
-            "TOTAL", "", "", "", "", "",
-            totals.cut_qty, totals.load_qty, "", totals.cut_wip, "",
+            "TOTAL", "", "", "", "", "", totals.cut_qty, totals.load_qty, "", totals.cut_wip, "",
             totals.assigned_fabric.toFixed(2), totals.consumed_fabric.toFixed(2), 
             totals.rejection.toFixed(2), totals.fab_stock.toFixed(2), avgPerPc
         ];
 
         autoTable(doc, {
-            head: [tableColumn],
-            body: [...tableRows, summaryRow],
-            startY: 32,
+            head: [tableColumn], body: [...tableRows, summaryRow], startY: 32,
             styles: { fontSize: 8, cellPadding: 2, valign: 'middle', halign: 'center', lineColor: 200, lineWidth: 0.1 },
             headStyles: { fillColor: [50, 50, 50], textColor: 255, fontStyle: 'bold' },
-            columnStyles: {
-                3: { cellWidth: 40 }, // Sizes column wider
-                4: { cellWidth: 30 }  // Style column wider
-            },
+            columnStyles: { 3: { cellWidth: 40 }, 4: { cellWidth: 30 }, 6: { cellWidth: 35, halign: 'left' }, 7: { cellWidth: 35, halign: 'left' } },
             didParseCell: (data) => {
-                // Style Summary Row
                 if (data.row.index === tableRows.length) {
                     data.cell.styles.fontStyle = 'bold';
-                    data.cell.styles.fillColor = [255, 255, 0]; // Yellow
+                    data.cell.styles.fillColor = [255, 255, 0]; 
                     data.cell.styles.textColor = [0, 0, 0];
                 }
             }
         });
-
-        doc.save(`Cutting_Status_Report_${startDate}_to_${endDate}.pdf`);
+      
+        doc.save(`Cutting_Daily_Report_${startDate}_to_${endDate}.pdf`);    
     };
 
     return (
@@ -141,7 +141,7 @@ const CuttingDailyReportPage = () => {
                         <h1 className="text-2xl font-bold text-gray-800 flex items-center">
                             <FileText className="mr-2 text-blue-600"/> Cutting Status Report
                         </h1>
-                        <p className="text-sm text-gray-500 mt-1">Overview of cutting production and fabric utilization by date.</p>
+                        <p className="text-sm text-gray-500 mt-1">Overview of cutting production, part tracking, and fabric utilization.</p>
                     </div>
                     
                     {/* Date Range Filter Form */}
@@ -203,8 +203,8 @@ const CuttingDailyReportPage = () => {
                                         <th className="py-3 px-2">Sizes</th>
                                         <th className="py-3 px-2">Style</th>
                                         <th className="py-3 px-2 text-right">Cut Date</th>
-                                        <th className="py-3 px-2 text-right">Cut Qty</th>
-                                        <th className="py-3 px-2 text-right">Load Qty</th>
+                                        <th className="py-3 px-2">Cut Qty & Parts</th>
+                                        <th className="py-3 px-2">Load Qty & Parts</th>
                                         <th className="py-3 px-2">Line</th>
                                         <th className="py-3 px-2 text-right">WIP</th>
                                         <th className="py-3 px-2 border-r border-gray-600">Stage</th>
@@ -220,9 +220,9 @@ const CuttingDailyReportPage = () => {
                                 {/* Summary Row (Sticky Top) */}
                                 <tbody className="bg-yellow-100 font-bold border-b-2 border-gray-300 text-gray-900">
                                     <tr>
-                                        <td colSpan={6} className="py-2 px-2 text-right uppercase">Date Range Total:</td>
-                                        <td className="py-2 px-2 text-right text-blue-700">{totals.cut_qty}</td>
-                                        <td className="py-2 px-2 text-right text-green-700">{totals.load_qty}</td>
+                                        <td colSpan={6} className="py-2 px-2 text-right uppercase">Date Range Total (Garments):</td>
+                                        <td className="py-2 px-2 text-blue-700">{totals.cut_qty}</td>
+                                        <td className="py-2 px-2 text-green-700">{totals.load_qty}</td>
                                         <td className="py-2 px-2"></td>
                                         <td className="py-2 px-2 text-right text-red-600">{totals.cut_wip}</td>
                                         <td className="py-2 px-2 border-r border-gray-300"></td>
@@ -247,24 +247,53 @@ const CuttingDailyReportPage = () => {
                                         if(row.batch_status === 'COMPLETED') { stage = "DONE"; stageColor = "text-green-600 font-bold"; }
 
                                         return (
-                                            <tr key={idx} className="hover:bg-blue-50 transition-colors">
-                                                <td className="py-2 px-2 font-medium">{row.po_code || '-'}</td>
-                                                <td className="py-2 px-2 font-mono text-blue-700 font-bold">{row.batch_code || `#${row.batch_id}`}</td>
-                                                <td className="py-2 px-2">{row.length_of_layer_inches || '-'}</td>
-                                                <td className="py-2 px-2 text-[10px] max-w-[150px] truncate" title={row.sizes}>{row.sizes}</td>
-                                                <td className="py-2 px-2 font-medium truncate max-w-[120px]" title={row.style_name}>{row.style_name}</td>
-                                                <td className="py-2 px-2 text-right text-gray-500">{row.cut_date ? new Date(row.cut_date).toLocaleDateString(undefined, {month:'short', day:'numeric'}) : '-'}</td>
-                                                <td className="py-2 px-2 text-right font-bold text-blue-700">{row.cut_qty}</td>
-                                                <td className="py-2 px-2 text-right text-green-700 font-medium">{row.load_qty}</td>
-                                                <td className="py-2 px-2 text-[10px]">{row.line_name || '-'}</td>
-                                                <td className={`py-2 px-2 text-right font-bold ${wip > 0 ? 'text-amber-600' : 'text-gray-300'}`}>{wip}</td>
-                                                <td className={`py-2 px-2 border-r border-gray-200 text-[10px] uppercase ${stageColor}`}>{stage}</td>
+                                            <tr key={idx} className="hover:bg-blue-50 transition-colors align-top">
+                                                <td className="py-3 px-2 font-medium pt-3">{row.po_code || '-'}</td>
+                                                <td className="py-3 px-2 font-mono text-blue-700 font-bold pt-3">{row.batch_code || `#${row.batch_id}`}</td>
+                                                <td className="py-3 px-2 pt-3">{row.length_of_layer_inches || '-'}</td>
+                                                <td className="py-3 px-2 text-[10px] max-w-[150px] truncate pt-3" title={row.sizes}>{row.sizes}</td>
+                                                <td className="py-3 px-2 font-medium truncate max-w-[120px] pt-3" title={row.style_name}>{row.style_name}</td>
+                                                <td className="py-3 px-2 text-right text-gray-500 pt-3">{row.cut_date ? new Date(row.cut_date).toLocaleDateString(undefined, {month:'short', day:'numeric'}) : '-'}</td>
                                                 
-                                                <td className="py-2 px-2 text-right">{parseFloat(row.assigned_fabric).toFixed(2)}</td>
-                                                <td className="py-2 px-2 text-right">{parseFloat(row.consumed_fabric).toFixed(2)}</td>
-                                                <td className="py-2 px-2 text-right text-red-500">{parseFloat(row.rejection) > 0 ? parseFloat(row.rejection).toFixed(2) : '-'}</td>
-                                                <td className={`py-2 px-2 text-right font-bold ${fabStock < 0 ? 'text-red-600' : 'text-green-600'}`}>{fabStock.toFixed(2)}</td>
-                                                <td className="py-2 px-2 text-right font-mono">{avg}</td>
+                                                {/* CUT QTY & PARTS BREAKDOWN */}
+                                                <td className="py-3 px-2">
+                                                    <div className="font-bold text-blue-700 text-sm">{row.cut_qty} <span className="text-[10px] font-normal text-gray-500">Garments</span></div>
+                                                    {row.cut_parts && row.cut_parts.length > 0 && (
+                                                        <div className="mt-1.5 space-y-0.5">
+                                                            {row.cut_parts.map((p, i) => (
+                                                                <div key={i} className="text-[9px] text-gray-600 flex justify-between bg-white border border-gray-100 px-1.5 py-0.5 rounded shadow-sm">
+                                                                    <span className="truncate max-w-[80px]" title={p.part_name}>{p.part_name}</span>
+                                                                    <span className="font-mono text-blue-600 ml-2">{p.part_qty}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </td>
+
+                                                {/* LOAD QTY & PARTS BREAKDOWN */}
+                                                <td className="py-3 px-2">
+                                                    <div className="font-bold text-green-700 text-sm">{row.load_qty} <span className="text-[10px] font-normal text-gray-500">Garments</span></div>
+                                                    {row.load_parts && row.load_parts.length > 0 && (
+                                                        <div className="mt-1.5 space-y-0.5">
+                                                            {row.load_parts.map((p, i) => (
+                                                                <div key={i} className="text-[9px] text-gray-600 flex justify-between bg-white border border-gray-100 px-1.5 py-0.5 rounded shadow-sm">
+                                                                    <span className="truncate max-w-[80px]" title={p.part_name}>{p.part_name}</span>
+                                                                    <span className="font-mono text-green-600 ml-2">{p.part_qty}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </td>
+
+                                                <td className="py-3 px-2 text-[10px] pt-3">{row.line_name || '-'}</td>
+                                                <td className={`py-3 px-2 text-right font-bold pt-3 ${wip > 0 ? 'text-amber-600' : 'text-gray-300'}`}>{wip}</td>
+                                                <td className={`py-3 px-2 border-r border-gray-200 text-[10px] uppercase pt-3 ${stageColor}`}>{stage}</td>
+                                                
+                                                <td className="py-3 px-2 text-right pt-3">{parseFloat(row.assigned_fabric).toFixed(2)}</td>
+                                                <td className="py-3 px-2 text-right pt-3">{parseFloat(row.consumed_fabric).toFixed(2)}</td>
+                                                <td className="py-3 px-2 text-right text-red-500 pt-3">{parseFloat(row.rejection) > 0 ? parseFloat(row.rejection).toFixed(2) : '-'}</td>
+                                                <td className={`py-3 px-2 text-right font-bold pt-3 ${fabStock < 0 ? 'text-red-600' : 'text-green-600'}`}>{fabStock.toFixed(2)}</td>
+                                                <td className="py-3 px-2 text-right font-mono pt-3">{avg}</td>
                                             </tr>
                                         );
                                     })}
