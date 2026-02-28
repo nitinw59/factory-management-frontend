@@ -5,17 +5,7 @@ import {
     Package, DollarSign, ArrowLeft, Loader2
 } from 'lucide-react';
 
-
-const mechanicApi = {
-    getOpenComplaints: async () => new Promise(r => setTimeout(() => r(mockJobs), 600)),
-    getAllSpares: async () => new Promise(r => setTimeout(() => r(mockSpares), 600)),
-    getComplaintHistory: async (id) => new Promise(r => setTimeout(() => r(mockHistory), 500)),
-    performMaintenance: async (data) => {
-        console.log("Submitting Maintenance Log:", data);
-        return new Promise(r => setTimeout(() => r({ success: true }), 800));
-    }
-};
-// --- END MOCK ---
+import {mechanicApi} from '../../api/mechanicApi';
 
 // --- SHARED COMPONENTS ---
 const Spinner = () => <Loader2 className="animate-spin text-blue-600" />;
@@ -311,7 +301,7 @@ const MaintenanceForm = ({ job, sparesList, onCancel, onSuccess }) => {
 
 
 // --- MAIN COMPONENT ---
-const MechanicPortal = () => {
+const MechanicsDashboardPage = () => {
     const [view, setView] = useState('board'); // 'board' or 'work'
     const [jobs, setJobs] = useState([]);
     const [allSpares, setAllSpares] = useState([]);
@@ -419,4 +409,4 @@ const MechanicPortal = () => {
     );
 };
 
-export default MechanicPortal;
+export default MechanicsDashboardPage;

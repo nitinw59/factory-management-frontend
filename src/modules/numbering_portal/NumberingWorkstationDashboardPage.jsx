@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { numberingCheckerApi } from '../../api/numberingCheckerApi';
 import { Shirt, Layers, ClipboardCheck, Component, Check, X, Hammer, Wrench, Loader2, ChevronDown, ChevronRight, CheckCircle2, Search } from 'lucide-react';
 
@@ -7,7 +7,6 @@ const Spinner = () => <div className="flex justify-center items-center p-8"><Loa
 const ErrorDisplay = ({ message }) => <div className="p-4 bg-red-100 text-red-700 rounded-lg">{message}</div>;
 
 // --- LOGIC HELPERS ---
-
 const checkSizeStatus = (detail) => {
     const total_cut = parseInt(detail.total_cut, 10) || 0;
     const total_validated = parseInt(detail.total_validated, 10) || 0;
@@ -77,7 +76,6 @@ const isRollMatch = (text, pattern) => {
     }
 };
 
-
 // --- MODAL COMPONENTS ---
 const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) => {
     const total_cut_num = parseInt(itemInfo.total_cut, 10) || 0;
@@ -85,20 +83,23 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
     const total_rejected_num = parseInt(itemInfo.total_rejected, 10) || 0;
     const total_altered_num = parseInt(itemInfo.total_altered, 10) || 0;
     const remaining = total_cut_num - (total_validated_num + total_rejected_num + total_altered_num);
+    
     const [quantity, setQuantity] = useState(unloadMode === 'bundle' ? remaining : 1);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const submitLock = useRef(false);
 
     useEffect(() => { setQuantity(unloadMode === 'bundle' ? remaining : 1); }, [unloadMode, remaining]);
 
     const handleStatusClick = async (qcStatus) => {
-        if (quantity > 0 && !isSubmitting) {
-            setIsSubmitting(true);
-            try {
-                await onValidationSubmit({ rollId: itemInfo.rollId, partId: itemInfo.partId, size: itemInfo.size, quantity, qcStatus });
-            } finally {
-                // Keep submitting state true until unmounted or parent handles it to prevent double taps
-                // Note: Logic in parent closes modal which unmounts this.
-            }
+        if (quantity <= 0 || submitLock.current) return;
+        
+        submitLock.current = true;
+        setIsSubmitting(true);
+        try {
+            await onValidationSubmit({ rollId: itemInfo.rollId, partId: itemInfo.partId, size: itemInfo.size, quantity, qcStatus });
+        } catch (err) {
+            submitLock.current = false;
+            setIsSubmitting(false);
         }
     };
 
@@ -113,7 +114,6 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
                              <span className="mx-2">|</span>
                              Roll: <span className="font-bold text-indigo-700">#{itemInfo.rollId}</span>
                         </div>
-                        {/* Display Color/Type if available */}
                         {(itemInfo.rollColor || itemInfo.rollType) && (
                             <div className="text-xs text-gray-500 mt-0.5">
                                 {itemInfo.rollType} &bull; <span className="font-semibold text-gray-700">{itemInfo.rollColor}</span>
@@ -164,14 +164,18 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
     const pending_alter = parseInt(itemInfo.total_altered, 10) - (parseInt(itemInfo.total_repaired, 10) + parseInt(itemInfo.total_rejected, 10));
     const [quantity, setQuantity] = useState(pending_alter);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const submitLock = useRef(false);
 
     const handleSave = async () => {
-        if (isNaN(quantity) || quantity <= 0 || quantity > pending_alter) return alert("Invalid quantity.");
+        if (isNaN(quantity) || quantity <= 0 || quantity > pending_alter || submitLock.current) return alert("Invalid quantity.");
+        
+        submitLock.current = true;
         setIsSubmitting(true);
         try {
             await onSave(quantity);
-        } finally {
-            setIsSubmitting(false); // Only reset if not unmounted (though this usually unmounts)
+        } catch (err) {
+            submitLock.current = false;
+            setIsSubmitting(false); 
         }
     };
 
@@ -204,7 +208,6 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
 };
 
 // --- DATA ROW COMPONENTS ---
-
 const SizeValidationRow = ({ sizeDetail, onValidateClick, onApproveAlterClick }) => {
     const { total_cut, total_processed, pending_alter, isComplete } = checkSizeStatus(sizeDetail);
     if (total_cut === 0) return null;
@@ -365,8 +368,6 @@ const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick, acti
         return validRolls.filter(r => isRollMatch(r.fabric_roll_id, rollFilter));
     }, [validRolls, rollFilter]);
 
- 
-
     const completedRolls = filteredRolls.filter(r => checkRollStatus(r));
     const activeRolls = filteredRolls.filter(r => !checkRollStatus(r));
 
@@ -377,7 +378,7 @@ const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick, acti
         }
     }, [activeContext, batch.batch_id, rollFilter]);
 
-       // If filter is applied and no rolls match, don't render batch
+    // If filter is applied and no rolls match, don't render batch
     if (filteredRolls.length === 0 && rollFilter) return null;
     if (validRolls.length === 0) return null;
     
@@ -551,7 +552,10 @@ const NumberingCheckerDashboardPage = () => {
             }
             closeModal();
             fetchQueue(false); // Background refresh
-        } catch (err) { alert(`Error: ${err.message}`); }
+        } catch (err) { 
+            alert(`Error: ${err.message}`); 
+            throw err; 
+        }
     };
 
     const handleApproveAlterSubmit = async (quantity) => {
@@ -586,7 +590,10 @@ const NumberingCheckerDashboardPage = () => {
             }
             closeModal();
             fetchQueue(false);
-        } catch (err) { alert(`Error: ${err.message}`); }
+        } catch (err) { 
+            alert(`Error: ${err.message}`); 
+            throw err; 
+        }
     };
 
     const validBatches = batches.filter(hasBatchData);

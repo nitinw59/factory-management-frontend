@@ -12,7 +12,7 @@ export const factoryUserConfig = {
       label: 'Role', 
       type: 'select',
       required: true,
-      options: ['factory_admin', 'store_manager', 'line_manager', 'supplier', 'production_manager', 'accountant', 'hr_manager', 'checking_user', 'cutting_operator', 'line_loader', 'validation_user', 'numbering_user', 'cutting_manager', 'preparation_loader', 'preparation_manager', 'preparation_unloader', 'finishing_manager', 'finishing_loader', 'finishing_unloader', 'sewing_part_operator', 'assembly_operator','sewing_manager']   ,
+      options: ['factory_admin', 'store_manager', 'line_manager', 'supplier', 'production_manager', 'accountant', 'hr_manager', 'checking_user', 'cutting_operator', 'line_loader', 'validation_user', 'numbering_user', 'cutting_manager', 'preparation_loader', 'preparation_manager', 'preparation_unloader', 'finishing_manager', 'finishing_loader', 'finishing_unloader', 'sewing_part_operator', 'assembly_operator','sewing_manager','mechanic']   ,
     },
   ],
   columns: [ { key: 'name', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'role', label: 'Role' } ]

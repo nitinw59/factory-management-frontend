@@ -46,6 +46,14 @@ export const assetApi = {
      */
     decommissionAsset: (assetId) => api.delete(`assets/assets/${assetId}`),
 
+
+        // ✅ NEW: Import / Export
+    exportAssets: () => api.get('assets/assets-export'),
+    bulkImportAssets: (data) => api.post('assets/assets-bulk-import', { assets: data }),
+
+    // ✅ NEW: Fetch Suppliers for Dropdown
+    getSuppliers: () => api.get('shared/supplier'),
+
     // =========================================================================
     // 2. SPARE PARTS INVENTORY (Store Manager)
     // =========================================================================

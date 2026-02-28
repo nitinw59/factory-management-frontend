@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
     AlertTriangle, CheckCircle, Clock, Search, Plus, X, 
     Wrench, FileText, ChevronRight, Filter, Loader2, 
     ThumbsUp, ThumbsDown, Camera
 } from 'lucide-react';
-import {assetApi }from '../../api/assetApi';  
+import { assetApi } from '../../api/assetApi';  
 
 // --- SHARED COMPONENTS ---
 const Spinner = () => <Loader2 className="animate-spin h-5 w-5 text-current" />;
@@ -34,6 +33,14 @@ const Badge = ({ type, value }) => {
 };
 
 // --- MODALS ---
+const COMMON_ISSUES = [
+    "Needle breakage",
+    "Thread tension problems",
+    "Timing shift",
+    "Knife issue",
+    "Lubrication / Oil leak"
+];
+
 const ReportModal = ({ onClose, onSuccess }) => {
     const [formData, setFormData] = useState({ qr_id: '', issue: '', priority: 'MEDIUM' });
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -99,7 +106,27 @@ const ReportModal = ({ onClose, onSuccess }) => {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Describe the Issue</label>
+                        <div className="flex justify-between items-end mb-1">
+                            <label className="block text-sm font-medium text-gray-700">Describe the Issue</label>
+                        </div>
+                        
+                        {/* Quick Select Common Issues */}
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                            {COMMON_ISSUES.map(issueText => (
+                                <button
+                                    key={issueText}
+                                    type="button"
+                                    onClick={() => setFormData(prev => ({ 
+                                        ...prev, 
+                                        issue: prev.issue ? `${prev.issue}, ${issueText}` : issueText 
+                                    }))}
+                                    className="px-2.5 py-1 bg-gray-100 hover:bg-red-50 text-gray-600 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded-md text-[10px] font-semibold transition-colors"
+                                >
+                                    + {issueText}
+                                </button>
+                            ))}
+                        </div>
+
                         <textarea 
                             required
                             rows="4"
@@ -208,7 +235,6 @@ const VerifyModal = ({ ticket, onClose, onSuccess }) => {
     );
 };
 
-
 // --- MAIN PAGE ---
 const SewingMachineComplaintPage = () => {
     const [complaints, setComplaints] = useState([]);
@@ -224,7 +250,7 @@ const SewingMachineComplaintPage = () => {
         setIsLoading(true);
         try {
             const res = await assetApi.getMyComplaints();
-            setComplaints(res.data);
+            setComplaints(res.data || []);
         } catch (err) {
             console.error(err);
         } finally {
@@ -242,8 +268,8 @@ const SewingMachineComplaintPage = () => {
             const matchesTab = activeTab === 'active' 
                 ? ['OPEN', 'IN_PROGRESS', 'RESOLVED'].includes(c.status)
                 : ['CLOSED'].includes(c.status);
-            const matchesSearch = c.asset_name.toLowerCase().includes(searchTerm.toLowerCase()) 
-                || c.asset_qr.toLowerCase().includes(searchTerm.toLowerCase());
+            const matchesSearch = c.asset_name?.toLowerCase().includes(searchTerm.toLowerCase()) 
+                || c.asset_qr?.toLowerCase().includes(searchTerm.toLowerCase());
             return matchesTab && matchesSearch;
         });
     }, [complaints, activeTab, searchTerm]);

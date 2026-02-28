@@ -83,6 +83,10 @@ const InitialRedirect = () => {
             // Sales Managers are sent to their sales management dashboard.
             return <Navigate to="/accounts/sales/dashboard" replace />;
 
+        case 'mechanic':
+            // Mechanics are sent to their mechanic dashboard.
+            return <Navigate to="/mechanics-portal/dashboard" replace />;
+
         
         default:
             // If a user has a valid login but their role is not recognized

@@ -95,6 +95,10 @@ import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
 import CuttingDailyReportPage from './modules/initialisation_portal/CuttingDailyReportPage';
 import InterliningManagerPage from './modules/initialisation_portal/InterliningManagerPage';
 
+import MechanicsLayout from './shared/MechanicsLayout';
+import MechanicsProtectedRoute from './shared/MechanicsProtectedRoute';
+import MechanicsDashboardPage from './modules/mechanics/MechanicsDashboardPage';
+
 function App() {
   return (
     <Routes>
@@ -107,6 +111,7 @@ function App() {
       <Route element={<ProtectedRoute />}>
         {/* The root path is the main entry point that redirects based on role */}
         <Route path="/init" element={<InitialRedirect />} />
+        <Route path="/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
         
         {/* Admin Portal */}
         <Route path="/admin" element={<AdminProtectedRoute><AdminLayout /></AdminProtectedRoute>}>
@@ -278,6 +283,14 @@ function App() {
           <Route path="dashboard" element={<AssemblyDashboardPage />} />
           {/* Add more assembly operator specific routes here later */}
       </Route>  
+
+
+    {/* mechanics portal */}
+    <Route path="/mechanics-portal" element={<MechanicsProtectedRoute><MechanicsLayout /></MechanicsProtectedRoute>}>
+        <Route index element={<MechanicsDashboardPage />} />
+        <Route path="dashboard" element={<MechanicsDashboardPage />} />
+        {/* Add more mechanics operator specific routes here later */}
+    </Route>
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}
       <Route path="*" element={<Navigate to="/" />} />

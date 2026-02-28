@@ -34,7 +34,8 @@ const ProtectedRoute = () => {
         'sewing_part_operator',
         'sewing_manager',
         'assembly_operator',
-        'accountant'
+        'accountant',
+        'mechanic'
     ];
     if (!user.role || !allowedRoles.includes(user.role)) {
       // If the user's role is not recognized for this app, they are unauthorized.
