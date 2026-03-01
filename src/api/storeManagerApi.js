@@ -30,6 +30,12 @@ export const storeManagerApi = {
 
     recheckMissingItems: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/recheck`),
 
-    
+    autoFulfillOrder: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/auto-fulfill`),
+
+
+
+    autoFulfillSubstitutes: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/auto-fulfill-substitutes`),
+    revertFulfillment: (logId) => api.delete(`/store-manager/trim-fulfillments/${logId}`),
+
 
 };
