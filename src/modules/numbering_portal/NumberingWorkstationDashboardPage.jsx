@@ -1,10 +1,66 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { numberingCheckerApi } from '../../api/numberingCheckerApi';
-import { Shirt, Layers, ClipboardCheck, Component, Check, X, Hammer, Wrench, Loader2, ChevronDown, ChevronRight, CheckCircle2, Search } from 'lucide-react';
+import { Shirt, Layers, ClipboardCheck, Component, Check, X, Hammer, Wrench, Loader2, ChevronDown, ChevronRight, CheckCircle2, Search, RefreshCw, FolderCheck } from 'lucide-react';
 
 // --- UI & LOGIC COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
 const ErrorDisplay = ({ message }) => <div className="p-4 bg-red-100 text-red-700 rounded-lg">{message}</div>;
+
+// --- REUSABLE QUANTITY SLIDER ---
+const QuantitySlider = ({ value, onChange, min = 1, max, disabled, activeColor = 'blue' }) => {
+    const handleMinus = () => {
+        if (value > min && !disabled) onChange(value - 1);
+    };
+    const handlePlus = () => {
+        if (value < max && !disabled) onChange(value + 1);
+    };
+
+    // Style adjustments based on context
+    const accentClass = activeColor === 'amber' ? 'accent-amber-500' : 'accent-blue-600';
+    const textClass = activeColor === 'amber' ? 'text-amber-600' : 'text-blue-600';
+
+    return (
+        <div className="flex flex-col items-center py-2">
+            <div className={`text-6xl font-black ${textClass} font-mono mb-6 tracking-tighter drop-shadow-sm`}>
+                {value}
+            </div>
+            <div className="flex items-center w-full gap-4 px-2">
+                <button
+                    type="button"
+                    onClick={handleMinus}
+                    disabled={disabled || value <= min}
+                    className="w-14 h-14 shrink-0 flex items-center justify-center bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 active:bg-gray-300 disabled:opacity-40 disabled:cursor-not-allowed text-3xl font-medium transition-all shadow-sm"
+                >
+                    -
+                </button>
+
+                <input
+                    type="range"
+                    min={min}
+                    max={max}
+                    value={value}
+                    onChange={(e) => onChange(parseInt(e.target.value, 10))}
+                    onWheel={(e) => e.target.blur()} // Drop focus to prevent mouse-wheel scroll from changing value
+                    disabled={disabled}
+                    className={`w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer disabled:opacity-50 touch-none ${accentClass}`}
+                />
+
+                <button
+                    type="button"
+                    onClick={handlePlus}
+                    disabled={disabled || value >= max}
+                    className="w-14 h-14 shrink-0 flex items-center justify-center bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 active:bg-gray-300 disabled:opacity-40 disabled:cursor-not-allowed text-3xl font-medium transition-all shadow-sm"
+                >
+                    +
+                </button>
+            </div>
+            <div className="flex justify-between w-full px-4 mt-2 text-xs font-bold text-gray-400">
+                <span>Min: {min}</span>
+                <span>Max: {max}</span>
+            </div>
+        </div>
+    );
+};
 
 // --- LOGIC HELPERS ---
 const checkSizeStatus = (detail) => {
@@ -27,6 +83,11 @@ const checkRollStatus = (roll) => {
     return roll.parts_details.every(part => 
         part.size_details.every(size => checkSizeStatus(size).isComplete)
     );
+};
+
+const isBatchComplete = (batch) => {
+    if (!batch.rolls || batch.rolls.length === 0) return false;
+    return batch.rolls.every(r => checkRollStatus(r));
 };
 
 // --- OPTIMIZATION HELPER ---
@@ -91,7 +152,8 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
     useEffect(() => { setQuantity(unloadMode === 'bundle' ? remaining : 1); }, [unloadMode, remaining]);
 
     const handleStatusClick = async (qcStatus) => {
-        if (quantity <= 0 || submitLock.current) return;
+        if (submitLock.current) return;
+        if (quantity <= 0 || quantity > remaining) return alert("Invalid quantity selected.");
         
         submitLock.current = true;
         setIsSubmitting(true);
@@ -105,7 +167,7 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 backdrop-blur-sm" onClick={!isSubmitting ? onClose : undefined}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all" onClick={e => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
                     <div>
                         <h3 className="text-lg font-bold text-gray-800">Validate: {itemInfo.partName}</h3>
@@ -125,15 +187,22 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
                              </span>
                         </div>
                     </div>
-                    <button onClick={onClose} disabled={isSubmitting}><X className="w-5 h-5 text-gray-400 hover:text-gray-600"/></button>
+                    <button onClick={onClose} disabled={isSubmitting}><X className="w-6 h-6 text-gray-400 hover:text-gray-600"/></button>
                 </div>
-                <div className="p-6 space-y-5">
+                <div className="p-6 space-y-6">
                     <div>
                         <div className="flex justify-between mb-1">
                             <label className="text-sm font-semibold text-gray-700">Quantity to Validate</label>
-                            <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">Remaining: {remaining}</span>
                         </div>
-                        <input type="number" value={quantity} onChange={(e) => setQuantity(Math.max(1, Math.min(remaining, parseInt(e.target.value) || 1)))} disabled={unloadMode === 'single' || isSubmitting} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg font-medium text-center disabled:bg-gray-100" min="1" max={remaining} />
+                        
+                        <QuantitySlider 
+                            value={quantity} 
+                            onChange={setQuantity} 
+                            min={1} 
+                            max={remaining} 
+                            disabled={unloadMode === 'single' || isSubmitting} 
+                            activeColor="blue"
+                        />
                     </div>
                     <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2">QC Decision</label>
@@ -141,14 +210,14 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
                             <button 
                                 onClick={() => handleStatusClick('APPROVED')} 
                                 disabled={isSubmitting || quantity <= 0} 
-                                className={`py-3 px-4 bg-green-600 text-white rounded-lg font-bold shadow-sm flex items-center justify-center transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-green-700 active:scale-95'}`}
+                                className={`py-3 px-4 bg-green-600 text-white rounded-xl font-bold shadow-sm flex items-center justify-center transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-green-700 active:scale-95'}`}
                             >
                                 {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin"/> : <><Check className="w-5 h-5 mr-2"/> APPROVE</>}
                             </button>
                             <button 
                                 onClick={() => handleStatusClick('ALTER')} 
                                 disabled={isSubmitting || quantity <= 0} 
-                                className={`py-3 px-4 bg-amber-500 text-white rounded-lg font-bold shadow-sm flex items-center justify-center transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-amber-600 active:scale-95'}`}
+                                className={`py-3 px-4 bg-amber-500 text-white rounded-xl font-bold shadow-sm flex items-center justify-center transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-amber-600 active:scale-95'}`}
                             >
                                 {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin"/> : <><Hammer className="w-5 h-5 mr-2"/> ALTER</>}
                             </button>
@@ -167,7 +236,8 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
     const submitLock = useRef(false);
 
     const handleSave = async () => {
-        if (isNaN(quantity) || quantity <= 0 || quantity > pending_alter || submitLock.current) return alert("Invalid quantity.");
+        if (submitLock.current) return;
+        if (isNaN(quantity) || quantity <= 0 || quantity > pending_alter) return alert("Invalid quantity selected.");
         
         submitLock.current = true;
         setIsSubmitting(true);
@@ -181,25 +251,36 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 backdrop-blur-sm" onClick={!isSubmitting ? onClose : undefined}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-                 <div className="px-6 py-4 border-b bg-amber-50 border-amber-100">
-                    <h3 className="text-lg font-bold text-amber-900">Approve Repaired Pieces</h3>
-                    <p className="text-xs text-amber-700 mt-1">Returning from alteration</p>
-                </div>
-                <div className="p-6 space-y-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+                 <div className="px-6 py-4 border-b bg-amber-50 border-amber-100 flex justify-between items-center">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Quantity Repaired (Max: {pending_alter})</label>
-                        <input type="number" value={quantity} onChange={(e) => setQuantity(parseInt(e.target.value) || 0)} disabled={isSubmitting} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-lg font-medium disabled:bg-gray-100" min="1" max={pending_alter} autoFocus />
+                        <h3 className="text-lg font-bold text-amber-900">Approve Repaired Pieces</h3>
+                        <p className="text-xs text-amber-700 mt-1">Returning from alteration</p>
+                    </div>
+                    <button onClick={onClose} disabled={isSubmitting}><X className="w-6 h-6 text-amber-400 hover:text-amber-600"/></button>
+                </div>
+                <div className="p-6 space-y-6">
+                    <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-1">Quantity Repaired</label>
+                        
+                        <QuantitySlider 
+                            value={quantity} 
+                            onChange={setQuantity} 
+                            min={1} 
+                            max={pending_alter} 
+                            disabled={isSubmitting} 
+                            activeColor="amber"
+                        />
                     </div>
                 </div>
                 <div className="px-6 py-4 border-t bg-gray-50 flex justify-end space-x-3">
-                    <button onClick={onClose} disabled={isSubmitting} className="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+                    <button onClick={onClose} disabled={isSubmitting} className="px-6 py-3 bg-white border border-gray-300 text-gray-700 font-bold rounded-xl hover:bg-gray-50 disabled:opacity-50">Cancel</button>
                     <button 
                         onClick={handleSave} 
                         disabled={isSubmitting || quantity <= 0} 
-                        className={`px-4 py-2 bg-amber-600 text-white font-bold rounded-lg shadow-sm flex items-center ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-amber-700'}`}
+                        className={`px-8 py-3 bg-amber-600 text-white font-bold rounded-xl shadow-sm flex items-center ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-amber-700 active:scale-95'}`}
                     >
-                        {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin"/> : "Confirm"}
+                        {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin"/> : "Confirm Fix"}
                     </button>
                 </div>
             </div>
@@ -356,8 +437,8 @@ const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick, activeCont
 };
 
 // --- BATCH CARD with GROUPED ROLLS (Collapsible) ---
-const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick, activeContext, rollFilter }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
+const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick, onReconcile, isReconciling, activeContext, rollFilter, initiallyExpanded = false }) => {
+    const [isExpanded, setIsExpanded] = useState(initiallyExpanded);
     const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
 
     const validRolls = batch.rolls.filter(hasRollData);
@@ -395,11 +476,23 @@ const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick, acti
                             <Shirt className="w-6 h-6" />
                         </div>
                         <div>
-                            <h2 className="text-lg font-bold text-gray-900">Batch #{batch.batch_id}</h2>
+                            <h2 className="text-lg font-bold text-gray-900 flex items-center">
+                                Batch #{batch.batch_id}
+                            </h2>
                             <p className="text-xs text-gray-500 font-mono mt-0.5">{batch.batch_code || 'No Code'}</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-4">
+                        {/* Re-conciliation Button */}
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onReconcile(batch.batch_id); }}
+                            className="p-2 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-100 rounded-lg transition-colors border border-transparent hover:border-indigo-200 shadow-sm bg-white"
+                            title="Force Re-check Batch Completion"
+                            disabled={isReconciling}
+                        >
+                            <RefreshCw size={18} className={isReconciling ? "animate-spin text-indigo-400" : ""} />
+                        </button>
+                        
                         <div className="text-right">
                             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide block">Pending Rolls</span>
                             <span className="text-lg font-bold text-blue-600 leading-none">{activeRolls.length}</span>
@@ -484,10 +577,14 @@ const NumberingCheckerDashboardPage = () => {
     const [isRefetching, setIsRefetching] = useState(false);
     const [error, setError] = useState(null);
     const [modalState, setModalState] = useState({ type: null, data: null });
-    const [headerInfo, setHeaderInfo] = useState({ lineName: 'N/A', processType: 'unknown' });
+    const [headerInfo, setHeaderInfo] = useState({ lineName: 'N/A', processType: 'unknown', lineId: null });
     const [batchFilter, setBatchFilter] = useState('');
     const [rollFilter, setRollFilter] = useState('');
     
+    // UI State for grouping completed batches
+    const [showCompletedBatches, setShowCompletedBatches] = useState(false);
+    const [reconcilingBatchId, setReconcilingBatchId] = useState(null);
+
     // Track context of last action to maintain expanded state
     const [lastActiveContext, setLastActiveContext] = useState(null);
 
@@ -524,6 +621,28 @@ const NumberingCheckerDashboardPage = () => {
     const openValidationModal = (batchId, batchCode, itemInfo) => setModalState({ type: 'validate', data: { batchId, itemInfo: { ...itemInfo, batchCode } } });
     const openAlterModal = (batchId, itemInfo) => setModalState({ type: 'alter', data: { batchId, itemInfo } });
     const closeModal = () => setModalState({ type: null, data: null });
+
+    const handleReconcileBatch = async (batchId) => {
+        setReconcilingBatchId(batchId);
+        try {
+            // Find a rollId to pass if required by the backend
+            const batch = batches.find(b => b.batch_id === batchId);
+            const rollId = batch?.rolls?.[0]?.fabric_roll_id;
+            
+            await numberingCheckerApi.checkAndCompleteStages({
+                rollId: rollId || 0, // Fallback if no rolls exist (shouldn't happen)
+                batchId: batchId,
+                lineId: headerInfo.lineId
+            });
+            
+            // Refresh to see if it moved to completed
+            await fetchQueue(false);
+        } catch (err) {
+            alert(`Re-conciliation failed: ${err.message}`);
+        } finally {
+            setReconcilingBatchId(null);
+        }
+    };
 
     const handleValidationSubmit = async (validationData) => {
         try {
@@ -602,6 +721,10 @@ const NumberingCheckerDashboardPage = () => {
         (b.batch_code?.toLowerCase() || '').includes(batchFilter.toLowerCase())
     );
 
+    // Split batches into Active and Completed
+    const activeBatchesList = filteredBatches.filter(b => !isBatchComplete(b));
+    const completedBatchesList = filteredBatches.filter(b => isBatchComplete(b));
+
     return (
         <div className="p-6 bg-gray-100 min-h-screen font-inter text-slate-800">
             <div className="max-w-5xl mx-auto">
@@ -650,25 +773,76 @@ const NumberingCheckerDashboardPage = () => {
                 </header>
                 
                 {isLoading ? <Spinner /> : error ? <ErrorDisplay message={error} /> : (
-                    <div className="space-y-4">
-                        {filteredBatches.length > 0 ? (
-                            filteredBatches.map(batch => (
-                                <ProductionBatchCard 
-                                    key={batch.batch_id} 
-                                    batch={batch} 
-                                    onValidateClick={openValidationModal} 
-                                    onApproveAlterClick={openAlterModal} 
-                                    activeContext={lastActiveContext} 
-                                    rollFilter={rollFilter}
-                                />
-                            ))
-                        ) : (
-                            <div className="text-center py-20 bg-white rounded-xl border border-dashed border-gray-300">
-                                <p className="text-slate-400 font-medium">
-                                    {batchFilter || rollFilter ? "No batches match your filter." : "No active batches available for checking."}
-                                </p>
+                    <div className="space-y-6">
+                        
+                        {/* --- ACTIVE BATCHES --- */}
+                        <div>
+                            <h2 className="text-lg font-bold text-gray-700 mb-4 flex items-center">
+                                <span className="w-3 h-3 rounded-full bg-blue-500 mr-2"></span>
+                                Active Checking Queue ({activeBatchesList.length})
+                            </h2>
+                            {activeBatchesList.length > 0 ? (
+                                activeBatchesList.map(batch => (
+                                    <ProductionBatchCard 
+                                        key={batch.batch_id} 
+                                        batch={batch} 
+                                        onValidateClick={openValidationModal} 
+                                        onApproveAlterClick={openAlterModal} 
+                                        onReconcile={handleReconcileBatch}
+                                        isReconciling={reconcilingBatchId === batch.batch_id}
+                                        activeContext={lastActiveContext} 
+                                        rollFilter={rollFilter}
+                                        initiallyExpanded={true}
+                                    />
+                                ))
+                            ) : (
+                                <div className="text-center py-16 bg-white rounded-xl border border-dashed border-gray-300">
+                                    <p className="text-slate-400 font-medium">
+                                        {batchFilter || rollFilter ? "No active batches match your filter." : "No active batches available for checking."}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* --- COMPLETED BATCHES (COLLAPSIBLE) --- */}
+                        {completedBatchesList.length > 0 && (
+                            <div className="mt-8 border-t border-gray-200 pt-6">
+                                <button 
+                                    onClick={() => setShowCompletedBatches(!showCompletedBatches)}
+                                    className="flex items-center justify-between w-full p-4 bg-white rounded-xl shadow-sm border border-gray-200 hover:bg-gray-50 transition-colors"
+                                >
+                                    <div className="flex items-center text-gray-700">
+                                        <FolderCheck className="w-6 h-6 mr-3 text-green-500" />
+                                        <h2 className="text-lg font-bold">
+                                            Completed Batches ({completedBatchesList.length})
+                                        </h2>
+                                    </div>
+                                    <div className="text-gray-400">
+                                        {showCompletedBatches ? <ChevronDown size={24} /> : <ChevronRight size={24} />}
+                                    </div>
+                                </button>
+
+                                {showCompletedBatches && (
+                                    <div className="mt-4 space-y-4 animate-in slide-in-from-top-4 duration-300">
+                                        {completedBatchesList.map(batch => (
+                                            <div key={batch.batch_id} className="opacity-90">
+                                                <ProductionBatchCard 
+                                                    batch={batch} 
+                                                    onValidateClick={openValidationModal} 
+                                                    onApproveAlterClick={openAlterModal} 
+                                                    onReconcile={handleReconcileBatch}
+                                                    isReconciling={reconcilingBatchId === batch.batch_id}
+                                                    activeContext={lastActiveContext} 
+                                                    rollFilter={rollFilter}
+                                                    initiallyExpanded={false}
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
+
                     </div>
                 )}
             </div>
