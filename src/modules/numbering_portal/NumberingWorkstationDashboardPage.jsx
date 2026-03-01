@@ -152,13 +152,17 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
     useEffect(() => { setQuantity(unloadMode === 'bundle' ? remaining : 1); }, [unloadMode, remaining]);
 
     const handleStatusClick = async (qcStatus) => {
-        if (submitLock.current) return;
-        if (quantity <= 0 || quantity > remaining) return alert("Invalid quantity selected.");
+        if (submitLock.current || isSubmitting) return;
+        if (quantity <= 0 || quantity > remaining) {
+            alert("Invalid quantity selected.");
+            return;
+        }
         
         submitLock.current = true;
         setIsSubmitting(true);
         try {
             await onValidationSubmit({ rollId: itemInfo.rollId, partId: itemInfo.partId, size: itemInfo.size, quantity, qcStatus });
+            // Let the parent close the modal, ensuring we stay locked until it's unmounted
         } catch (err) {
             submitLock.current = false;
             setIsSubmitting(false);
@@ -236,13 +240,17 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
     const submitLock = useRef(false);
 
     const handleSave = async () => {
-        if (submitLock.current) return;
-        if (isNaN(quantity) || quantity <= 0 || quantity > pending_alter) return alert("Invalid quantity selected.");
+        if (submitLock.current || isSubmitting) return;
+        if (isNaN(quantity) || quantity <= 0 || quantity > pending_alter) {
+            alert("Invalid quantity selected.");
+            return;
+        }
         
         submitLock.current = true;
         setIsSubmitting(true);
         try {
             await onSave(quantity);
+            // Let the parent close the modal, ensuring we stay locked until it's unmounted
         } catch (err) {
             submitLock.current = false;
             setIsSubmitting(false); 
