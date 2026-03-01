@@ -2,6 +2,53 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { numberingCheckerApi } from '../../api/numberingCheckerApi';
 import { Shirt, Layers, ClipboardCheck, Component, Check, X, Hammer, Wrench, Loader2, ChevronDown, ChevronRight, CheckCircle2, Search, RefreshCw, FolderCheck } from 'lucide-react';
 
+// --- MOCKED API FOR PREVIEW ENVIRONMENT ---
+const mockNumberingApi = {
+    getMyQueue: async () => {
+        return new Promise(resolve => setTimeout(() => resolve({
+            data: {
+                production_line_name: 'Mock Line A',
+                workstation_process_type: 'Numbering',
+                production_line_id: 101,
+                batches: [
+                    {
+                        batch_id: 1001,
+                        batch_code: 'B-1001',
+                        rolls: [
+                            {
+                                fabric_roll_id: 501,
+                                fabric_color: 'Red',
+                                fabric_type: 'Cotton',
+                                parts_details: [
+                                    {
+                                        part_id: 1,
+                                        part_name: 'Front Panel',
+                                        size_details: [
+                                            { size: 'M', total_cut: 100, total_validated: 50, total_rejected: 2, total_repaired: 0, total_altered: 5 }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }), 500));
+    },
+    logNumberingCheck: async (data) => {
+        return new Promise(resolve => setTimeout(() => resolve({ data: { success: true } }), 300));
+    },
+    checkAndCompleteStages: async (data) => {
+        return new Promise(resolve => setTimeout(() => resolve({ data: { success: true } }), 300));
+    },
+    approveAlteredPieces: async (data) => {
+        return new Promise(resolve => setTimeout(() => resolve({ data: { success: true } }), 300));
+    }
+};
+
+// Map real API to mock for preview (switch back in production)
+const currentApi = mockNumberingApi; // Change to numberingCheckerApi in prod
+
 // --- UI & LOGIC COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
 const ErrorDisplay = ({ message }) => <div className="p-4 bg-red-100 text-red-700 rounded-lg">{message}</div>;
@@ -163,9 +210,8 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
         
         try {
             await onValidationSubmit({ rollId: itemInfo.rollId, partId: itemInfo.partId, size: itemInfo.size, quantity, qcStatus });
-            // Modal remains open, waiting for parent to execute `closeModal()`
+            // Let the parent close the modal, ensuring we stay locked until it's unmounted
         } catch (err) {
-            // Unlock on failure so the user can try again
             submitLock.current = false;
             setSubmittingAction(null);
         }
@@ -239,36 +285,37 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
 const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
     const pending_alter = parseInt(itemInfo.total_altered, 10) - (parseInt(itemInfo.total_repaired, 10) + parseInt(itemInfo.total_rejected, 10));
     const [quantity, setQuantity] = useState(pending_alter);
-    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [submittingAction, setSubmittingAction] = useState(null); // 'REPAIRED'
     const submitLock = useRef(false);
 
     const handleSave = async () => {
-        if (submitLock.current || isSubmitting) return;
+        if (submitLock.current || submittingAction !== null) return;
         if (isNaN(quantity) || quantity <= 0 || quantity > pending_alter) {
             alert("Invalid quantity selected.");
             return;
         }
         
         submitLock.current = true;
-        setIsSubmitting(true);
+        setSubmittingAction('REPAIRED');
+        
         try {
             await onSave(quantity);
             // Modal remains open, waiting for parent to execute `closeModal()`
         } catch (err) {
             submitLock.current = false;
-            setIsSubmitting(false); 
+            setSubmittingAction(null); 
         }
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 backdrop-blur-sm" onClick={!isSubmitting ? onClose : undefined}>
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 backdrop-blur-sm" onClick={submittingAction === null ? onClose : undefined}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
                  <div className="px-6 py-4 border-b bg-amber-50 border-amber-100 flex justify-between items-center">
                     <div>
                         <h3 className="text-lg font-bold text-amber-900">Approve Repaired Pieces</h3>
                         <p className="text-xs text-amber-700 mt-1">Returning from alteration</p>
                     </div>
-                    <button onClick={onClose} disabled={isSubmitting}><X className="w-6 h-6 text-amber-400 hover:text-amber-600"/></button>
+                    <button onClick={onClose} disabled={submittingAction !== null}><X className="w-6 h-6 text-amber-400 hover:text-amber-600"/></button>
                 </div>
                 <div className="p-6 space-y-6">
                     <div>
@@ -279,19 +326,19 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
                             onChange={setQuantity} 
                             min={1} 
                             max={pending_alter} 
-                            disabled={isSubmitting} 
+                            disabled={submittingAction !== null} 
                             activeColor="amber"
                         />
                     </div>
                 </div>
                 <div className="px-6 py-4 border-t bg-gray-50 flex justify-end space-x-3">
-                    <button onClick={onClose} disabled={isSubmitting} className="px-6 py-3 bg-white border border-gray-300 text-gray-700 font-bold rounded-xl hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+                    <button onClick={onClose} disabled={submittingAction !== null} className="px-6 py-3 bg-white border border-gray-300 text-gray-700 font-bold rounded-xl hover:bg-gray-50 disabled:opacity-50">Cancel</button>
                     <button 
                         onClick={handleSave} 
-                        disabled={isSubmitting || quantity <= 0} 
-                        className={`px-8 py-3 bg-amber-600 text-white font-bold rounded-xl shadow-sm flex items-center ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-amber-700 active:scale-95'}`}
+                        disabled={submittingAction !== null || quantity <= 0} 
+                        className={`px-8 py-3 bg-amber-600 text-white font-bold rounded-xl shadow-sm flex items-center ${submittingAction !== null ? 'opacity-70 cursor-not-allowed' : 'hover:bg-amber-700 active:scale-95'}`}
                     >
-                        {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-2"/> : null}
+                        {submittingAction === 'REPAIRED' ? <Loader2 className="w-5 h-5 animate-spin mr-2"/> : null}
                         Confirm Fix
                     </button>
                 </div>
@@ -607,7 +654,7 @@ const NumberingCheckerDashboardPage = () => {
         else setIsRefetching(true);
         
         try {
-            const res = await numberingCheckerApi.getMyQueue();
+            const res = await currentApi.getMyQueue();
             let fetchedBatches = res.data.batches || [];
             fetchedBatches.sort((a, b) => a.batch_id - b.batch_id);
             setBatches(fetchedBatches);
@@ -634,7 +681,7 @@ const NumberingCheckerDashboardPage = () => {
     const openAlterModal = (batchId, itemInfo) => setModalState({ type: 'alter', data: { batchId, itemInfo } });
     const closeModal = () => setModalState({ type: null, data: null });
 
-    // ✅ NEW: Apply state locally for instant UI response before background fetch completes
+    // Apply state locally for instant UI response before background fetch completes
     const applyLocalUpdate = useCallback((batchId, rollId, partId, size, quantity, qcStatus) => {
         setBatches(prevBatches => prevBatches.map(batch => {
             if (batch.batch_id !== batchId) return batch;
@@ -673,7 +720,7 @@ const NumberingCheckerDashboardPage = () => {
             const batch = batches.find(b => b.batch_id === batchId);
             const rollId = batch?.rolls?.[0]?.fabric_roll_id;
             
-            await numberingCheckerApi.checkAndCompleteStages({
+            await currentApi.checkAndCompleteStages({
                 rollId: rollId || 0, // Fallback if no rolls exist (shouldn't happen)
                 batchId: batchId,
                 lineId: headerInfo.lineId
@@ -688,83 +735,105 @@ const NumberingCheckerDashboardPage = () => {
         }
     };
 
-    const handleValidationSubmit = async (validationData) => {
-        try {
-            const batchId = modalState.data.batchId;
-            setLastActiveContext({ 
-                batchId: batchId,
-                rollId: validationData.rollId,
-                partId: validationData.partId
-            });
+    // ✅ TRUE OPTIMISTIC UPDATE: Update state, close modal instantly, execute API in background.
+    const handleValidationSubmit = (validationData) => {
+        const batchId = modalState.data.batchId;
+        setLastActiveContext({ 
+            batchId: batchId,
+            rollId: validationData.rollId,
+            partId: validationData.partId
+        });
 
-            await numberingCheckerApi.logNumberingCheck(validationData);
+        // Check if this validation will complete the roll/batch synchronously
+        const currentBatch = batches.find(b => b.batch_id === batchId);
+        let shouldCheckStages = false;
 
-            const currentBatch = batches.find(b => b.batch_id === batchId);
-            if (currentBatch) {
-                const pendingRolls = currentBatch.rolls.filter(r => !checkRollStatus(r));
-                const currentRoll = pendingRolls.find(r => r.fabric_roll_id === validationData.rollId);
-                if (pendingRolls.length === 1 && currentRoll) {
-                    if (willActionCompleteRoll(currentRoll, { ...validationData })) {
-                        await numberingCheckerApi.checkAndCompleteStages({
-                            rollId: validationData.rollId,
-                            batchId: batchId,
-                            lineId: headerInfo.lineId
-                        });
-                    }
+        if (currentBatch) {
+            const pendingRolls = currentBatch.rolls.filter(r => !checkRollStatus(r));
+            const currentRoll = pendingRolls.find(r => r.fabric_roll_id === validationData.rollId);
+            if (pendingRolls.length === 1 && currentRoll) {
+                if (willActionCompleteRoll(currentRoll, { ...validationData })) {
+                    shouldCheckStages = true;
                 }
             }
-            
-            // ✅ Optimistically update UI so the row flips to 'Done' instantly
-            applyLocalUpdate(batchId, validationData.rollId, validationData.partId, validationData.size, validationData.quantity, validationData.qcStatus);
-            
-            closeModal();
-            fetchQueue(false); // Background refresh ensures perfect sync
-        } catch (err) { 
-            alert(`Error: ${err.message}`); 
-            throw err; 
         }
+
+        // 1. Optimistic local state update
+        applyLocalUpdate(batchId, validationData.rollId, validationData.partId, validationData.size, validationData.quantity, validationData.qcStatus);
+        
+        // 2. Close modal immediately
+        closeModal();
+
+        // 3. Fire API asynchronously (Fire and Forget from UI perspective)
+        currentApi.logNumberingCheck(validationData)
+            .then(async () => {
+                if (shouldCheckStages) {
+                    await currentApi.checkAndCompleteStages({
+                        rollId: validationData.rollId,
+                        batchId: batchId,
+                        lineId: headerInfo.lineId
+                    });
+                }
+                fetchQueue(false); // Silent background refresh
+            })
+            .catch(err => {
+                console.error(err);
+                alert(`Error: ${err.message}`); 
+                fetchQueue(false); // Revert optimistic update
+            });
     };
 
-    const handleApproveAlterSubmit = async (quantity) => {
-        try {
-            const { itemInfo, batchId } = modalState.data;
-            setLastActiveContext({ 
-                batchId: batchId,
-                rollId: itemInfo.rollId,
-                partId: itemInfo.partId
-            });
+    // ✅ TRUE OPTIMISTIC UPDATE for Alter Approval
+    const handleApproveAlterSubmit = (quantity) => {
+        const { itemInfo, batchId } = modalState.data;
+        setLastActiveContext({ 
+            batchId: batchId,
+            rollId: itemInfo.rollId,
+            partId: itemInfo.partId
+        });
 
-            await numberingCheckerApi.approveAlteredPieces({ ...itemInfo, quantity });
-            
-            const currentBatch = batches.find(b => b.batch_id === batchId);
-            if (currentBatch) {
-                const pendingRolls = currentBatch.rolls.filter(r => !checkRollStatus(r));
-                const currentRoll = pendingRolls.find(r => r.fabric_roll_id === itemInfo.rollId);
-                if (pendingRolls.length === 1 && currentRoll) {
-                    if (willActionCompleteRoll(currentRoll, { 
-                        partId: itemInfo.partId, 
-                        size: itemInfo.size, 
-                        quantity: quantity, 
-                        qcStatus: 'REPAIRED' 
-                    })) {
-                        await numberingCheckerApi.checkAndCompleteStages({
-                            rollId: itemInfo.rollId,
-                            batchId: batchId,
-                            lineId: headerInfo.lineId
-                        });
-                    }
+        // Check if this will complete the roll/batch synchronously
+        const currentBatch = batches.find(b => b.batch_id === batchId);
+        let shouldCheckStages = false;
+
+        if (currentBatch) {
+            const pendingRolls = currentBatch.rolls.filter(r => !checkRollStatus(r));
+            const currentRoll = pendingRolls.find(r => r.fabric_roll_id === itemInfo.rollId);
+            if (pendingRolls.length === 1 && currentRoll) {
+                if (willActionCompleteRoll(currentRoll, { 
+                    partId: itemInfo.partId, 
+                    size: itemInfo.size, 
+                    quantity: quantity, 
+                    qcStatus: 'REPAIRED' 
+                })) {
+                    shouldCheckStages = true;
                 }
             }
-            
-            // ✅ Optimistically update UI so the row flips to 'Done' instantly
-            applyLocalUpdate(batchId, itemInfo.rollId, itemInfo.partId, itemInfo.size, quantity, 'REPAIRED');
-
-            closeModal();
-            fetchQueue(false);
-        } catch (err) { 
-            alert(`Error: ${err.message}`); 
-            throw err; 
         }
+
+        // 1. Optimistic local state update
+        applyLocalUpdate(batchId, itemInfo.rollId, itemInfo.partId, itemInfo.size, quantity, 'REPAIRED');
+        
+        // 2. Close modal immediately
+        closeModal();
+
+        // 3. Background API request
+        currentApi.approveAlteredPieces({ ...itemInfo, quantity })
+            .then(async () => {
+                if (shouldCheckStages) {
+                    await currentApi.checkAndCompleteStages({
+                        rollId: itemInfo.rollId,
+                        batchId: batchId,
+                        lineId: headerInfo.lineId
+                    });
+                }
+                fetchQueue(false); // Silent background refresh
+            })
+            .catch(err => {
+                console.error(err);
+                alert(`Error: ${err.message}`); 
+                fetchQueue(false); // Revert optimistic update
+            });
     };
 
     const validBatches = batches.filter(hasBatchData);
