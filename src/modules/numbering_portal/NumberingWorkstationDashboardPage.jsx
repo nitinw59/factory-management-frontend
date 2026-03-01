@@ -146,31 +146,33 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
     const remaining = total_cut_num - (total_validated_num + total_rejected_num + total_altered_num);
     
     const [quantity, setQuantity] = useState(unloadMode === 'bundle' ? remaining : 1);
-    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [submittingAction, setSubmittingAction] = useState(null); // 'APPROVED' or 'ALTER'
     const submitLock = useRef(false);
 
     useEffect(() => { setQuantity(unloadMode === 'bundle' ? remaining : 1); }, [unloadMode, remaining]);
 
     const handleStatusClick = async (qcStatus) => {
-        if (submitLock.current || isSubmitting) return;
+        if (submitLock.current || submittingAction !== null) return;
         if (quantity <= 0 || quantity > remaining) {
             alert("Invalid quantity selected.");
             return;
         }
         
         submitLock.current = true;
-        setIsSubmitting(true);
+        setSubmittingAction(qcStatus);
+        
         try {
             await onValidationSubmit({ rollId: itemInfo.rollId, partId: itemInfo.partId, size: itemInfo.size, quantity, qcStatus });
-            // Let the parent close the modal, ensuring we stay locked until it's unmounted
+            // Modal remains open, waiting for parent to execute `closeModal()`
         } catch (err) {
+            // Unlock on failure so the user can try again
             submitLock.current = false;
-            setIsSubmitting(false);
+            setSubmittingAction(null);
         }
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 backdrop-blur-sm" onClick={!isSubmitting ? onClose : undefined}>
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 backdrop-blur-sm" onClick={submittingAction === null ? onClose : undefined}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all" onClick={e => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
                     <div>
@@ -191,12 +193,13 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
                              </span>
                         </div>
                     </div>
-                    <button onClick={onClose} disabled={isSubmitting}><X className="w-6 h-6 text-gray-400 hover:text-gray-600"/></button>
+                    <button onClick={onClose} disabled={submittingAction !== null}><X className="w-6 h-6 text-gray-400 hover:text-gray-600"/></button>
                 </div>
                 <div className="p-6 space-y-6">
                     <div>
                         <div className="flex justify-between mb-1">
                             <label className="text-sm font-semibold text-gray-700">Quantity to Validate</label>
+                            <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">Remaining: {remaining}</span>
                         </div>
                         
                         <QuantitySlider 
@@ -204,7 +207,7 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
                             onChange={setQuantity} 
                             min={1} 
                             max={remaining} 
-                            disabled={unloadMode === 'single' || isSubmitting} 
+                            disabled={unloadMode === 'single' || submittingAction !== null} 
                             activeColor="blue"
                         />
                     </div>
@@ -213,17 +216,17 @@ const ValidationModal = ({ itemInfo, unloadMode, onClose, onValidationSubmit }) 
                         <div className="grid grid-cols-2 gap-3">
                             <button 
                                 onClick={() => handleStatusClick('APPROVED')} 
-                                disabled={isSubmitting || quantity <= 0} 
-                                className={`py-3 px-4 bg-green-600 text-white rounded-xl font-bold shadow-sm flex items-center justify-center transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-green-700 active:scale-95'}`}
+                                disabled={submittingAction !== null || quantity <= 0} 
+                                className={`py-3 px-4 bg-green-600 text-white rounded-xl font-bold shadow-sm flex items-center justify-center transition-all ${submittingAction !== null ? 'opacity-70 cursor-not-allowed' : 'hover:bg-green-700 active:scale-95'}`}
                             >
-                                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin"/> : <><Check className="w-5 h-5 mr-2"/> APPROVE</>}
+                                {submittingAction === 'APPROVED' ? <Loader2 className="w-5 h-5 animate-spin"/> : <><Check className="w-5 h-5 mr-2"/> APPROVE</>}
                             </button>
                             <button 
                                 onClick={() => handleStatusClick('ALTER')} 
-                                disabled={isSubmitting || quantity <= 0} 
-                                className={`py-3 px-4 bg-amber-500 text-white rounded-xl font-bold shadow-sm flex items-center justify-center transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-amber-600 active:scale-95'}`}
+                                disabled={submittingAction !== null || quantity <= 0} 
+                                className={`py-3 px-4 bg-amber-500 text-white rounded-xl font-bold shadow-sm flex items-center justify-center transition-all ${submittingAction !== null ? 'opacity-70 cursor-not-allowed' : 'hover:bg-amber-600 active:scale-95'}`}
                             >
-                                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin"/> : <><Hammer className="w-5 h-5 mr-2"/> ALTER</>}
+                                {submittingAction === 'ALTER' ? <Loader2 className="w-5 h-5 animate-spin"/> : <><Hammer className="w-5 h-5 mr-2"/> ALTER</>}
                             </button>
                         </div>
                     </div>
@@ -250,7 +253,7 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
         setIsSubmitting(true);
         try {
             await onSave(quantity);
-            // Let the parent close the modal, ensuring we stay locked until it's unmounted
+            // Modal remains open, waiting for parent to execute `closeModal()`
         } catch (err) {
             submitLock.current = false;
             setIsSubmitting(false); 
@@ -288,7 +291,8 @@ const ApproveAlteredModal = ({ itemInfo, onClose, onSave }) => {
                         disabled={isSubmitting || quantity <= 0} 
                         className={`px-8 py-3 bg-amber-600 text-white font-bold rounded-xl shadow-sm flex items-center ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-amber-700 active:scale-95'}`}
                     >
-                        {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin"/> : "Confirm Fix"}
+                        {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-2"/> : null}
+                        Confirm Fix
                     </button>
                 </div>
             </div>
