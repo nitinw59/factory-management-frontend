@@ -634,6 +634,38 @@ const NumberingCheckerDashboardPage = () => {
     const openAlterModal = (batchId, itemInfo) => setModalState({ type: 'alter', data: { batchId, itemInfo } });
     const closeModal = () => setModalState({ type: null, data: null });
 
+    // ✅ NEW: Apply state locally for instant UI response before background fetch completes
+    const applyLocalUpdate = useCallback((batchId, rollId, partId, size, quantity, qcStatus) => {
+        setBatches(prevBatches => prevBatches.map(batch => {
+            if (batch.batch_id !== batchId) return batch;
+            return {
+                ...batch,
+                rolls: batch.rolls.map(roll => {
+                    if (roll.fabric_roll_id !== rollId) return roll;
+                    return {
+                        ...roll,
+                        parts_details: roll.parts_details.map(part => {
+                            if (part.part_id !== partId) return part;
+                            return {
+                                ...part,
+                                size_details: part.size_details.map(sz => {
+                                    if (sz.size !== size) return sz;
+                                    const qty = parseInt(quantity, 10);
+                                    const updatedSize = { ...sz };
+                                    if (qcStatus === 'APPROVED') updatedSize.total_validated = (parseInt(updatedSize.total_validated) || 0) + qty;
+                                    if (qcStatus === 'REJECT') updatedSize.total_rejected = (parseInt(updatedSize.total_rejected) || 0) + qty;
+                                    if (qcStatus === 'ALTER') updatedSize.total_altered = (parseInt(updatedSize.total_altered) || 0) + qty;
+                                    if (qcStatus === 'REPAIRED') updatedSize.total_repaired = (parseInt(updatedSize.total_repaired) || 0) + qty;
+                                    return updatedSize;
+                                })
+                            };
+                        })
+                    };
+                })
+            };
+        }));
+    }, []);
+
     const handleReconcileBatch = async (batchId) => {
         setReconcilingBatchId(batchId);
         try {
@@ -681,8 +713,12 @@ const NumberingCheckerDashboardPage = () => {
                     }
                 }
             }
+            
+            // ✅ Optimistically update UI so the row flips to 'Done' instantly
+            applyLocalUpdate(batchId, validationData.rollId, validationData.partId, validationData.size, validationData.quantity, validationData.qcStatus);
+            
             closeModal();
-            fetchQueue(false); // Background refresh
+            fetchQueue(false); // Background refresh ensures perfect sync
         } catch (err) { 
             alert(`Error: ${err.message}`); 
             throw err; 
@@ -719,6 +755,10 @@ const NumberingCheckerDashboardPage = () => {
                     }
                 }
             }
+            
+            // ✅ Optimistically update UI so the row flips to 'Done' instantly
+            applyLocalUpdate(batchId, itemInfo.rollId, itemInfo.partId, itemInfo.size, quantity, 'REPAIRED');
+
             closeModal();
             fetchQueue(false);
         } catch (err) { 
