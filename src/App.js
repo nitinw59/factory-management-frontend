@@ -98,6 +98,7 @@ import InterliningManagerPage from './modules/initialisation_portal/InterliningM
 import MechanicsLayout from './shared/MechanicsLayout';
 import MechanicsProtectedRoute from './shared/MechanicsProtectedRoute';
 import MechanicsDashboardPage from './modules/mechanics/MechanicsDashboardPage';
+import TrimBillingPage from './modules/store_manager/TrimBillingPage';
 
 function App() {
   return (
@@ -153,6 +154,7 @@ function App() {
           
           <Route path="record-trim-purchase" element={<TrimIntakeForm />} />
           <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} /> 
+          <Route path="trim-orders/:orderId/billing" element={<TrimBillingPage />} />
         </Route>
 
         {/* Production Manager Portal */}

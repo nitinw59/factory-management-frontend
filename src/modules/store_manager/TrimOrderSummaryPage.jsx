@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { 
     ArrowLeft, Package, Calendar, User, Layers, 
-    Clock, CheckCircle, AlertCircle, Box, Download 
+    Clock, CheckCircle, AlertCircle, Box, Download, Receipt
 } from 'lucide-react';
 import { storeManagerApi } from '../../api/storeManagerApi'; 
 import jsPDF from 'jspdf';
@@ -17,12 +17,8 @@ const formatDate = (dateString) => {
 };
 
 const TrimOrderSummaryPage = () => {
-    const params = useParams();
-    const orderId = params.orderId || '1001'; 
-    
-    // Fixed: Call useNavigate unconditionally
-    const navigateHook = useNavigate();
-    const navigate = navigateHook || ((path) => console.log(`Maps to: ${path}`));
+    const { orderId } = useParams(); 
+    const navigate = useNavigate();
     
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -32,9 +28,7 @@ const TrimOrderSummaryPage = () => {
         const fetchSummary = async () => {
             setLoading(true);
             try {
-                let res;
-                res = await storeManagerApi.getTrimOrderSummary(orderId); 
-                
+                const res = await storeManagerApi.getTrimOrderSummary(orderId); 
                 setData(res.data);
             } catch (err) {
                 setError(err.message || "Failed to load order summary");
@@ -50,7 +44,6 @@ const TrimOrderSummaryPage = () => {
         const { order, items, consumption_report } = data;
         const doc = new jsPDF();
 
-        // 1. Header
         doc.setFontSize(18);
         doc.setTextColor(0, 0, 0);
         doc.text(`Trim Order Summary #${order.id}`, 14, 20);
@@ -58,7 +51,6 @@ const TrimOrderSummaryPage = () => {
         doc.setFontSize(10);
         doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 26);
 
-        // 2. Batch & Order Info Table
         autoTable(doc, {
             startY: 32,
             head: [['Batch Information', 'Order Information']],
@@ -66,24 +58,11 @@ const TrimOrderSummaryPage = () => {
                 `Batch Code: ${order.batch_code}\nProduct: ${order.product_name}`,
                 `Status: ${order.status}\nRequested By: ${order.requested_by}\nDate: ${new Date(order.created_at).toLocaleDateString()}`
             ]],
-            theme: 'grid', // Black borders
-            headStyles: { 
-                fillColor: 255, 
-                textColor: 0, 
-                lineWidth: 0.1, 
-                lineColor: 0,
-                fontStyle: 'bold'
-            },
-            styles: { 
-                textColor: 0, 
-                lineWidth: 0.1, 
-                lineColor: 0, 
-                cellPadding: 4,
-                fontSize: 10
-            },
+            theme: 'grid', 
+            headStyles: { fillColor: 255, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold' },
+            styles: { textColor: 0, lineWidth: 0.1, lineColor: 0, cellPadding: 4, fontSize: 10 },
         });
 
-        // 3. Consumption Report Table
         doc.setFontSize(14);
         doc.setFont("helvetica", "bold");
         doc.text("Inventory Consumption Report", 14, doc.lastAutoTable.finalY + 15);
@@ -101,47 +80,13 @@ const TrimOrderSummaryPage = () => {
             theme: 'grid',
             headStyles: { fillColor: 255, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold' },
             styles: { textColor: 0, lineWidth: 0.1, lineColor: 0 },
-            columnStyles: {
-                2: { halign: 'right', fontStyle: 'bold' }
-            }
+            columnStyles: { 2: { halign: 'right', fontStyle: 'bold' } }
         });
 
-        // // 4. Request Details Table
-        // doc.setFontSize(14);
-        // doc.text("Fulfillment Details", 14, doc.lastAutoTable.finalY + 15);
-
-        // const itemRows = items.map(item => [
-        //      `${item.item_name}\n${item.brand}`,
-        //      item.color_name,
-        //      item.quantity_required,
-        //      item.quantity_fulfilled,
-        //      item.is_fulfilled ? 'Yes' : 'No'
-        // ]);
-
-        // autoTable(doc, {
-        //     startY: doc.lastAutoTable.finalY + 20,
-        //     head: [['Item / Brand', 'Color', 'Required', 'Fulfilled', 'Complete']],
-        //     body: itemRows,
-        //     theme: 'grid',
-        //     headStyles: { fillColor: 255, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold' },
-        //     styles: { textColor: 0, lineWidth: 0.1, lineColor: 0 },
-        //     columnStyles: {
-        //         2: { halign: 'right' },
-        //         3: { halign: 'right' },
-        //         4: { halign: 'center' }
-        //     }
-        // });
-
-        // 5. PENDING ITEMS REPORT (New Section)
         const pendingItems = items.filter(item => item.quantity_fulfilled < item.quantity_required);
 
         if (pendingItems.length > 0) {
-            // Check for page break
-            if (doc.lastAutoTable.finalY > 250) {
-                doc.addPage();
-                doc.lastAutoTable.finalY = 20; 
-            }
-
+            if (doc.lastAutoTable.finalY > 250) { doc.addPage(); doc.lastAutoTable.finalY = 20; }
             doc.setFontSize(14);
             doc.text("Pending Items (Action Required)", 14, doc.lastAutoTable.finalY + 15);
 
@@ -150,7 +95,7 @@ const TrimOrderSummaryPage = () => {
                 item.color_name,
                 item.quantity_required,
                 item.quantity_fulfilled,
-                (item.quantity_required - item.quantity_fulfilled) // Calculated Pending Qty
+                (item.quantity_required - item.quantity_fulfilled)
             ]);
 
             autoTable(doc, {
@@ -158,22 +103,11 @@ const TrimOrderSummaryPage = () => {
                 head: [['Item / Brand', 'Color', 'Required', 'Fulfilled', 'Pending Qty']],
                 body: pendingRows,
                 theme: 'grid',
-                headStyles: { 
-                    fillColor: 255, 
-                    textColor: 0, 
-                    lineWidth: 0.1, 
-                    lineColor: 0, 
-                    fontStyle: 'bold' 
-                },
+                headStyles: { fillColor: 255, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold' },
                 styles: { textColor: 0, lineWidth: 0.1, lineColor: 0 },
-                columnStyles: {
-                    2: { halign: 'right' },
-                    3: { halign: 'right' },
-                    4: { halign: 'right', fontStyle: 'bold' } // Highlight pending qty
-                }
+                columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right', fontStyle: 'bold' } }
             });
         }
-
         doc.save(`Trim_Order_${order.id}_Summary.pdf`);
     };
 
@@ -189,28 +123,26 @@ const TrimOrderSummaryPage = () => {
             PARTIAL: "bg-blue-100 text-blue-800 border-blue-200",
             COMPLETED: "bg-green-100 text-green-800 border-green-200",
         };
-        return (
-            <span className={`px-3 py-1 rounded-full text-xs font-bold border ${styles[status] || "bg-gray-100"}`}>
-                {status}
-            </span>
-        );
+        return <span className={`px-3 py-1 rounded-full text-xs font-bold border ${styles[status] || "bg-gray-100"}`}>{status}</span>;
     };
 
     return (
         <div className="p-6 max-w-5xl mx-auto bg-gray-50 min-h-screen font-inter">
             <div className="flex justify-between items-center mb-6">
                 <button onClick={() => navigate(-1)} className="flex items-center text-gray-600 hover:text-gray-900">
-                    <ArrowLeft className="w-4 h-4 mr-2" /> Back to Orders
+                    <ArrowLeft className="w-4 h-4 mr-2" /> Back to Order
                 </button>
-                <button 
-                    onClick={handleDownloadPDF} 
-                    className="flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 text-sm font-medium transition-colors"
-                >
-                    <Download className="w-4 h-4 mr-2" /> Download PDF Report
-                </button>
+                <div className="flex gap-3">
+                    <button onClick={handleDownloadPDF} className="flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 text-sm font-medium transition-colors">
+                        <Download className="w-4 h-4 mr-2" /> PDF Report
+                    </button>
+                    {/* ✅ NEW: Manage Billing Button */}
+                    <Link to={`/store-manager/trim-orders/${order.id}/billing`} className="flex items-center px-4 py-2 bg-indigo-600 border border-transparent rounded-lg shadow-sm hover:bg-indigo-700 text-white text-sm font-bold transition-colors">
+                        <Receipt className="w-4 h-4 mr-2" /> Generate / Edit Bill
+                    </Link>
+                </div>
             </div>
 
-            {/* Order Header */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
                 <div className="flex flex-col md:flex-row justify-between md:items-start gap-4">
                     <div>
@@ -230,7 +162,7 @@ const TrimOrderSummaryPage = () => {
                 </div>
             </div>
 
-            {/* Inventory Consumption Report */}
+            {/* Consumption Report */}
             <div className="mb-8">
                 <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center">
                     <Box className="w-5 h-5 mr-2 text-purple-600"/> 
@@ -253,9 +185,7 @@ const TrimOrderSummaryPage = () => {
                                             <li key={i}>
                                                 {usage.order_item_name} ({usage.order_item_color}) - 
                                                 <span className="font-mono font-bold ml-1">{usage.quantity} units</span>
-                                                {usage.is_substitution && (
-                                                    <span className="ml-2 text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200">SUBSTITUTE</span>
-                                                )}
+                                                {usage.is_substitution && <span className="ml-2 text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200">SUBSTITUTE</span>}
                                             </li>
                                         ))}
                                     </ul>
@@ -272,19 +202,14 @@ const TrimOrderSummaryPage = () => {
 
             <hr className="border-gray-200 my-8" />
 
-            {/* Detailed Request Tracking */}
             <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center">
-                <Layers className="w-5 h-5 mr-2 text-blue-600"/> 
-                Request Details
-                <span className="ml-2 text-xs font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-full">Did we fulfill the requirement?</span>
+                <Layers className="w-5 h-5 mr-2 text-blue-600"/> Request Details
             </h2>
             <div className="space-y-4">
                 {items.map((item) => {
                     const percent = Math.min(100, Math.round((item.quantity_fulfilled / item.quantity_required) * 100));
-                    
                     return (
                         <div key={item.order_item_id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                            {/* Item Header */}
                             <div className="p-5 border-b border-gray-100 bg-gray-50/50">
                                 <div className="flex justify-between items-start">
                                     <div className="flex gap-4">
@@ -296,78 +221,49 @@ const TrimOrderSummaryPage = () => {
                                             <p className="text-sm text-gray-500">
                                                 {item.brand} • <span className="font-medium text-gray-700">{item.color_name}</span> {item.color_number && `(${item.color_number})`}
                                             </p>
-                                            <div className="mt-1 text-xs text-gray-400">Requested Variant ID: {item.requested_variant_id}</div>
                                         </div>
                                     </div>
-                                    
                                     <div className="text-right min-w-[120px]">
-                                        <div className="text-sm font-medium text-gray-500 mb-1">Fulfillment Progress</div>
                                         <div className="flex items-end justify-end gap-1 mb-1">
-                                            <span className={`text-xl font-bold ${item.is_fulfilled ? 'text-green-600' : 'text-gray-800'}`}>
-                                                {item.quantity_fulfilled}
-                                            </span>
+                                            <span className={`text-xl font-bold ${item.is_fulfilled ? 'text-green-600' : 'text-gray-800'}`}>{item.quantity_fulfilled}</span>
                                             <span className="text-sm text-gray-400 mb-1">/ {item.quantity_required}</span>
                                         </div>
                                         <div className="w-full bg-gray-200 rounded-full h-2">
-                                            <div 
-                                                className={`h-2 rounded-full ${item.is_fulfilled ? 'bg-green-500' : 'bg-blue-500'}`} 
-                                                style={{ width: `${percent}%` }}
-                                            ></div>
+                                            <div className={`h-2 rounded-full ${item.is_fulfilled ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${percent}%` }}></div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-
-                            {/* Detailed Log Table showing ACTUAL items used */}
                             {item.logs.length > 0 ? (
                                 <div className="p-4 bg-white">
-                                    <h4 className="text-xs font-bold text-gray-400 uppercase mb-3 flex items-center">
-                                        <Clock className="w-3 h-3 mr-1" /> Fulfillment History
-                                    </h4>
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-sm text-left">
-                                            <thead className="bg-gray-50 text-gray-500">
-                                                <tr>
-                                                    <th className="px-4 py-2 font-medium rounded-l-md">Date & Time</th>
-                                                    <th className="px-4 py-2 font-medium">Item Used</th>
-                                                    <th className="px-4 py-2 font-medium">Issued By</th>
-                                                    <th className="px-4 py-2 font-medium text-right rounded-r-md">Qty</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-gray-100">
-                                                {item.logs.map((log) => {
-                                                    const isSubstitute = log.fulfilled_with_variant_id !== item.requested_variant_id;
-                                                    return (
-                                                        <tr key={log.id} className="hover:bg-gray-50">
-                                                            <td className="px-4 py-2 text-gray-600">
-                                                                {formatDate(log.fulfilled_at)}
-                                                            </td>
-                                                            <td className="px-4 py-2">
-                                                                <div className="font-medium text-gray-900">{log.used_item_name}</div>
-                                                                <div className="text-xs text-gray-500">{log.used_color_name} ({log.used_item_brand})</div>
-                                                                {isSubstitute && (
-                                                                    <span className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800">
-                                                                        <AlertCircle className="w-3 h-3 mr-1" /> Substituted
-                                                                    </span>
-                                                                )}
-                                                            </td>
-                                                            <td className="px-4 py-2 text-gray-600">
-                                                                {log.fulfilled_by}
-                                                            </td>
-                                                            <td className="px-4 py-2 text-right font-mono font-bold text-blue-600">
-                                                                +{log.quantity_fulfilled}
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="bg-gray-50 text-gray-500">
+                                            <tr>
+                                                <th className="px-4 py-2 font-medium rounded-l-md">Date & Time</th>
+                                                <th className="px-4 py-2 font-medium">Item Used</th>
+                                                <th className="px-4 py-2 font-medium text-right rounded-r-md">Qty</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {item.logs.map((log) => {
+                                                const isSubstitute = log.fulfilled_with_variant_id !== item.requested_variant_id;
+                                                return (
+                                                    <tr key={log.id} className="hover:bg-gray-50">
+                                                        <td className="px-4 py-2 text-gray-600">{formatDate(log.fulfilled_at)}</td>
+                                                        <td className="px-4 py-2">
+                                                            <div className="font-medium text-gray-900">{log.used_item_name}</div>
+                                                            <div className="text-xs text-gray-500">{log.used_color_name} ({log.used_item_brand})</div>
+                                                            {isSubstitute && <span className="text-[10px] bg-amber-100 text-amber-800 px-1 rounded">Substituted</span>}
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right font-mono font-bold text-blue-600">+{log.quantity_fulfilled}</td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
                                 </div>
                             ) : (
-                                <div className="p-4 bg-gray-50 text-center text-sm text-gray-400 italic border-t border-gray-100">
-                                    No fulfillment records yet.
-                                </div>
+                                <div className="p-4 bg-gray-50 text-center text-sm text-gray-400 italic">No fulfillment records.</div>
                             )}
                         </div>
                     );

@@ -6,9 +6,6 @@ import {
     FileSpreadsheet, Loader2, Download 
 } from 'lucide-react';
 
-
-
-
 const downloadAsExcel = (data, fileName = 'trim_inventory.csv') => {
     if (!data || !data.length) {
         alert("No data available to export.");
@@ -38,8 +35,6 @@ const downloadAsExcel = (data, fileName = 'trim_inventory.csv') => {
     }
 };
 
-
-
 // --- UI Components ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><Loader2 className="animate-spin h-6 w-6 text-gray-500" /></div>;
 const Placeholder = ({ text }) => <div className="p-8 text-center bg-gray-50 rounded-lg h-full flex items-center justify-center"><p className="text-gray-500">{text}</p></div>;
@@ -52,47 +47,76 @@ const Modal = ({ title, children, onClose }) => (
     </div>
 );
 
-
 // --- Form Modals ---
 const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
     const [formData, setFormData] = useState({ 
         name: '', brand: '', description: '', item_code: '', unit_of_measure: 'pieces', is_color_agnostic: false, 
+        cost_price: '', selling_price: '', // <-- NEW FIELDS ADDED HERE
         ...initialData 
     });
+
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
         setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
     };
-    const handleSubmit = (e) => { e.preventDefault(); onSave(formData); };
+
+    const handleSubmit = (e) => { 
+        e.preventDefault(); 
+        onSave({
+            ...formData,
+            cost_price: parseFloat(formData.cost_price) || 0,
+            selling_price: parseFloat(formData.selling_price) || 0
+        }); 
+    };
 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label className="text-xs font-medium text-gray-500">Name</label>
-                    <input name="name" value={formData.name} onChange={handleChange} placeholder="Item Name" required className="w-full p-2 border rounded" />
+                    <input name="name" value={formData.name} onChange={handleChange} placeholder="Item Name" required className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
                     <label className="text-xs font-medium text-gray-500">Brand</label>
-                    <input name="brand" value={formData.brand} onChange={handleChange} placeholder="Brand" required className="w-full p-2 border rounded" />
+                    <input name="brand" value={formData.brand} onChange={handleChange} placeholder="Brand" required className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
             </div>
+
             <div>
                 <label className="text-xs font-medium text-gray-500">Item Code / SKU</label>
-                <input name="item_code" value={formData.item_code} onChange={handleChange} placeholder="Item Code" className="w-full p-2 border rounded" />
+                <input name="item_code" value={formData.item_code} onChange={handleChange} placeholder="Item Code" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
-            <textarea name="description" value={formData.description} onChange={handleChange} placeholder="Description" className="w-full p-2 border rounded" rows="3"></textarea>
-            <select name="unit_of_measure" value={formData.unit_of_measure} onChange={handleChange} className="w-full p-2 border rounded">
+
+            {/* --- NEW PRICE FIELDS --- */}
+            <div className="grid grid-cols-2 gap-4">
+                <div>
+                    <label className="text-xs font-medium text-gray-500">Cost Price</label>
+                    <input type="number" step="0.01" name="cost_price" value={formData.cost_price} onChange={handleChange} placeholder="0.00" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                    <label className="text-xs font-medium text-gray-500">Selling Price</label>
+                    <input type="number" step="0.01" name="selling_price" value={formData.selling_price} onChange={handleChange} placeholder="0.00" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+            </div>
+
+            <textarea name="description" value={formData.description} onChange={handleChange} placeholder="Description" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" rows="3"></textarea>
+            
+            <select name="unit_of_measure" value={formData.unit_of_measure} onChange={handleChange} className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none">
                 <option value="pieces">pieces</option>
                 <option value="meters">meters</option>
                 <option value="spools">spools</option>
                 <option value="packets">packets</option>
             </select>
-            <label className="flex items-center space-x-2">
-                <input type="checkbox" name="is_color_agnostic" checked={formData.is_color_agnostic} onChange={handleChange} />
-                <span className="text-sm">Common across all colors (e.g., Wash Care Label)</span>
+
+            <label className="flex items-center space-x-2 bg-gray-50 p-3 rounded-lg border border-gray-200 cursor-pointer">
+                <input type="checkbox" name="is_color_agnostic" checked={formData.is_color_agnostic} onChange={handleChange} className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />
+                <span className="text-sm text-gray-700">Common across all colors (e.g., Wash Care Label)</span>
             </label>
-            <div className="flex justify-end space-x-2 pt-4 border-t"><button type="button" onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded">Cancel</button><button type="submit" className="px-4 py-2 text-sm bg-blue-600 text-white rounded">Save Item</button></div>
+
+            <div className="flex justify-end space-x-3 pt-4 border-t">
+                <button type="button" onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+                <button type="submit" className="px-4 py-2 text-sm bg-blue-600 text-white font-medium rounded-lg shadow-sm hover:bg-blue-700 transition-colors">Save Item</button>
+            </div>
         </form>
     );
 };
@@ -328,7 +352,7 @@ const TrimManagementPage = () => {
                     <p className="text-gray-500 text-sm mt-1">Manage definitions, stock variants, and substitutes.</p>
                 </div>
                 
-                {/* NEW: Export Button */}
+                {/* Export Button */}
                 <button 
                     onClick={handleExport} 
                     disabled={isExporting}
@@ -390,15 +414,28 @@ const TrimManagementPage = () => {
                                         : 'border-transparent hover:bg-gray-50 hover:border-gray-100'
                                     }`}
                                 >
-                                    <div>
-                                        <p className={`text-sm font-semibold ${selectedItem?.id === item.id ? 'text-blue-900' : 'text-gray-700'}`}>
-                                            {item.name}
-                                        </p>
+                                    <div className="w-full pr-2">
+                                        <div className="flex justify-between items-start">
+                                            <p className={`text-sm font-semibold truncate ${selectedItem?.id === item.id ? 'text-blue-900' : 'text-gray-700'}`}>
+                                                {item.name}
+                                            </p>
+                                        </div>
                                         <p className="text-xs text-gray-500 mt-0.5">
-                                            {item.brand} {item.is_color_agnostic && <span className="text-purple-600 font-medium ml-1 text-[10px] bg-purple-50 px-1.5 py-0.5 rounded-full border border-purple-100">Generic</span>}
+                                            {item.brand}
+                                            {item.is_color_agnostic && <span className="text-purple-600 font-medium ml-1 text-[10px] bg-purple-50 px-1.5 py-0.5 rounded-full border border-purple-100">Generic</span>}
                                         </p>
+                                        
+                                        {/* --- PRICE DISPLAY --- */}
+                                        <div className="flex gap-2 mt-1">
+                                            <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 rounded">
+                                                CP: ₹{Number(item.cost_price || 0).toFixed(2)}
+                                            </span>
+                                            <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 rounded">
+                                                SP: ₹{Number(item.selling_price || 0).toFixed(2)}
+                                            </span>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                                         {user.role === 'factory_admin' && (
                                             <>
                                                 <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'item', data: item }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200">
@@ -581,16 +618,14 @@ const TrimManagementPage = () => {
             {/* Modal Rendering */}
             {modal.type === 'item' && <Modal title={modal.data ? 'Edit Item' : 'Add New Item'} onClose={() => setModal({type: null})}><ItemFormModal onSave={(data) => handleSave('item', data)} onClose={() => setModal({type: null})} initialData={modal.data} /></Modal>}
             {modal.type === 'variant' && <Modal title={modal.data ? 'Edit Variant' : 'Add New Variant'} onClose={() => setModal({type: null})}><VariantFormModal onSave={(data) => handleSave('variant', data)} onClose={() => setModal({type: null})} initialData={modal.data} isColorAgnostic={selectedItem?.is_color_agnostic} colors={colors} userRole={user.role} /></Modal>}
-            
-            {/* Updated Substitute Modal usage */}
             {modal.type === 'substitute' && (
                 <Modal title="Add Substitute" onClose={() => setModal({type: null})}>
                     <SubstituteFormModal 
                         onSave={(data) => handleSave('substitute', data)} 
                         onClose={() => setModal({type: null})} 
-                        variants={variants} // Passing scoped variants instead of global
-                        parentItemName={selectedItem?.name} // Passing parent name for display
-                        parentItemBrand={selectedItem?.brand} // Passing parent brand for display
+                        variants={variants} 
+                        parentItemName={selectedItem?.name} 
+                        parentItemBrand={selectedItem?.brand} 
                         currentVariantId={selectedVariant?.id} 
                         existingSubstitutes={substitutes} 
                     />

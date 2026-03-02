@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { storeManagerApi } from '../../api/storeManagerApi';
-import { LuClock, LuPackageCheck, LuPackage, LuTriangleAlert, LuRefreshCw, LuReplace, LuArrowLeft, LuListOrdered, LuCircleCheck, LuWand, LuTrash2 } from 'react-icons/lu';
+import { LuClock, LuPackageCheck, LuPackage, LuTriangleAlert, LuRefreshCw, LuReplace, LuArrowLeft, LuListOrdered, LuCircleCheck, LuWand, LuTrash2, LuFileText } from 'react-icons/lu';
 import { Loader2 } from 'lucide-react'; 
 
 const Spinner = () => <div className="flex justify-center items-center p-12"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
@@ -92,7 +92,6 @@ const TrimOrderDetailPage = () => {
         setError(null);
         try {
             const response = await storeManagerApi.getTrimOrderDetails(orderId);
-            console.log("Fetched order details:", response.data);
             const sanitizedItems = (response.data.items || []).map(item => ({
                 ...item,
                 quantity_fulfilled: parseInt(item.quantity_fulfilled) || 0,
@@ -100,9 +99,14 @@ const TrimOrderDetailPage = () => {
             }));
             setItems(sanitizedItems);
             setMissingItems(response.data.missing_items || []);
+            
+            // ✅ Include the newly fetched fields into state
             setOrderInfo({
                 status: response.data.status,
-                batchId: response.data.production_batch_id
+                batchId: response.data.production_batch_id,
+                batch_index: response.data.batch_code,
+                sales_orders: response.data.sales_order_number,
+                purchase_orders: response.data.purchase_order_code
             });
         } catch (err) {
             setError('Could not load order details.');
@@ -123,7 +127,7 @@ const TrimOrderDetailPage = () => {
         });
     }, [items]);
 
-    // 2. Substitute Fulfillable Items (Exact stock is too low, but a substitute has enough)
+    // 2. Substitute Fulfillable Items
     const substituteFulfillableItems = useMemo(() => {
         return items.filter(item => {
             const remaining = item.quantity_required - item.quantity_fulfilled;
@@ -173,11 +177,8 @@ const TrimOrderDetailPage = () => {
         }
     };
 
-    // 3. Revert (Change) Fulfillment Feature
     const handleRevertFulfillment = async (logId) => {
-       
         if (!window.confirm("Are you sure you want to remove this fulfillment? The items will be returned to inventory and you will need to fulfill this again.")) return;
-        
         setIsReverting(true);
         try {
             await storeManagerApi.revertFulfillment(logId);
@@ -215,22 +216,69 @@ const TrimOrderDetailPage = () => {
         return false;
     };
 
+    // Formatter to cleanly display arrays or strings of orders
+    const formatOrderList = (orders) => {
+        if (!orders) return "N/A";
+        if (Array.isArray(orders)) return orders.join(', ');
+        return orders;
+    };
+
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
             <header className="mb-6">
                 <Link to="/store-manager/trim-orders" className="text-sm text-blue-600 hover:underline flex items-center mb-4 font-semibold">
                     <LuArrowLeft className="mr-2" /> Back to All Orders
                 </Link>
-                <div className="flex justify-between items-center bg-white p-5 rounded-xl shadow-sm border border-gray-200">
-                    <div>
-                        <h1 className="text-2xl font-extrabold text-gray-900">Trim Order #{orderId}</h1>
-                        {orderInfo?.batchId && <p className="text-sm font-medium text-gray-500 mt-1">Production Batch #{orderInfo.batchId}</p>}
+                
+                {/* ✅ REDESIGNED HEADER: Meta Data & Summary Link */}
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                    <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
+                        <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-3">
+                                <h1 className="text-2xl font-extrabold text-gray-900">Trim Order #{orderId}</h1>
+                                {orderInfo?.status && (
+                                    <span className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full border ${orderInfo.status === 'COMPLETED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                                        {orderInfo.status}
+                                    </span>
+                                )}
+                            </div>
+                            
+                            {orderInfo && (
+                                <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-600 bg-gray-50 border border-gray-100 p-3 rounded-lg inline-flex">
+                                    <div className="flex items-center">
+                                        <span className="font-bold text-gray-400 uppercase text-[10px] tracking-wider mr-2">Batch:</span> 
+                                        <span className="font-semibold text-gray-800">
+                                            #{orderInfo.batchId} 
+                                            {orderInfo.batch_index && <span className="ml-1 text-gray-500">({orderInfo.batch_index})</span>}
+                                        </span>
+                                    </div>
+                                    {/* <div className="flex items-center border-l border-gray-300 pl-6">
+                                        <span className="font-bold text-gray-400 uppercase text-[10px] tracking-wider mr-2">SO:</span> 
+                                        <span className="font-semibold text-gray-800 truncate max-w-[200px]" title={formatOrderList(orderInfo.sales_orders)}>
+                                            {formatOrderList(orderInfo.sales_orders)}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center border-l border-gray-300 pl-6">
+                                        <span className="font-bold text-gray-400 uppercase text-[10px] tracking-wider mr-2">PO:</span> 
+                                        <span className="font-semibold text-gray-800 truncate max-w-[200px]" title={formatOrderList(orderInfo.purchase_orders)}>
+                                            {formatOrderList(orderInfo.purchase_orders)}
+                                        </span>
+                                    </div> */}
+                                </div>
+                            )}
+                        </div>
+                        
+                        <div className="flex flex-col items-end gap-2 shrink-0">
+                            {/* ✅ LINK TO SUMMARY PAGE */}
+                            <Link 
+                                to={`/store-manager/trim-orders/${orderId}/summary`} 
+                                className="px-5 py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-100 hover:border-indigo-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center group"
+                            >
+                                <LuFileText className="mr-2 h-5 w-5 text-indigo-500 group-hover:text-indigo-200 transition-colors" /> 
+                                View Order Summary
+                            </Link>
+                        </div>
                     </div>
-                    {orderInfo?.status && (
-                        <span className={`px-4 py-1.5 text-sm font-bold rounded-full border ${orderInfo.status === 'COMPLETED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
-                            {orderInfo.status}
-                        </span>
-                    )}
                 </div>
             </header>
             
