@@ -26,4 +26,5 @@ export const trimsApi = {
 
     // Export inventory data  
     exportInventory: () => api.get('trims/export'),
+    bulkUpdateInventory: (data) => api.post('/trims/bulk-update', data)
 };

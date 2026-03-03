@@ -7,6 +7,7 @@ export const storeManagerApi = {
     getFabricIntakeFormData: () => api.get('/store-manager/form-data/fabric-intake'),
     getFabricRollsByPO: (poId) => api.get(`/store-manager/fabric-rolls/po/${poId}`),
     // Trims
+    getAllTrimItems: () => api.get('/store-manager/trim-items'),
     getVariantsByTrimItem: (trimItemId) => api.get(`/store-manager/trim-item-variants/${trimItemId}`),
 
     // Trim Orders
@@ -37,5 +38,9 @@ export const storeManagerApi = {
     autoFulfillSubstitutes: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/auto-fulfill-substitutes`),
     revertFulfillment: (logId) => api.delete(`/store-manager/trim-fulfillments/${logId}`),
 
+
+    // Billing  
+    getTrimBillsForOrder: (orderId) => api.get(`/store-manager/trim-orders/${orderId}/bills`),
+    saveTrimBill: (orderId, data) => api.post(`/store-manager/trim-orders/${orderId}/bills`, data),
 
 };

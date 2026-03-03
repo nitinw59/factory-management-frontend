@@ -1,16 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { trimsApi } from '../../api/trimsApi';
 import { useAuth } from '../../context/AuthContext';
 import { 
     Plus, Edit2, Trash2, ChevronRight, Search, Package, Layers, Repeat, 
-    FileSpreadsheet, Loader2, Download 
+    FileSpreadsheet, Loader2, Upload
 } from 'lucide-react';
 
 const downloadAsExcel = (data, fileName = 'trim_inventory.csv') => {
-    if (!data || !data.length) {
-        alert("No data available to export.");
-        return;
-    }
+    if (!data || !data.length) return alert("No data available to export.");
     const headers = Object.keys(data[0]);
     const csvContent = [
         headers.join(','), 
@@ -35,7 +32,41 @@ const downloadAsExcel = (data, fileName = 'trim_inventory.csv') => {
     }
 };
 
-// --- UI Components ---
+// Robust CSV Parser that handles commas inside quotes
+const parseCSVRow = (str) => {
+    const result = [];
+    let cur = '';
+    let inQuote = false;
+    for (let i = 0; i < str.length; i++) {
+        if (inQuote) {
+            if (str[i] === '"') {
+                if (i < str.length - 1 && str[i + 1] === '"') { cur += '"'; i++; } 
+                else { inQuote = false; }
+            } else { cur += str[i]; }
+        } else {
+            if (str[i] === '"') { inQuote = true; }
+            else if (str[i] === ',') { result.push(cur); cur = ''; }
+            else { cur += str[i]; }
+        }
+    }
+    result.push(cur);
+    return result;
+};
+
+const parseCSV = (csvText) => {
+    const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
+    if (lines.length < 2) return [];
+    
+    const headers = parseCSVRow(lines[0]).map(h => h.trim());
+    return lines.slice(1).map(line => {
+        const values = parseCSVRow(line);
+        return headers.reduce((obj, header, index) => {
+            obj[header] = values[index];
+            return obj;
+        }, {});
+    });
+};
+
 const Spinner = () => <div className="flex justify-center items-center p-8"><Loader2 className="animate-spin h-6 w-6 text-gray-500" /></div>;
 const Placeholder = ({ text }) => <div className="p-8 text-center bg-gray-50 rounded-lg h-full flex items-center justify-center"><p className="text-gray-500">{text}</p></div>;
 const Modal = ({ title, children, onClose }) => (
@@ -47,11 +78,10 @@ const Modal = ({ title, children, onClose }) => (
     </div>
 );
 
-// --- Form Modals ---
+// --- ITEM FORM ---
 const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
     const [formData, setFormData] = useState({ 
         name: '', brand: '', description: '', item_code: '', unit_of_measure: 'pieces', is_color_agnostic: false, 
-        cost_price: '', selling_price: '', // <-- NEW FIELDS ADDED HERE
         ...initialData 
     });
 
@@ -62,11 +92,7 @@ const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
 
     const handleSubmit = (e) => { 
         e.preventDefault(); 
-        onSave({
-            ...formData,
-            cost_price: parseFloat(formData.cost_price) || 0,
-            selling_price: parseFloat(formData.selling_price) || 0
-        }); 
+        onSave(formData); 
     };
 
     return (
@@ -85,18 +111,6 @@ const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
             <div>
                 <label className="text-xs font-medium text-gray-500">Item Code / SKU</label>
                 <input name="item_code" value={formData.item_code} onChange={handleChange} placeholder="Item Code" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
-            </div>
-
-            {/* --- NEW PRICE FIELDS --- */}
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="text-xs font-medium text-gray-500">Cost Price</label>
-                    <input type="number" step="0.01" name="cost_price" value={formData.cost_price} onChange={handleChange} placeholder="0.00" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
-                </div>
-                <div>
-                    <label className="text-xs font-medium text-gray-500">Selling Price</label>
-                    <input type="number" step="0.01" name="selling_price" value={formData.selling_price} onChange={handleChange} placeholder="0.00" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
-                </div>
             </div>
 
             <textarea name="description" value={formData.description} onChange={handleChange} placeholder="Description" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" rows="3"></textarea>
@@ -121,12 +135,22 @@ const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
     );
 };
 
+// --- VARIANT FORM ---
 const VariantFormModal = ({ onSave, onClose, initialData = {}, isColorAgnostic, colors, userRole }) => {
-    const [formData, setFormData] = useState({ fabric_color_id: '', main_store_stock: 0, low_stock_threshold: 10, ...initialData });
+    const [formData, setFormData] = useState({ 
+        fabric_color_id: '', main_store_stock: 0, low_stock_threshold: 10, 
+        cost_price: '', selling_price: '',
+        ...initialData 
+    });
+    
     const handleChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
     const handleSubmit = (e) => {
         e.preventDefault();
-        const dataToSave = { ...formData };
+        const dataToSave = { 
+            ...formData,
+            cost_price: parseFloat(formData.cost_price) || 0,
+            selling_price: parseFloat(formData.selling_price) || 0
+        };
         if (isColorAgnostic || dataToSave.fabric_color_id === '') {
             dataToSave.fabric_color_id = null;
         }
@@ -138,22 +162,39 @@ const VariantFormModal = ({ onSave, onClose, initialData = {}, isColorAgnostic, 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-                <label className="text-sm font-medium">Color</label>
+                <label className="text-sm font-medium text-gray-700">Color</label>
                 <select name="fabric_color_id" value={formData.fabric_color_id || ''} onChange={handleChange} disabled={isColorAgnostic || isDefinitionDisabled} required={!isColorAgnostic} className="w-full p-2 border rounded disabled:bg-gray-200 disabled:cursor-not-allowed">
                     <option value="">{isColorAgnostic ? 'N/A - Color Agnostic' : 'Select Color'}</option>
                     {colors.map(c => <option key={c.id} value={c.id}>{c.color_number}-{c.name}</option>)}
                 </select>
                 {isDefinitionDisabled && <p className="text-xs text-gray-500 mt-1">Only admins can change the color of an existing variant.</p>}
             </div>
-             <div>
-                <label className="text-sm font-medium">Current Stock</label>
-                <input type="number" name="main_store_stock" value={formData.main_store_stock} onChange={handleChange} placeholder="Current Stock" required className="w-full p-2 border rounded" />
+
+            <div className="grid grid-cols-2 gap-4">
+                <div>
+                    <label className="text-sm font-medium text-gray-700">Cost Price</label>
+                    <input type="number" step="0.01" name="cost_price" value={formData.cost_price} onChange={handleChange} placeholder="0.00" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                    <label className="text-sm font-medium text-gray-700">Selling Price</label>
+                    <input type="number" step="0.01" name="selling_price" value={formData.selling_price} onChange={handleChange} placeholder="0.00" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
             </div>
-             <div>
-                <label className="text-sm font-medium">Low Stock Threshold</label>
-                <input type="number" name="low_stock_threshold" value={formData.low_stock_threshold} onChange={handleChange} placeholder="Low Stock Threshold" required className="w-full p-2 border rounded" />
+
+            <div className="grid grid-cols-2 gap-4">
+                <div>
+                    <label className="text-sm font-medium text-gray-700">Current Stock</label>
+                    <input type="number" name="main_store_stock" value={formData.main_store_stock} onChange={handleChange} placeholder="Current Stock" required className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                    <label className="text-sm font-medium text-gray-700">Low Stock Threshold</label>
+                    <input type="number" name="low_stock_threshold" value={formData.low_stock_threshold} onChange={handleChange} placeholder="Low Stock Threshold" required className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
             </div>
-            <div className="flex justify-end space-x-2 pt-4 border-t"><button type="button" onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded">Cancel</button><button type="submit" className="px-4 py-2 text-sm bg-blue-600 text-white rounded">Save Variant</button></div>
+            <div className="flex justify-end space-x-2 pt-4 border-t">
+                <button type="button" onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded">Cancel</button>
+                <button type="submit" className="px-4 py-2 text-sm bg-blue-600 text-white rounded">Save Variant</button>
+            </div>
         </form>
     );
 };
@@ -162,7 +203,6 @@ const SubstituteFormModal = ({ onSave, onClose, variants, currentVariantId, exis
     const [substituteId, setSubstituteId] = useState('');
     const handleSubmit = (e) => { e.preventDefault(); onSave({ substitute_variant_id: substituteId }); };
 
-    // Filter out the current variant itself and any that are already substitutes
     const availableOptions = variants.filter(v => 
         v.id !== currentVariantId && !existingSubstitutes.some(s => s.substitute_variant_id === v.id)
     );
@@ -191,7 +231,6 @@ const SubstituteFormModal = ({ onSave, onClose, variants, currentVariantId, exis
     );
 };
 
-
 // --- Main Page Component ---
 const TrimManagementPage = () => {
     const { user } = useAuth(); 
@@ -203,15 +242,16 @@ const TrimManagementPage = () => {
     const [selectedItem, setSelectedItem] = useState(null);
     const [selectedVariant, setSelectedVariant] = useState(null);
     
-    // --- Search Filter States ---
     const [itemFilter, setItemFilter] = useState('');
     const [variantFilter, setVariantFilter] = useState('');
     const [substituteFilter, setSubstituteFilter] = useState('');
     
     const [loading, setLoading] = useState({ items: true, variants: false, substitutes: false });
     const [isExporting, setIsExporting] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
     const [modal, setModal] = useState({ type: null, data: null });
 
+    const fileInputRef = useRef(null);
     const [colors, setColors] = useState([]);
 
     const fetchData = useCallback(async () => {
@@ -265,21 +305,77 @@ const TrimManagementPage = () => {
         setSubstituteFilter('');
     };
 
+    // --- Export / Import Logic ---
     const handleExport = async () => {
         setIsExporting(true);
         try {
             const res = await trimsApi.exportInventory();
-            console.log(res.data);
             const date = new Date().toISOString().split('T')[0];
             downloadAsExcel(res.data, `Trim_Catalog_Export_${date}.csv`);
         } catch (error) {
-            console.log("Export failed", error);
-            alert("Export failed.", error);
+            console.error("Export failed", error);
+            alert("Export failed.");
         } finally {
             setIsExporting(false);
         }
     };
 
+    const handleImportClick = () => {
+        fileInputRef.current.click();
+    };
+
+    const handleFileUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setIsImporting(true);
+        const reader = new FileReader();
+
+        reader.onload = async (event) => {
+            try {
+                const text = event.target.result;
+                const parsedData = parseCSV(text);
+
+                if (parsedData.length === 0) throw new Error("The CSV file is empty or invalid.");
+                if (!parsedData[0]["Variant ID"]) throw new Error("The CSV must contain a 'Variant ID' column. Please download the template via Export first.");
+
+                // Map parsed data to the expected backend payload
+                const updates = parsedData.map(row => ({
+                    variant_id: parseInt(row["Variant ID"], 10),
+                    stock: row["Current Stock"] !== "" ? parseInt(row["Current Stock"], 10) : undefined,
+                    cost_price: row["Cost Price"] !== "" ? parseFloat(row["Cost Price"]) : undefined,
+                    selling_price: row["Selling Price"] !== "" ? parseFloat(row["Selling Price"]) : undefined,
+                    threshold: row["Low Stock Alert Limit"] !== "" ? parseInt(row["Low Stock Alert Limit"], 10) : undefined
+                })).filter(u => !isNaN(u.variant_id));
+
+                if (updates.length === 0) throw new Error("No valid variant IDs found to update.");
+
+                const res = await trimsApi.bulkUpdateInventory({ updates });
+                alert(res.data.message || `Successfully imported updates for ${updates.length} items.`);
+                
+                // Refresh data to show updates
+                if (selectedItem) {
+                    const variantsRes = await trimsApi.getVariants(selectedItem.id);
+                    setVariants(variantsRes.data);
+                }
+            } catch (err) {
+                console.error("Import failed", err);
+                alert(`Import failed: ${err.message}`);
+            } finally {
+                setIsImporting(false);
+                e.target.value = null; // reset input
+            }
+        };
+
+        reader.onerror = () => {
+            alert("Failed to read the file.");
+            setIsImporting(false);
+        };
+
+        reader.readAsText(file);
+    };
+
+    // --- Save / Delete Logic ---
     const handleSave = async (type, data) => {
         try {
             switch (type) {
@@ -326,7 +422,6 @@ const TrimManagementPage = () => {
         }
     };
 
-    // --- Filter Logic ---
     const filteredItems = items.filter(item => 
         item.name.toLowerCase().includes(itemFilter.toLowerCase()) || 
         item.brand?.toLowerCase().includes(itemFilter.toLowerCase()) ||
@@ -343,24 +438,45 @@ const TrimManagementPage = () => {
         return name.toLowerCase().includes(substituteFilter.toLowerCase());
     });
 
-
     return (
         <div className="p-6 bg-gray-100 min-h-screen">
-            <div className="flex justify-between items-end mb-6">
+            <div className="flex flex-col md:flex-row justify-between md:items-end gap-4 mb-6">
                 <div>
                     <h1 className="text-3xl font-bold text-gray-800">Trim Management</h1>
                     <p className="text-gray-500 text-sm mt-1">Manage definitions, stock variants, and substitutes.</p>
                 </div>
                 
-                {/* Export Button */}
-                <button 
-                    onClick={handleExport} 
-                    disabled={isExporting}
-                    className="flex items-center space-x-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg shadow-sm transition-all disabled:opacity-70 disabled:cursor-not-allowed"
-                >
-                    {isExporting ? <Loader2 className="animate-spin w-4 h-4"/> : <FileSpreadsheet className="w-4 h-4"/>}
-                    <span>{isExporting ? 'Exporting...' : 'Download Excel Report'}</span>
-                </button>
+                <div className="flex items-center gap-3">
+                    {/* Hidden File Input */}
+                    <input 
+                        type="file" 
+                        accept=".csv" 
+                        ref={fileInputRef} 
+                        onChange={handleFileUpload} 
+                        className="hidden" 
+                    />
+                    
+                    {/* IMPORT BUTTON */}
+                    {(user.role === 'factory_admin') && (
+                    <button 
+                        onClick={handleImportClick} 
+                        disabled={isImporting}
+                        className="flex items-center space-x-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-4 py-2 rounded-lg shadow-sm transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                    >
+                        {isImporting ? <Loader2 className="animate-spin w-4 h-4"/> : <Upload className="w-4 h-4"/>}
+                        <span className="font-semibold">{isImporting ? 'Importing...' : 'Import Excel / CSV'}</span>
+                    </button>
+                    )}
+                    {/* EXPORT BUTTON */}
+                    <button 
+                        onClick={handleExport} 
+                        disabled={isExporting}
+                        className="flex items-center space-x-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg shadow-sm transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                    >
+                        {isExporting ? <Loader2 className="animate-spin w-4 h-4"/> : <FileSpreadsheet className="w-4 h-4"/>}
+                        <span className="font-semibold">{isExporting ? 'Exporting...' : 'Export Inventory'}</span>
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -370,32 +486,17 @@ const TrimManagementPage = () => {
                     <div className="border-b border-gray-100 bg-white rounded-t-xl z-10">
                         <header className="flex justify-between items-center p-4 pb-2">
                             <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
-                                <div className="p-1.5 bg-gray-100 rounded-md">
-                                    <Package className="text-gray-500 w-5 h-5" />
-                                </div>
+                                <div className="p-1.5 bg-gray-100 rounded-md"><Package className="text-gray-500 w-5 h-5" /></div>
                                 Trim Items
                             </h2>
                             {(user.role === 'factory_admin' || user.role === 'store_manager') && (
-                                <button 
-                                    onClick={() => setModal({ type: 'item' })} 
-                                    className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
-                                >
-                                    <Plus size={18} />
-                                </button>
+                                <button onClick={() => setModal({ type: 'item' })} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"><Plus size={18} /></button>
                             )}
                         </header>
-                        
-                        {/* Filter Input */}
                         <div className="px-4 pb-3">
                             <div className="relative">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                                <input 
-                                    type="text" 
-                                    placeholder="Filter items..." 
-                                    value={itemFilter}
-                                    onChange={(e) => setItemFilter(e.target.value)}
-                                    className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white"
-                                />
+                                <input type="text" placeholder="Filter items..." value={itemFilter} onChange={(e) => setItemFilter(e.target.value)} className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white" />
                             </div>
                         </div>
                     </div>
@@ -409,41 +510,20 @@ const TrimManagementPage = () => {
                                     key={item.id} 
                                     onClick={() => handleSelectItem(item)} 
                                     className={`group flex justify-between items-center p-3 rounded-lg cursor-pointer border transition-all duration-200 
-                                    ${selectedItem?.id === item.id 
-                                        ? 'border-blue-200 bg-blue-50/80 ring-1 ring-blue-200' 
-                                        : 'border-transparent hover:bg-gray-50 hover:border-gray-100'
-                                    }`}
+                                    ${selectedItem?.id === item.id ? 'border-blue-200 bg-blue-50/80 ring-1 ring-blue-200' : 'border-transparent hover:bg-gray-50 hover:border-gray-100'}`}
                                 >
                                     <div className="w-full pr-2">
-                                        <div className="flex justify-between items-start">
-                                            <p className={`text-sm font-semibold truncate ${selectedItem?.id === item.id ? 'text-blue-900' : 'text-gray-700'}`}>
-                                                {item.name}
-                                            </p>
-                                        </div>
+                                        <p className={`text-sm font-semibold truncate ${selectedItem?.id === item.id ? 'text-blue-900' : 'text-gray-700'}`}>{item.name}</p>
                                         <p className="text-xs text-gray-500 mt-0.5">
                                             {item.brand}
                                             {item.is_color_agnostic && <span className="text-purple-600 font-medium ml-1 text-[10px] bg-purple-50 px-1.5 py-0.5 rounded-full border border-purple-100">Generic</span>}
                                         </p>
-                                        
-                                        {/* --- PRICE DISPLAY --- */}
-                                        <div className="flex gap-2 mt-1">
-                                            <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 rounded">
-                                                CP: ₹{Number(item.cost_price || 0).toFixed(2)}
-                                            </span>
-                                            <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 rounded">
-                                                SP: ₹{Number(item.selling_price || 0).toFixed(2)}
-                                            </span>
-                                        </div>
                                     </div>
                                     <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                                         {user.role === 'factory_admin' && (
                                             <>
-                                                <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'item', data: item }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200">
-                                                    <Edit2 size={12}/>
-                                                </button>
-                                                <button onClick={(e) => { e.stopPropagation(); handleDelete('item', item.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200">
-                                                    <Trash2 size={12}/>
-                                                </button>
+                                                <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'item', data: item }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200"><Edit2 size={12}/></button>
+                                                <button onClick={(e) => { e.stopPropagation(); handleDelete('item', item.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200"><Trash2 size={12}/></button>
                                             </>
                                         )}
                                         <ChevronRight className={`w-4 h-4 text-gray-300 ${selectedItem?.id === item.id ? 'text-blue-400' : ''}`}/>
@@ -459,33 +539,17 @@ const TrimManagementPage = () => {
                     <div className="border-b border-gray-100 bg-white rounded-t-xl z-10">
                         <header className="flex justify-between items-center p-4 pb-2">
                             <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
-                                <div className="p-1.5 bg-gray-100 rounded-md">
-                                    <Layers className="text-gray-500 w-5 h-5" />
-                                </div>
+                                <div className="p-1.5 bg-gray-100 rounded-md"><Layers className="text-gray-500 w-5 h-5" /></div>
                                 Variants
                             </h2>
                             {selectedItem && (user.role === 'factory_admin' || user.role === 'store_manager') && (
-                                <button 
-                                    onClick={() => setModal({ type: 'variant' })} 
-                                    className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
-                                >
-                                    <Plus size={18} />
-                                </button>
+                                <button onClick={() => setModal({ type: 'variant' })} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"><Plus size={18} /></button>
                             )}
                         </header>
-
-                        {/* Filter Input */}
                         <div className="px-4 pb-3">
                             <div className="relative">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                                <input 
-                                    type="text" 
-                                    placeholder="Filter variants..." 
-                                    disabled={!selectedItem}
-                                    value={variantFilter}
-                                    onChange={(e) => setVariantFilter(e.target.value)}
-                                    className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white disabled:bg-gray-100 disabled:text-gray-400"
-                                />
+                                <input type="text" placeholder="Filter variants..." disabled={!selectedItem} value={variantFilter} onChange={(e) => setVariantFilter(e.target.value)} className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white disabled:bg-gray-100 disabled:text-gray-400" />
                             </div>
                         </div>
                     </div>
@@ -494,47 +558,35 @@ const TrimManagementPage = () => {
                         {loading.variants ? (
                             <div className="flex justify-center p-8"><Spinner /></div>
                         ) : !selectedItem ? (
-                            <div className="h-full flex flex-col items-center justify-center p-6 text-center opacity-60">
-                                <Package className="w-10 h-10 text-gray-300 mb-2" />
-                                <Placeholder text="Select an item to view variants." />
-                            </div>
+                            <div className="h-full flex flex-col items-center justify-center p-6 text-center opacity-60"><Package className="w-10 h-10 text-gray-300 mb-2" /><Placeholder text="Select an item to view variants." /></div>
                         ) : (
                             filteredVariants.map(variant => (
                                 <div 
                                     key={variant.id} 
                                     onClick={() => handleSelectVariant(variant)} 
                                     className={`group flex justify-between items-center p-3 rounded-lg cursor-pointer border transition-all duration-200 
-                                    ${selectedVariant?.id === variant.id 
-                                        ? 'border-blue-200 bg-blue-50/80 ring-1 ring-blue-200' 
-                                        : 'border-transparent hover:bg-gray-50 hover:border-gray-100'
-                                    }`}
+                                    ${selectedVariant?.id === variant.id ? 'border-blue-200 bg-blue-50/80 ring-1 ring-blue-200' : 'border-transparent hover:bg-gray-50 hover:border-gray-100'}`}
                                 >
                                     <div>
                                         <p className={`text-sm font-semibold ${selectedVariant?.id === variant.id ? 'text-blue-900' : 'text-gray-700'}`}>
                                             {variant.color_name || 'Generic (Color Agnostic)'}
                                         </p>
-                                        <p className="text-xs text-gray-500 mt-0.5 font-mono bg-gray-100 inline-block px-1 rounded">
-                                            Stock: {variant.main_store_stock}
-                                        </p>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <span className="text-[10px] font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">Stock: {variant.main_store_stock}</span>
+                                            <span className="text-[10px] bg-green-50 text-green-700 px-1.5 py-0.5 rounded border border-green-100">SP: ₹{Number(variant.selling_price || 0).toFixed(2)}</span>
+                                        </div>
                                     </div>
                                     <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                         {user.role === 'factory_admin' && (
                                             <>
-                                                <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'variant', data: variant }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200">
-                                                    <Edit2 size={12}/>
-                                                </button>
-                                                <button onClick={(e) => { e.stopPropagation(); handleDelete('variant', variant.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200">
-                                                    <Trash2 size={12}/>
-                                                </button>
+                                                <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'variant', data: variant }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200"><Edit2 size={12}/></button>
+                                                <button onClick={(e) => { e.stopPropagation(); handleDelete('variant', variant.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200"><Trash2 size={12}/></button>
                                             </>
                                         )}
                                         <ChevronRight className={`w-4 h-4 text-gray-300 ${selectedVariant?.id === variant.id ? 'text-blue-400' : ''}`}/>
                                     </div>
                                 </div>
                             ))
-                        )}
-                        {filteredVariants.length === 0 && selectedItem && !loading.variants && (
-                            <p className="text-sm text-center text-gray-400 p-8 bg-gray-50 rounded-lg border border-dashed border-gray-200 m-2">No variants found.</p>
                         )}
                     </div>
                 </div>
@@ -544,33 +596,17 @@ const TrimManagementPage = () => {
                     <div className="border-b border-gray-100 bg-white rounded-t-xl z-10">
                         <header className="flex justify-between items-center p-4 pb-2">
                             <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
-                                <div className="p-1.5 bg-gray-100 rounded-md">
-                                    <Repeat className="text-gray-500 w-5 h-5" />
-                                </div>
+                                <div className="p-1.5 bg-gray-100 rounded-md"><Repeat className="text-gray-500 w-5 h-5" /></div>
                                 Substitutes
                             </h2>
                             {selectedVariant && (
-                                <button 
-                                    onClick={() => setModal({ type: 'substitute' })} 
-                                    className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
-                                >
-                                    <Plus size={18} />
-                                </button>
+                                <button onClick={() => setModal({ type: 'substitute' })} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"><Plus size={18} /></button>
                             )}
                         </header>
-
-                        {/* Filter Input */}
                         <div className="px-4 pb-3">
                             <div className="relative">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                                <input 
-                                    type="text" 
-                                    placeholder="Filter substitutes..." 
-                                    disabled={!selectedVariant}
-                                    value={substituteFilter}
-                                    onChange={(e) => setSubstituteFilter(e.target.value)}
-                                    className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white disabled:bg-gray-100 disabled:text-gray-400"
-                                />
+                                <input type="text" placeholder="Filter substitutes..." disabled={!selectedVariant} value={substituteFilter} onChange={(e) => setSubstituteFilter(e.target.value)} className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white disabled:bg-gray-100 disabled:text-gray-400" />
                             </div>
                         </div>
                     </div>
@@ -579,58 +615,27 @@ const TrimManagementPage = () => {
                         {loading.substitutes ? (
                             <div className="flex justify-center p-8"><Spinner /></div>
                         ) : !selectedVariant ? (
-                            <div className="h-full flex flex-col items-center justify-center p-6 text-center opacity-60">
-                                <Layers className="w-10 h-10 text-gray-300 mb-2" />
-                                <Placeholder text="Select a variant to manage substitutes." />
-                            </div>
+                            <div className="h-full flex flex-col items-center justify-center p-6 text-center opacity-60"><Layers className="w-10 h-10 text-gray-300 mb-2" /><Placeholder text="Select a variant to manage substitutes." /></div>
                         ) : (
                             filteredSubstitutes.map(sub => (
-                                <div 
-                                    key={sub.id} 
-                                    className="group flex justify-between items-center p-3 rounded-lg border border-transparent hover:bg-gray-50 hover:border-gray-100 transition-all duration-200"
-                                >
+                                <div key={sub.id} className="group flex justify-between items-center p-3 rounded-lg border border-transparent hover:bg-gray-50 hover:border-gray-100 transition-all duration-200">
                                     <div>
-                                        <p className="text-sm font-semibold text-gray-700">
-                                            {sub.substitute_item_name} <span className="text-gray-400 font-normal mx-1">/</span> {sub.substitute_color_name || 'Generic'}
-                                        </p>
-                                        <p className="text-xs text-gray-500 mt-0.5 font-mono bg-gray-100 inline-block px-1 rounded">
-                                            Stock: {sub.substitute_stock}
-                                        </p>
+                                        <p className="text-sm font-semibold text-gray-700">{sub.substitute_item_name} <span className="text-gray-400 font-normal mx-1">/</span> {sub.substitute_color_name || 'Generic'}</p>
+                                        <p className="text-xs text-gray-500 mt-0.5 font-mono bg-gray-100 inline-block px-1 rounded">Stock: {sub.substitute_stock}</p>
                                     </div>
                                     {user.role === 'factory_admin' && (
-                                        <button 
-                                            onClick={() => handleDelete('substitute', sub.id)} 
-                                            className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200 opacity-0 group-hover:opacity-100 transition-all"
-                                        >
-                                            <Trash2 size={12}/>
-                                        </button>
+                                        <button onClick={() => handleDelete('substitute', sub.id)} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12}/></button>
                                     )}
                                 </div>
                             ))
-                        )}
-                        {filteredSubstitutes.length === 0 && selectedVariant && !loading.substitutes && (
-                             <p className="text-sm text-center text-gray-400 p-8 bg-gray-50 rounded-lg border border-dashed border-gray-200 m-2">No substitutes found.</p>
                         )}
                     </div>
                 </div>
             </div>
 
-            {/* Modal Rendering */}
             {modal.type === 'item' && <Modal title={modal.data ? 'Edit Item' : 'Add New Item'} onClose={() => setModal({type: null})}><ItemFormModal onSave={(data) => handleSave('item', data)} onClose={() => setModal({type: null})} initialData={modal.data} /></Modal>}
             {modal.type === 'variant' && <Modal title={modal.data ? 'Edit Variant' : 'Add New Variant'} onClose={() => setModal({type: null})}><VariantFormModal onSave={(data) => handleSave('variant', data)} onClose={() => setModal({type: null})} initialData={modal.data} isColorAgnostic={selectedItem?.is_color_agnostic} colors={colors} userRole={user.role} /></Modal>}
-            {modal.type === 'substitute' && (
-                <Modal title="Add Substitute" onClose={() => setModal({type: null})}>
-                    <SubstituteFormModal 
-                        onSave={(data) => handleSave('substitute', data)} 
-                        onClose={() => setModal({type: null})} 
-                        variants={variants} 
-                        parentItemName={selectedItem?.name} 
-                        parentItemBrand={selectedItem?.brand} 
-                        currentVariantId={selectedVariant?.id} 
-                        existingSubstitutes={substitutes} 
-                    />
-                </Modal>
-            )}
+            {modal.type === 'substitute' && <Modal title="Add Substitute" onClose={() => setModal({type: null})}><SubstituteFormModal onSave={(data) => handleSave('substitute', data)} onClose={() => setModal({type: null})} variants={variants} parentItemName={selectedItem?.name} parentItemBrand={selectedItem?.brand} currentVariantId={selectedVariant?.id} existingSubstitutes={substitutes} /></Modal>}
         </div>
     );
 };
