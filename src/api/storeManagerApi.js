@@ -11,7 +11,8 @@ export const storeManagerApi = {
     getVariantsByTrimItem: (trimItemId) => api.get(`/store-manager/trim-item-variants/${trimItemId}`),
 
     // Trim Orders
-    getAllTrimOrders: () => api.get('/store-manager/trim-orders'),
+    getAllTrimOrders: (params) => api.get('/store-manager/trim-orders', { params }),
+    getTrimOrdersKPIs: () => api.get('/store-manager/trim-orders/kpis'),
     getTrimOrderDetails: (orderId) => api.get(`/store-manager/trim-orders/${orderId}`),
     fulfillOrderItem: (data) => api.post('/store-manager/trim-orders/fulfill-item', data),
     fulfillWithVariant: (data) => api.post('/store-manager/trim-orders/fulfill-with-variant', data),
