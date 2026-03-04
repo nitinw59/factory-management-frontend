@@ -28,6 +28,11 @@ const ReferenceDataModal = ({ isOpen, onClose, orderId }) => {
         console.log("Reference MModal Data:", data);
     }, [isOpen, orderId]);
 
+    const totalCutSum = data.cutting.reduce(
+    (sum, cut) => sum + Number(cut.total_cut || 0),
+    0
+    );
+
     if (!isOpen) return null;
 
     return (
@@ -36,13 +41,42 @@ const ReferenceDataModal = ({ isOpen, onClose, orderId }) => {
                 
                 {/* Modal Header */}
                 <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-xl">
+                      {/* Total Summary */}
+        
+                    
                     <div>
                         <h3 className="text-xl font-extrabold text-gray-800 flex items-center">
                             <LuBookOpen className="mr-2 text-indigo-600" /> Batch Reference Details
                         </h3>
                         <p className="text-sm text-gray-500 mt-1">View single piece requirements and cutting history.</p>
                     </div>
-                    <button onClick={onClose} className="p-2 bg-gray-200 text-gray-600 hover:bg-gray-300 rounded-full transition-colors">
+                   
+
+                          <div className="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between">
+    
+                    <div className="flex items-center space-x-8">
+                        <div>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 font-medium">
+                                Total Rolls
+                            </p>
+                            <p className="text-2xl font-semibold text-gray-800">
+                                {data.cutting.length}
+                            </p>
+                        </div>
+
+                        <div>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 font-medium">
+                                Total Cut Quantity
+                            </p>
+                            <p className="text-2xl font-semibold text-blue-600">
+                                {totalCutSum.toLocaleString()}
+                            </p>
+                        </div>
+                    </div>
+
+                </div>
+
+                 <button onClick={onClose} className="p-2 bg-gray-200 text-gray-600 hover:bg-gray-300 rounded-full transition-colors">
                         <LuTrash2 className="h-4 w-4" style={{display: 'none'}} />
                         <span className="font-bold px-1">✕</span>
                     </button>
