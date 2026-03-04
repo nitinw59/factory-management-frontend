@@ -1,10 +1,134 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { 
+    LuClock, LuPackageCheck, LuPackage, LuTriangleAlert, LuRefreshCw, 
+    LuReplace, LuArrowLeft, LuListOrdered, LuCircleCheck, LuWand, 
+    LuTrash2, LuFileText, LuBookOpen, LuScissors, LuTag
+} from 'react-icons/lu';
+import { Loader2, Info } from 'lucide-react'; 
 import { storeManagerApi } from '../../api/storeManagerApi';
-import { LuClock, LuPackageCheck, LuPackage, LuTriangleAlert, LuRefreshCw, LuReplace, LuArrowLeft, LuListOrdered, LuCircleCheck, LuWand, LuTrash2, LuFileText } from 'react-icons/lu';
-import { Loader2 } from 'lucide-react'; 
-
 const Spinner = () => <div className="flex justify-center items-center p-12"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
+
+// --- Reference Data Modal (BOM & Cutting) ---
+const ReferenceDataModal = ({ isOpen, onClose, orderId }) => {
+    const [activeTab, setActiveTab] = useState('bom');
+    const [loading, setLoading] = useState(true);
+    const [data, setData] = useState({ bom: [], cutting: [] });
+
+    useEffect(() => {
+        if (isOpen) {
+            setLoading(true);
+            storeManagerApi.getOrderReferenceData(orderId)
+                .then(res => setData(res.data))
+                .catch(err => console.error("Failed to load reference data", err))
+                .finally(() => setLoading(false));
+               
+        }
+
+        console.log("Reference MModal Data:", data);
+    }, [isOpen, orderId]);
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 transition-opacity duration-300">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+                
+                {/* Modal Header */}
+                <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-xl">
+                    <div>
+                        <h3 className="text-xl font-extrabold text-gray-800 flex items-center">
+                            <LuBookOpen className="mr-2 text-indigo-600" /> Batch Reference Details
+                        </h3>
+                        <p className="text-sm text-gray-500 mt-1">View single piece requirements and cutting history.</p>
+                    </div>
+                    <button onClick={onClose} className="p-2 bg-gray-200 text-gray-600 hover:bg-gray-300 rounded-full transition-colors">
+                        <LuTrash2 className="h-4 w-4" style={{display: 'none'}} />
+                        <span className="font-bold px-1">✕</span>
+                    </button>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex border-b border-gray-200 bg-white">
+                    <button 
+                        onClick={() => setActiveTab('bom')}
+                        className={`flex-1 py-3.5 text-sm font-bold border-b-2 transition-colors flex justify-center items-center ${activeTab === 'bom' ? 'border-indigo-600 text-indigo-700 bg-indigo-50/30' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                    >
+                        <LuTag className="mr-2 h-4 w-4" /> Single Piece BOM
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('cutting')}
+                        className={`flex-1 py-3.5 text-sm font-bold border-b-2 transition-colors flex justify-center items-center ${activeTab === 'cutting' ? 'border-blue-600 text-blue-700 bg-blue-50/30' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                    >
+                        <LuScissors className="mr-2 h-4 w-4" /> Cutting Details
+                    </button>
+                </div>
+
+                {/* Tab Content */}
+                <div className="p-0 overflow-y-auto flex-1 bg-gray-50/30">
+                    {loading ? (
+                        <div className="py-20 flex justify-center items-center flex-col">
+                            <Loader2 className="animate-spin h-8 w-8 text-indigo-500 mb-4" />
+                            <p className="text-gray-500 font-medium">Fetching details...</p>
+                        </div>
+                    ) : (
+                        <>
+                            {/* BOM TAB */}
+                            {activeTab === 'bom' && (
+                                <table className="min-w-full text-left border-collapse">
+                                    <thead className="bg-gray-100 text-xs uppercase text-gray-600 font-bold sticky top-0">
+                                        <tr>
+                                            <th className="py-3 px-5 border-b">Material Name</th>
+                                            <th className="py-3 px-5 border-b text-center">Req. Qty / Pc</th>
+                                            <th className="py-3 px-5 border-b">Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-200 bg-white">
+                                        {data.bom.length > 0 ? data.bom.map((item, idx) => (
+                                            <tr key={idx} className="hover:bg-gray-50">
+                                                <td className="py-3 px-5 font-semibold text-gray-800">{item.item_name}</td>
+                                                <td className="py-3 px-5 text-center font-mono font-bold text-indigo-600 bg-indigo-50/30">{parseFloat(item.quantity_per_piece).toFixed(4)}</td>
+                                                <td className="py-3 px-5 text-sm text-gray-500 italic">{item.notes || '-'}</td>
+                                            </tr>
+                                        )) : (
+                                            <tr><td colSpan="3" className="py-10 text-center text-gray-400">No BOM data found for this product.</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            )}
+
+                            {/* CUTTING TAB */}
+                            {activeTab === 'cutting' && (
+                                <table className="min-w-full text-left border-collapse">
+                                    <thead className="bg-gray-100 text-xs uppercase text-gray-600 font-bold sticky top-0">
+                                        <tr>
+                                            <th className="py-3 px-5 border-b">Roll No.</th>
+                                            <th className="py-3 px-5 border-b">Color</th>
+                                            <th className="py-3 px-5 border-b text-center">Total Cut Qty</th>
+                                            <th className="py-3 px-5 border-b">Size Breakdown</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-200 bg-white">
+                                        {data.cutting.length > 0 ? data.cutting.map((cut, idx) => (
+                                            <tr key={idx} className="hover:bg-gray-50">
+                                                <td className="py-3 px-5 font-bold text-gray-800">{cut.roll_no}</td>
+                                                <td className="py-3 px-5 text-sm text-gray-600 font-medium">{cut.color_name || 'N/A'}</td>
+                                                <td className="py-3 px-5 text-center font-bold text-blue-700">{cut.total_cut}</td>
+                                                <td className="py-3 px-5 text-sm text-gray-500 font-mono bg-gray-50">{cut.sizes || 'N/A'}</td>
+                                            </tr>
+                                        )) : (
+                                            <tr><td colSpan="4" className="py-10 text-center text-gray-400">No cutting records found for this batch yet.</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            )}
+                        </>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
 
 // --- Fulfillment Modal ---
 const FulfillmentModal = ({ item, onClose, onSubmit }) => {
@@ -76,6 +200,7 @@ const FulfillmentModal = ({ item, onClose, onSubmit }) => {
     );
 };
 
+// --- Main Page Component ---
 const TrimOrderDetailPage = () => {
     const { orderId } = useParams();
     const [orderInfo, setOrderInfo] = useState(null);
@@ -85,7 +210,10 @@ const TrimOrderDetailPage = () => {
     const [isFulfillingAll, setIsFulfillingAll] = useState(false); 
     const [isReverting, setIsReverting] = useState(false);
     const [error, setError] = useState(null);
+    
+    // Modals state
     const [modalState, setModalState] = useState({ isOpen: false, item: null });
+    const [refModalOpen, setRefModalOpen] = useState(false); // NEW: Reference Modal State
 
     const fetchDetails = useCallback(async () => {
         setIsLoading(true); 
@@ -100,13 +228,10 @@ const TrimOrderDetailPage = () => {
             setItems(sanitizedItems);
             setMissingItems(response.data.missing_items || []);
             
-            // ✅ Include the newly fetched fields into state
             setOrderInfo({
                 status: response.data.status,
                 batchId: response.data.production_batch_id,
-                batch_index: response.data.batch_code,
-                sales_orders: response.data.sales_order_number,
-                purchase_orders: response.data.purchase_order_code
+                batch_code: response.data.batch_code,
             });
         } catch (err) {
             setError('Could not load order details.');
@@ -216,13 +341,6 @@ const TrimOrderDetailPage = () => {
         return false;
     };
 
-    // Formatter to cleanly display arrays or strings of orders
-    const formatOrderList = (orders) => {
-        if (!orders) return "N/A";
-        if (Array.isArray(orders)) return orders.join(', ');
-        return orders;
-    };
-
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
             <header className="mb-6">
@@ -230,7 +348,6 @@ const TrimOrderDetailPage = () => {
                     <LuArrowLeft className="mr-2" /> Back to All Orders
                 </Link>
                 
-                {/* ✅ REDESIGNED HEADER: Meta Data & Summary Link */}
                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
                     <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
                         <div className="flex-1">
@@ -249,27 +366,23 @@ const TrimOrderDetailPage = () => {
                                         <span className="font-bold text-gray-400 uppercase text-[10px] tracking-wider mr-2">Batch:</span> 
                                         <span className="font-semibold text-gray-800">
                                             #{orderInfo.batchId} 
-                                            {orderInfo.batch_index && <span className="ml-1 text-gray-500">({orderInfo.batch_index})</span>}
+                                            {orderInfo.batch_code && <span className="ml-1 text-gray-500">({orderInfo.batch_code})</span>}
                                         </span>
                                     </div>
-                                    {/* <div className="flex items-center border-l border-gray-300 pl-6">
-                                        <span className="font-bold text-gray-400 uppercase text-[10px] tracking-wider mr-2">SO:</span> 
-                                        <span className="font-semibold text-gray-800 truncate max-w-[200px]" title={formatOrderList(orderInfo.sales_orders)}>
-                                            {formatOrderList(orderInfo.sales_orders)}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center border-l border-gray-300 pl-6">
-                                        <span className="font-bold text-gray-400 uppercase text-[10px] tracking-wider mr-2">PO:</span> 
-                                        <span className="font-semibold text-gray-800 truncate max-w-[200px]" title={formatOrderList(orderInfo.purchase_orders)}>
-                                            {formatOrderList(orderInfo.purchase_orders)}
-                                        </span>
-                                    </div> */}
                                 </div>
                             )}
                         </div>
                         
-                        <div className="flex flex-col items-end gap-2 shrink-0">
-                            {/* ✅ LINK TO SUMMARY PAGE */}
+                        <div className="flex flex-col sm:flex-row items-end gap-3 shrink-0 mt-2 md:mt-0">
+                            {/* ✅ NEW BUTTON: Opens Reference Modal */}
+                            <button 
+                                onClick={() => setRefModalOpen(true)}
+                                className="px-5 py-2.5 bg-white text-gray-700 hover:bg-gray-100 border border-gray-300 hover:border-gray-400 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center"
+                            >
+                                <Info className="mr-2 h-5 w-5 text-gray-500" /> 
+                                View Ref & BOM
+                            </button>
+
                             <Link 
                                 to={`/store-manager/trim-orders/${orderId}/summary`} 
                                 className="px-5 py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-100 hover:border-indigo-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center group"
@@ -314,7 +427,6 @@ const TrimOrderDetailPage = () => {
                                 <LuListOrdered className="mr-3 text-blue-600"/>Order Requirements
                             </h3>
                             
-                            {/* Bulk Action Buttons */}
                             <div className="flex gap-3">
                                 {substituteFulfillableItems.length > 0 && (
                                     <button 
@@ -368,35 +480,30 @@ const TrimOrderDetailPage = () => {
                                         return (
                                             <tr key={item.id} className={`hover:bg-blue-50/30 transition-colors align-top ${isComplete ? 'bg-green-50/20' : ''}`}>
                                                 
-                                                {/* ITEM DETAILS */}
                                                 <td className="py-4 px-5">
                                                     <div className="font-bold text-gray-900 text-base mb-1">{item.item_name}</div>
                                                     <div className="text-sm font-medium text-gray-600 flex items-center">
                                                         Req: <span className="font-bold text-gray-900 ml-1.5 bg-gray-100 px-2 rounded">{item.quantity_required}</span> 
                                                         <span className="mx-2 text-gray-300">|</span> 
-                                                        Color: <span className="font-bold text-gray-800 ml-1.5">{item.color_name} - {item.color_number}</span>
+                                                        Color: <span className="font-bold text-gray-800 ml-1.5">{item.color_name} {item.color_number ? `- ${item.color_number}` : ''}</span>
                                                     </div>
                                                 </td>
 
-                                                {/* IN STOCK */}
                                                 <td className="py-4 px-5 text-center">
                                                     <span className={`text-lg font-bold ${item.available_stock > 0 ? 'text-blue-700' : 'text-red-500'}`}>
                                                         {item.available_stock}
                                                     </span>
                                                 </td>
 
-                                                {/* STATUS */}
                                                 <td className="py-4 px-5 text-center">
                                                     <span className={`inline-flex items-center font-bold text-[11px] uppercase tracking-wide text-${status.color}-700 bg-${status.color}-100 px-3 py-1.5 rounded-full border border-${status.color}-200`}>
                                                         <Icon className="mr-1.5 h-4 w-4"/> {status.text}
                                                     </span>
                                                 </td>
 
-                                                {/* FULFILLMENT DETAILS & ACTIONS */}
                                                 <td className="py-4 px-5">
                                                     <div className="flex flex-col gap-3">
                                                         
-                                                        {/* The action button if more is needed */}
                                                         {!isComplete && (
                                                             <div>
                                                                 <button 
@@ -409,7 +516,6 @@ const TrimOrderDetailPage = () => {
                                                             </div>
                                                         )}
 
-                                                        {/* Fulfillment Logs (The "What was used" view + Revert option) */}
                                                         {item.fulfillment_log && item.fulfillment_log.length > 0 && (
                                                             <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5">
                                                                 <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 flex justify-between border-b pb-1">
@@ -426,7 +532,7 @@ const TrimOrderDetailPage = () => {
                                                                                     {log.fulfilled_item_name}
                                                                                 </span>
                                                                                 <span className="text-[10px] font-semibold text-gray-500 leading-tight truncate mt-0.5 ml-[26px]">
-                                                                                    {log.fulfilled_color_name} - {log.fulfilled_color_number}
+                                                                                    {log.fulfilled_color_name} {log.fulfilled_color_number ? `- ${log.fulfilled_color_number}` : ''}
                                                                                     {log.used_substitute && <span className="text-purple-600 font-bold ml-1.5 bg-purple-50 px-1 rounded">(Substituted)</span>}
                                                                                 </span>
                                                                             </div>
@@ -458,9 +564,14 @@ const TrimOrderDetailPage = () => {
                 </main>
             )}
             
+            {/* Existing Fulfillment Modal */}
             {modalState.isOpen && (
                 <FulfillmentModal item={modalState.item} onClose={() => setModalState({ isOpen: false, item: null })} onSubmit={handleFulfillmentSubmit} />
             )}
+
+            {/* NEW Reference & BOM Modal */}
+            <ReferenceDataModal isOpen={refModalOpen} onClose={() => setRefModalOpen(false)} orderId={orderId} />
+
         </div>
     );
 };
