@@ -100,6 +100,8 @@ import MechanicsProtectedRoute from './shared/MechanicsProtectedRoute';
 import MechanicsDashboardPage from './modules/mechanics/MechanicsDashboardPage';
 import TrimBillingPage from './modules/store_manager/TrimBillingPage';
 
+import AdminMaintenanceDashboard from './modules/admin/AdminMaintenanceDashboard';
+import MaintenanceSchedulePage from './modules/maintenance/MaintenanceSchedulePage';
 function App() {
   return (
     <Routes>
@@ -136,6 +138,8 @@ function App() {
           
           <Route path="portal-management" element={<PortalManagementPage />} />
           <Route path="trim-management" element={<TrimManagementPage />} />
+          <Route path="maintenance-dashboard" element={<AdminMaintenanceDashboard />} />
+          <Route path="maintenance-schedule" element={<MaintenanceSchedulePage />} /> 
       </Route>
 
               {/* Store Manager Portal */}
@@ -293,6 +297,8 @@ function App() {
         <Route path="dashboard" element={<MechanicsDashboardPage />} />
         {/* Add more mechanics operator specific routes here later */}
     </Route>
+
+    <Route path="/maintenance/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}
       <Route path="*" element={<Navigate to="/" />} />

@@ -102,10 +102,17 @@ const AdminLayout = () => {
                    <NavLink to="/admin/workstation-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Workstation Types</NavLink>
                    <NavLink to="/admin/portal-management" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Portals</NavLink>
                 </DesktopNavDropdown>
+                <DesktopNavDropdown title="Maintenance">
+                  <NavLink to="/admin/maintenance-dashboard" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Dashboard</NavLink>
+                   <NavLink to="/admin/maintenance-schedule" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Schedule</NavLink>
+                   <NavLink to="/admin/maintenance-logs" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Logs</NavLink>
+                </DesktopNavDropdown>
 
                 <NavLink to="/admin/asset-management" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                   Asset Management
                 </NavLink>  
+
+                
               </nav>
             </div>
 

@@ -1,37 +1,47 @@
 import api from '../utils/api';
 
 export const sparesApi = {
-    /**
-     * Fetches all spare parts with current stock, cost, and category details.
-     */
+    // --- GLOBAL STORE METHODS ---
     getAllSpares: async () => {
-        const response = await api.get('/assets/spares');
+        const response = await api.get('/spares/');
         return response.data;
     },
-
-    /**
-     * Fetches categories for the dropdown (e.g., Electrical, Mechanical).
-     */
     getCategories: async () => {
-        const response = await api.get('/assets/spares/categories');
+        const response = await api.get('/spares/categories');
         return response.data;
     },
-
-    /**
-     * Creates a new spare part definition in the system.
-     * @param {object} data - { name, part_number, category_id, min_stock_threshold, unit_cost, location, current_stock }
-     */
     createSparePart: async (data) => {
-        const response = await api.post('/assets/spares', data);
+        const response = await api.post('/spares/', data);
+        return response.data;
+    },
+    restockSparePart: async (data) => {
+        const response = await api.post('/spares/restock', data);
         return response.data;
     },
 
-    /**
-     * Adds stock to an existing part and updates the weighted average cost.
-     * @param {object} data - { spare_id, qty, new_unit_cost }
-     */
-    restockSparePart: async (data) => {
-        const response = await api.post('/assets/spares/restock', data);
+    // --- NEW: USER / MECHANIC INVENTORY METHODS ---
+    
+    // Get the stock currently held by the logged-in user
+    getMySpareInventory: async () => {
+        const response = await api.get('/spares/my-inventory');
+        return response.data;
+    },
+    // Submit a request to the store for parts/needles
+    requestSpares: async (data) => {
+        const response = await api.post('/spares/request', data);
+        return response.data;
+    },
+
+    // --- NEW: STORE MANAGER ISSUANCE METHODS ---
+    
+    // View all pending requests from users
+    getPendingRequests: async () => {
+        const response = await api.get('/spares/requests');
+        return response.data;
+    },
+    // Issue parts (moves stock from Main Store -> User Inventory)
+    issueSpares: async (requestId, data) => {
+        const response = await api.post(`/spares/requests/${requestId}/issue`, data);
         return response.data;
     }
 };

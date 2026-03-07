@@ -1,26 +1,41 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
-    FiCamera, FiSearch, FiPlus, FiArrowLeft, FiClipboard, 
-    FiX, FiDownload, FiUpload, FiEdit, FiAlertCircle, FiCheck 
-} from 'react-icons/fi';
-import { LuHardHat,LuAirplay } from 'react-icons/lu';
-import { assetApi } from '../../api/assetApi'; 
+    Camera, Plus, ArrowLeft, Clipboard, 
+    X, Download, Upload, Edit2, AlertCircle, Check, Calendar, Shield,
+    HardHat, Loader2, Trash2, Filter, Info, IndianRupee
+} from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
-// --- Helper Components ---
-const Spinner = () => <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
-const ErrorDisplay = ({ message, onClear }) => (
-    <div className="p-3 bg-red-100 text-red-700 rounded-lg flex justify-between items-center mb-4">
-        <span className="text-sm font-medium flex items-center"><FiAlertCircle className="mr-2"/> {message}</span>
-        {onClear && <button onClick={onClear} className="font-bold text-lg text-red-700 hover:text-red-900">&times;</button>}
-    </div>
-);
+import { assetApi } from '../../api/assetApi';  
+import { maintenanceApi } from '../../api/maintenanceApi';
+// import { sparesApi } from '../../api/sparesApi'; // Available for future use if needed
+
+
+// --- Enterprise Helper Components ---
+const Spinner = () => <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
+
+const Toast = ({ message, type = 'success', onClose }) => {
+    useEffect(() => {
+        const timer = setTimeout(onClose, 4000);
+        return () => clearTimeout(timer);
+    }, [onClose]);
+
+    const bg = type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-blue-600';
+    return (
+        <div className={`fixed bottom-6 right-6 ${bg} text-white px-6 py-3 rounded-lg shadow-xl flex items-center gap-3 z-50 animate-fade-in-up`}>
+            {type === 'success' ? <Check size={20} /> : <AlertCircle size={20} />}
+            <span className="font-medium">{message}</span>
+            <button onClick={onClose} className="ml-4 hover:text-gray-200"><X size={16} /></button>
+        </div>
+    );
+};
+
 const Modal = ({ title, children, onClose, size = "max-w-md" }) => (
-    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 backdrop-blur-sm" onClick={onClose}>
-        <div className={`bg-white rounded-lg shadow-xl w-full ${size} flex flex-col max-h-[90vh]`} onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-lg">
-                <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
-                <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><FiX size={20}/></button>
+    <div className="fixed inset-0 bg-gray-900/60 z-50 flex justify-center items-center p-4 backdrop-blur-sm transition-opacity" onClick={onClose}>
+        <div className={`bg-white rounded-xl shadow-2xl w-full ${size} flex flex-col max-h-[90vh] overflow-hidden`} onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b flex justify-between items-center bg-gray-50/80">
+                <h2 className="text-xl font-bold text-gray-800">{title}</h2>
+                <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-full transition-colors"><X size={20}/></button>
             </div>
             <div className="p-6 overflow-y-auto">{children}</div>
         </div>
@@ -29,7 +44,7 @@ const Modal = ({ title, children, onClose, size = "max-w-md" }) => (
 
 // --- CSV UTILS ---
 const downloadAsCSV = (data, fileName = 'assets_export.csv') => {
-    if (!data || !data.length) return alert("No data to export.");
+    if (!data || !data.length) return;
     const headers = Object.keys(data[0]);
     const csvContent = [
         headers.join(','),
@@ -52,7 +67,6 @@ const parseCSV = (text) => {
     const lines = text.split('\n');
     const headers = lines[0].split(',').map(h => h.replace(/(^"|"$)/g, '').trim());
     return lines.slice(1).filter(line => line.trim()).map(line => {
-        // Regex handles commas inside quotes
         const values = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
         let obj = {};
         headers.forEach((h, i) => obj[h] = values[i] ? values[i].replace(/(^"|"$)/g, '').trim() : null);
@@ -62,25 +76,38 @@ const parseCSV = (text) => {
 
 // --- Modals ---
 const QrScannerModal = ({ onScanSuccess, onClose }) => {
-    useEffect(() => {
-        let scanner;
-        try {
-            scanner = new Html5QrcodeScanner("qr-reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
-            scanner.render((decodedText) => {
-                scanner.clear().then(() => onScanSuccess(decodedText)).catch(() => onScanSuccess(decodedText));
-            }, () => {});
-        } catch (err) { console.error(err); }
-        return () => { if (scanner) scanner.clear().catch(e => console.error(e)); };
-    }, [onScanSuccess]);
-
+    const [manualCode, setManualCode] = useState('');
+    
     return (
         <Modal title="Scan Asset QR Code" onClose={onClose}>
-            <div id="qr-reader" className="w-full max-w-sm mx-auto"></div>
+            <div className="flex flex-col items-center">
+                <div className="w-64 h-64 bg-gray-100 border-2 border-dashed border-gray-300 flex flex-col items-center justify-center mb-6 rounded-2xl relative overflow-hidden">
+                    <Camera size={48} className="text-gray-300 mb-2" />
+                    <span className="text-gray-400 text-sm font-medium">Scanner Active...</span>
+                    <div className="absolute top-0 w-full h-1 bg-blue-500 opacity-70 animate-pulse"></div>
+                </div>
+                <div className="w-full flex gap-3">
+                    <input 
+                        type="text" 
+                        value={manualCode} 
+                        onChange={(e) => setManualCode(e.target.value)}
+                        placeholder="Or enter QR code manually"
+                        className="flex-1 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 outline-none transition-colors"
+                        autoFocus
+                    />
+                    <button 
+                        onClick={() => manualCode.trim() && onScanSuccess(manualCode.trim())}
+                        className="px-6 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-sm"
+                    >
+                        Process
+                    </button>
+                </div>
+            </div>
         </Modal>
     );
 };
 
-const AddAssetTypeModal = ({ onClose, onSaveSuccess }) => {
+const AddAssetTypeModal = ({ onClose, onSaveSuccess, showToast }) => {
     const [typeName, setTypeName] = useState('');
     const [description, setDescription] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -90,36 +117,48 @@ const AddAssetTypeModal = ({ onClose, onSaveSuccess }) => {
         setIsSaving(true);
         try {
             const res = await assetApi.createAssetType({ type_name: typeName, description });
+            showToast('Asset type created successfully', 'success');
             onSaveSuccess(res.data);
         } catch (err) {
-            alert('Failed to create asset type.');
+            showToast('Failed to create asset type', 'error');
         } finally {
             setIsSaving(false);
         }
     };
 
     return (
-        <Modal title="Add New Asset Type" onClose={onClose}>
-            <form onSubmit={handleSubmit} className="space-y-4">
-                <div><label className="block text-sm font-medium">Type Name*</label><input type="text" value={typeName} onChange={(e) => setTypeName(e.target.value)} required className="mt-1 p-2 w-full border rounded-md" /></div>
-                <div><label className="block text-sm font-medium">Description</label><textarea value={description} onChange={(e) => setDescription(e.target.value)} className="mt-1 p-2 w-full border rounded-md" rows="2"></textarea></div>
-                <div className="flex justify-end space-x-3 pt-4 border-t"><button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 rounded-md">Cancel</button><button type="submit" disabled={isSaving} className="px-4 py-2 bg-blue-600 text-white rounded-md">{isSaving ? 'Saving...' : 'Save Type'}</button></div>
+        <Modal title="Create New Asset Type" onClose={onClose}>
+            <form onSubmit={handleSubmit} className="space-y-5">
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Type Name*</label>
+                    <input type="text" value={typeName} onChange={(e) => setTypeName(e.target.value)} required placeholder="e.g. Single Needle Machine" className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none transition-colors" />
+                </div>
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Description</label>
+                    <textarea value={description} onChange={(e) => setDescription(e.target.value)} className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none transition-colors" rows="3"></textarea>
+                </div>
+                <div className="flex justify-end gap-3 pt-4">
+                    <button type="button" onClick={onClose} className="px-5 py-2.5 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-semibold transition-colors">Cancel</button>
+                    <button type="submit" disabled={isSaving} className="px-5 py-2.5 bg-blue-600 text-white hover:bg-blue-700 rounded-lg font-bold transition-colors flex items-center">
+                        {isSaving ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : null} Save Type
+                    </button>
+                </div>
             </form>
         </Modal>
     );
 };
 
-const ImportConfirmationModal = ({ parsedData, onConfirm, onClose }) => {
+const ImportConfirmationModal = ({ parsedData, onConfirm, onClose, showToast }) => {
     const [isImporting, setIsImporting] = useState(false);
 
     const handleConfirm = async () => {
         setIsImporting(true);
         try {
             const res = await assetApi.bulkImportAssets(parsedData);
-            alert(`Import Successful! \nInserted: ${res.data.inserted} \nUpdated: ${res.data.updated}`);
+            showToast(`Import Successful! Inserted: ${res.data.inserted || 0}, Updated: ${res.data.updated || 0}`, 'success');
             onConfirm();
         } catch (err) {
-            alert(err.response?.data?.error || "Import failed");
+            showToast(err.response?.data?.error || "Bulk import failed", 'error');
         } finally {
             setIsImporting(false);
         }
@@ -127,45 +166,44 @@ const ImportConfirmationModal = ({ parsedData, onConfirm, onClose }) => {
 
     return (
         <Modal title="Confirm Bulk Import" onClose={onClose} size="max-w-4xl">
-            <div className="space-y-4">
-                <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200 text-yellow-800 flex items-start">
-                    <FiAlertCircle className="w-5 h-5 mr-2 mt-0.5 shrink-0" />
+            <div className="space-y-5">
+                <div className="bg-yellow-50 p-5 rounded-xl border border-yellow-200 text-yellow-800 flex items-start">
+                    <AlertCircle className="w-6 h-6 mr-3 shrink-0 text-yellow-600" />
                     <div>
-                        <p className="font-bold">You are about to import/update {parsedData.length} assets.</p>
-                        <p className="text-sm mt-1">If the QR ID exists, the asset will be updated. If it does not exist, a new asset will be created.</p>
+                        <p className="font-bold text-lg">You are about to import {parsedData.length} records.</p>
+                        <p className="text-sm mt-1 font-medium text-yellow-700">If a System QR ID exists, the equipment profile will be updated. Otherwise, a new record will be generated.</p>
                     </div>
                 </div>
                 
-                <h4 className="font-bold text-gray-700">Data Preview (First 5 rows)</h4>
-                <div className="overflow-x-auto border rounded-lg">
-                    <table className="w-full text-sm text-left">
-                        <thead className="bg-gray-100 text-gray-600">
+                <h4 className="font-bold text-gray-700">Data Preview (First 5 records)</h4>
+                <div className="overflow-x-auto border-2 border-gray-100 rounded-xl">
+                    <table className="min-w-full text-sm text-left">
+                        <thead className="bg-gray-50 text-gray-600">
                             <tr>
-                                <th className="p-2">QR ID</th>
-                                <th className="p-2">Asset Name</th>
-                                <th className="p-2">Type</th>
-                                <th className="p-2">Brand</th>
-                                <th className="p-2">Supplier</th>
+                                <th className="p-3 font-bold">QR ID</th>
+                                <th className="p-3 font-bold">Asset Name</th>
+                                <th className="p-3 font-bold">Brand</th>
+                                <th className="p-3 font-bold">Purchase Cost</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y">
+                        <tbody className="divide-y divide-gray-100">
                             {parsedData.slice(0, 5).map((row, i) => (
-                                <tr key={i}>
-                                    <td className="p-2 font-mono text-xs">{row["QR ID"] || '-'}</td>
-                                    <td className="p-2">{row["Asset Name"]}</td>
-                                    <td className="p-2">{row["Type"]}</td>
-                                    <td className="p-2">{row["Brand"]}</td>
-                                    <td className="p-2">{row["Supplier"]}</td>
+                                <tr key={i} className="bg-white">
+                                    <td className="p-3 font-mono text-xs font-bold text-gray-600">{row["QR ID"] || row["asset_qr_id"] || '-'}</td>
+                                    <td className="p-3 font-medium">{row["Asset Name"] || row["name"]}</td>
+                                    <td className="p-3 text-gray-600">{row["Brand"] || row["brand"] || '-'}</td>
+                                    <td className="p-3 text-gray-600">{row["Purchase Cost"] || row["purchase_cost"] || '-'}</td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
 
-                <div className="flex justify-end gap-3 pt-4 border-t">
-                    <button onClick={onClose} disabled={isImporting} className="px-5 py-2 bg-gray-200 text-gray-800 rounded-lg font-medium hover:bg-gray-300">Cancel</button>
-                    <button onClick={handleConfirm} disabled={isImporting} className="px-5 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 flex items-center">
-                        {isImporting ? <Spinner /> : <><FiCheck className="mr-2"/> Confirm Bulk Update</>}
+                <div className="flex justify-end gap-3 pt-6 border-t-2 border-gray-100">
+                    <button onClick={onClose} disabled={isImporting} className="px-6 py-2.5 bg-gray-100 text-gray-800 rounded-xl font-bold hover:bg-gray-200 transition-colors">Cancel</button>
+                    <button onClick={handleConfirm} disabled={isImporting} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors flex items-center shadow-sm">
+                        {isImporting ? <Loader2 className="animate-spin mr-2 w-5 h-5"/> : <Check className="mr-2 w-5 h-5"/>} 
+                        {isImporting ? 'Processing...' : 'Confirm Bulk Sync'}
                     </button>
                 </div>
             </div>
@@ -173,40 +211,44 @@ const ImportConfirmationModal = ({ parsedData, onConfirm, onClose }) => {
     );
 };
 
-
 /**
  * Main Asset Management Page
  */
 const AssetManagementPage = () => {
     const [viewMode, setViewMode] = useState('list'); // 'list', 'form', 'details'
     const [selectedAsset, setSelectedAsset] = useState(null);
-    const [editingData, setEditingData] = useState(null); // Holds data when editing
+    const [editingData, setEditingData] = useState(null); 
     
     const [assets, setAssets] = useState([]);
     const [assetTypes, setAssetTypes] = useState([]);
     const [suppliers, setSuppliers] = useState([]);
+    const [pmTemplates, setPmTemplates] = useState([]);
     
     const [isLoading, setIsLoading] = useState(true);
     const [isScanModalOpen, setIsScanModalOpen] = useState(false); 
     const [importData, setImportData] = useState(null);
     
-    const [error, setError] = useState(null);
     const [qrSearchTerm, setQrSearchTerm] = useState('');
+    const [unregisteredQr, setUnregisteredQr] = useState(null);
+    
+    const [toast, setToast] = useState(null);
+    const showToast = (message, type = 'success') => setToast({ message, type });
 
     const fetchAllData = useCallback(async () => {
         setIsLoading(true);
-        setError(null);
         try {
-            const [assetsRes, typesRes, supRes] = await Promise.all([
+            const [assetsRes, typesRes, supRes, pmRes] = await Promise.all([
                 assetApi.getAllAssets(),
                 assetApi.getAllAssetTypes(),
-                assetApi.getSuppliers ? assetApi.getSuppliers() : Promise.resolve({ data: [] })
+                assetApi.getSuppliers ? assetApi.getSuppliers() : Promise.resolve({ data: [] }),
+                maintenanceApi.getPMTemplates ? maintenanceApi.getPMTemplates() : Promise.resolve({ data: [] })
             ]);
             setAssets(assetsRes.data || []);
             setAssetTypes(typesRes.data || []);
             setSuppliers(supRes.data || []);
+            setPmTemplates(pmRes.data || []);
         } catch (err) {
-            setError('Could not load asset data.');
+            showToast('Failed to connect to system databases.', 'error');
         } finally {
             setIsLoading(false);
         }
@@ -216,37 +258,34 @@ const AssetManagementPage = () => {
         if (viewMode === 'list') {
             fetchAllData();
             setEditingData(null);
+            setUnregisteredQr(null);
         }
     }, [viewMode, fetchAllData]);
 
-    const findAssetByQr = async (qrId) => {
+    // Smart Routing: Check DB, route to details OR prompt to add
+    const processQrId = async (qrId) => {
+        if (!qrId) return;
         setIsLoading(true);
-        setError(null);
+        setUnregisteredQr(null);
+        
         try {
             const res = await assetApi.getAssetByQrId(qrId);
             setSelectedAsset(res.data);
             setViewMode('details');
+            setQrSearchTerm('');
+            showToast(`Asset loaded: ${res.data.name}`, 'success');
         } catch (err) {
-            setError(err.response?.data?.error || `No asset found with ID: ${qrId}`);
+            // Assume 404 means asset does not exist yet
+            setUnregisteredQr(qrId);
+            setQrSearchTerm('');
         } finally {
             setIsLoading(false);
-            setQrSearchTerm('');
         }
     };
 
-    const handleSearch = (e) => {
+    const handleSearchSubmit = (e) => {
         e.preventDefault();
-        if (!qrSearchTerm) return;
-        findAssetByQr(qrSearchTerm);
-    };
-
-    const handleExport = async () => {
-        try {
-            const res = await assetApi.exportAssets();
-            downloadAsCSV(res.data, `Assets_Export_${new Date().toISOString().split('T')[0]}.csv`);
-        } catch (error) {
-            alert("Failed to export assets");
-        }
+        processQrId(qrSearchTerm);
     };
 
     const handleFileImport = (e) => {
@@ -259,413 +298,516 @@ const AssetManagementPage = () => {
             if(parsed && parsed.length > 0) {
                 setImportData(parsed);
             } else {
-                alert("Invalid or empty CSV file.");
+                showToast("Invalid or empty CSV file.", "error");
             }
         };
         reader.readAsText(file);
-        e.target.value = null; // reset input
-    };
-
-    const handleEditAsset = (asset) => {
-        setEditingData(asset);
-        setViewMode('form');
+        e.target.value = null; // Reset input
     };
 
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
-            <header className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <h1 className="text-3xl font-bold text-gray-800 flex items-center"><LuHardHat className="mr-3 text-blue-500"/>Asset Management</h1>
+            {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
+            <header className="mb-8 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
+                <div>
+                    <h1 className="text-3xl font-extrabold text-gray-900 flex items-center">
+                        <HardHat className="mr-3 w-8 h-8 text-blue-600"/> Asset Command Center
+                    </h1>
+                    <p className="text-gray-500 mt-1 font-medium ml-11">NIITN TRADERS / MATRIX OVERSEAS LLP</p>
+                </div>
                 
                 {viewMode === 'list' && (
-                    <div className="flex gap-2">
-                        <label className="cursor-pointer px-4 py-2 bg-white border border-gray-300 text-gray-700 font-semibold rounded-lg shadow-sm hover:bg-gray-50 flex items-center transition-colors">
-                            <FiUpload className="mr-2"/> Import CSV
+                    <div className="flex gap-3">
+                        <label className="cursor-pointer px-5 py-2.5 bg-white text-gray-700 border-2 border-gray-200 font-bold rounded-xl hover:bg-gray-50 flex items-center transition-colors shadow-sm">
+                            <Upload className="mr-2 w-4 h-4 text-blue-600"/> Import CSV
                             <input type="file" accept=".csv" className="hidden" onChange={handleFileImport} />
                         </label>
-                        <button onClick={handleExport} className="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-sm hover:bg-green-700 flex items-center transition-colors">
-                            <FiDownload className="mr-2"/> Export Excel
+                        <button onClick={() => downloadAsCSV(assets)} className="px-5 py-2.5 bg-white text-gray-700 border-2 border-gray-200 font-bold rounded-xl hover:bg-gray-50 flex items-center transition-colors shadow-sm">
+                            <Download className="mr-2 w-4 h-4 text-green-600"/> Export Report
                         </button>
                     </div>
                 )}
             </header>
 
-            {/* Main Search Bar */}
+            {/* Smart Universal Search/Scan Bar */}
             {viewMode === 'list' && (
-                <form onSubmit={handleSearch} className="mb-6 flex gap-2">
-                    <input
-                        type="text"
-                        value={qrSearchTerm}
-                        onChange={(e) => setQrSearchTerm(e.target.value)}
-                        placeholder="Scan or enter Asset QR ID..."
-                        className="flex-grow p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                    <button type="button" onClick={() => { setError(null); setIsScanModalOpen(true); }} className="px-4 py-3 bg-gray-700 text-white font-semibold rounded-lg shadow-sm hover:bg-gray-800 flex items-center">
-                        <FiCamera className="mr-2"/> Scan
-                    </button>
-                    <button type="submit" className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-sm hover:bg-blue-700 flex items-center">
-                        <FiSearch className="mr-2"/> Search
-                    </button>
-                    <button type="button" onClick={() => { setEditingData(null); setViewMode('form'); setQrSearchTerm(''); }} className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-sm hover:bg-indigo-700 flex items-center">
-                        <FiPlus className="mr-2"/> Add New
-                    </button>
-                </form>
-            )}
-            
-            {(error && !isLoading) && <ErrorDisplay message={error} onClear={() => setError(null)} />}
+                <div className="mb-8 max-w-3xl">
+                    <form onSubmit={handleSearchSubmit} className="relative shadow-sm rounded-xl">
+                        <input
+                            type="text"
+                            value={qrSearchTerm}
+                            onChange={(e) => setQrSearchTerm(e.target.value)}
+                            placeholder="Scan or type Asset QR ID to inspect or register..."
+                            className="w-full pl-14 pr-6 py-4 border-2 border-gray-300 rounded-xl text-lg focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10 outline-none transition-all font-medium text-gray-800 placeholder-gray-400"
+                            autoFocus
+                        />
+                        <button 
+                            type="button" 
+                            onClick={() => setIsScanModalOpen(true)} 
+                            className="absolute left-4 top-1/2 transform -translate-y-1/2 p-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg transition-colors"
+                            title="Open Camera Scanner"
+                        >
+                            <Camera className="w-6 h-6"/>
+                        </button>
+                    </form>
 
-            <div className="mt-6">
+                    {/* Unregistered QR State Prompt */}
+                    {unregisteredQr && (
+                        <div className="mt-4 p-5 bg-yellow-50 border border-yellow-200 rounded-xl flex items-center justify-between animate-fade-in-up">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-yellow-100 text-yellow-700 rounded-full"><Info size={24}/></div>
+                                <div>
+                                    <h4 className="font-bold text-yellow-900 text-lg">Unregistered Asset Detected</h4>
+                                    <p className="text-yellow-800 text-sm mt-0.5">QR Code <span className="font-mono font-bold bg-yellow-100 px-1 py-0.5 rounded">{unregisteredQr}</span> is not linked to any equipment.</p>
+                                </div>
+                            </div>
+                            <button 
+                                onClick={() => {
+                                    setEditingData(null);
+                                    setViewMode('form');
+                                }} 
+                                className="px-6 py-3 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-lg shadow-sm transition-colors flex items-center"
+                            >
+                                <Plus className="mr-2 w-5 h-5"/> Register Asset
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <main className="bg-transparent">
                 {isLoading && <Spinner />}
 
-                {!isLoading && viewMode === 'list' && (
-                    <AssetList assets={assets} onSelect={(asset) => findAssetByQr(asset.asset_qr_id)} />
+                {!isLoading && viewMode === 'list' && !unregisteredQr && (
+                    <AssetList assets={assets} onSelect={(asset) => processQrId(asset.asset_qr_id)} />
                 )}
                 
                 {!isLoading && viewMode === 'details' && (
                     <AssetDetails 
                         asset={selectedAsset} 
                         onBack={() => { setViewMode('list'); setSelectedAsset(null); }} 
-                        onEdit={() => handleEditAsset(selectedAsset)}
-                        onRefetch={() => findAssetByQr(selectedAsset.asset_qr_id)} 
+                        onEdit={() => { setEditingData(selectedAsset); setViewMode('form'); }}
+                        onRefetch={() => processQrId(selectedAsset.asset_qr_id)} 
+                        showToast={showToast}
                     />
                 )}
                 
                 {!isLoading && viewMode === 'form' && (
                     <AssetForm 
                         assetTypes={assetTypes} 
-                        suppliers={suppliers}
+                        pmTemplates={pmTemplates}
                         initialData={editingData}
-                        onSaveSuccess={() => { setViewMode('list'); setEditingData(null); }} 
-                        onCancel={() => { setViewMode('list'); setEditingData(null); }}
-                        initialQrId={qrSearchTerm}
+                        initialQrId={unregisteredQr || ''}
+                        onSaveSuccess={() => { setViewMode('list'); setEditingData(null); setUnregisteredQr(null); showToast('Asset saved successfully'); }} 
+                        onCancel={() => { setViewMode(editingData ? 'details' : 'list'); setEditingData(null); setUnregisteredQr(null); }}
                         onAssetTypeCreated={(newType) => setAssetTypes(prev => [...prev, newType])} 
+                        showToast={showToast}
                     />
                 )}
-            </div>
+            </main>
 
-            {isScanModalOpen && <QrScannerModal onClose={() => setIsScanModalOpen(false)} onScanSuccess={(id) => { setIsScanModalOpen(false); findAssetByQr(id); }} />}
-            {importData && <ImportConfirmationModal parsedData={importData} onConfirm={() => { setImportData(null); fetchAllData(); }} onClose={() => setImportData(null)} />}
+            {isScanModalOpen && <QrScannerModal onClose={() => setIsScanModalOpen(false)} onScanSuccess={(id) => { setIsScanModalOpen(false); processQrId(id); }} />}
+            {importData && <ImportConfirmationModal parsedData={importData} onConfirm={() => { setImportData(null); fetchAllData(); }} onClose={() => setImportData(null)} showToast={showToast} />}
         </div>
     );
 };
 
-// --- Asset List View ---
-const AssetList = ({ assets, onSelect }) => (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <table className="min-w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                    <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Asset Name</th>
-                    <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">QR ID</th>
-                    <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
-                    <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Location</th>
-                    <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-                {assets.length === 0 && <tr><td colSpan="5" className="text-center p-8 text-gray-500">No assets found.</td></tr>}
-                {assets.map(asset => {
-                    const statusColor = asset.status === 'ACTIVE' ? 'text-green-600 bg-green-50' : asset.status === 'IN_REPAIR' ? 'text-yellow-700 bg-yellow-50' : 'text-red-600 bg-red-50';
-                    return (
-                        <tr key={asset.id} onClick={() => onSelect(asset)} className="hover:bg-blue-50/50 cursor-pointer transition-colors">
-                            <td className="py-3 px-4 font-bold text-gray-800">{asset.name}</td>
-                            <td className="py-3 px-4 font-mono text-sm text-gray-600">{asset.asset_qr_id}</td>
-                            <td className="py-3 px-4 text-gray-600">{asset.type_name}</td>
-                            <td className="py-3 px-4 text-gray-600">{asset.location || '-'}</td>
-                            <td className="py-3 px-4"><span className={`px-2 py-1 rounded text-xs font-bold ${statusColor}`}>{asset.status.replace('_', ' ')}</span></td>
-                        </tr>
-                    );
-                })}
-            </tbody>
-        </table>
-    </div>
-);
+// --- Asset List View (With Local Filter) ---
+const AssetList = ({ assets, onSelect }) => {
+    const [filterText, setFilterText] = useState('');
 
-// --- Asset Form (Handles both Create and Edit) ---
-const AssetForm = ({ assetTypes, suppliers, onSaveSuccess, onCancel, initialData, initialQrId = '', onAssetTypeCreated }) => {
+    const filtered = assets.filter(a => 
+        (a.name?.toLowerCase().includes(filterText.toLowerCase())) ||
+        (a.asset_qr_id?.toLowerCase().includes(filterText.toLowerCase())) ||
+        (a.current_line?.toLowerCase().includes(filterText.toLowerCase()))
+    );
+
+    return (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                <h3 className="font-bold text-gray-700">Equipment Directory ({filtered.length})</h3>
+                <div className="relative">
+                    <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4"/>
+                    <input 
+                        type="text" 
+                        placeholder="Filter list..." 
+                        value={filterText}
+                        onChange={(e) => setFilterText(e.target.value)}
+                        className="pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                </div>
+            </div>
+            <div className="overflow-x-auto">
+                <table className="min-w-full">
+                    <thead className="bg-white border-b border-gray-200">
+                        <tr>
+                            <th className="py-4 px-6 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Asset Info</th>
+                            <th className="py-4 px-6 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">System ID</th>
+                            <th className="py-4 px-6 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Assignment</th>
+                            <th className="py-4 px-6 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                        {filtered.length === 0 && <tr><td colSpan="4" className="text-center p-12 text-gray-500 font-medium">No assets match your search criteria.</td></tr>}
+                        {filtered.map(asset => {
+                            const isGreen = asset.status === 'ACTIVE';
+                            const isRed = asset.status === 'OUT_OF_SERVICE';
+                            return (
+                                <tr key={asset.id} onClick={() => onSelect(asset)} className="hover:bg-blue-50/60 cursor-pointer transition-colors group">
+                                    <td className="py-4 px-6">
+                                        <p className="font-bold text-gray-900 group-hover:text-blue-700 transition-colors">{asset.name}</p>
+                                        <p className="text-xs text-gray-500 font-medium mt-0.5">{asset.type_name}</p>
+                                    </td>
+                                    <td className="py-4 px-6 font-mono text-sm font-bold text-gray-600">{asset.asset_qr_id}</td>
+                                    <td className="py-4 px-6 text-sm text-gray-700 font-medium">{asset.current_line || asset.location || 'Unassigned'}</td>
+                                    <td className="py-4 px-6">
+                                        <span className={`px-3 py-1 rounded-full text-xs font-bold border ${isGreen ? 'text-green-700 bg-green-50 border-green-200' : isRed ? 'text-red-700 bg-red-50 border-red-200' : 'text-yellow-700 bg-yellow-50 border-yellow-200'}`}>
+                                            {asset.status.replace('_', ' ')}
+                                        </span>
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+// --- Asset Form (With Inline Type Addition) ---
+const AssetForm = ({ assetTypes, pmTemplates = [], onSaveSuccess, onCancel, initialData, initialQrId = '', onAssetTypeCreated, showToast }) => {
     const isEditMode = Boolean(initialData);
 
     const [formData, setFormData] = useState({
         asset_qr_id: initialQrId,
         name: '', asset_type_id: '', brand: '', model: '', serial_number: '',
-        purchase_date: '', purchase_cost: '', supplier_id: '', invoice_number: '', location: '', status: 'ACTIVE',
+        purchase_date: '', purchase_cost: '', current_line: '', location: '', status: 'ACTIVE', warranty_expiry_date: '', expected_lifespan_years: ''
     });
     
+    const [pmSchedules, setPmSchedules] = useState([]);
     const [isSaving, setIsSaving] = useState(false);
-    const [isScanModalOpen, setIsFormScanModalOpen] = useState(false);
-    const [error, setError] = useState(null);
-    const [isTypeModalOpen, setIsTypeModalOpen] = useState(false);
+    const [showTypeModal, setShowTypeModal] = useState(false);
 
     useEffect(() => {
         if (initialData) {
-            // Pre-fill form for editing. Format dates properly for input[type="date"]
-            const formattedDate = initialData.purchase_date ? new Date(initialData.purchase_date).toISOString().split('T')[0] : '';
+            const fmtDate = (d) => d ? new Date(d).toISOString().split('T')[0] : '';
             setFormData({
                 ...initialData,
-                purchase_date: formattedDate
+                purchase_date: fmtDate(initialData.purchase_date),
+                warranty_expiry_date: fmtDate(initialData.warranty_expiry_date)
             });
+            if (initialData.pm_schedules && Array.isArray(initialData.pm_schedules)) {
+                setPmSchedules(initialData.pm_schedules.map(pm => ({
+                    id: pm.id, template_id: pm.template_id || pmTemplates.find(t => t.name === pm.task_name)?.id || '',
+                    next_due_date: fmtDate(pm.next_due_date), is_active: pm.is_active !== false
+                })));
+            }
         }
-    }, [initialData]);
+    }, [initialData, pmTemplates]);
 
-    const handleChange = (e) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
+    const handleChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+
+    const handleTypeChange = (e) => {
+        if (e.target.value === 'CREATE_NEW') {
+            setShowTypeModal(true);
+        } else {
+            handleChange(e);
+        }
     };
+
+    const addPmSchedule = () => setPmSchedules([...pmSchedules, { template_id: '', next_due_date: '', is_active: true }]);
+    const updatePmSchedule = (index, field, value) => {
+        const updated = [...pmSchedules];
+        updated[index][field] = value;
+        setPmSchedules(updated);
+    };
+    const removePmSchedule = (index) => setPmSchedules(pmSchedules.filter((_, i) => i !== index));
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setError(null);
         setIsSaving(true);
         try {
-            if (isEditMode) {
-                await assetApi.updateAsset(initialData.id, formData);
-            } else {
-                await assetApi.createAsset(formData);
-            }
+            const payload = { ...formData, pm_schedules: pmSchedules };
+            if (isEditMode) await assetApi.updateAsset(initialData.id, payload);
+            else await assetApi.createAsset(payload);
             onSaveSuccess();
         } catch (err) {
-            setError(err.response?.data?.error || `Failed to ${isEditMode ? 'update' : 'create'} asset.`);
-        } finally {
+            showToast(err.response?.data?.error || `Failed to ${isEditMode ? 'update' : 'create'} asset.`, 'error');
             setIsSaving(false);
         }
     };
 
     return (
         <>
-            <form onSubmit={handleSubmit} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 space-y-6 max-w-4xl mx-auto">
-                <button type="button" onClick={onCancel} className="text-sm text-blue-600 hover:underline flex items-center">
-                     <FiArrowLeft className="mr-1"/> Back to List
+            <form onSubmit={handleSubmit} className="bg-white p-8 rounded-2xl shadow-sm border border-gray-200 max-w-4xl mx-auto">
+                <button type="button" onClick={onCancel} className="text-sm font-bold text-gray-500 hover:text-gray-800 flex items-center mb-6 transition-colors">
+                     <ArrowLeft className="mr-2 w-4 h-4"/> Cancel & Return
                 </button>
                 
-                {error && <ErrorDisplay message={error} onClear={() => setError(null)} />}
-                
-                <h2 className="text-2xl font-bold text-gray-800 border-b pb-2">{isEditMode ? 'Edit Asset Details' : 'Onboard New Asset'}</h2>
+                <h2 className="text-2xl font-extrabold text-gray-900 border-b-2 border-gray-100 pb-4 mb-8">
+                    {isEditMode ? 'Modify Equipment Profile' : 'Onboard New Equipment'}
+                </h2>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                     <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">Asset QR ID*</label>
-                        <div className="flex gap-2">
-                            <input type="text" name="asset_qr_id" value={formData.asset_qr_id} onChange={handleChange} required placeholder="Scan or enter ID" className="flex-grow p-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" />
-                            <button type="button" onClick={() => setIsFormScanModalOpen(true)} className="p-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 transition-colors">
-                                <FiCamera/>
-                            </button>
-                        </div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">Asset QR ID <span className="text-red-500">*</span></label>
+                        <input type="text" name="asset_qr_id" value={formData.asset_qr_id} onChange={handleChange} required readOnly={!isEditMode && initialQrId} className={`p-3 w-full border-2 rounded-lg font-mono outline-none ${!isEditMode && initialQrId ? 'bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed' : 'bg-white border-gray-200 focus:border-blue-500'}`} />
                     </div>
                     <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">Asset Type*</label>
-                        <div className="flex gap-2">
-                            <select name="asset_type_id" value={formData.asset_type_id} onChange={handleChange} required className="flex-grow p-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none bg-white">
-                                <option value="">Select a type...</option>
-                                {assetTypes.map(type => <option key={type.id} value={type.id}>{type.type_name}</option>)}
-                            </select>
-                            <button type="button" onClick={() => setIsTypeModalOpen(true)} className="p-2 bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors" title="Add New Type">
-                                <FiPlus/>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                
-                 <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-1">Asset Name / Title*</label>
-                    <input type="text" name="name" value={formData.name} onChange={handleChange} required placeholder="e.g., Juki Overlock (Floor 1, Station 5)" className="p-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" />
-                </div>
-                
-                {/* Manufacturer Details */}
-                <h3 className="font-semibold text-gray-800 bg-gray-50 p-2 rounded">Hardware Information</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
-                        <input type="text" name="brand" value={formData.brand} onChange={handleChange} placeholder="e.g., Juki" className="p-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                        <input type="text" name="model" value={formData.model} onChange={handleChange} placeholder="e.g., DDL-8700" className="p-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Serial Number</label>
-                        <input type="text" name="serial_number" value={formData.serial_number} onChange={handleChange} className="p-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" />
-                    </div>
-                </div>
-                
-                {/* Purchase & Location Details */}
-                <h3 className="font-semibold text-gray-800 bg-gray-50 p-2 rounded">Purchase & Location</h3>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
-                        <select name="supplier_id" value={formData.supplier_id} onChange={handleChange} className="p-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none bg-white">
-                            <option value="">Select Supplier (Optional)</option>
-                            {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">Equipment Classification <span className="text-red-500">*</span></label>
+                        <select name="asset_type_id" value={formData.asset_type_id} onChange={handleTypeChange} required className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-medium bg-white">
+                            <option value="" disabled>Select categorization...</option>
+                            {assetTypes.map(t => <option key={t.id} value={t.id}>{t.type_name}</option>)}
+                            <option disabled>──────────</option>
+                            <option value="CREATE_NEW" className="font-bold text-blue-600">➕ Create New Type...</option>
                         </select>
                     </div>
                     <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Invoice Number</label>
-                        <input type="text" name="invoice_number" value={formData.invoice_number} onChange={handleChange} placeholder="Invoice Ref" className="p-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" />
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">Asset Identification Name <span className="text-red-500">*</span></label>
+                        <input type="text" name="name" value={formData.name} onChange={handleChange} required placeholder="e.g. Juki DDL-8700 Industrial Machine" className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none transition-all" />
                     </div>
-                    
-                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
-                        <input type="date" name="purchase_date" value={formData.purchase_date} onChange={handleChange} className="p-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                
+                <h3 className="font-bold text-gray-800 bg-gray-50/50 p-3 rounded-lg border border-gray-100 mb-4">Operational Placement</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">Production Line</label>
+                        <input type="text" name="current_line" value={formData.current_line} onChange={handleChange} placeholder="e.g. Sewing Line 4" className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none" />
                     </div>
-                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Cost ($)</label>
-                        <input type="number" step="0.01" name="purchase_cost" value={formData.purchase_cost} onChange={handleChange} className="p-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" />
-                    </div>
-                    <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Physical Location</label>
-                        <input type="text" name="location" value={formData.location} onChange={handleChange} placeholder="e.g., Cutting Floor" className="p-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none" />
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">Facility Location</label>
+                        <input type="text" name="location" value={formData.location} onChange={handleChange} placeholder="e.g. Matrix Overseas - Block A" className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none" />
                     </div>
                 </div>
 
-                <div className="flex justify-end space-x-3 pt-6 border-t mt-6">
-                    <button type="button" onClick={onCancel} className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-bold transition-colors">Cancel</button>
-                    <button type="submit" disabled={isSaving} className="px-8 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-md transition-all disabled:opacity-70">
-                        {isSaving ? <LuAirplay className="animate-spin inline w-5 h-5"/> : (isEditMode ? 'Save Changes' : 'Create Asset')}
+                <h3 className="font-bold text-gray-800 bg-gray-50/50 p-3 rounded-lg border border-gray-100 mb-4">Hardware Specifications</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div><label className="block text-sm font-bold text-gray-700 mb-1.5">Manufacturer Brand</label><input type="text" name="brand" value={formData.brand} onChange={handleChange} className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none" /></div>
+                    <div><label className="block text-sm font-bold text-gray-700 mb-1.5">Model Number</label><input type="text" name="model" value={formData.model} onChange={handleChange} className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none" /></div>
+                    <div><label className="block text-sm font-bold text-gray-700 mb-1.5">Serial Number</label><input type="text" name="serial_number" value={formData.serial_number} onChange={handleChange} className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none font-mono text-sm" /></div>
+                </div>
+
+                <h3 className="font-bold text-gray-800 bg-gray-50/50 p-3 rounded-lg border border-gray-100 mb-4">Financial & Acquisition</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">Date of Purchase</label>
+                        <input type="date" name="purchase_date" value={formData.purchase_date} onChange={handleChange} className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none text-gray-700 font-medium" />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">Procurement Cost</label>
+                        <div className="relative">
+                            <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500 font-bold">₹</span>
+                            <input type="number" step="0.01" name="purchase_cost" value={formData.purchase_cost} onChange={handleChange} placeholder="0.00" className="pl-8 p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none font-mono" />
+                        </div>
+                    </div>
+                </div>
+                
+                <h3 className="font-bold text-gray-800 bg-gray-50/50 p-3 rounded-lg border border-gray-100 mb-4">Maintenance Workflows</h3>
+                <div className="space-y-4 mb-8">
+                    {pmSchedules.map((schedule, idx) => (
+                        <div key={idx} className="flex flex-col md:flex-row gap-4 items-center bg-white p-4 rounded-xl border-2 border-gray-100 shadow-sm">
+                            <div className="flex-1 w-full">
+                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Standard Operating Procedure</label>
+                                <select className="w-full p-2.5 border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none font-medium bg-white" value={schedule.template_id} onChange={e => updatePmSchedule(idx, 'template_id', e.target.value)} required >
+                                    <option value="" disabled>Select maintenance template...</option>
+                                    {pmTemplates.map(t => <option key={t.id} value={t.id}>{t.name} ({t.frequency_days}d cycle)</option>)}
+                                </select>
+                            </div>
+                            <div className="w-full md:w-auto">
+                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Target Action Date</label>
+                                <input type="date" className="w-full p-2.5 border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none font-medium text-gray-700 bg-white" value={schedule.next_due_date} onChange={e => updatePmSchedule(idx, 'next_due_date', e.target.value)} required />
+                            </div>
+                            <div className="flex items-center gap-2 mt-4 md:mt-0 md:pt-5">
+                                <button type="button" onClick={() => removePmSchedule(idx)} className="p-2.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete Workflow">
+                                    <Trash2 size={20} />
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                    <button type="button" onClick={addPmSchedule} className="px-4 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold rounded-lg transition-colors flex items-center border border-blue-200">
+                        <Plus size={18} className="mr-2"/> Assign Maintenance Routine
+                    </button>
+                </div>
+
+                <div className="flex justify-end gap-4 pt-6 border-t-2 border-gray-100">
+                    <button type="button" onClick={onCancel} className="px-6 py-3 bg-white border-2 border-gray-200 hover:border-gray-300 text-gray-700 rounded-xl font-bold transition-all shadow-sm">Discard</button>
+                    <button type="submit" disabled={isSaving} className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md transition-all flex items-center">
+                        {isSaving && <Loader2 className="animate-spin mr-3 h-5 w-5" />}
+                        {isSaving ? 'Synchronizing...' : 'Finalize & Save Asset'}
                     </button>
                 </div>
             </form>
             
-            {isTypeModalOpen && <AddAssetTypeModal onClose={() => setIsTypeModalOpen(false)} onSaveSuccess={(nt) => { onAssetTypeCreated(nt); setFormData(p => ({...p, asset_type_id: nt.id})); setIsTypeModalOpen(false); }} />}
-            {isScanModalOpen && <QrScannerModal onClose={() => setIsFormScanModalOpen(false)} onScanSuccess={(id) => { setFormData(p => ({...p, asset_qr_id: id})); setIsFormScanModalOpen(false); }} />}
+            {showTypeModal && (
+                <AddAssetTypeModal 
+                    onClose={() => {
+                        setShowTypeModal(false);
+                        setFormData(prev => ({...prev, asset_type_id: ''})); 
+                    }}
+                    onSaveSuccess={(newType) => {
+                        setShowTypeModal(false);
+                        onAssetTypeCreated(newType); 
+                        setFormData(prev => ({...prev, asset_type_id: newType.id})); 
+                    }}
+                    showToast={showToast}
+                />
+            )}
         </>
     );
 };
 
 // --- Asset Details View ---
-const AssetDetails = ({ asset, onBack, onEdit, onRefetch }) => { 
+const AssetDetails = ({ asset, onBack, onEdit, onRefetch, showToast }) => { 
     const [showMaintForm, setShowMaintForm] = useState(false);
-    const [history, setHistory] = useState(asset.history || []);
-    
-    const handleLogSaved = (newLog) => {
-        setHistory([newLog, ...history]);
-        setShowMaintForm(false);
-        if (onRefetch) onRefetch(); 
-    };
-    
-    const statusColor = asset.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : asset.status === 'IN_REPAIR' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800';
+    const history = asset.history || [];
+    const pmSchedules = asset.pm_schedules || [];
+    const isUnderWarranty = asset.warranty_expiry_date && new Date(asset.warranty_expiry_date) > new Date();
 
     return (
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 max-w-5xl mx-auto">
-            <div className="flex justify-between items-center mb-6 border-b pb-4">
-                <button type="button" onClick={onBack} className="text-sm text-blue-600 hover:underline flex items-center font-medium">
-                    <FiArrowLeft className="mr-1"/> Back to Directory
+        <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-200 max-w-5xl mx-auto animate-fade-in-up">
+            <div className="flex justify-between items-center mb-8 pb-6 border-b-2 border-gray-100">
+                <button type="button" onClick={onBack} className="text-sm font-bold text-gray-500 hover:text-gray-800 flex items-center transition-colors">
+                    <ArrowLeft className="mr-2 w-4 h-4"/> Back to Directory
                 </button>
-                <button onClick={onEdit} className="px-4 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 rounded-lg font-bold text-sm flex items-center transition-colors">
-                    <FiEdit className="mr-2"/> Edit Asset Info
+                <button onClick={onEdit} className="px-5 py-2.5 bg-gray-900 text-white hover:bg-gray-800 rounded-xl font-bold text-sm flex items-center shadow-sm transition-colors">
+                    <Edit2 className="mr-2 w-4 h-4"/> Manage Asset Details
                 </button>
             </div>
             
-            {/* Header */}
-            <div className="flex flex-col md:flex-row justify-between items-start mb-6">
+            <div className="flex flex-col md:flex-row justify-between items-start mb-8 gap-6">
                 <div>
-                    <h2 className="text-3xl font-extrabold text-gray-900">{asset.name}</h2>
-                    <p className="text-lg text-gray-500 font-medium mt-1">{asset.type_name}</p>
-                    <span className={`mt-3 inline-flex px-3 py-1 text-xs font-bold rounded-full border ${statusColor}`}>{asset.status.replace('_', ' ')}</span>
+                    <h2 className="text-4xl font-extrabold text-gray-900 tracking-tight">{asset.name}</h2>
+                    <p className="text-xl text-gray-500 font-medium mt-1">{asset.type_name}</p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                        <span className="inline-flex px-4 py-1.5 text-xs font-bold rounded-lg bg-gray-100 text-gray-800 border border-gray-200">{asset.status.replace('_', ' ')}</span>
+                        {isUnderWarranty && (
+                            <span className="inline-flex items-center px-4 py-1.5 text-xs font-bold rounded-lg bg-green-50 text-green-700 border border-green-200">
+                                <Shield className="mr-1.5 w-3.5 h-3.5"/> Protected by Warranty
+                            </span>
+                        )}
+                    </div>
                 </div>
-                <div className="mt-4 md:mt-0 text-left md:text-right bg-gray-50 p-4 rounded-xl border border-gray-100">
-                     <p className="font-mono text-xl font-bold text-indigo-700">{asset.asset_qr_id}</p>
-                     <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mt-1">System QR ID</p>
+                <div className="bg-gray-50 p-5 rounded-2xl border-2 border-gray-100 min-w-[200px] text-center">
+                     <p className="font-mono text-2xl font-bold text-gray-900">{asset.asset_qr_id}</p>
+                     <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mt-2">Active Database Key</p>
                 </div>
             </div>
             
-            {/* Details Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 py-6 border-y border-gray-100">
-                <div><span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">Brand</span><p className="font-semibold text-gray-800">{asset.brand || 'N/A'}</p></div>
-                <div><span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">Model</span><p className="font-semibold text-gray-800">{asset.model || 'N/A'}</p></div>
-                <div><span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">Serial #</span><p className="font-semibold text-gray-800">{asset.serial_number || 'N/A'}</p></div>
-                <div><span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">Location</span><p className="font-semibold text-gray-800">{asset.location || 'N/A'}</p></div>
-                <div><span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">Purchase Date</span><p className="font-medium text-gray-700">{asset.purchase_date ? new Date(asset.purchase_date).toLocaleDateString() : 'N/A'}</p></div>
-                <div><span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">Purchase Cost</span><p className="font-mono font-bold text-green-700">${parseFloat(asset.purchase_cost || 0).toFixed(2)}</p></div>
-                <div><span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">Supplier</span><p className="font-medium text-gray-700">{asset.supplier_name || 'N/A'}</p></div>
-                <div><span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">Invoice Number</span><p className="font-mono text-gray-700">{asset.invoice_number || 'N/A'}</p></div>
+            {/* Top Grid: Operations & Core Hardware */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-8 py-8 border-t-2 border-gray-100 bg-gray-50/30 px-6 rounded-t-xl">
+                <div><span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Assigned Unit</span><p className="font-bold text-lg text-gray-800">{asset.current_line || 'Float / Pool'}</p></div>
+                <div><span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Physical Sector</span><p className="font-bold text-lg text-gray-800">{asset.location || 'Not Specified'}</p></div>
+                <div><span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Hardware Core</span><p className="font-bold text-lg text-gray-800">{asset.brand} {asset.model}</p></div>
+                <div><span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">S/N Tracking</span><p className="font-bold text-lg font-mono text-gray-600">{asset.serial_number || 'N/A'}</p></div>
+            </div>
+            
+            {/* Bottom Grid: Financial Data */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-8 py-6 border-b-2 border-gray-100 bg-gray-50/30 px-6 rounded-b-xl mb-10 border-t border-gray-200">
+                <div>
+                    <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Acquisition Date</span>
+                    <p className="font-bold text-gray-800">{asset.purchase_date ? new Date(asset.purchase_date).toLocaleDateString() : 'Unrecorded'}</p>
+                </div>
+                <div>
+                    <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Procurement Cost</span>
+                    <p className="font-bold text-gray-800 flex items-center">
+                        {asset.purchase_cost ? <><IndianRupee className="w-4 h-4 text-gray-500 mr-0.5" />{parseFloat(asset.purchase_cost).toLocaleString('en-IN')}</> : 'Unrecorded'}
+                    </p>
+                </div>
             </div>
 
-            {/* Maintenance Section */}
-            <div className="mt-8">
-                <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-xl font-bold text-gray-800 flex items-center"><FiClipboard className="mr-2 text-blue-600"/> Maintenance History</h3>
-                    <button onClick={() => setShowMaintForm(!showMaintForm)} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg text-sm hover:bg-blue-700 transition-colors shadow-sm">
-                        {showMaintForm ? 'Cancel Log' : '+ Add Log Entry'}
-                    </button>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                <div>
+                    <h3 className="text-xl font-extrabold text-gray-900 flex items-center mb-6"><Calendar className="mr-3 w-6 h-6 text-blue-600"/> Scheduled Procedures</h3>
+                    <div className="space-y-4">
+                        {pmSchedules.length === 0 ? (
+                            <div className="p-6 border-2 border-dashed border-gray-200 rounded-xl text-center">
+                                <p className="text-gray-500 font-medium">No preventative routines assigned.</p>
+                            </div>
+                        ) : pmSchedules.map(pm => {
+                            const isOverdue = new Date(pm.next_due_date) < new Date();
+                            return (
+                                <div key={pm.id} className={`p-4 rounded-xl border-2 ${isOverdue ? 'bg-red-50 border-red-100' : 'bg-white border-gray-100 shadow-sm'}`}>
+                                    <div className="flex justify-between items-start mb-2">
+                                        <p className="font-bold text-gray-900 text-base">{pm.task_name}</p>
+                                        <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-md">Cycle: {pm.frequency_days}d</span>
+                                    </div>
+                                    <p className={`text-sm font-bold ${isOverdue ? 'text-red-600' : 'text-blue-600'}`}>
+                                        Target Execution: {new Date(pm.next_due_date).toLocaleDateString()}
+                                        {isOverdue && ' — OVERDUE'}
+                                    </p>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
-                
-                {showMaintForm && <MaintenanceLogForm assetId={asset.id} onLogSaved={handleLogSaved} />}
 
-                <div className="mt-4 space-y-3 max-h-80 overflow-y-auto pr-2">
-                    {history.length === 0 && <div className="text-center py-10 bg-gray-50 rounded-xl border border-dashed border-gray-300"><p className="text-gray-500 font-medium">No maintenance history recorded.</p></div>}
-                    {history.map(log => (
-                        <div key={log.id} className="p-4 border border-gray-200 rounded-xl bg-white shadow-sm hover:border-blue-200 transition-colors">
-                            <div className="flex justify-between items-center mb-2">
-                                <span className="font-bold text-xs px-2 py-1 bg-gray-100 rounded text-gray-700 uppercase tracking-wider">{log.maintenance_type}</span>
-                                <span className="text-sm font-bold text-gray-600">{new Date(log.maintenance_date).toLocaleDateString()}</span>
+                <div>
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="text-xl font-extrabold text-gray-900 flex items-center"><Clipboard className="mr-3 w-6 h-6 text-indigo-600"/> Intervention Logs</h3>
+                        <button onClick={() => setShowMaintForm(!showMaintForm)} className="text-sm font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors">
+                            {showMaintForm ? 'Cancel Entry' : '+ Append Record'}
+                        </button>
+                    </div>
+                    
+                    {showMaintForm && <MaintenanceLogForm assetId={asset.id} onLogSaved={() => {setShowMaintForm(false); showToast('Maintenance log appended'); onRefetch();}} />}
+                    
+                    <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                        {history.length === 0 && !showMaintForm && (
+                            <div className="p-6 border-2 border-dashed border-gray-200 rounded-xl text-center">
+                                <p className="text-gray-500 font-medium">Lifecycle history is empty.</p>
                             </div>
-                            <p className="text-sm text-gray-800 leading-relaxed">"{log.description}"</p>
-                            <div className="flex justify-between items-end mt-4 pt-3 border-t border-gray-100">
-                                <span className="text-xs font-medium text-gray-500">Mechanic: <span className="text-gray-800">{log.performed_by_name || 'System'}</span></span>
-                                <span className="text-sm font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded border border-green-100">Cost: ${parseFloat(log.cost || 0).toFixed(2)}</span>
+                        )}
+                        {history.map(log => (
+                            <div key={log.id} className="p-4 border-2 border-gray-100 rounded-xl bg-white shadow-sm hover:border-blue-100 transition-colors">
+                                <div className="flex justify-between items-center mb-2 pb-2 border-b border-gray-50">
+                                    <span className="font-bold text-[10px] px-2.5 py-1 bg-gray-100 rounded text-gray-700 uppercase tracking-wider">{log.maintenance_type}</span>
+                                    <span className="text-xs font-bold text-gray-400">{new Date(log.maintenance_date).toLocaleDateString()}</span>
+                                </div>
+                                <p className="text-sm text-gray-800 font-medium leading-relaxed">"{log.description}"</p>
                             </div>
-                        </div>
-                    ))}
+                        ))}
+                    </div>
                 </div>
             </div>
         </div>
     );
 };
 
-// --- Maintenance Log Form (Sub-component) ---
+// Uses maintenanceApi instead of assetApi now
 const MaintenanceLogForm = ({ assetId, onLogSaved }) => {
-    const [formData, setFormData] = useState({ maintenance_date: new Date().toISOString().split('T')[0], maintenance_type: 'PREVENTATIVE', description: '', cost: '', next_scheduled_date: '' });
+    const [formData, setFormData] = useState({ maintenance_date: new Date().toISOString().split('T')[0], maintenance_type: 'PREVENTATIVE', description: '' });
     const [isSaving, setIsSaving] = useState(false);
-    const [error, setError] = useState(null);
-
-    const handleChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setIsSaving(true);
         try {
-            const res = await assetApi.addMaintenanceLog({ ...formData, asset_id: assetId });
-            onLogSaved(res.data);
+            await maintenanceApi.addMaintenanceLog({ ...formData, asset_id: assetId });
+            onLogSaved();
         } catch (err) {
-            setError(err.response?.data?.error || 'Failed to save log.');
+            alert('Failed to save log.');
         } finally {
             setIsSaving(false);
         }
     };
     
     return (
-        <form onSubmit={handleSubmit} className="p-5 border border-blue-200 rounded-xl bg-blue-50/30 space-y-4 mb-6 shadow-sm">
-            {error && <ErrorDisplay message={error} onClear={() => setError(null)} />}
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                 <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Maintenance Date*</label>
-                    <input type="date" name="maintenance_date" value={formData.maintenance_date} onChange={handleChange} required className="p-2.5 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
-                </div>
-                <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Maintenance Type*</label>
-                    <select name="maintenance_type" value={formData.maintenance_type} onChange={handleChange} required className="p-2.5 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
-                        <option value="PREVENTATIVE">Preventative</option><option value="REPAIR">Repair</option><option value="CALIBRATION">Calibration</option><option value="INSPECTION">Inspection</option>
-                    </select>
-                </div>
-            </div>
-            <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Description*</label>
-                <textarea name="description" value={formData.description} onChange={handleChange} required placeholder="Describe the work performed..." className="p-3 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white" rows="3"></textarea>
-            </div>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                 <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Total Cost ($)</label>
-                    <input type="number" step="0.01" name="cost" value={formData.cost} onChange={handleChange} placeholder="0.00" className="p-2.5 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
-                </div>
-                <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Next Scheduled Date (Optional)</label>
-                    <input type="date" name="next_scheduled_date" value={formData.next_scheduled_date} onChange={handleChange} className="p-2.5 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
-                </div>
-            </div>
-            <div className="flex justify-end pt-2">
-                 <button type="submit" disabled={isSaving} className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-bold shadow-md hover:bg-blue-700 transition-colors disabled:opacity-70 flex items-center">
-                    {isSaving ? <LuAirplay className="animate-spin mr-2"/> : null}
-                    Save Log
-                </button>
-            </div>
+        <form onSubmit={handleSubmit} className="p-5 border-2 border-indigo-100 rounded-xl bg-indigo-50/30 mb-6 shadow-sm">
+            <label className="block text-xs font-bold text-indigo-800 uppercase tracking-wider mb-2">Intervention Type</label>
+            <select name="maintenance_type" value={formData.maintenance_type} onChange={e => setFormData({...formData, maintenance_type: e.target.value})} className="mb-4 p-3 w-full text-sm border-2 border-indigo-100 rounded-lg outline-none font-bold text-gray-700 bg-white focus:border-indigo-400">
+                <option value="PREVENTATIVE">Routine Maintenance</option>
+                <option value="REPAIR">Corrective Repair</option>
+            </select>
+            
+            <label className="block text-xs font-bold text-indigo-800 uppercase tracking-wider mb-2">Technician Notes</label>
+            <textarea name="description" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} required placeholder="Detail the procedures executed..." className="mb-4 p-3 w-full text-sm border-2 border-indigo-100 rounded-lg outline-none focus:border-indigo-400 min-h-[80px]"></textarea>
+            
+            <button type="submit" disabled={isSaving} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-sm flex justify-center items-center shadow-sm transition-colors">
+                {isSaving ? <Loader2 className="animate-spin w-4 h-4 mr-2"/> : null}
+                {isSaving ? 'Writing to Ledger...' : 'Commit Record'}
+            </button>
         </form>
     );
 };

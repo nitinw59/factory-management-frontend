@@ -1,15 +1,51 @@
 import api from '../utils/api';
 
 export const mechanicApi = {
-    /**
-     * Fetches all tickets with status OPEN, IN_PROGRESS, or RESOLVED.
-     * Used for the Mechanic Job Board.
-     */
-    getOpenComplaints: async () => {
-        const response = await api.get('/assets/complaints/open');
+    
+     reportBreakdown: (data) =>
+        api.post('/complaints', data),
+
+    getMyComplaints: () =>
+        api.get('/complaints/my'),
+
+    verifyRepair: (data) =>
+        api.post('/complaints/verify', data),
+
+    getOpenComplaints: () =>
+        api.get('/complaints/open'),
+
+    getComplaintHistory: (complaintId) =>
+        api.get(`/complaints/${complaintId}/history`),
+
+    // ================================
+    // MECHANIC ACTIONS
+    // ================================
+
+    performMaintenance: (data) =>
+        api.post('/maintenance/perform', data),
+    
+
+
+     getMyCompletedTasks: async () => {
+        const response = await api.get('/maintenance/my-completed');
         return response.data;
     },
+    // ================================
+    // DIRECT MAINTENANCE LOGS
+    // ================================
 
+    addMaintenanceLog: (logData) =>
+        api.post('/assets/maintenance', logData),
+
+    deleteMaintenanceLog: (logId) =>
+        api.delete(`/assets/maintenance/${logId}`),
+
+  
+    
+    
+    
+    
+   
     /**
      * Fetches the list of available spare parts for the "Add Spare" selector.
      */
@@ -18,20 +54,18 @@ export const mechanicApi = {
         return response.data;
     },
 
-    /**
-     * Fetches previous maintenance logs for a specific complaint ID.
-     */
-    getComplaintHistory: async (complaintId) => {
-        const response = await api.get(`/assets/complaints/${complaintId}/history`);
-        return response.data;
-    },
 
-    /**
-     * Submits the final maintenance log.
-     * @param {object} data - { complaint_id, maintenance_type, description, labor_cost, sparesUsed, next_scheduled_date }
-     */
-    performMaintenance: async (data) => {
-        const response = await api.post('/assets/maintenance/perform', data);
-        return response.data;
-    }
+
+
+   
+    // getAssetHistoryByQR: async (qrId) => {
+    //     const response = await api.get(`/assets/assets/by-qr/${qrId}`);
+    //     return response.data;
+    // }
+
+
+
+
+
+
 };

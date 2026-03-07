@@ -76,6 +76,9 @@ const ProductionManagerLayout = () => {
                     <NavLink to="/production-manager/workstation-management" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Workstations</NavLink>
                     <NavLink to="/production-manager/factory-layout-planner" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Factory Layout</NavLink>
                 </NavDropdown>
+                <NavLink to="/maintenance/sewing-machine-complaints" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                Sewing Machine Complaints
+              </NavLink>
                  
             </nav>
           </div>

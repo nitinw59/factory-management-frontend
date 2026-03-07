@@ -173,42 +173,50 @@ const TrimIntakeForm = () => {
         });
     };
 
-    // Special handler for Master Item selection (Dropdown 1)
-    const handleMasterItemChange = async (index, itemId) => {
-        // Optimistic update: Set ID, reset variant, clear options
-        setItems(prevItems => {
-            const newItems = [...prevItems];
-            newItems[index] = { 
-                ...newItems[index], 
-                trim_item_id: itemId, 
-                trim_item_variant_id: '', 
-                available_variants: [] 
-            };
-            return newItems;
-        });
+// Special handler for Master Item selection (Dropdown 1)
+const handleMasterItemChange = async (index, itemId) => {
+    // Optimistic update: Set ID, reset variant, clear options
+    setItems(prevItems => {
+        const newItems = [...prevItems];
+        newItems[index] = { 
+            ...newItems[index], 
+            trim_item_id: itemId, 
+            trim_item_variant_id: '', 
+            available_variants: [] 
+        };
+        return newItems;
+    });
 
-        if (itemId) {
-            try {
-                // Fetch variants for this specific item
-                const res = await storeManagerApi.getVariantsByItem(itemId);
-                
-                // Update state with fetched variants
-                setItems(prevItems => {
-                    const newItems = [...prevItems];
-                    // Ensure the row exists before updating
-                    if (newItems[index]) {
-                        newItems[index] = { 
-                            ...newItems[index], 
-                            available_variants: res.data || [] 
-                        };
-                    }
-                    return newItems;
-                });
-            } catch (err) {
-                console.error("Failed to load variants", err);
-            }
+    if (itemId) {
+        try {
+            // Fetch variants for this specific item
+            const res = await storeManagerApi.getVariantsByItem(itemId);
+            
+            // 🛠️ THE FIX: Map the backend data to match the Dropdown's expectations
+            const formattedVariants = (res.data || []).map(variant => ({
+                ...variant,
+                id: variant.variant_id, // Maps your backend ID to the component's expected 'id'
+                // Create a clean, readable label using the color name and number
+                variant_name: `${variant.color_name} - ${variant.color_number}` 
+            }));
+            
+            // Update state with the *formatted* variants
+            setItems(prevItems => {
+                const newItems = [...prevItems];
+                // Ensure the row exists before updating
+                if (newItems[index]) {
+                    newItems[index] = { 
+                        ...newItems[index], 
+                        available_variants: formattedVariants 
+                    };
+                }
+                return newItems;
+            });
+        } catch (err) {
+            console.error("Failed to load variants", err);
         }
-    };
+    }
+};
 
     const addItem = () => {
         setItems(prev => [...prev, { trim_item_id: '', trim_item_variant_id: '', packs_received: '', units_per_pack: '', available_variants: [] }]);
