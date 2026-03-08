@@ -35,6 +35,7 @@ const AdminMaintenanceDashboard = () => {
             try {
                 const res = await maintenanceApi.getAdminAnalytics();
                 setData(res.data);
+                console.log("Analytics data loaded:", res.data);
             } catch (err) {
                 setError("Failed to load analytics dashboard.");
             } finally {

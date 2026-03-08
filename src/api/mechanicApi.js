@@ -1,33 +1,31 @@
 import api from '../utils/api';
 
 export const mechanicApi = {
-    
-     reportBreakdown: (data) =>
-        api.post('/complaints', data),
+    reportBreakdown: (data) =>
+        api.post('/mechanics/complaints', data),
 
     getMyComplaints: () =>
-        api.get('/complaints/my'),
+        api.get('/mechanics/complaints/my'),
 
     verifyRepair: (data) =>
-        api.post('/complaints/verify', data),
+        api.post('/mechanics/complaints/verify', data),
 
     getOpenComplaints: () =>
-        api.get('/complaints/open'),
+        api.get('/mechanics/complaints/open'),
 
     getComplaintHistory: (complaintId) =>
-        api.get(`/complaints/${complaintId}/history`),
+        api.get(`/mechanics/complaints/${complaintId}/history`),
 
     // ================================
     // MECHANIC ACTIONS
     // ================================
 
     performMaintenance: (data) =>
-        api.post('/maintenance/perform', data),
-    
+        api.post('/mechanics/maintenance/perform', data),
 
 
-     getMyCompletedTasks: async () => {
-        const response = await api.get('/maintenance/my-completed');
+    getMyCompletedTasks: async () => {
+        const response = await api.get('/mechanics/maintenance/my-completed');
         return response.data;
     },
     // ================================
@@ -35,22 +33,16 @@ export const mechanicApi = {
     // ================================
 
     addMaintenanceLog: (logData) =>
-        api.post('/assets/maintenance', logData),
+        api.post('/mechanics/maintenance', logData),
 
     deleteMaintenanceLog: (logId) =>
-        api.delete(`/assets/maintenance/${logId}`),
+        api.delete(`/mechanics/maintenance/${logId}`),
 
-  
-    
-    
-    
-    
-   
     /**
      * Fetches the list of available spare parts for the "Add Spare" selector.
      */
     getAllSpares: async () => {
-        const response = await api.get('/assets/spares');
+        const response = await api.get('/mechanics/spares');
         return response.data;
     },
 

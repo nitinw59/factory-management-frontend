@@ -592,10 +592,18 @@ const MechanicPortal = () => {
             mechanicApi.getOpenComplaints(),
             sparesApi.getMySpareInventory(),
             sparesApi.getAllSpares()
-        ]).then(([jobsData, myStock, storeStock]) => {
-            setJobs(jobsData);
-            setMyInventory(myStock);
-            setGlobalSpares(storeStock);
+        ]).then(([jobsRes, myStockRes, storeStockRes]) => {
+            // ✅ Safely extract .data (if using Axios) or fallback to the response itself if it's already an array
+            setJobs(jobsRes?.data || jobsRes || []);
+            setMyInventory(myStockRes?.data || myStockRes || []);
+            setGlobalSpares(storeStockRes?.data || storeStockRes || []);
+            setLoading(false);
+        }).catch(err => {
+            console.error("Failed to load mechanic dashboard:", err);
+            // Ensure they are set to empty arrays on failure so .filter() doesn't crash
+            setJobs([]);
+            setMyInventory([]);
+            setGlobalSpares([]);
             setLoading(false);
         });
     };

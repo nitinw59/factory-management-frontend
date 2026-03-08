@@ -1,17 +1,11 @@
 
-
-
-
-
-
-
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
     Package, Search, Plus, AlertTriangle, DollarSign, 
     Filter, ShoppingCart, ArrowUpRight, X, Loader2 
 } from 'lucide-react';
 
+import { sparesApi } from '../../api/sparesApi';
 // --- SHARED COMPONENTS ---
 const Spinner = () => <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-indigo-600" /></div>;
 

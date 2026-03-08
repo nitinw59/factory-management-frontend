@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 // Added LuMenu for the hamburger icon
-import { LuFileText, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX } from 'react-icons/lu';
+import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX } from 'react-icons/lu';
 import { notificationApi } from '../api/notificationApi';
 
 // No changes to NavDropdown component
@@ -106,6 +106,10 @@ const StoreManagerLayout = () => {
                                     <LuFileText className="mr-2" /> Trim Stock Report
                                 </NavLink> */}
                             </NavDropdown>
+
+                            <NavLink to="/store-manager/spare-parts" className="flex items-center text-sm text-gray-600 hover:text-blue-600">
+                                <LuPackage className="mr-2" /> Spare Parts
+                            </NavLink>
                         </nav>
                     </div>
                     <div className="flex items-center space-x-4">
@@ -164,6 +168,10 @@ const StoreManagerLayout = () => {
                             <NavLink to="/store-manager/trim-orders" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuClipboardList className="mr-2" /> Trim Orders
                             </NavLink>
+                            <NavLink to="/store-manager/spare-parts" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuPackage className="mr-2" /> Spare Parts
+                            </NavLink>
+
                             <hr />
                             {/* Logout button for mobile menu */}
                              {user && (

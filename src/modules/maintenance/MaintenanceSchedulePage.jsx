@@ -115,9 +115,17 @@ const ForecastView = ({ tasks }) => {
 
 // --- TAB 2: TEMPLATE LIBRARY ---
 const TemplateLibraryView = ({ templates, fetchTemplates }) => {
-    const [editingTemplate, setEditingTemplate] = useState(null); // null = list mode, object = edit mode, {} = new mode
+    const [editingTemplate, setEditingTemplate] = useState(null); // null = list, object = edit, {} = new
+    const [viewingTemplateAssets, setViewingTemplateAssets] = useState(null); // template object when viewing assigned assets
+    
+    // States for Form
     const [formData, setFormData] = useState({ name: '', description: '', frequency_days: 30, estimated_minutes: 60 });
     const [isSaving, setIsSaving] = useState(false);
+    
+    // States for Assets View
+    const [assignedAssets, setAssignedAssets] = useState([]);
+    const [loadingAssets, setLoadingAssets] = useState(false);
+    const [assetSearchTerm, setAssetSearchTerm] = useState('');
 
     const handleEdit = (tmpl) => {
         setFormData(tmpl);
@@ -129,13 +137,26 @@ const TemplateLibraryView = ({ templates, fetchTemplates }) => {
         setEditingTemplate({});
     };
 
+    const handleViewAssets = async (tmpl) => {
+        setViewingTemplateAssets(tmpl);
+        setLoadingAssets(true);
+        setAssetSearchTerm('');
+        try {
+            const res = await maintenanceApi.getAssetsByTemplate(tmpl.id);
+            setAssignedAssets(res.data || []);
+        } catch (err) {
+            console.error("Failed to load assigned assets", err);
+            setAssignedAssets([]);
+        } finally {
+            setLoadingAssets(false);
+        }
+    };
+
     const handleSave = async (e) => {
         e.preventDefault();
         setIsSaving(true);
         try {
             if (formData.id) {
-                // Update existing (Endpoint logic needed if not implemented, using create as placeholder if API missing)
-                // In a true enterprise setup, add an updatePMTemplate to maintenanceApi
                 await maintenanceApi.updatePMTemplate(formData); 
             } else {
                 await maintenanceApi.createPMTemplate(formData);
@@ -149,6 +170,18 @@ const TemplateLibraryView = ({ templates, fetchTemplates }) => {
         }
     };
 
+   // Derived filtered assets based on search (SAFE VERSION)
+    const searchTerm = (assetSearchTerm || '').toLowerCase();
+
+    const filteredAssets = assignedAssets.filter(a => {
+        const nameMatch = (a.name || '').toLowerCase().includes(searchTerm);
+        const qrMatch = (a.asset_qr_id || '').toLowerCase().includes(searchTerm);
+        const lineMatch = (a.current_line || '').toLowerCase().includes(searchTerm);
+        
+        return nameMatch || qrMatch || lineMatch;
+    });
+
+    // Render Form View
     if (editingTemplate !== null) {
         return (
             <div className="max-w-2xl mx-auto bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-200 animate-in fade-in zoom-in-95 duration-200">
@@ -192,6 +225,75 @@ const TemplateLibraryView = ({ templates, fetchTemplates }) => {
         );
     }
 
+    // Render Assigned Assets View
+    if (viewingTemplateAssets !== null) {
+        return (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 animate-in fade-in duration-300 flex flex-col max-w-4xl mx-auto">
+                <div className="p-5 border-b border-gray-100 flex justify-between items-start md:items-center bg-gray-50 rounded-t-2xl flex-col md:flex-row gap-4">
+                    <div>
+                        <h2 className="text-xl font-extrabold text-gray-800 flex items-center">
+                            <Layers className="w-6 h-6 mr-2 text-indigo-600"/> 
+                            Assets Assigned to: {viewingTemplateAssets.name}
+                        </h2>
+                        <p className="text-sm text-gray-500 font-medium mt-1">
+                            Search and review all machines operating under this SOP.
+                        </p>
+                    </div>
+                    <button onClick={() => setViewingTemplateAssets(null)} className="px-4 py-2 bg-white border border-gray-200 hover:bg-gray-100 rounded-xl text-gray-600 font-bold transition-colors shadow-sm flex items-center whitespace-nowrap">
+                        <ArrowRight className="w-4 h-4 mr-2 rotate-180"/> Back to Library
+                    </button>
+                </div>
+
+                <div className="p-5 flex-1 flex flex-col">
+                    {/* Search Bar */}
+                    <div className="relative mb-6">
+                        <Search className="w-5 h-5 absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                        <input
+                            type="text"
+                            placeholder="Search assets by name, line, or QR code..."
+                            className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium shadow-sm"
+                            value={assetSearchTerm}
+                            onChange={(e) => setAssetSearchTerm(e.target.value)}
+                        />
+                    </div>
+
+                    {loadingAssets ? (
+                        <div className="py-12"><Spinner /></div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto max-h-[500px]">
+                            {filteredAssets.length === 0 ? (
+                                <div className="col-span-full py-16 flex flex-col items-center justify-center text-gray-400">
+                                    <FileBox className="w-12 h-12 mb-3 text-gray-300"/>
+                                    <p>No assets found matching your search.</p>
+                                </div>
+                            ) : (
+                                filteredAssets.map(asset => (
+                                    <div key={asset.id} className="p-4 border border-gray-200 rounded-xl bg-white hover:border-indigo-300 hover:shadow-md transition-all flex justify-between items-center group">
+                                        <div>
+                                            <h4 className="font-bold text-gray-900 group-hover:text-indigo-700 transition-colors">{asset.name}</h4>
+                                            <div className="flex flex-wrap items-center mt-2 gap-2">
+                                                <span className="text-[10px] font-mono text-gray-500 bg-gray-100 border border-gray-200 px-2 py-0.5 rounded">
+                                                    {asset.asset_qr_id}
+                                                </span>
+                                                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded uppercase tracking-wider">
+                                                    {asset.current_line}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div className="bg-gray-50 p-2 rounded-lg border border-gray-100 group-hover:bg-indigo-50 group-hover:border-indigo-100 transition-colors">
+                                            <FileBox className="text-gray-400 group-hover:text-indigo-500 w-5 h-5" />
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    // Render Main Grid View
     return (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 animate-in fade-in duration-300 flex flex-col">
             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-2xl">
@@ -206,18 +308,35 @@ const TemplateLibraryView = ({ templates, fetchTemplates }) => {
             
             <div className="p-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 {templates.map(tmpl => (
-                    <div key={tmpl.id} className="border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow relative group bg-white">
-                        <button onClick={() => handleEdit(tmpl)} className="absolute top-4 right-4 p-2 bg-gray-50 hover:bg-indigo-50 hover:text-indigo-600 text-gray-400 rounded-lg transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100">
+                    <div 
+                        key={tmpl.id} 
+                        onClick={() => handleViewAssets(tmpl)}
+                        className="border border-gray-200 rounded-xl p-5 hover:shadow-lg hover:border-indigo-300 transition-all cursor-pointer relative group bg-white flex flex-col h-full"
+                    >
+                        {/* Edit Button - Stops propagation so it doesn't trigger the view assets click */}
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); handleEdit(tmpl); }} 
+                            className="absolute top-4 right-4 p-2 bg-gray-50 hover:bg-indigo-100 text-gray-400 hover:text-indigo-600 rounded-lg transition-colors z-10"
+                            title="Edit Template"
+                        >
                             <Edit className="w-4 h-4"/>
                         </button>
-                        <h3 className="font-bold text-gray-900 text-lg mb-2 pr-8 leading-tight">{tmpl.name}</h3>
+
+                        <h3 className="font-bold text-gray-900 text-lg mb-2 pr-10 leading-tight group-hover:text-indigo-700 transition-colors">{tmpl.name}</h3>
+                        
                         <div className="flex gap-3 mb-4">
                             <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100 flex items-center"><CalendarIcon className="w-3 h-3 mr-1"/> Every {tmpl.frequency_days} Days</span>
                             <span className="text-[10px] font-bold bg-orange-50 text-orange-700 px-2 py-1 rounded border border-orange-100 flex items-center"><Clock className="w-3 h-3 mr-1"/> {tmpl.estimated_minutes || 60} Min</span>
                         </div>
-                        <p className="text-sm text-gray-600 line-clamp-3 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        
+                        <p className="text-sm text-gray-600 line-clamp-3 bg-gray-50 p-3 rounded-lg border border-gray-100 flex-1">
                             {tmpl.description || 'No detailed instructions provided.'}
                         </p>
+
+                        <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs font-bold text-gray-500 group-hover:text-indigo-600 transition-colors">
+                            <span className="flex items-center"><Layers className="w-4 h-4 mr-1"/> View Assigned Assets</span>
+                            <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transform translate-x-[-10px] group-hover:translate-x-0 transition-all"/>
+                        </div>
                     </div>
                 ))}
                 {templates.length === 0 && <div className="col-span-full py-16 text-center text-gray-400">No templates found. Create one to standardize maintenance.</div>}
@@ -403,8 +522,8 @@ const BulkScheduleView = ({ templates }) => {
 };
 
 // --- MAIN PAGE WRAPPER ---
-const MaintenanceSchedulePage = () => {
-    const [activeTab, setActiveTab] = useState('forecast'); // forecast, templates, bulk
+export default function App() {
+    const [activeTab, setActiveTab] = useState('templates'); // default changed to templates to easily view the new feature
     
     // Master State
     const [templates, setTemplates] = useState([]);
@@ -430,7 +549,7 @@ const MaintenanceSchedulePage = () => {
     useEffect(() => { loadCoreData(); }, []);
 
     return (
-        <div className="p-4 md:p-6 bg-gray-50 min-h-screen font-inter pb-24 text-gray-900">
+        <div className="p-4 md:p-6 bg-gray-50 min-h-screen font-sans pb-24 text-gray-900">
             {/* Header */}
             <header className="mb-6 md:mb-8">
                 <h1 className="text-2xl md:text-3xl font-black text-slate-900 flex items-center tracking-tight mb-4">
@@ -471,6 +590,4 @@ const MaintenanceSchedulePage = () => {
             )}
         </div>
     );
-};
-
-export default MaintenanceSchedulePage;
+}

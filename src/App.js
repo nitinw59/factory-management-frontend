@@ -102,6 +102,10 @@ import TrimBillingPage from './modules/store_manager/TrimBillingPage';
 
 import AdminMaintenanceDashboard from './modules/admin/AdminMaintenanceDashboard';
 import MaintenanceSchedulePage from './modules/maintenance/MaintenanceSchedulePage';
+import SparePartsPage from './modules/store_manager/SparePartsPage';
+
+
+
 function App() {
   return (
     <Routes>
@@ -159,6 +163,8 @@ function App() {
           <Route path="record-trim-purchase" element={<TrimIntakeForm />} />
           <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} /> 
           <Route path="trim-orders/:orderId/billing" element={<TrimBillingPage />} />
+
+          <Route path="spare-parts" element={<SparePartsPage />} />
         </Route>
 
         {/* Production Manager Portal */}

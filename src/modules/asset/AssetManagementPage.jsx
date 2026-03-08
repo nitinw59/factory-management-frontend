@@ -2,14 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
     Camera, Plus, ArrowLeft, Clipboard, 
     X, Download, Upload, Edit2, AlertCircle, Check, Calendar, Shield,
-    HardHat, Loader2, Trash2, Filter, Info, IndianRupee
+    HardHat, Loader2, Trash2, Filter, Info, IndianRupee, ChevronDown, ChevronUp 
 } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
 import { assetApi } from '../../api/assetApi';  
 import { maintenanceApi } from '../../api/maintenanceApi';
-// import { sparesApi } from '../../api/sparesApi'; // Available for future use if needed
-
 
 // --- Enterprise Helper Components ---
 const Spinner = () => <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
@@ -262,7 +260,6 @@ const AssetManagementPage = () => {
         }
     }, [viewMode, fetchAllData]);
 
-    // Smart Routing: Check DB, route to details OR prompt to add
     const processQrId = async (qrId) => {
         if (!qrId) return;
         setIsLoading(true);
@@ -275,7 +272,6 @@ const AssetManagementPage = () => {
             setQrSearchTerm('');
             showToast(`Asset loaded: ${res.data.name}`, 'success');
         } catch (err) {
-            // Assume 404 means asset does not exist yet
             setUnregisteredQr(qrId);
             setQrSearchTerm('');
         } finally {
@@ -302,7 +298,7 @@ const AssetManagementPage = () => {
             }
         };
         reader.readAsText(file);
-        e.target.value = null; // Reset input
+        e.target.value = null; 
     };
 
     return (
@@ -330,7 +326,6 @@ const AssetManagementPage = () => {
                 )}
             </header>
 
-            {/* Smart Universal Search/Scan Bar */}
             {viewMode === 'list' && (
                 <div className="mb-8 max-w-3xl">
                     <form onSubmit={handleSearchSubmit} className="relative shadow-sm rounded-xl">
@@ -352,7 +347,6 @@ const AssetManagementPage = () => {
                         </button>
                     </form>
 
-                    {/* Unregistered QR State Prompt */}
                     {unregisteredQr && (
                         <div className="mt-4 p-5 bg-yellow-50 border border-yellow-200 rounded-xl flex items-center justify-between animate-fade-in-up">
                             <div className="flex items-center gap-4">
@@ -413,7 +407,7 @@ const AssetManagementPage = () => {
     );
 };
 
-// --- Asset List View (With Local Filter) ---
+// --- Asset List View ---
 const AssetList = ({ assets, onSelect }) => {
     const [filterText, setFilterText] = useState('');
 
@@ -476,7 +470,7 @@ const AssetList = ({ assets, onSelect }) => {
     );
 };
 
-// --- Asset Form (With Inline Type Addition) ---
+// --- Asset Form (With Inline Type Addition and Fixed Deletion) ---
 const AssetForm = ({ assetTypes, pmTemplates = [], onSaveSuccess, onCancel, initialData, initialQrId = '', onAssetTypeCreated, showToast }) => {
     const isEditMode = Boolean(initialData);
 
@@ -500,8 +494,11 @@ const AssetForm = ({ assetTypes, pmTemplates = [], onSaveSuccess, onCancel, init
             });
             if (initialData.pm_schedules && Array.isArray(initialData.pm_schedules)) {
                 setPmSchedules(initialData.pm_schedules.map(pm => ({
-                    id: pm.id, template_id: pm.template_id || pmTemplates.find(t => t.name === pm.task_name)?.id || '',
-                    next_due_date: fmtDate(pm.next_due_date), is_active: pm.is_active !== false
+                    id: pm.id, 
+                    _uid: pm.id, // Use database ID as unique key if it exists
+                    template_id: pm.template_id || pmTemplates.find(t => t.name === pm.task_name)?.id || '',
+                    next_due_date: fmtDate(pm.next_due_date), 
+                    is_active: pm.is_active !== false
                 })));
             }
         }
@@ -517,13 +514,18 @@ const AssetForm = ({ assetTypes, pmTemplates = [], onSaveSuccess, onCancel, init
         }
     };
 
-    const addPmSchedule = () => setPmSchedules([...pmSchedules, { template_id: '', next_due_date: '', is_active: true }]);
+    const addPmSchedule = () => setPmSchedules(prev => [
+        ...prev, 
+        { _uid: Math.random().toString(36).substr(2, 9), template_id: '', next_due_date: '', is_active: true }
+    ]);
+
     const updatePmSchedule = (index, field, value) => {
-        const updated = [...pmSchedules];
-        updated[index][field] = value;
-        setPmSchedules(updated);
+        setPmSchedules(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
     };
-    const removePmSchedule = (index) => setPmSchedules(pmSchedules.filter((_, i) => i !== index));
+
+    const removePmSchedule = (index) => {
+        setPmSchedules(prev => prev.filter((_, i) => i !== index));
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -603,11 +605,11 @@ const AssetForm = ({ assetTypes, pmTemplates = [], onSaveSuccess, onCancel, init
                         </div>
                     </div>
                 </div>
-                
+
                 <h3 className="font-bold text-gray-800 bg-gray-50/50 p-3 rounded-lg border border-gray-100 mb-4">Maintenance Workflows</h3>
                 <div className="space-y-4 mb-8">
                     {pmSchedules.map((schedule, idx) => (
-                        <div key={idx} className="flex flex-col md:flex-row gap-4 items-center bg-white p-4 rounded-xl border-2 border-gray-100 shadow-sm">
+                        <div key={schedule.id || schedule._uid} className="flex flex-col md:flex-row gap-4 items-center bg-white p-4 rounded-xl border-2 border-gray-100 shadow-sm">
                             <div className="flex-1 w-full">
                                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Standard Operating Procedure</label>
                                 <select className="w-full p-2.5 border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none font-medium bg-white" value={schedule.template_id} onChange={e => updatePmSchedule(idx, 'template_id', e.target.value)} required >
@@ -661,6 +663,11 @@ const AssetForm = ({ assetTypes, pmTemplates = [], onSaveSuccess, onCancel, init
 // --- Asset Details View ---
 const AssetDetails = ({ asset, onBack, onEdit, onRefetch, showToast }) => { 
     const [showMaintForm, setShowMaintForm] = useState(false);
+    
+    // Track which cards are expanded
+    const [expandedPmId, setExpandedPmId] = useState(null);
+    const [expandedLogId, setExpandedLogId] = useState(null);
+
     const history = asset.history || [];
     const pmSchedules = asset.pm_schedules || [];
     const isUnderWarranty = asset.warranty_expiry_date && new Date(asset.warranty_expiry_date) > new Date();
@@ -695,7 +702,6 @@ const AssetDetails = ({ asset, onBack, onEdit, onRefetch, showToast }) => {
                 </div>
             </div>
             
-            {/* Top Grid: Operations & Core Hardware */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8 py-8 border-t-2 border-gray-100 bg-gray-50/30 px-6 rounded-t-xl">
                 <div><span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Assigned Unit</span><p className="font-bold text-lg text-gray-800">{asset.current_line || 'Float / Pool'}</p></div>
                 <div><span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Physical Sector</span><p className="font-bold text-lg text-gray-800">{asset.location || 'Not Specified'}</p></div>
@@ -703,7 +709,6 @@ const AssetDetails = ({ asset, onBack, onEdit, onRefetch, showToast }) => {
                 <div><span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">S/N Tracking</span><p className="font-bold text-lg font-mono text-gray-600">{asset.serial_number || 'N/A'}</p></div>
             </div>
             
-            {/* Bottom Grid: Financial Data */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8 py-6 border-b-2 border-gray-100 bg-gray-50/30 px-6 rounded-b-xl mb-10 border-t border-gray-200">
                 <div>
                     <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Acquisition Date</span>
@@ -718,6 +723,7 @@ const AssetDetails = ({ asset, onBack, onEdit, onRefetch, showToast }) => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                {/* --- SCHEDULED PROCEDURES SECTION --- */}
                 <div>
                     <h3 className="text-xl font-extrabold text-gray-900 flex items-center mb-6"><Calendar className="mr-3 w-6 h-6 text-blue-600"/> Scheduled Procedures</h3>
                     <div className="space-y-4">
@@ -727,22 +733,41 @@ const AssetDetails = ({ asset, onBack, onEdit, onRefetch, showToast }) => {
                             </div>
                         ) : pmSchedules.map(pm => {
                             const isOverdue = new Date(pm.next_due_date) < new Date();
+                            const isExpanded = expandedPmId === pm.id;
+                            
                             return (
-                                <div key={pm.id} className={`p-4 rounded-xl border-2 ${isOverdue ? 'bg-red-50 border-red-100' : 'bg-white border-gray-100 shadow-sm'}`}>
+                                <div 
+                                    key={pm.id} 
+                                    onClick={() => setExpandedPmId(isExpanded ? null : pm.id)}
+                                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${isOverdue ? 'bg-red-50 border-red-100 hover:bg-red-100/70' : 'bg-white border-gray-100 shadow-sm hover:border-blue-100'}`}
+                                >
                                     <div className="flex justify-between items-start mb-2">
-                                        <p className="font-bold text-gray-900 text-base">{pm.task_name}</p>
+                                        <p className="font-bold text-gray-900 text-base flex items-center">
+                                            {pm.task_name}
+                                            {isExpanded ? <ChevronUp className="w-4 h-4 ml-2 text-gray-400"/> : <ChevronDown className="w-4 h-4 ml-2 text-gray-400"/>}
+                                        </p>
                                         <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-md">Cycle: {pm.frequency_days}d</span>
                                     </div>
                                     <p className={`text-sm font-bold ${isOverdue ? 'text-red-600' : 'text-blue-600'}`}>
                                         Target Execution: {new Date(pm.next_due_date).toLocaleDateString()}
                                         {isOverdue && ' — OVERDUE'}
                                     </p>
+                                    
+                                    {/* Expanded PM Content */}
+                                    {isExpanded && (
+                                        <div className="mt-4 pt-4 border-t border-gray-200/60 animate-fade-in-up text-sm text-gray-700">
+                                            <p className="mb-2"><strong>Status:</strong> {pm.is_active !== false ? 'Active Routine' : 'Paused'}</p>
+                                            <p className="mb-2"><strong>Template Reference:</strong> #{pm.template_id}</p>
+                                            <p><strong>Notes:</strong> Follow standard operating procedure for {pm.task_name}. Log all replacement parts used during this cycle.</p>
+                                        </div>
+                                    )}
                                 </div>
                             );
                         })}
                     </div>
                 </div>
 
+                {/* --- INTERVENTION LOGS SECTION --- */}
                 <div>
                     <div className="flex justify-between items-center mb-6">
                         <h3 className="text-xl font-extrabold text-gray-900 flex items-center"><Clipboard className="mr-3 w-6 h-6 text-indigo-600"/> Intervention Logs</h3>
@@ -753,21 +778,43 @@ const AssetDetails = ({ asset, onBack, onEdit, onRefetch, showToast }) => {
                     
                     {showMaintForm && <MaintenanceLogForm assetId={asset.id} onLogSaved={() => {setShowMaintForm(false); showToast('Maintenance log appended'); onRefetch();}} />}
                     
-                    <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                    <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
                         {history.length === 0 && !showMaintForm && (
                             <div className="p-6 border-2 border-dashed border-gray-200 rounded-xl text-center">
                                 <p className="text-gray-500 font-medium">Lifecycle history is empty.</p>
                             </div>
                         )}
-                        {history.map(log => (
-                            <div key={log.id} className="p-4 border-2 border-gray-100 rounded-xl bg-white shadow-sm hover:border-blue-100 transition-colors">
-                                <div className="flex justify-between items-center mb-2 pb-2 border-b border-gray-50">
-                                    <span className="font-bold text-[10px] px-2.5 py-1 bg-gray-100 rounded text-gray-700 uppercase tracking-wider">{log.maintenance_type}</span>
-                                    <span className="text-xs font-bold text-gray-400">{new Date(log.maintenance_date).toLocaleDateString()}</span>
+                        {history.map(log => {
+                            const isExpanded = expandedLogId === log.id;
+                            
+                            return (
+                                <div 
+                                    key={log.id} 
+                                    onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
+                                    className="p-4 border-2 border-gray-100 rounded-xl bg-white shadow-sm hover:border-indigo-100 cursor-pointer transition-colors"
+                                >
+                                    <div className="flex justify-between items-center mb-2 pb-2 border-b border-gray-50">
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-bold text-[10px] px-2.5 py-1 bg-gray-100 rounded text-gray-700 uppercase tracking-wider">{log.maintenance_type}</span>
+                                            {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-400"/> : <ChevronDown className="w-4 h-4 text-gray-400"/>}
+                                        </div>
+                                        <span className="text-xs font-bold text-gray-400">{new Date(log.maintenance_date).toLocaleDateString()}</span>
+                                    </div>
+                                    <p className={`text-sm text-gray-800 font-medium leading-relaxed ${!isExpanded ? 'line-clamp-2' : ''}`}>
+                                        "{log.description}"
+                                    </p>
+                                    
+                                    {/* Expanded Log Content */}
+                                    {isExpanded && (
+                                        <div className="mt-3 pt-3 border-t border-gray-50 text-sm text-gray-600 animate-fade-in-up">
+                                            <p className="mb-1"><strong>Log Entry ID:</strong> #{log.id}</p>
+                                            <p className="mb-1"><strong>Logged on:</strong> {new Date(log.created_at || log.maintenance_date).toLocaleString()}</p>
+                                            <p><strong>System Note:</strong> The equipment was processed under the {log.maintenance_type.toLowerCase()} workflow and returned to service.</p>
+                                        </div>
+                                    )}
                                 </div>
-                                <p className="text-sm text-gray-800 font-medium leading-relaxed">"{log.description}"</p>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             </div>
@@ -775,7 +822,6 @@ const AssetDetails = ({ asset, onBack, onEdit, onRefetch, showToast }) => {
     );
 };
 
-// Uses maintenanceApi instead of assetApi now
 const MaintenanceLogForm = ({ assetId, onLogSaved }) => {
     const [formData, setFormData] = useState({ maintenance_date: new Date().toISOString().split('T')[0], maintenance_type: 'PREVENTATIVE', description: '' });
     const [isSaving, setIsSaving] = useState(false);

@@ -13,9 +13,14 @@ export const maintenanceApi = {
         api.post('/maintenance/templates', data),
     updatePMTemplate: (data) =>
         api.put(`/maintenance/templates/${data.id}`, data),
+    getAssetsByTemplate: (templateId) =>
+        api.get(`/maintenance/templates/${templateId}/assets`),
+
 
     createPMSchedule: (data) =>
         api.post('/assets/pm-schedules', data),
+    
+  
 
     // ✅ NEW: Scheduling Dashboard Endpoints
     getUpcomingTasks: () => 
