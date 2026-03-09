@@ -69,7 +69,7 @@ const TrimOrderSummaryPage = () => {
         
         const consumptionRows = consumption_report.map(report => [
             `${report.item_name}\n${report.brand}`,
-            report.color_name,
+            report.color_name + (report.color_number ? ` (${report.color_number})` : ''),   
             report.total_consumed
         ]);
 
@@ -92,7 +92,7 @@ const TrimOrderSummaryPage = () => {
 
             const pendingRows = pendingItems.map(item => [
                 `${item.item_name}\n${item.brand}`,
-                item.color_name,
+                item.color_name + (item.color_number ? ` (${item.color_number})` : ''),
                 item.quantity_required,
                 item.quantity_fulfilled,
                 (item.quantity_required - item.quantity_fulfilled)

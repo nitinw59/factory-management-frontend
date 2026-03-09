@@ -58,7 +58,7 @@ import StoreManagerDashboardPage from './modules/store_manager/StoreManagerDashb
 import ProductionPlanningPage from './modules/production/ProductionPlanningPage';
 import CuttingDashboardPage from './modules/cutting_portal/CuttingDashboardPage'; // New
 import FactoryLayoutPlannerPage from './modules/production/FactoryLayoutPlannerPage';
-import TrimIntakeForm from './modules/store_manager/TrimIntakeForm'; 
+import UnifiedIntakeForm from './modules/store_manager/UnifiedIntakeForm'; 
 import TrimManagementPage from './modules/store_manager/TrimManagementPage';
 import TrimOrdersPage from './modules/store_manager/TrimOrdersPage';
 import TrimOrderDetailPage from './modules/store_manager/TrimOrderDetailPage';
@@ -85,7 +85,7 @@ import AssemblyDashboardPage from './modules/sewing_portal/AssemblyDashboardPage
 import TrimOrderSummaryPage from './modules/store_manager/TrimOrderSummaryPage';
 import NumberingCheckerSummaryPage from './modules/numbering_portal/NumberingCheckerSummaryPage';
 import SewingMachineComplaintPage from './modules/asset/SewingMachineComplaintPage';
-import ListTrimStockIntake from './modules/store_manager/ListTrimStockIntake';  
+import ListInventoryIntakes from './modules/store_manager/ListInventoryIntakes';  
 import CuttingManagerReportPage from './modules/initialisation_portal/CuttingManagerReportPage';
 import CreateSalesOrder from './modules/accounts/sales/CreateSalesOrder';
 //import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
@@ -151,7 +151,7 @@ function App() {
           <Route index element={<StoreManagerDashboardPage />} />
           <Route path="fabric-stock" element={<StoreManagerDashboardPage />} />
           <Route path="trim-management" element={<TrimManagementPage />} />
-          <Route path="trim-stock-intake" element={<ListTrimStockIntake />} />
+          <Route path="trim-stock-intake" element={<ListInventoryIntakes />} />
           
           {/* Corrected Routes for Trim Orders */}
           {/* This route displays the list of all orders */}
@@ -160,7 +160,7 @@ function App() {
           {/* This route displays the details of a single, specific order */}
           <Route path="trim-orders/:orderId" element={<TrimOrderDetailPage />} />
           
-          <Route path="record-trim-purchase" element={<TrimIntakeForm />} />
+          <Route path="record-trim-purchase" element={<UnifiedIntakeForm />} />
           <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} /> 
           <Route path="trim-orders/:orderId/billing" element={<TrimBillingPage />} />
 
