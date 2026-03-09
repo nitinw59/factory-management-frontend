@@ -105,6 +105,10 @@ import MaintenanceSchedulePage from './modules/maintenance/MaintenanceSchedulePa
 import SparePartsPage from './modules/store_manager/SparePartsPage';
 
 
+import DispatchLayout from './shared/DispatchLayout';
+import DispatchProtectedRoute from './shared/DispatchProtectedRoute';
+import DispatchDashboardPage from './modules/depatch_portal/DispatchDashboardPage';
+import DispatchReceiptsPage from './modules/depatch_portal/DispatchReceiptsPage';
 
 function App() {
   return (
@@ -302,6 +306,13 @@ function App() {
         <Route index element={<MechanicsDashboardPage />} />
         <Route path="dashboard" element={<MechanicsDashboardPage />} />
         {/* Add more mechanics operator specific routes here later */}
+    </Route>
+
+    <Route path="/dispatch-portal" element={<DispatchProtectedRoute><DispatchLayout /></DispatchProtectedRoute>}>
+        <Route index element={<DispatchDashboardPage />} />
+        <Route path="dashboard" element={<DispatchDashboardPage />} />
+        <Route path="receipts" element={<DispatchReceiptsPage />} />
+        {/* Add more dispatch operator specific routes here later */}
     </Route>
 
     <Route path="/maintenance/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />

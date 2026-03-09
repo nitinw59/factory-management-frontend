@@ -86,6 +86,10 @@ const InitialRedirect = () => {
         case 'mechanic':
             // Mechanics are sent to their mechanic dashboard.
             return <Navigate to="/mechanics-portal/dashboard" replace />;
+        
+        case 'dispatch_officer':
+            // Dispatch Officers are sent to their dispatch dashboard.
+            return <Navigate to="/dispatch-portal/dashboard" replace />;    
 
         
         default:

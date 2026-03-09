@@ -17,7 +17,7 @@ const Spinner = () => <div className="flex justify-center p-8"><Loader2 classNam
 
 // --- CONSTANTS & STYLES ---
 const NODE_WIDTH = 260;
-const NODE_HEIGHT = 150; 
+const NODE_HEIGHT = 300; // Increased to accommodate the new WIP and Trim sections
 const GAP_X = 80;
 const GAP_Y = 20;
 
@@ -30,10 +30,11 @@ const StatusBadge = ({ status }) => {
         'IN_PROGRESS': 'bg-indigo-100 text-indigo-700 border-indigo-200',
         'ISSUED': 'bg-amber-100 text-amber-700 border-amber-200',
         'DRAFT': 'bg-gray-100 text-gray-600 border-gray-200',
-        'PENDING': 'bg-yellow-50 text-yellow-700 border-yellow-200'
+        'PENDING': 'bg-yellow-50 text-yellow-700 border-yellow-200',
+        'PREPARED': 'bg-orange-100 text-orange-700 border-orange-200' // Added for Trims
     };
     return (
-        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${colors[status] || 'bg-gray-100 text-gray-500'}`}>
+        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${colors[status] || 'bg-gray-100 text-gray-500'}`}>
             {status ? status.replace('_', ' ') : 'N/A'}
         </span>
     );
@@ -154,63 +155,99 @@ const BatchNode = ({ data, x, y, onViewDetails, onEditBatch, onDeleteBatch }) =>
     const { user } = useAuth();
     const canManage = user && ['production_manager', 'factory_admin'].includes(user.role);
 
+    // FEATURE 1 & 2: Safe fallbacks for new API data
+    const trimStatus = data.trim_status || 'PENDING';
+    const wip = data.wip || { cut_pct: 0, sew_pct: 0, assemble_pct: 0 };
+    
+    // BOTTLENECK DETECTOR: If production is running but trims are stuck
+    const hasBottleneck = data.overall_status === 'IN_PROGRESS' && trimStatus === 'PENDING';
+
     return (
         <div 
-            className="absolute bg-white rounded-xl shadow-sm border border-l-4 border-l-emerald-500 border-slate-200 p-3 hover:shadow-md transition-all cursor-default"
+            className={`absolute bg-white rounded-xl shadow-sm border-l-4 ${hasBottleneck ? 'border-l-red-500 border-red-200 shadow-red-100' : 'border-l-emerald-500 border-slate-200'} p-3 hover:shadow-md transition-all cursor-default flex flex-col`}
             style={{ width: NODE_WIDTH, height: NODE_HEIGHT, left: x, top: y }}
         >
             <div className="flex justify-between items-start mb-2">
                 <div className="flex items-center gap-2">
-                    <div className="p-1 bg-emerald-50 rounded-lg">
-                        <Scissors className="text-emerald-600" size={14} />
+                    <div className={`p-1.5 rounded-lg ${hasBottleneck ? 'bg-red-50' : 'bg-emerald-50'}`}>
+                        {hasBottleneck ? <AlertCircle className="text-red-600 animate-pulse" size={14}/> : <Scissors className="text-emerald-600" size={14} />}
                     </div>
-                    <span className="font-bold text-slate-700 text-sm">{data.batch_code}</span>
+                    <span className="font-bold text-slate-800 text-sm">{data.batch_code}</span>
                 </div>
-                <StatusBadge status={data.overall_status || 'PENDING'} />
+                <div className="flex flex-col items-end">
+                    <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Trims</span>
+                    <StatusBadge status={trimStatus} />
+                </div>
             </div>
             
-            <div className="mt-2">
-                <div className="flex justify-between text-[10px] text-slate-500 mb-1">
-                    <span className="truncate max-w-[150px]">{data.product_name}</span>
-                    <span>{data.overall_status === 'COMPLETED' ? '100%' : 'In Progress'}</span>
+            <div className="text-xs font-bold text-slate-700 truncate bg-slate-50 p-1.5 rounded mb-2" title={data.product_name}>
+                {data.product_name}
+            </div>
+            
+            {/* Real-Time WIP Tracking Bars */}
+            <div className="flex-1 bg-white border border-slate-100 rounded-lg p-2 space-y-2.5">
+                <div>
+                    <div className="flex justify-between text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        <span className="flex items-center"><Scissors size={10} className="mr-1 text-blue-500"/> Cut</span>
+                        <span className={wip.cut_pct >= 100 ? 'text-blue-600' : ''}>{wip.cut_pct}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                        <div className="bg-blue-500 h-full rounded-full transition-all duration-500" style={{ width: `${wip.cut_pct}%` }}></div>
+                    </div>
                 </div>
-                <div className="w-full bg-slate-100 rounded-full h-1.5">
-                    <div className={`h-1.5 rounded-full ${data.overall_status === 'COMPLETED' ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: data.overall_status === 'COMPLETED' ? '100%' : '40%' }}></div>
+                <div>
+                    <div className="flex justify-between text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        <span className="flex items-center"><Layers size={10} className="mr-1 text-amber-500"/> Sew</span>
+                        <span className={wip.sew_pct >= 100 ? 'text-amber-600' : ''}>{wip.sew_pct}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                        <div className="bg-amber-500 h-full rounded-full transition-all duration-500" style={{ width: `${wip.sew_pct}%` }}></div>
+                    </div>
+                </div>
+                <div>
+                    <div className="flex justify-between text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        <span className="flex items-center"><Package size={10} className="mr-1 text-emerald-500"/> Finish</span>
+                        <span className={wip.assemble_pct >= 100 ? 'text-emerald-600' : ''}>{wip.assemble_pct}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                        <div className="bg-emerald-500 h-full rounded-full transition-all duration-500" style={{ width: `${wip.assemble_pct}%` }}></div>
+                    </div>
                 </div>
             </div>
 
-            <div className="mt-3 flex justify-end gap-1.5">
-                 {canManage && (
+            <div className="mt-3 flex justify-between items-center pt-2 border-t border-slate-100">
+                <StatusBadge status={data.overall_status || 'PENDING'} />
+                <div className="flex gap-1.5">
+                    {canManage && (
+                        <button 
+                            onClick={(e) => { 
+                                e.stopPropagation(); 
+                                if(window.confirm(`Are you sure you want to delete Batch ${data.batch_code}?`)) onDeleteBatch(data.id);
+                            }}
+                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title="Delete Batch"
+                        >
+                            <Trash2 size={12} />
+                        </button>
+                    )}
+                    
+                    {canManage && (
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); onEditBatch(data.id); }}
+                            className="text-[10px] bg-slate-50 text-slate-600 hover:text-amber-600 hover:bg-amber-50 px-2 py-1 rounded border border-slate-200 flex items-center font-medium transition-colors"
+                            title="Edit Batch"
+                        >
+                            <Edit3 size={10} className="mr-1" /> Edit
+                        </button>
+                    )}
+                    
                     <button 
-                        onClick={(e) => { 
-                            e.stopPropagation(); 
-                            if(window.confirm(`Are you sure you want to delete Batch ${data.batch_code}? This will revert assigned rolls to stock.`)) {
-                                onDeleteBatch(data.id);
-                            }
-                        }}
-                        className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                        title="Delete Batch"
+                        onClick={(e) => { e.stopPropagation(); onViewDetails(data.id); }}
+                        className="text-[10px] bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-2 py-1 rounded border border-indigo-100 flex items-center font-medium transition-colors"
                     >
-                        <Trash2 size={12} />
+                        Details <ChevronRight size={10} className="ml-0.5" />
                     </button>
-                )}
-                
-                {canManage && (
-                    <button 
-                        onClick={(e) => { e.stopPropagation(); onEditBatch(data.id); }}
-                        className="text-[10px] bg-slate-50 text-slate-600 hover:text-amber-600 hover:bg-amber-50 px-2 py-1 rounded border border-slate-200 flex items-center font-medium transition-colors"
-                        title="Edit Batch"
-                    >
-                        <Edit3 size={10} className="mr-1" /> Edit
-                    </button>
-                )}
-                
-                <button 
-                    onClick={(e) => { e.stopPropagation(); onViewDetails(data.id); }}
-                    className="text-[10px] bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-2 py-1 rounded border border-indigo-100 flex items-center font-medium transition-colors"
-                >
-                    Details <ChevronRight size={10} className="ml-0.5" />
-                </button>
+                </div>
             </div>
         </div>
     );
@@ -218,7 +255,6 @@ const BatchNode = ({ data, x, y, onViewDetails, onEditBatch, onDeleteBatch }) =>
 
 // --- GRAPH COMPONENT FOR SINGLE SALES ORDER ---
 const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO }) => {
-    // Calculate Layout just for this SO tree
     const { nodes, connectors, height } = useMemo(() => {
         const nodesList = [];
         const connList = [];
