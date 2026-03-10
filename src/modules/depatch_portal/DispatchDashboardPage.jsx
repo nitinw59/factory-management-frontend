@@ -1,53 +1,20 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
-    Truck, Search, CheckCircle, Clock, Package, X, 
+    Truck, Search, CheckCircle, Package, X, 
     FileText, Printer, ArrowLeft, ShieldCheck, Building2, 
     Calendar, Loader2, AlertCircle, ChevronDown, Eye, Box,
     ShoppingBag, ChevronRight
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // ==========================================
-// 1. MOCK API SERVICE (Replaces external imports for Canvas preview)
+// 1. MOCK API SERVICE (For Canvas Preview)
+// In production, UNCOMMENT the line below and DELETE this mock object
 // ==========================================
 import { dispatchManagerApi } from '../../api/dispatchManagerApi';
 
-//const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// const dispatchManagerApi = {
-//     getDashboardData: async () => {
-//         await delay(800);
-//         return {
-//             data: [
-//                 { id: 'B-2026-001', style: 'Mens Cotton Polo', client: 'RetailCorp', status: 'READY', date: '2026-03-01', totalPieces: 270, po_code: 'PO-9912' },
-//                 { id: 'B-2026-002', style: 'Womens Denim Jacket', client: 'FashionHub', status: 'READY', date: '2026-03-05', totalPieces: 85, po_code: 'PO-8821' },
-//                 { id: 'B-2026-003', style: 'Kids Summer Tee', client: 'TinyTots', status: 'READY', date: '2026-03-08', totalPieces: 530 },
-//                 { id: 'B-2026-004', style: 'Winter Fleece Zip', client: 'OutdoorGear', status: 'DISPATCHED', date: '2026-02-28', dispatchDate: '2026-03-02', totalPieces: 400 },
-//             ]
-//         };
-//     },
-//     getRollDetailsForBatch: async (batchId) => {
-//         await delay(600);
-//         const mockDb = {
-//             'B-2026-001': [{ rollId: 'R-1001', color: 'Navy Blue', cutPieces: 120 }, { rollId: 'R-1002', color: 'White', cutPieces: 150 }],
-//             'B-2026-002': [{ rollId: 'R-2001', color: 'Washed Blue', cutPieces: 85 }],
-//             'B-2026-003': [{ rollId: 'R-3001', color: 'Yellow', cutPieces: 200 }, { rollId: 'R-3002', color: 'Red', cutPieces: 180 }, { rollId: 'R-3003', color: 'Green', cutPieces: 150 }],
-//         };
-//         return { data: mockDb[batchId] || [] };
-//     },
-//     submitDispatch: async (payload) => {
-//         await delay(1000); // Simulate processing all cycle stages to COMPLETED
-//         return { success: true, receiptId: `REC-${payload.batchId.replace('B-', '')}`, dispatchDate: new Date().toLocaleDateString() };
-//     },
-//     getReceiptDetails: async (batchId) => {
-//         await delay(500);
-//         return {
-//             data: {
-//                 dispatchDate: '2026-03-02',
-//                 rolls: [{ rollId: 'R-4001', color: 'Black', cutPieces: 400, dispatchedPieces: 400 }]
-//             }
-//         };
-//     }
-// };
 
 // ==========================================
 // 2. SHARED UI COMPONENTS
@@ -56,7 +23,7 @@ const Spinner = () => <div className="flex justify-center items-center p-12"><Lo
 const ErrorDisplay = ({ message }) => <div className="text-center p-4 text-rose-600 bg-rose-50 rounded-xl border border-rose-100 font-medium flex items-center justify-center space-x-2"><AlertCircle size={20} /><span>{message}</span></div>;
 
 const Modal = ({ title, onClose, children, maxWidth = "max-w-2xl" }) => (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200 print:hidden">
         <div className={`bg-white rounded-2xl shadow-2xl w-full ${maxWidth} overflow-hidden flex flex-col max-h-[90vh]`}>
             <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50">
                 <h3 className="font-bold text-lg text-slate-800 flex items-center space-x-2">
@@ -107,8 +74,8 @@ const DispatchFormModal = ({ batch, onClose, onSuccess }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState(null);
-    const [showPreview, setShowPreview] = useState(false); // New state for review step
-    const [showWarning, setShowWarning] = useState(false); // State for the final warning dialog
+    const [showPreview, setShowPreview] = useState(false);
+    const [showWarning, setShowWarning] = useState(false);
 
     useEffect(() => {
         const fetchRolls = async () => {
@@ -130,7 +97,7 @@ const DispatchFormModal = ({ batch, onClose, onSuccess }) => {
             }
         };
         fetchRolls();
-    }, [batch.id]);
+    }, [batch.id, batch.real_batch_id]);
 
     const handleInputChange = (rollId, val) => {
         setInputs(prev => ({ ...prev, [rollId]: parseInt(val) || 0 }));
@@ -146,7 +113,6 @@ const DispatchFormModal = ({ batch, onClose, onSuccess }) => {
             };
             const response = await dispatchManagerApi.submitDispatch(payload);
             
-            // Generate standard receipt payload to return back to dashboard
             const generatedReceipt = {
                 ...batch,
                 dispatchDate: response.dispatchDate,
@@ -157,14 +123,13 @@ const DispatchFormModal = ({ batch, onClose, onSuccess }) => {
             onSuccess(generatedReceipt);
         } catch (err) {
             setError("Failed to finalize dispatch process.");
-            setIsSubmitting(false); // Re-enable buttons if error occurs
+            setIsSubmitting(false);
         }
     };
 
     if (isLoading) return <Modal title={`Dispatching: ${batch.id}`} onClose={onClose}><Spinner /></Modal>;
     if (error) return <Modal title="Error" onClose={onClose}><ErrorDisplay message={error} /></Modal>;
 
-    // Calculate dynamic totals
     const totalCut = rolls.reduce((sum, r) => sum + parseInt(r.cutPieces || 0, 10), 0);
     const totalDispatched = rolls.reduce((sum, r) => sum + parseInt(inputs[r.rollId] || 0, 10), 0);
 
@@ -332,8 +297,6 @@ export default function DispatchDashboardPage() {
         try {
             const res = await dispatchManagerApi.getDashboardData();
             const fetchedBatches = res.data?.data || res.data || []; 
-        
-             // Ensure we strictly set an array
             setBatches(Array.isArray(fetchedBatches) ? fetchedBatches : []);
         } catch (err) {
             console.error("Error fetching dashboard data:", err);   
@@ -348,48 +311,44 @@ export default function DispatchDashboardPage() {
     const handleDispatchSuccess = (receiptData) => {
         setDispatchingBatch(null);
         setReceiptView(receiptData);
-        // In a real app, you'd re-fetch the dashboard. Here we locally update to show immediate UI response.
         setBatches(prev => prev.map(b => b.id === receiptData.id ? { ...b, status: 'DISPATCHED', dispatchDate: receiptData.dispatchDate } : b));
         setExpandedSections({ READY: false, DISPATCHED: true });
     };
 
-        const handleViewExistingReceipt = async (batch) => {
-                setIsLoading(true);
-                try {
-                    const res = await dispatchManagerApi.getReceiptDetails(batch.real_batch_id);
-                    
-                    // Safely extract the nested receipt object
-                    // Axios = res.data.data | Fetch = res.data
-                    const receiptData = res.data?.data || res.data || {};
-
-                    setReceiptView({ 
-                        ...batch, 
-                        receiptId: receiptData.receiptId, // Capture the actual receipt number
-                        dispatchDate: receiptData.dispatchDate, 
-                        rolls: Array.isArray(receiptData.rolls) ? receiptData.rolls : [] 
-                    });
-                } catch (err) {
-                    console.log("Error fetching receipt details:", err);
-                    alert("Failed to fetch receipt data.");
-                } finally {
-                    setIsLoading(false);
-                }
-            };
+    const handleViewExistingReceipt = async (batch) => {
+        setIsLoading(true);
+        try {
+            const res = await dispatchManagerApi.getReceiptDetails(batch.real_batch_id);
+            const receiptData = res.data?.data || res.data || {};
+            console.log("Fetched receipt details:", receiptData);
+            setReceiptView({ 
+                ...batch, 
+                receiptId: receiptData.receiptId, 
+                dispatchDate: receiptData.dispatchDate, 
+                sizeRatio: receiptData.sizeRatio || null,
+                rolls: Array.isArray(receiptData.rolls) ? receiptData.rolls : [] 
+            });
+        } catch (err) {
+            console.log("Error fetching receipt details:", err);
+            alert("Failed to fetch receipt data.");
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     const toggleSection = (section) => setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
-            const filteredBatches = useMemo(() => {
-                // SAFETY NET: Ensure batches is always an array before filtering
-                const safeBatches = Array.isArray(batches) ? batches : [];
-
-                if (!searchQuery) return safeBatches;
-                
-                const lower = searchQuery.toLowerCase();
-                return safeBatches.filter(b => 
-                    b.id.toLowerCase().includes(lower) || 
-                    b.client.toLowerCase().includes(lower) || 
-                    b.style.toLowerCase().includes(lower)
-                );
-            }, [batches, searchQuery]);
+    
+    const filteredBatches = useMemo(() => {
+        const safeBatches = Array.isArray(batches) ? batches : [];
+        if (!searchQuery) return safeBatches;
+        
+        const lower = searchQuery.toLowerCase();
+        return safeBatches.filter(b => 
+            b.id.toLowerCase().includes(lower) || 
+            b.client.toLowerCase().includes(lower) || 
+            b.style.toLowerCase().includes(lower)
+        );
+    }, [batches, searchQuery]);
 
     const groupedBatches = useMemo(() => {
         return filteredBatches.reduce((acc, batch) => {
@@ -399,92 +358,258 @@ export default function DispatchDashboardPage() {
         }, { READY: [], DISPATCHED: [] });
     }, [filteredBatches]);
 
+    // ==========================================
+    // PDF GENERATION WITH JSPDF (For B&W Printing)
+    // ==========================================
+    const handlePrintPDF = () => {
+        if (!receiptView) return;
+
+        const doc = new jsPDF();
+        const pageWidth = doc.internal.pageSize.width;
+        
+        const totalCut = receiptView.rolls.reduce((sum, r) => sum + parseInt(r.cutPieces || 0, 10), 0);
+        const totalDispatched = receiptView.rolls.reduce((sum, r) => sum + parseInt(r.dispatchedPieces || 0, 10), 0);
+
+        // Set global text color to pure black
+        doc.setTextColor(0, 0, 0);
+
+        // --- LETTERHEAD ---
+        doc.setFontSize(22);
+        doc.setFont("helvetica", "bold");
+        doc.text("MATRIX OVERSEAS", pageWidth / 2, 20, { align: "center" });
+
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        const addressLines = [
+            "PLOT NO. 24,26,27, K T STEEL PLOT PREMISSES,",
+            "R K CNG PUMP, WIMCO NAKA, AMBERNATH 421505.",
+            "Phone: +918591383476"
+        ];
+        doc.text(addressLines, pageWidth / 2, 28, { align: "center", lineHeightFactor: 1.5 });
+
+        // Separator Line (Black)
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.5);
+        doc.line(14, 45, pageWidth - 14, 45);
+
+        // --- RECEIPT HEADER INFO ---
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.text("DISPATCH RECEIPT", 14, 55);
+
+        // Left Side
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.text("Receipt #:", 14, 65);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${receiptView.receiptId}`, 40, 65);
+
+        doc.setFont("helvetica", "bold");
+        doc.text("Date:", 14, 72);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${receiptView.dispatchDate}`, 40, 72);
+        
+        doc.setFont("helvetica", "bold");
+        doc.text("Batch ID:", 14, 79);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${receiptView.id}`, 40, 79);
+
+        // Right Side 
+        doc.setFont("helvetica", "bold");
+        doc.text("Client:", 120, 65);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${receiptView.client}`, 135, 65);
+        
+        doc.setFont("helvetica", "bold");
+        doc.text("Style:", 120, 72);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${receiptView.style}`, 135, 72);
+
+        if (receiptView.po_code) {
+            doc.setFont("helvetica", "bold");
+            doc.text("PO Ref:", 120, 79);
+            doc.setFont("helvetica", "normal");
+            doc.text(`${receiptView.po_code}`, 135, 79);
+        }
+
+        let currentY = 88;
+
+        // --- SIZE RATIO SECTION ---
+        if (receiptView.sizeRatio && Object.keys(receiptView.sizeRatio).length > 0) {
+            doc.setFont("helvetica", "bold");
+            doc.text("Size Ratio:", 14, currentY);
+            
+            doc.setFont("helvetica", "normal");
+            const ratioString = Object.entries(receiptView.sizeRatio)
+                .map(([size, ratio]) => `[${size}: ${ratio}]`)
+                .join('   ');
+                
+            doc.text(ratioString, 40, currentY);
+            currentY += 10;
+        }
+
+        // --- ITEMS TABLE (Black & White Styles) ---
+        autoTable(doc, { 
+            startY: currentY + 5, 
+            head: [['Roll ID', 'Color',  'Dispatched Pieces']], 
+            body: receiptView.rolls.map(r => [
+                r.rollId, 
+                r.color + (r.colorNumber ? ` (${r.colorNumber})` : ''), 
+                r.dispatchedPieces
+            ]),
+            theme: 'grid',
+            // Use white text on black background for header, pure black borders
+            headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], lineColor: [0, 0, 0], lineWidth: 0.5 },
+            // Use black text on white background for body, pure black borders
+            bodyStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.5 },
+            alternateRowStyles: { fillColor: [255, 255, 255] }, // Disable alternate row coloring
+            styles: { fontSize: 10, cellPadding: 4, lineColor: [0, 0, 0], lineWidth: 0.5 },
+            columnStyles: {
+                2: { halign: 'right' },
+                3: { halign: 'right', fontStyle: 'bold' }
+            },
+            foot: [[
+                { content: 'Grand Total', colSpan: 2, styles: { halign: 'right', fontStyle: 'bold', fillColor: [255, 255, 255], textColor: [0, 0, 0] } },
+                { content: `${totalCut}`, styles: { halign: 'right', fontStyle: 'bold', fillColor: [255, 255, 255], textColor: [0, 0, 0] } },
+                { content: `${totalDispatched}`, styles: { halign: 'right', fontStyle: 'bold', fillColor: [255, 255, 255], textColor: [0, 0, 0] } }
+            ]],
+            // Ensure footer borders are black
+            footStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.5 }
+        });
+
+        // --- FOOTER SIGNATURES ---
+        const finalY = doc.lastAutoTable.finalY + 30;
+        
+        doc.setFont("helvetica", "bold");
+        doc.text("Authorized Dispatch Officer", 14, finalY);
+        doc.setDrawColor(0, 0, 0); // Black line
+        doc.line(14, finalY + 1, 70, finalY + 1);
+
+        doc.text("Transport / Receiver Signature", 120, finalY);
+        doc.line(120, finalY + 1, 180, finalY + 1);
+
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "italic");
+        doc.text("This is a computer-generated receipt and requires signatures for physical transit.", pageWidth / 2, finalY + 15, { align: 'center' });
+
+        // Trigger Download
+        doc.save(`Dispatch_Receipt_${receiptView.receiptId}.pdf`);
+    };
+
     // --- RECEIPT RENDER ---
     if (receiptView) {
         const totalDispatched = receiptView.rolls.reduce((sum, r) => sum + r.dispatchedPieces, 0);
         const totalCut = receiptView.rolls.reduce((sum, r) => sum + r.cutPieces, 0);
         
         return (
-            <div className="min-h-screen bg-slate-100 p-8 font-sans">
+            <div className="min-h-screen bg-slate-100 p-8 font-sans print:p-0 print:bg-white">
                 <div className="max-w-3xl mx-auto">
                     <div className="flex justify-between items-center mb-6 print:hidden">
                         <button onClick={() => setReceiptView(null)} className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 bg-white px-4 py-2 rounded-lg shadow-sm">
                             <ArrowLeft size={18} /><span>Back to Dashboard</span>
                         </button>
-                        <button onClick={() => window.print()} className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg shadow-sm font-medium transition-colors">
-                            <Printer size={18} /><span>Print Receipt</span>
+                        <button onClick={handlePrintPDF} className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            <Printer size={18} /><span>Download PDF</span>
                         </button>
                     </div>
 
-                    <div className="bg-white p-10 rounded-xl shadow-lg print:shadow-none print:p-0 print:m-0 border border-slate-200">
-                        <div className="flex justify-between items-start border-b-2 border-slate-800 pb-6 mb-8">
+                    <div className="bg-white p-10 rounded-xl shadow-lg print:shadow-none print:p-0 print:m-0 border border-slate-200 print:border-none">
+                        
+                        {/* Print Only Letterhead */}
+                        <div className="hidden print:block text-center mb-8 pb-4 border-b-2 border-slate-800">
+                            <h1 className="text-3xl font-bold tracking-tight">MATRIX OVERSEAS</h1>
+                            <p className="text-sm mt-1">PLOT NO. 24,26,27, K T STEEL PLOT PREMISSES,</p>
+                            <p className="text-sm">R K CNG PUMP, WIMCO NAKA, AMBERNATH 421505.</p>
+                            <p className="text-sm mt-1 font-medium">Phone: +918591383476</p>
+                        </div>
+                        
+                        <div className="flex justify-between items-start border-b-2 border-slate-800 pb-6 mb-8 print:border-none print:pb-0">
                             <div>
-                                <div className="flex items-center space-x-2 mb-2">
+                                <div className="flex items-center space-x-2 mb-2 print:hidden">
                                     <Building2 size={28} className="text-slate-800" />
                                     <h1 className="text-3xl font-bold text-slate-800 tracking-tight">EnterpriseOS</h1>
                                 </div>
-                                <p className="text-slate-500 text-sm">Official Goods Dispatch Receipt</p>
+                                <p className="text-slate-500 text-sm print:text-xl print:font-bold print:text-black">Official Goods Dispatch Receipt</p>
                             </div>
                             <div className="text-right">
-                                <h2 className="text-xl font-bold text-slate-800">RECEIPT #{receiptView.receiptId || receiptView.id.replace('B-', 'REC-')}</h2>
-                                <div className="flex items-center justify-end space-x-2 mt-2 text-slate-600">
-                                    <Calendar size={14} /><span className="text-sm">Date: {receiptView.dispatchDate}</span>
+                                <h2 className="text-xl font-bold text-slate-800 print:text-black">RECEIPT #{receiptView.receiptId || receiptView.id.replace('B-', 'REC-')}</h2>
+                                <div className="flex items-center justify-end space-x-2 mt-2 text-slate-600 print:text-black">
+                                    <Calendar size={14} className="print:hidden"/><span className="text-sm">Date: {receiptView.dispatchDate}</span>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-8 mb-8 bg-slate-50 p-6 rounded-lg border border-slate-100">
+                        <div className="grid grid-cols-2 gap-8 mb-6 bg-slate-50 p-6 rounded-lg border border-slate-100 print:bg-transparent print:border-none print:p-0">
                             <div>
-                                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Batch Information</h3>
-                                <p className="font-semibold text-slate-800 text-lg">{receiptView.id}</p>
-                                <p className="text-slate-600 mt-1">{receiptView.style}</p>
+                                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 print:text-slate-600">Batch Information</h3>
+                                <p className="font-semibold text-slate-800 text-lg print:text-black">{receiptView.id}</p>
+                                <p className="text-slate-600 mt-1 print:text-black">{receiptView.style}</p>
                             </div>
                             <div>
-                                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Client</h3>
-                                <p className="font-semibold text-slate-800 text-lg">{receiptView.client}</p>
+                                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 print:text-slate-600">Client</h3>
+                                <p className="font-semibold text-slate-800 text-lg print:text-black">{receiptView.client}</p>
+                                {receiptView.po_code && <p className="text-slate-500 text-sm mt-1 print:text-black">PO: {receiptView.po_code}</p>}
                             </div>
                         </div>
 
-                        <div className="mb-12">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="bg-slate-100 text-slate-600 text-sm uppercase tracking-wider">
-                                        <th className="p-3 font-semibold rounded-tl-lg">Roll ID</th>
-                                        <th className="p-3 font-semibold">Color</th>
-                                        <th className="p-3 font-semibold text-right">Cut Pieces</th>
-                                        <th className="p-3 font-semibold text-right rounded-tr-lg">Dispatched Pieces</th>
+                         {/* UI Element for Size Ratio */}
+                         {receiptView.sizeRatio && (
+                            <div className="mb-6 bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex flex-col md:flex-row md:items-center gap-4 print:bg-transparent print:border-none print:p-0">
+                                <h3 className="text-xs font-bold text-indigo-800 uppercase tracking-wider shrink-0 print:text-slate-600">Size Ratio:</h3>
+                                <div className="flex flex-wrap gap-2">
+                                    {Object.entries(receiptView.sizeRatio).map(([size, ratio]) => (
+                                        <span key={size} className="bg-white text-indigo-700 border border-indigo-200 px-3 py-1 rounded-md shadow-sm text-sm font-bold flex items-center gap-2 print:bg-transparent print:border-none print:shadow-none print:p-0 print:text-black">
+                                            <span className="text-slate-400 font-medium text-xs print:text-slate-600">[{size}:</span>
+                                            <span>{ratio}]</span>
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="mb-12 print:mb-24">
+                            <table className="w-full text-left border-collapse print:border print:border-slate-800">
+                                <thead className="print:bg-slate-100">
+                                    <tr className=" text-slate-600 text-sm uppercase tracking-wider print:text-black">
+                                        <th className="p-3 font-semibold rounded-tl-lg print:border print:border-slate-300">Roll ID</th>
+                                        <th className="p-3 font-semibold print:border print:border-slate-300">Color</th>
+                                        <th className="p-3 font-semibold text-right print:border print:border-slate-300">Cut Pieces</th>
+                                        <th className="p-3 font-semibold text-right rounded-tr-lg print:border print:border-slate-300">Dispatched Pieces</th>
                                     </tr>
                                 </thead>
-                                <tbody>
+                                <tbody className="print:divide-slate-300">
                                     {receiptView.rolls.map((roll, idx) => (
-                                        <tr key={idx} className="border-b border-slate-100">
-                                            <td className="p-3 font-medium text-slate-800">{roll.rollId}</td>
-                                            <td className="p-3 text-slate-600">{roll.color}</td>
-                                            <td className="p-3 text-right text-slate-600">{roll.cutPieces}</td>
-                                            <td className="p-3 text-right font-bold text-slate-800">{roll.dispatchedPieces}</td>
+                                        <tr key={idx} className="border-b border-slate-100 print:border-slate-300">
+                                            <td className="p-3 font-medium text-slate-800 print:border print:border-slate-300 print:text-black">{roll.rollId}</td>
+                                            <td className="p-3 text-slate-600 print:border print:border-slate-300 print:text-black">{roll.color}({roll.colorNumber})</td>
+                                            <td className="p-3 text-right text-slate-600 print:border print:border-slate-300 print:text-black">{roll.cutPieces}</td>
+                                            <td className="p-3 text-right font-bold text-slate-800 print:border print:border-slate-300 print:text-black">{roll.dispatchedPieces}</td>
                                         </tr>
                                     ))}
                                 </tbody>
-                                <tfoot>
-                                    <tr className="bg-slate-50 border-t-2 border-slate-200">
-                                        <td colSpan="2" className="p-3 font-bold text-slate-800 text-right">Total:</td>
-                                        <td className="p-3 text-right font-bold text-slate-800">{totalCut}</td>
-                                        <td className="p-3 text-right font-bold text-blue-700 text-lg">{totalDispatched}</td>
+                                <tfoot className="print:bg-slate-100">
+                                    <tr className="bg-slate-50 border-t-2 border-slate-200 print:border-t print:border-slate-800">
+                                        <td colSpan="2" className="p-3 font-bold text-slate-800 text-right print:border print:border-slate-300 print:text-black">Total:</td>
+                                        <td className="p-3 text-right font-bold text-slate-800 print:border print:border-slate-300 print:text-black">{totalCut}</td>
+                                        <td className="p-3 text-right font-bold text-blue-700 text-lg print:border print:border-slate-300 print:text-black">{totalDispatched}</td>
                                     </tr>
                                 </tfoot>
                             </table>
                         </div>
 
-                        <div className="flex justify-between items-end mt-24 pt-8 border-t border-slate-200">
+                        <div className="flex justify-between items-end mt-24 pt-8 border-t border-slate-200 print:border-slate-800">
                             <div className="text-center w-48">
-                                <div className="border-b border-slate-400 h-8 mb-2"></div>
-                                <p className="text-sm font-medium text-slate-600">Authorized Dispatch Officer</p>
-                                <p className="text-xs text-slate-400 mt-1">System Verified</p>
+                                <div className="border-b border-slate-400 h-8 mb-2 print:border-slate-800"></div>
+                                <p className="text-sm font-medium text-slate-600 print:text-black">Authorized Dispatch Officer</p>
+                                <p className="text-xs text-slate-400 mt-1 print:hidden">System Verified</p>
                             </div>
                             <div className="text-center w-48">
-                                <div className="border-b border-slate-400 h-8 mb-2"></div>
-                                <p className="text-sm font-medium text-slate-600">Transport / Receiver Signature</p>
+                                <div className="border-b border-slate-400 h-8 mb-2 print:border-slate-800"></div>
+                                <p className="text-sm font-medium text-slate-600 print:text-black">Transport / Receiver Signature</p>
                             </div>
+                        </div>
+                        <div className="hidden print:block text-center mt-8 text-xs text-slate-500 italic">
+                            This is a computer-generated receipt and requires signatures for physical transit.
                         </div>
                     </div>
                 </div>
@@ -553,7 +678,7 @@ export default function DispatchDashboardPage() {
                                         {batch.po_code && (
                                             <div className="mb-3">
                                                 <span className="inline-flex items-center text-[10px] font-bold tracking-wide uppercase text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
-                                                    <ShoppingBag size={10} className="mr-1"/> {batch.real_batch_id}
+                                                    <ShoppingBag size={10} className="mr-1"/> {batch.po_code}
                                                 </span>
                                             </div>
                                         )}
@@ -646,12 +771,21 @@ export default function DispatchDashboardPage() {
             {/* Print Formatting */}
             <style dangerouslySetInnerHTML={{__html: `
                 @media print {
-                    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: white !important; }
                     .print\\:hidden { display: none !important; }
                     .print\\:block { display: block !important; }
                     .print\\:shadow-none { box-shadow: none !important; }
                     .print\\:p-0 { padding: 0 !important; }
                     .print\\:m-0 { margin: 0 !important; }
+                    .print\\:bg-white { background-color: white !important; }
+                    .print\\:bg-transparent { background-color: transparent !important; }
+                    .print\\:border-none { border: none !important; }
+                    .print\\:border { border-width: 1px !important; }
+                    .print\\:border-slate-800 { border-color: #1e293b !important; }
+                    .print\\:border-slate-300 { border-color: #cbd5e1 !important; }
+                    .print\\:text-black { color: black !important; }
+                    .print\\:border-collapse { border-collapse: collapse !important; }
+                    .print\\:bg-slate-100 { background-color: #f1f5f9 !important; }
                     @page { margin: 1.5cm; }
                 }
             `}} />

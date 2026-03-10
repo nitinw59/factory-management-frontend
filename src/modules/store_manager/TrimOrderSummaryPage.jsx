@@ -29,6 +29,7 @@ const TrimOrderSummaryPage = () => {
             setLoading(true);
             try {
                 const res = await storeManagerApi.getTrimOrderSummary(orderId); 
+                console.log("Fetched trim order summary:", res.data);
                 setData(res.data);
             } catch (err) {
                 setError(err.message || "Failed to load order summary");
@@ -40,6 +41,7 @@ const TrimOrderSummaryPage = () => {
     }, [orderId]);
 
     const handleDownloadPDF = () => {
+        console.log("Generating PDF report for order:", data?.order?.id);
         if (!data) return;
         const { order, items, consumption_report } = data;
         const doc = new jsPDF();
@@ -55,7 +57,7 @@ const TrimOrderSummaryPage = () => {
             startY: 32,
             head: [['Batch Information', 'Order Information']],
             body: [[
-                `Batch Code: ${order.batch_code}\nProduct: ${order.product_name}`,
+                `Batch Code: ${order.batch_code}\nBatch ID: ${order.batch_id}\nProduct: ${order.product_name}`,
                 `Status: ${order.status}\nRequested By: ${order.requested_by}\nDate: ${new Date(order.created_at).toLocaleDateString()}`
             ]],
             theme: 'grid', 
@@ -67,20 +69,29 @@ const TrimOrderSummaryPage = () => {
         doc.setFont("helvetica", "bold");
         doc.text("Inventory Consumption Report", 14, doc.lastAutoTable.finalY + 15);
         
-        const consumptionRows = consumption_report.map(report => [
-            `${report.item_name}\n${report.brand}`,
-            report.color_name + (report.color_number ? ` (${report.color_number})` : ''),   
-            report.total_consumed
-        ]);
+        const consumptionRows = consumption_report.map(report => {
+            // Map the usage breakdown into a formatted string for the new column
+            const usedForStr = report.usage_breakdown.map(usage => {
+                const subTag = usage.is_substitution ? ' [SUBSTITUTE]' : '';
+                return `• ${usage.order_item_name} (${usage.order_item_color}-${usage.order_item_color_number}): ${usage.quantity} units${subTag}`;
+            }).join('\n');
+
+            return [
+                `${report.item_name}\n${report.brand}`,
+                report.color_name + (report.color_number ? ` (${report.color_number})` : ''),   
+                usedForStr,
+                report.total_consumed
+            ];
+        });
 
         autoTable(doc, {
             startY: doc.lastAutoTable.finalY + 20,
-            head: [['Item / Brand', 'Color', 'Total Consumed']],
+            head: [['Item / Brand', 'Color', 'Used For', 'Total Consumed']],
             body: consumptionRows,
             theme: 'grid',
             headStyles: { fillColor: 255, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold' },
             styles: { textColor: 0, lineWidth: 0.1, lineColor: 0 },
-            columnStyles: { 2: { halign: 'right', fontStyle: 'bold' } }
+            columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } }
         });
 
         const pendingItems = items.filter(item => item.quantity_fulfilled < item.quantity_required);
@@ -157,6 +168,8 @@ const TrimOrderSummaryPage = () => {
                     <div className="text-right">
                         <p className="text-sm font-medium text-gray-500 uppercase">Production Batch</p>
                         <p className="text-lg font-bold text-blue-600">{order.batch_code}</p>
+                        <p className="text-lg font-bold text-green-600">Batch ID: {order.batch_id}</p>
+
                         <p className="text-sm text-gray-600">{order.product_name}</p>
                     </div>
                 </div>
@@ -177,13 +190,13 @@ const TrimOrderSummaryPage = () => {
                                     <h3 className="font-bold text-gray-900">{report.item_name}</h3>
                                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{report.brand}</span>
                                 </div>
-                                <p className="text-sm text-gray-600 mt-1">Variant Color: <span className="font-semibold">{report.color_name}</span></p>
+                                <p className="text-sm text-gray-600 mt-1">Variant Color: <span className="font-semibold">{report.color_name}({report.color_number})</span></p>
                                 <div className="mt-2 text-xs text-gray-500">
                                     <span className="font-medium">Used for:</span>
                                     <ul className="ml-4 list-disc mt-1 space-y-1">
                                         {report.usage_breakdown.map((usage, i) => (
                                             <li key={i}>
-                                                {usage.order_item_name} ({usage.order_item_color}) - 
+                                                {usage.order_item_name} ({usage.order_item_color}-{usage.order_item_color_number}) 
                                                 <span className="font-mono font-bold ml-1">{usage.quantity} units</span>
                                                 {usage.is_substitution && <span className="ml-2 text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200">SUBSTITUTE</span>}
                                             </li>

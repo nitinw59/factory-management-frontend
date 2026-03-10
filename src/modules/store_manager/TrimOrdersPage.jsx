@@ -61,7 +61,11 @@ const OrderCard = ({ order }) => {
                     <div>
                         <h3 className="font-bold text-lg text-gray-900">Order #{order.id}</h3>
                         <p className="text-sm font-medium text-gray-500 mt-0.5">
-                            Batch <span className="text-blue-600">#{order.production_batch_id || order.batch_code}</span>
+                            Batch <span className="text-blue-600">#{order.production_batch_id ||order.batch_code}</span>
+                        </p>
+
+                         <p className="text-sm font-medium text-gray-500 mt-0.5">
+                            CODE <span className="text-blue-600">#{order.batch_code || order.production_batch_id}</span>
                         </p>
                     </div>
                     <span className={`inline-flex items-center text-[10px] uppercase tracking-wider font-bold px-2.5 py-1 rounded-full ${badgeColorClass}`}>
