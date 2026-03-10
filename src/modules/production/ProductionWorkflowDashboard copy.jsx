@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
     Search, Filter, Plus, Box, FileText, ShoppingCart, 
     Scissors, ChevronRight, ChevronDown, Clock, AlertCircle, 
@@ -7,97 +8,16 @@ import {
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { accountingApi } from '../../api/accountingApi'; 
 import { storeManagerApi } from '../../api/storeManagerApi'; 
-// ==========================================
-// STATEFUL MOCKS FOR CANVAS PREVIEW 
-// ==========================================
-const useNavigate = () => (path) => alert(`Navigating to: ${path}`);
-const useAuth = () => ({ user: { role: 'factory_admin' } });
-
-const delay = (ms) => new Promise(res => setTimeout(res, ms));
-
-
-
-// const productionManagerApi = {
-//     getWorkflowData: async () => {
-//         await delay(600);
-//         // Deep copy to trigger standard React re-renders for the preview
-//         return { data: JSON.parse(JSON.stringify(mockWorkflowData)) };
-//     },
-//     getFabricTypes: async () => ({ data: [{id: 1, name: 'Cotton'}, {id: 2, name: 'Fleece'}, {id: 3, name: 'Denim'}] }),
-//     getFabricColors: async () => ({ data: [{id: 1, color_number: 'BLK', name: 'Black'}, {id: 2, color_number: 'NVY', name: 'Navy Blue'}] }),
-//     deleteBatch: async (id) => { await delay(400); return { success: true }; }
-// };
-
-// const accountingApi = {
-//     getSalesOrderDetails: async (id) => {
-//         await delay(400);
-//         return {
-//             data: {
-//                 order_number: `SO-2026-00${id}`, customer_name: 'OutdoorGear', buyer_po_number: 'PO-OUT-001',
-//                 status: 'IN_PRODUCTION', order_date: '2026-03-01', total_amount: '45,000.00', total_quantity: 800,
-//                 products: [{ product_name: 'Winter Fleece Zip', fabric_type: 'Fleece', size_breakdown: { S: 1, M: 2, L: 2, XL: 1 }, colors: [{ color_name: 'Black', color_number: 'BLK', quantity: 400, unit_price: '50.00' }] }]
-//             }
-//         };
-//     },
-//     getPurchaseOrderDetails: async (id) => {
-//         await delay(400);
-//         return {
-//             data: {
-//                 po_code: `PO-${id}`, supplier_name: 'Premium Fabrics Ltd', supplier_email: 'sales@premiumfabrics.com',
-//                 supplier_address: '123 Textile Way, Industrial Dist.', status: 'RECEIVED', expected_delivery_date: '2026-03-10',
-//                 items: [{ fabric_type: 'Fleece', fabric_color: 'Black', color_number: 'BLK', quantity: 1000, uom: 'meter', unit_price: '15.00', total_price: '15,000.00' }]
-//             }
-//         };
-//     },
-//     createPurchaseOrder: async (formData) => { 
-//         await delay(500); 
-//         // Intercept creation in mock data to render it instantly on the dashboard
-//         const soIndex = mockWorkflowData.findIndex(so => so.id === formData.sales_order_id);
-//         if (soIndex > -1) {
-//             const newTotalQty = formData.items.reduce((sum, item) => sum + item.quantity, 0);
-//             mockWorkflowData[soIndex].purchase_orders.push({
-//                 id: Math.floor(Math.random() * 10000),
-//                 po_code: `PO-NEW-${Math.floor(Math.random() * 1000)}`,
-//                 supplier_name: 'Supplier Partner',
-//                 expected_delivery_date: formData.expected_delivery_date,
-//                 status: 'DRAFT',
-//                 total_ordered_qty: newTotalQty,
-//                 total_received_qty: 0,
-//                 production_batches: []
-//             });
-//         }
-//         return { success: true }; 
-//     },
-//     deletePurchaseOrder: async (id) => { await delay(400); return { success: true }; }
-// };
-
-// const storeManagerApi = {
-//     getFabricIntakeFormData: async () => ({ data: { suppliers: [{id: 1, name: 'Premium Fabrics Ltd'}, {id: 2, name: 'Global Textiles'}] } }),
-//     getFabricRollsByPO: async (id) => ({ data: [{ id: '4001', fabric_type: 'Fleece - Black', meter: 500, status: 'IN_STOCK' }, { id: '4002', fabric_type: 'Fleece - Black', meter: 500, status: 'ASSIGNED_TO_PRODUCTION' }] })
-// };
-
-const Modal = ({ title, onClose, size = "max-w-2xl", children }) => (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm print:hidden">
-        <div className={`bg-white rounded-2xl shadow-2xl w-full ${size} max-h-[90vh] flex flex-col animate-in fade-in zoom-in duration-200`}>
-            <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50">
-                <h3 className="font-bold text-lg text-slate-800">{title}</h3>
-                <button onClick={onClose} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors">
-                    <X size={20} />
-                </button>
-            </div>
-            <div className="overflow-y-auto p-6">
-                {children}
-            </div>
-        </div>
-    </div>
-);
-
+import Modal from '../../shared/Modal';
+import { useAuth } from '../../context/AuthContext';
+import jsPDF from 'jspdf'; 
+import autoTable from 'jspdf-autotable'; 
 
 const Spinner = () => <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
 
 // --- CONSTANTS & STYLES ---
 const NODE_WIDTH = 260;
-const NODE_HEIGHT = 300; 
+const NODE_HEIGHT = 300; // Increased to accommodate the new WIP and Trim sections
 const GAP_X = 80;
 const GAP_Y = 20;
 
@@ -111,9 +31,7 @@ const StatusBadge = ({ status }) => {
         'ISSUED': 'bg-amber-100 text-amber-700 border-amber-200',
         'DRAFT': 'bg-gray-100 text-gray-600 border-gray-200',
         'PENDING': 'bg-yellow-50 text-yellow-700 border-yellow-200',
-        'PREPARED': 'bg-orange-100 text-orange-700 border-orange-200',
-        'SHIPPED': 'bg-purple-100 text-purple-700 border-purple-200',
-        'DISPATCHED': 'bg-purple-100 text-purple-700 border-purple-200'
+        'PREPARED': 'bg-orange-100 text-orange-700 border-orange-200' // Added for Trims
     };
     return (
         <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${colors[status] || 'bg-gray-100 text-gray-500'}`}>
@@ -166,8 +84,6 @@ const SalesOrderNode = ({ data, x, y, onDetails, onAddPO }) => (
 
 const PurchaseOrderNode = ({ data, x, y, onDetails, onCreateBatch, onDeletePO }) => {
     const { user } = useAuth();
-    console.log('Rendering PurchaseOrderNode - User Role:', user?.role, 'PO Data:', data);
-    
     const ordered = parseFloat(data.total_ordered_qty || 0);
     const received = parseFloat(data.total_received_qty || 0);
     const percent = ordered > 0 ? Math.min(100, Math.round((received / ordered) * 100)) : 0;
@@ -237,10 +153,9 @@ const PurchaseOrderNode = ({ data, x, y, onDetails, onCreateBatch, onDeletePO })
 
 const BatchNode = ({ data, x, y, onViewDetails, onEditBatch, onDeleteBatch }) => {
     const { user } = useAuth();
-    console.log('Rendering BatchNode - User Role:', user?.role, 'Batch Data:', data);
-    const canManage = user && [ 'factory_admin'].includes(user.role);
-    const canManageBatch = user && ['production_manager', 'factory_admin'].includes(user.role);
+    const canManage = user && ['production_manager', 'factory_admin'].includes(user.role);
 
+    // FEATURE 1 & 2: Safe fallbacks for new API data
     const trimStatus = data.trim_status || 'PENDING';
     const wip = data.wip || { cut_pct: 0, sew_pct: 0, assemble_pct: 0 };
     
@@ -303,8 +218,7 @@ const BatchNode = ({ data, x, y, onViewDetails, onEditBatch, onDeleteBatch }) =>
             <div className="mt-3 flex justify-between items-center pt-2 border-t border-slate-100">
                 <StatusBadge status={data.overall_status || 'PENDING'} />
                 <div className="flex gap-1.5">
-                    {console.log('Batch Node Render - canManage:', canManage, 'canManageBatch:', canManageBatch)}
-                    {canManageBatch && (
+                    {canManage && (
                         <button 
                             onClick={(e) => { 
                                 e.stopPropagation(); 
@@ -317,7 +231,7 @@ const BatchNode = ({ data, x, y, onViewDetails, onEditBatch, onDeleteBatch }) =>
                         </button>
                     )}
                     
-                    {canManageBatch && (
+                    {canManage && (
                         <button 
                             onClick={(e) => { e.stopPropagation(); onEditBatch(data.id); }}
                             className="text-[10px] bg-slate-50 text-slate-600 hover:text-amber-600 hover:bg-amber-50 px-2 py-1 rounded border border-slate-200 flex items-center font-medium transition-colors"
@@ -339,26 +253,6 @@ const BatchNode = ({ data, x, y, onViewDetails, onEditBatch, onDeleteBatch }) =>
     );
 };
 
-// --- TERMINAL DISPATCH NODE ---
-const DispatchReceiptNode = ({ data, x, y }) => (
-    <div 
-        className="absolute bg-white rounded-xl shadow-sm border-l-4 border-l-purple-500 border-slate-200 p-3 hover:shadow-md transition-all cursor-default group"
-        style={{ width: 180, height: 100, left: x, top: y + (NODE_HEIGHT/2) - 50 }}
-    >
-        <div className="flex justify-between items-start mb-2">
-            <div className="flex items-center gap-2">
-                <div className="p-1 bg-purple-50 rounded-lg">
-                    <Truck className="text-purple-600" size={14} />
-                </div>
-                <span className="font-bold text-slate-800 text-sm">Dispatched</span>
-            </div>
-            <StatusBadge status="SHIPPED" />
-        </div>
-        <p className="text-xs text-slate-500 mt-2 font-medium truncate">Goods left facility.</p>
-        <p className="text-[10px] text-slate-400 mt-1">Receipt Generated</p>
-    </div>
-);
-
 // --- GRAPH COMPONENT FOR SINGLE SALES ORDER ---
 const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO }) => {
     const { nodes, connectors, height } = useMemo(() => {
@@ -370,7 +264,6 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
         const soX = startX;
         const poX = soX + NODE_WIDTH + GAP_X;
         const batchX = poX + NODE_WIDTH + GAP_X;
-        const dispatchX = batchX + NODE_WIDTH + GAP_X; 
 
         const purchaseOrders = so.purchase_orders || [];
         
@@ -391,16 +284,6 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
                 const batchYPositions = [];
                 batches.forEach(batch => {
                     nodesList.push({ type: 'BATCH', data: batch, x: batchX, y: currentY });
-                    
-                    // Render Terminal Dispatch Node if the batch has shipped status or receipt
-                    if (batch.overall_status === 'SHIPPED' || batch.overall_status === 'DISPATCHED' || batch.is_dispatched || batch.dispatch_receipt) {
-                        nodesList.push({ type: 'DISPATCH', data: batch, x: dispatchX, y: currentY });
-                        connList.push({
-                            start: { x: batchX + NODE_WIDTH, y: currentY + (NODE_HEIGHT / 2) },
-                            end: { x: dispatchX, y: currentY + (NODE_HEIGHT / 2) }
-                        });
-                    }
-
                     batchYPositions.push(currentY);
                     currentY += NODE_HEIGHT + GAP_Y;
                 });
@@ -438,7 +321,7 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
     }, [so]);
 
     return (
-        <div style={{ position: 'relative', height: height, minWidth: '1200px' }} className="bg-slate-50/50 rounded-lg border border-slate-100">
+        <div style={{ position: 'relative', height: height, minWidth: '900px' }} className="bg-slate-50/50 rounded-lg border border-slate-100">
             <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{zIndex: 0}}>
                 <defs>
                     <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -453,7 +336,6 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
                 if (node.type === 'SALES_ORDER') return <SalesOrderNode key={i} {...node} onDetails={onDetails} onAddPO={onAddPO} />;
                 if (node.type === 'PURCHASE_ORDER') return <PurchaseOrderNode key={i} {...node} onDetails={onPODetails} onCreateBatch={onCreateBatch} onDeletePO={onDeletePO} />; 
                 if (node.type === 'BATCH') return <BatchNode key={i} {...node} onViewDetails={onViewBatchDetails} onEditBatch={onEditBatch} onDeleteBatch={onDeleteBatch} />;
-                if (node.type === 'DISPATCH') return <DispatchReceiptNode key={i} {...node} />;
                 return null;
             })}
         </div>
@@ -494,12 +376,7 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
                 </td>
                 <td className="px-6 py-4 text-right">
                     <button 
-                        onClick={(e) => { 
-                            e.stopPropagation(); 
-                            // 🚀 BUGFIX: Force the row to expand so the user sees the newly rendered node immediately
-                            setExpanded(true); 
-                            onAddPO(so.id); 
-                        }}
+                        onClick={(e) => { e.stopPropagation(); onAddPO(so.id); }}
                         className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-md transition-colors"
                         title="Quick Add PO"
                     >
@@ -514,7 +391,7 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
                         <div className="overflow-x-auto">
                             <WorkflowGraph 
                                 so={so} 
-                                onAddPO={(id) => { setExpanded(true); onAddPO(id); }} 
+                                onAddPO={onAddPO} 
                                 onDetails={onDetails}
                                 onPODetails={onPODetails} 
                                 onCreateBatch={onCreateBatch}
@@ -689,126 +566,179 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
     if (loading) return <Modal title="Loading PO..." onClose={onClose}><Spinner/></Modal>;
     if (!po) return null;
     
-    // --- BROWSER PRINT REPLACEMENT FOR JSPDF ---
+    // --- UPDATED PDF GENERATOR WITH MATRIX OVERSEAS LETTERHEAD ---
     const handlePrintPO = () => {
-        window.print();
+        const doc = new jsPDF();
+        const pageWidth = doc.internal.pageSize.width;
+        
+        // --- LETTERHEAD ---
+        // Company Name
+        doc.setFontSize(22);
+        doc.setFont("helvetica", "bold");
+        doc.text("MATRIX OVERSEAS", pageWidth / 2, 20, { align: "center" });
+
+        // Address & Phone
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        const addressLines = [
+            "PLOT NO. 24,26,27, K T STEEL PLOT PREMISSES,",
+            "R K CNG PUMP, WIMCO NAKA, AMBERNATH 421505.",
+            "Phone: +918591383476"
+        ];
+        doc.text(addressLines, pageWidth / 2, 28, { align: "center", lineHeightFactor: 1.5 });
+
+        // Separator Line
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.5);
+        doc.line(14, 45, pageWidth - 14, 45);
+
+        // --- PO HEADER INFO ---
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.text("PURCHASE ORDER", 14, 55);
+
+        // Left Side (PO Details)
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.text("PO Number:", 14, 65);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${po.po_code || po.po_number}`, 40, 65);
+
+        doc.setFont("helvetica", "bold");
+        doc.text("Date:", 14, 72);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${new Date(po.created_at || Date.now()).toLocaleDateString()}`, 40, 72);
+        
+        doc.setFont("helvetica", "bold");
+        doc.text("Ref (SO):", 14, 79);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${po.sales_order_number || 'N/A'}`, 40, 79);
+
+        // Right Side (Supplier Details)
+        doc.setFont("helvetica", "bold");
+        doc.text("To (Supplier):", 120, 55);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${po.supplier_name}`, 120, 62);
+        
+        if (po.supplier_address) {
+            const splitAddress = doc.splitTextToSize(po.supplier_address, 75);
+            doc.text(splitAddress, 120, 69);
+        }
+
+        // --- ITEMS TABLE ---
+        autoTable(doc, { 
+            startY: 90, 
+            head: [['Fabric Type', 'Color Details', 'Quantity', 'UOM', 'Unit Price', 'Total']], 
+            body: po.items.map(i => [
+                i.fabric_type, 
+                `${i.fabric_color} (${i.color_number || ''})`, 
+                i.quantity, 
+                i.uom, 
+                `₹${i.unit_price}`, 
+                `₹${i.total_price}`
+            ]),
+            theme: 'grid',
+            headStyles: { fillColor: [40, 40, 40], textColor: [255, 255, 255] },
+            styles: { fontSize: 9, cellPadding: 3 },
+            columnStyles: {
+                2: { halign: 'right' },
+                3: { halign: 'center' },
+                4: { halign: 'right' },
+                5: { halign: 'right', fontStyle: 'bold' }
+            },
+            foot: [[
+                { content: 'Grand Total', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold' } },
+                { content: `₹${po.items.reduce((sum, item) => sum + parseFloat(item.total_price || 0), 0).toFixed(2)}`, styles: { fontStyle: 'bold' } }
+            ]]
+        });
+
+        // --- FOOTER SIGNATURES ---
+        const finalY = doc.lastAutoTable.finalY + 30;
+        doc.setFont("helvetica", "bold");
+        doc.text("Authorized Signature", 14, finalY);
+        doc.line(14, finalY + 1, 60, finalY + 1);
+
+        doc.save(`PO_${po.po_code}.pdf`);
     };
 
     return (
         <Modal title={`Purchase Order: ${po.po_code || po.po_number}`} onClose={onClose} size="max-w-4xl">
-             {/* Main PO Detail View */}
-             <div className="space-y-6 print:m-0 print:p-0 print:text-black">
+             <div className="space-y-6">
                 
-                {/* Print Only Letterhead */}
-                <div className="hidden print:block text-center mb-8 pb-4 border-b-2 border-slate-800">
-                    <h1 className="text-3xl font-bold tracking-tight">MATRIX OVERSEAS</h1>
-                    <p className="text-sm mt-1">PLOT NO. 24,26,27, K T STEEL PLOT PREMISSES,</p>
-                    <p className="text-sm">R K CNG PUMP, WIMCO NAKA, AMBERNATH 421505.</p>
-                    <p className="text-sm mt-1 font-medium">Phone: +918591383476</p>
-                    <h2 className="text-xl font-bold mt-4">PURCHASE ORDER</h2>
-                </div>
-
                 {/* Header Actions & Info */}
-                <div className="flex flex-col md:flex-row justify-between items-start gap-4 bg-amber-50 p-5 rounded-xl border border-amber-100 print:bg-transparent print:border-none print:p-0">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-amber-50 p-5 rounded-xl border border-amber-100">
                     <div className="flex items-start gap-4">
-                        <div className="p-3 bg-white rounded-lg shadow-sm text-amber-600 print:hidden">
+                        <div className="p-3 bg-white rounded-lg shadow-sm text-amber-600">
                             <Truck size={24}/>
                         </div>
                         <div>
-                            <p className="text-xs text-amber-700 font-bold uppercase tracking-wider mb-1 print:text-slate-500">Supplier Info</p>
+                            <p className="text-xs text-amber-700 font-bold uppercase tracking-wider mb-1">Supplier Info</p>
                             <p className="font-extrabold text-gray-900 text-lg">{po.supplier_name}</p>
                             <p className="text-sm text-gray-600">{po.supplier_email || 'No Email'} • {po.supplier_phone || 'No Phone'}</p>
                             <p className="text-xs text-gray-500 mt-1">{po.supplier_address}</p>
                         </div>
                     </div>
-                    <div className="text-left md:text-right w-full md:w-auto bg-white p-4 rounded-lg shadow-sm border border-amber-100 flex flex-col justify-center print:bg-transparent print:shadow-none print:border-none print:p-0">
-                        <div className="flex justify-between md:justify-end items-center mb-2 print:hidden">
+                    <div className="text-left md:text-right w-full md:w-auto bg-white p-4 rounded-lg shadow-sm border border-amber-100 flex flex-col justify-center">
+                        <div className="flex justify-between md:justify-end items-center mb-2">
                             <span className="text-xs text-gray-500 font-bold uppercase mr-3">Status:</span>
                             <StatusBadge status={po.status} />
                         </div>
-                        <p className="text-sm text-gray-700 font-medium hidden print:block mb-1">
-                            <span className="text-gray-400 text-xs mr-1 uppercase">PO Number:</span> 
-                            {po.po_code || po.po_number}
-                        </p>
                         <p className="text-sm text-gray-700 font-medium">
-                            <span className="text-gray-400 text-xs mr-1 uppercase">Ref (SO):</span> 
-                            {po.sales_order_number || 'N/A'}
-                        </p>
-                        <p className="text-sm text-gray-700 font-medium mt-1">
-                            <span className="text-gray-400 text-xs mr-1 uppercase">Date:</span> 
-                            {new Date(po.created_at || Date.now()).toLocaleDateString()}
-                        </p>
-                        <p className="text-sm text-gray-700 font-medium mt-1">
-                            <span className="text-gray-400 text-xs mr-1 uppercase">Delivery:</span> 
+                            <span className="text-gray-400 text-xs mr-1">Delivery:</span> 
                             {po.expected_delivery_date ? new Date(po.expected_delivery_date).toLocaleDateString() : 'N/A'}
                         </p>
                         <button 
                             onClick={handlePrintPO} 
-                            className="mt-3 w-full flex items-center justify-center text-sm bg-indigo-600 text-white font-bold px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm print:hidden"
+                            className="mt-3 w-full flex items-center justify-center text-sm bg-indigo-600 text-white font-bold px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
                         >
-                            <Printer size={16} className="mr-2"/> Print / Download PO
+                            <Printer size={16} className="mr-2"/> Download PO PDF
                         </button>
                     </div>
                 </div>
 
                 {/* Items Table */}
                 <div>
-                    <h4 className="text-lg font-bold text-gray-800 mb-3 flex items-center print:text-black">
-                        <ShoppingCart size={20} className="mr-2 text-indigo-500 print:hidden"/> Order Requirements
+                    <h4 className="text-lg font-bold text-gray-800 mb-3 flex items-center">
+                        <ShoppingCart size={20} className="mr-2 text-indigo-500"/> Order Requirements
                     </h4>
-                    <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm print:rounded-none print:shadow-none print:border-slate-800">
-                        <table className="w-full text-sm text-left print:border-collapse">
-                            <thead className="bg-gray-100 text-gray-600 border-b border-gray-200 print:bg-slate-100 print:text-black print:border-slate-800">
+                    <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-gray-100 text-gray-600 border-b border-gray-200">
                                 <tr>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider print:border print:border-slate-300">Fabric Type</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider print:border print:border-slate-300">Color Details</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right print:border print:border-slate-300">Quantity</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right print:border print:border-slate-300">Unit Price</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right bg-gray-50 print:bg-transparent print:border print:border-slate-300">Total</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Fabric Type</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Color Details</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right">Quantity</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right">Unit Price</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right bg-gray-50">Total</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100 bg-white print:divide-slate-300">
+                            <tbody className="divide-y divide-gray-100 bg-white">
                                 {po.items.map((item, idx) => (
                                     <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
-                                        <td className="px-4 py-3 font-bold text-gray-800 print:border print:border-slate-300">{item.fabric_type}</td>
-                                        <td className="px-4 py-3 print:border print:border-slate-300">
-                                            <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-slate-50 border border-slate-200 text-slate-700 font-medium text-xs print:bg-transparent print:border-none print:p-0">
+                                        <td className="px-4 py-3 font-bold text-gray-800">{item.fabric_type}</td>
+                                        <td className="px-4 py-3">
+                                            <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-slate-50 border border-slate-200 text-slate-700 font-medium text-xs">
                                                 {item.fabric_color} <span className="text-slate-400 font-normal ml-1">({item.color_number})</span>
                                             </span>
                                         </td>
-                                        <td className="px-4 py-3 text-right print:border print:border-slate-300">
-                                            <span className="font-extrabold text-blue-700 text-base print:text-black">{item.quantity}</span> 
+                                        <td className="px-4 py-3 text-right">
+                                            <span className="font-extrabold text-blue-700 text-base">{item.quantity}</span> 
                                             <span className="text-xs text-gray-500 ml-1">{item.uom}</span>
                                         </td>
-                                        <td className="px-4 py-3 text-right text-gray-600 font-medium print:text-black print:border print:border-slate-300">₹{item.unit_price}</td>
-                                        <td className="px-4 py-3 text-right font-bold text-emerald-700 bg-emerald-50/30 print:bg-transparent print:text-black print:border print:border-slate-300">₹{item.total_price}</td>
+                                        <td className="px-4 py-3 text-right text-gray-600 font-medium">₹{item.unit_price}</td>
+                                        <td className="px-4 py-3 text-right font-bold text-emerald-700 bg-emerald-50/30">₹{item.total_price}</td>
                                     </tr>
                                 ))}
                                 {po.items.length === 0 && (
-                                    <tr><td colSpan="5" className="px-4 py-8 text-center text-gray-500 italic print:border print:border-slate-300">No items listed for this Purchase Order.</td></tr>
+                                    <tr><td colSpan="5" className="px-4 py-8 text-center text-gray-500 italic">No items listed for this Purchase Order.</td></tr>
                                 )}
                             </tbody>
-                            <tfoot className="bg-slate-50 border-t border-slate-200 print:border-slate-800">
-                                <tr>
-                                    <td colSpan="4" className="px-4 py-3 text-right font-bold text-slate-700 print:border print:border-slate-300">Grand Total</td>
-                                    <td className="px-4 py-3 text-right font-bold text-slate-900 text-lg print:border print:border-slate-300">
-                                        ₹{po.items.reduce((sum, item) => sum + parseFloat(item.total_price || 0), 0).toFixed(2)}
-                                    </td>
-                                </tr>
-                            </tfoot>
                         </table>
                     </div>
                 </div>
 
-                {/* Print Signatures */}
-                <div className="hidden print:flex justify-end mt-24 pt-8">
-                    <div className="text-center w-48 border-t border-slate-800 pt-2">
-                        <p className="font-bold text-sm">Authorized Signature</p>
-                    </div>
-                </div>
-
-                {/* Received Rolls Summary - HIDDEN ON PRINT */}
-                <div className="print:hidden">
+                {/* Received Rolls Summary */}
+                <div>
                     <h4 className="text-lg font-bold text-gray-800 mb-3 flex items-center">
                         <Layers size={20} className="mr-2 text-indigo-500"/> Received Rolls Log
                     </h4>
@@ -840,52 +770,27 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
                 </div>
              </div>
              
-             <div className="flex justify-end pt-5 border-t border-gray-100 mt-6 print:hidden">
+             <div className="flex justify-end pt-5 border-t border-gray-100 mt-6">
                 <button onClick={onClose} className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-bold transition-colors">Close Viewer</button>
             </div>
-            
-            <style dangerouslySetInnerHTML={{__html: `
-                @media print {
-                    body * { visibility: hidden; }
-                    .fixed.inset-0 { position: absolute; left: 0; top: 0; width: 100%; display: block; background: transparent; }
-                    .fixed.inset-0 > div { box-shadow: none; max-width: 100%; width: 100%; }
-                    .fixed.inset-0 .overflow-y-auto { overflow: visible !important; }
-                    .print\\:block { display: block !important; visibility: visible !important; }
-                    .print\\:flex { display: flex !important; visibility: visible !important; }
-                    .print\\:hidden { display: none !important; }
-                    .print\\:m-0 { margin: 0 !important; }
-                    .print\\:p-0 { padding: 0 !important; }
-                    .print\\:text-black { color: black !important; }
-                    .print\\:bg-transparent { background-color: transparent !important; }
-                    .print\\:border-none { border: none !important; }
-                    .print\\:shadow-none { box-shadow: none !important; }
-                    .print\\:rounded-none { border-radius: 0 !important; }
-                    .print\\:border-slate-800 { border-color: #1e293b !important; }
-                    .print\\:border-slate-300 { border-color: #cbd5e1 !important; }
-                    .print\\:border { border-width: 1px !important; }
-                    .print\\:border-collapse { border-collapse: collapse !important; }
-                    .print\\:bg-slate-100 { background-color: #f1f5f9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                    .print\\:divide-slate-300 > * + * { border-color: #cbd5e1 !important; }
-                    .fixed.inset-0 .overflow-y-auto * { visibility: visible; }
-                }
-            `}} />
         </Modal>
     );
 };
 
 // --- REFACTORED CREATE PO MODAL (Grouped UI + Tabs + UOM) ---
 const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
-    const [activeTab, setActiveTab] = useState('form'); 
+    const [activeTab, setActiveTab] = useState('form'); // 'form' or 'details'
     const [soDetails, setSoDetails] = useState(null);
     const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
     const [supplierId, setSupplierId] = useState('');
     const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
     
+    // Updated Grouped State Structure to include UOM
     const [fabricGroups, setFabricGroups] = useState([
         {
             fabric_type_id: '',
-            uom: 'meter', 
+            uom: 'meter', // Default UOM
             unit_price: '',
             colors: [{ fabric_color_id: '', quantity: '' }]
         }
@@ -896,6 +801,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
     const [fabricColors, setFabricColors] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
+    // Fetch options for the form
     useEffect(() => {
         const loadOptions = async () => {
             try {
@@ -904,7 +810,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                     productionManagerApi.getFabricTypes(),
                     productionManagerApi.getFabricColors()
                 ]);
-                setSuppliers(intakeData.data?.suppliers || []);
+                setSuppliers(intakeData.data.suppliers || []);
                 setFabricTypes(typesRes.data || []);
                 setFabricColors(colorsRes.data || []);
             } catch (error) {
@@ -916,6 +822,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
         loadOptions();
     }, []);
 
+    // Fetch SO Details for the reference tab
     useEffect(() => {
         const fetchSoDetails = async () => {
             if (!salesOrderId) return;
@@ -933,6 +840,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
     }, [salesOrderId]);
 
 
+    // Handlers for Fabric Groups
     const addFabricGroup = () => {
         setFabricGroups([...fabricGroups, { fabric_type_id: '', uom: 'meter', unit_price: '', colors: [{ fabric_color_id: '', quantity: '' }] }]);
     };
@@ -949,6 +857,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
         setFabricGroups(newGroups);
     };
 
+    // Handlers for Colors within a Group
     const addColorToGroup = (groupIndex) => {
         const newGroups = [...fabricGroups];
         newGroups[groupIndex].colors.push({ fabric_color_id: '', quantity: '' });
@@ -974,10 +883,11 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
         
         if (!supplierId) return alert("Please select a supplier.");
         
+        // Flatten the grouped structure into the flat array expected by the backend
         const formattedItems = [];
         
         fabricGroups.forEach(group => {
-            if (!group.fabric_type_id) return; 
+            if (!group.fabric_type_id) return; // Skip empty groups
             
             group.colors.forEach(color => {
                 if (color.fabric_color_id && color.quantity) {
@@ -985,7 +895,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                         fabric_type_id: parseInt(group.fabric_type_id, 10),
                         fabric_color_id: parseInt(color.fabric_color_id, 10),
                         quantity: parseFloat(color.quantity),
-                        uom: group.uom, 
+                        uom: group.uom, // Pass dynamic UOM
                         unit_price: group.unit_price ? parseFloat(group.unit_price) : 0
                     });
                 }
@@ -1008,6 +918,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
 
     return (
         <Modal title="Create Purchase Order" onClose={onClose} size="max-w-5xl">
+            {/* Modal Tabs Header */}
             <div className="flex border-b border-gray-200 mb-6">
                 <button
                     className={`py-3 px-6 font-bold text-sm border-b-2 transition-colors ${activeTab === 'form' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
@@ -1023,9 +934,11 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                 </button>
             </div>
 
+            {/* TAB 1: FORM */}
             {activeTab === 'form' && (
                 <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in duration-200">
                     
+                    {/* Basic Info Section */}
                     <div className="bg-gray-50 p-5 rounded-xl border border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-5 shadow-sm">
                         <div>
                             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Supplier *</label>
@@ -1050,9 +963,11 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                         </div>
                     </div>
 
+                    {/* Fabric Groups Section */}
                     <div className="max-h-[50vh] overflow-y-auto pr-2 space-y-6 pb-4">
                         {fabricGroups.map((group, groupIdx) => (
                             <div key={groupIdx} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
+                                {/* Group Header (Fabric Type, UOM, Price) */}
                                 <div className="bg-slate-50 p-4 border-b border-slate-200 flex flex-col md:flex-row md:items-end gap-4">
                                     <div className="flex-1">
                                         <label className="block text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1.5">Fabric Type *</label>
@@ -1109,6 +1024,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                                     </div>
                                 </div>
 
+                                {/* Colors inside this Fabric Group */}
                                 <div className="p-4 bg-white">
                                     <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center">
                                         <Palette size={14} className="mr-2"/> Colors & Quantities
@@ -1177,6 +1093,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                         </div>
                     </div>
 
+                    {/* Footer Actions */}
                     <div className="flex justify-end pt-4 border-t border-gray-100 gap-3">
                         <button 
                             type="button" 
@@ -1195,6 +1112,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                 </form>
             )}
 
+            {/* TAB 2: REFERENCE DETAILS */}
             {activeTab === 'details' && (
                 <div className="max-h-[60vh] overflow-y-auto animate-in fade-in duration-200 pr-2">
                     {isLoadingDetails ? (
@@ -1203,6 +1121,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                         <div className="text-center p-12 text-gray-500 italic border-2 border-dashed border-gray-200 rounded-xl">Failed to load Sales Order details.</div>
                     ) : (
                         <div className="space-y-4">
+                            {/* Summary Header */}
                             <div className="bg-slate-50 p-4 border border-slate-200 rounded-xl grid grid-cols-2 md:grid-cols-4 gap-4 text-sm shadow-sm">
                                 <div>
                                     <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Customer</span>
@@ -1222,6 +1141,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                                 </div>
                             </div>
 
+                            {/* Detailed Products List */}
                             <h4 className="text-sm font-bold text-gray-800 border-b border-gray-200 pb-2 flex items-center">
                                 <Box size={16} className="mr-2 text-indigo-500"/> Products in this Order
                             </h4>
@@ -1282,6 +1202,7 @@ const ProductionWorkflowDashboard = () => {
     const [filterStatus, setFilterStatus] = useState('ALL');
     const [searchText, setSearchText] = useState(''); 
 
+    // Modal States
     const [selectedSOId, setSelectedSOId] = useState(null); 
     const [poModalSOId, setPoModalSOId] = useState(null);  
     const [selectedPOId, setSelectedPOId] = useState(null); 
@@ -1302,6 +1223,7 @@ const ProductionWorkflowDashboard = () => {
 
     useEffect(() => { fetchData(); }, []);
 
+    // Filter Logic
     useEffect(() => {
         let result = data;
         if (filterStatus !== 'ALL') {
@@ -1317,6 +1239,7 @@ const ProductionWorkflowDashboard = () => {
         setFilteredData(result);
     }, [data, filterStatus, searchText]);
 
+    // Action Handlers
     const handleAddPO = (salesOrderId) => setPoModalSOId(salesOrderId);
     const handleViewPODetails = (poId) => setSelectedPOId(poId); 
     
@@ -1382,7 +1305,8 @@ const ProductionWorkflowDashboard = () => {
 
     return (
         <div className="flex h-screen bg-slate-50 font-inter overflow-hidden">
-            <div className="w-72 bg-white border-r border-slate-200 p-6 flex flex-col z-10 shadow-sm shrink-0 h-full overflow-y-auto print:hidden">
+            {/* Sidebar / Filter Panel */}
+            <div className="w-72 bg-white border-r border-slate-200 p-6 flex flex-col z-10 shadow-sm shrink-0 h-full overflow-y-auto">
                 <h2 className="text-xl font-extrabold text-slate-800 mb-6 flex items-center">
                     <LayoutList className="mr-2 text-indigo-600" size={24}/> Workflow View
                 </h2>
@@ -1419,10 +1343,11 @@ const ProductionWorkflowDashboard = () => {
                 </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-8 print:p-0">
+            {/* Main Table Area */}
+            <div className="flex-1 overflow-auto p-8">
                 {loading ? <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin text-indigo-600 w-10 h-10"/></div> : (
-                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden print:border-none print:shadow-none print:rounded-none">
-                        <table className="min-w-full text-left border-collapse print:hidden">
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                        <table className="min-w-full text-left border-collapse">
                             <thead className="bg-slate-50 text-slate-500 font-semibold text-xs uppercase tracking-wider border-b border-slate-200 sticky top-0 z-10">
                                 <tr>
                                     <th className="px-6 py-4 w-12"></th>
@@ -1458,14 +1383,11 @@ const ProductionWorkflowDashboard = () => {
                                 )}
                             </tbody>
                         </table>
-                        <div className="hidden print:block p-8">
-                            <h1 className="text-2xl font-bold mb-4">Print View Active</h1>
-                            <p>To print Purchase Orders, please open the specific Purchase Order detail modal and use the print button located there.</p>
-                        </div>
                     </div>
                 )}
             </div>
 
+            {/* Modals */}
             {selectedSOId && <SalesOrderDetailsModal orderId={selectedSOId} onClose={() => setSelectedSOId(null)} />}
             {selectedPOId && <PurchaseOrderDetailsModal poId={selectedPOId} onClose={() => setSelectedPOId(null)} />}
             {poModalSOId && <CreatePOModal salesOrderId={poModalSOId} onClose={() => setPoModalSOId(null)} onSave={handleCreatePOSubmit} />}

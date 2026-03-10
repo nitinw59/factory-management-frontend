@@ -3,14 +3,15 @@ import {
     Truck, Search, CheckCircle, Clock, Package, X, 
     FileText, Printer, ArrowLeft, ShieldCheck, Building2, 
     Calendar, Loader2, AlertCircle, ChevronDown, Eye, Box,
-    ShoppingBag
+    ShoppingBag, ChevronRight
 } from 'lucide-react';
 
 // ==========================================
-// 1. MOCK API SERVICE (Replace with real API imports)
- import { dispatchManagerApi } from '../../api/dispatchManagerApi';
+// 1. MOCK API SERVICE (Replaces external imports for Canvas preview)
 // ==========================================
-// const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+import { dispatchManagerApi } from '../../api/dispatchManagerApi';
+
+//const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // const dispatchManagerApi = {
 //     getDashboardData: async () => {
@@ -106,12 +107,14 @@ const DispatchFormModal = ({ batch, onClose, onSuccess }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState(null);
+    const [showPreview, setShowPreview] = useState(false); // New state for review step
+    const [showWarning, setShowWarning] = useState(false); // State for the final warning dialog
 
     useEffect(() => {
         const fetchRolls = async () => {
             setIsLoading(true);
             try {
-                const res = await dispatchManagerApi.getRollDetailsForBatch(batch.id);
+                const res = await dispatchManagerApi.getRollDetailsForBatch(batch.real_batch_id);
                 const rollData = Array.isArray(res.data?.data) 
                 ? res.data.data 
                 : (Array.isArray(res.data) ? res.data : []);
@@ -134,10 +137,11 @@ const DispatchFormModal = ({ batch, onClose, onSuccess }) => {
     };
 
     const handleSubmit = async () => {
+        setShowWarning(false);
         setIsSubmitting(true);
         try {
             const payload = {
-                batchId: batch.id,
+                batchId: batch.real_batch_id,
                 dispatchedRolls: rolls.map(r => ({ ...r, dispatchedPieces: inputs[r.rollId] }))
             };
             const response = await dispatchManagerApi.submitDispatch(payload);
@@ -153,12 +157,16 @@ const DispatchFormModal = ({ batch, onClose, onSuccess }) => {
             onSuccess(generatedReceipt);
         } catch (err) {
             setError("Failed to finalize dispatch process.");
-            setIsSubmitting(false);
+            setIsSubmitting(false); // Re-enable buttons if error occurs
         }
     };
 
     if (isLoading) return <Modal title={`Dispatching: ${batch.id}`} onClose={onClose}><Spinner /></Modal>;
     if (error) return <Modal title="Error" onClose={onClose}><ErrorDisplay message={error} /></Modal>;
+
+    // Calculate dynamic totals
+    const totalCut = rolls.reduce((sum, r) => sum + parseInt(r.cutPieces || 0, 10), 0);
+    const totalDispatched = rolls.reduce((sum, r) => sum + parseInt(inputs[r.rollId] || 0, 10), 0);
 
     return (
         <Modal title={`Dispatch Process: ${batch.id}`} onClose={onClose}>
@@ -174,56 +182,132 @@ const DispatchFormModal = ({ batch, onClose, onSuccess }) => {
                     </div>
                 </div>
 
-                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                    <table className="w-full text-left border-collapse text-sm">
-                        <thead>
-                            <tr className="bg-slate-100 text-slate-600 border-b border-slate-200">
-                                <th className="p-3 font-semibold">Roll ID</th>
-                                <th className="p-3 font-semibold">Color</th>
-                                <th className="p-3 font-semibold text-right">Cut Pieces</th>
-                                <th className="p-3 font-semibold text-right w-40">Dispatched</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {rolls.map((roll, idx) => (
-                                <tr key={idx} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                                    <td className="p-3 font-medium text-slate-800">{roll.rollId}</td>
-                                    <td className="p-3 text-slate-600"><span className="px-2 py-0.5 rounded text-xs bg-slate-100 border border-slate-200">{roll.color}</span></td>
-                                    <td className="p-3 text-right font-medium text-slate-600">{roll.cutPieces}</td>
-                                    <td className="p-3">
-                                        <input 
-                                            type="number" min="0"
-                                            value={inputs[roll.rollId] !== undefined ? inputs[roll.rollId] : ''}
-                                            onChange={(e) => handleInputChange(roll.rollId, e.target.value)}
-                                            className="w-full text-right px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-bold text-blue-700 bg-white"
-                                        />
-                                    </td>
-                                </tr>
-                            ))}
-                            {rolls.length === 0 && <tr><td colSpan="4" className="p-6 text-center text-slate-500">No roll details available.</td></tr>}
-                        </tbody>
-                    </table>
-                </div>
+                {!showPreview ? (
+                    <>
+                        {/* EDIT MODE */}
+                        <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                            <table className="w-full text-left border-collapse text-sm">
+                                <thead>
+                                    <tr className="bg-slate-100 text-slate-600 border-b border-slate-200">
+                                        <th className="p-3 font-semibold">Roll ID</th>
+                                        <th className="p-3 font-semibold">Color</th>
+                                        <th className="p-3 font-semibold text-right">Cut Pieces</th>
+                                        <th className="p-3 font-semibold text-right w-40">Dispatched</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {rolls.map((roll, idx) => (
+                                        <tr key={idx} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                                            <td className="p-3 font-medium text-slate-800">{roll.rollId}</td>
+                                            <td className="p-3 text-slate-600"><span className="px-2 py-0.5 rounded text-xs bg-slate-100 border border-slate-200">{roll.color}</span></td>
+                                            <td className="p-3 text-right font-medium text-slate-600">{roll.cutPieces}</td>
+                                            <td className="p-3">
+                                                <input 
+                                                    type="number" min="0"
+                                                    value={inputs[roll.rollId] !== undefined ? inputs[roll.rollId] : ''}
+                                                    onChange={(e) => handleInputChange(roll.rollId, e.target.value)}
+                                                    className="w-full text-right px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-bold text-blue-700 bg-white"
+                                                />
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {rolls.length === 0 && <tr><td colSpan="4" className="p-6 text-center text-slate-500">No roll details available.</td></tr>}
+                                </tbody>
+                                <tfoot>
+                                    <tr className="bg-slate-50 border-t-2 border-slate-200 font-bold text-slate-800">
+                                        <td colSpan="2" className="p-3 text-right uppercase text-xs tracking-wider text-slate-500">Total Sum:</td>
+                                        <td className="p-3 text-right">{totalCut}</td>
+                                        <td className="p-3 text-right text-blue-700 text-lg">{totalDispatched}</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
 
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start space-x-3">
-                    <ShieldCheck className="text-amber-600 shrink-0 mt-0.5" size={20} />
-                    <div className="text-sm text-amber-800">
-                        <p className="font-bold mb-1">Authorization Notice</p>
-                        <p>Submitting this dispatch marks <strong>all previous production stages as completed</strong> and generates an official PDF receipt.</p>
-                    </div>
-                </div>
+                        <div className="flex justify-end space-x-3 pt-4 border-t border-slate-100">
+                            <button onClick={onClose} className="px-5 py-2.5 bg-slate-100 text-slate-700 font-medium rounded-xl hover:bg-slate-200 transition-colors text-sm">Cancel</button>
+                            <button 
+                                onClick={() => setShowPreview(true)} 
+                                disabled={rolls.length === 0} 
+                                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center space-x-2 transition-colors disabled:opacity-50 text-sm shadow-md"
+                            >
+                                <span>Review Dispatch</span>
+                                <ChevronRight size={18} />
+                            </button>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        {/* PREVIEW & CONFIRM MODE */}
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 animate-in fade-in slide-in-from-right-4 duration-300">
+                            <h4 className="font-bold text-blue-900 mb-4 flex items-center"><Eye size={18} className="mr-2"/> Dispatch Summary Preview</h4>
+                            <div className="space-y-3">
+                                {rolls.map((roll, idx) => (
+                                    <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm border border-blue-100">
+                                        <div>
+                                            <span className="font-bold text-slate-800">{roll.rollId}</span>
+                                            <span className="text-xs text-slate-500 ml-2">({roll.color})</span>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="text-xs text-slate-400 mr-3">Cut: {roll.cutPieces}</span>
+                                            <span className="font-bold text-blue-700 text-base">Disp: {inputs[roll.rollId] || 0}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="mt-4 pt-4 border-t border-blue-200 flex justify-between items-center font-bold text-blue-900">
+                                <span className="uppercase text-sm tracking-wider">Total Final Quantities:</span>
+                                <span className="text-xl">{totalDispatched} <span className="text-sm text-blue-500">/ {totalCut} pcs</span></span>
+                            </div>
+                        </div>
 
-                <div className="flex justify-end space-x-3 pt-4 border-t border-slate-100">
-                    <button onClick={onClose} disabled={isSubmitting} className="px-5 py-2.5 bg-slate-100 text-slate-700 font-medium rounded-xl hover:bg-slate-200 transition-colors text-sm">Cancel</button>
-                    <button 
-                        onClick={handleSubmit} 
-                        disabled={rolls.length === 0 || isSubmitting} 
-                        className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center space-x-2 transition-colors disabled:opacity-50 text-sm"
-                    >
-                        {isSubmitting ? <Loader2 className="animate-spin w-4 h-4" /> : <CheckCircle size={18} />}
-                        <span>Confirm & Generate Receipt</span>
-                    </button>
-                </div>
+                        <div className="flex justify-end space-x-3 pt-4 border-t border-slate-100">
+                            <button 
+                                onClick={() => setShowPreview(false)} 
+                                disabled={isSubmitting}
+                                className="px-5 py-2.5 bg-slate-100 text-slate-700 font-medium rounded-xl hover:bg-slate-200 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Back to Edit
+                            </button>
+                            <button 
+                                onClick={() => setShowWarning(true)} 
+                                disabled={isSubmitting} 
+                                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center space-x-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm shadow-md"
+                            >
+                                {isSubmitting ? <Loader2 className="animate-spin w-4 h-4" /> : <CheckCircle size={18} />}
+                                <span>{isSubmitting ? 'Processing...' : 'Confirm & Submit'}</span>
+                            </button>
+                        </div>
+                        
+                        {/* FINAL WARNING MODAL OVERLAY */}
+                        {showWarning && (
+                            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+                                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center animate-in zoom-in-95 duration-200">
+                                    <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-5 shadow-inner">
+                                        <AlertCircle className="text-red-600 w-8 h-8" />
+                                    </div>
+                                    <h3 className="text-2xl font-black text-slate-800 mb-3 tracking-tight">Final Confirmation</h3>
+                                    <p className="text-red-600 font-bold bg-red-50 p-4 rounded-xl border border-red-100 mb-8 leading-relaxed">
+                                        THIS RECEIPT CAN BE GENERATED ONLY ONCE AND CANNOT BE MODIFIED
+                                    </p>
+                                    <div className="flex gap-3 justify-center">
+                                        <button 
+                                            onClick={() => setShowWarning(false)} 
+                                            className="flex-1 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button 
+                                            onClick={handleSubmit} 
+                                            className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-colors shadow-md shadow-red-600/20"
+                                        >
+                                            Generate Receipt
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
             </div>
         </Modal>
     );
@@ -272,7 +356,7 @@ export default function DispatchDashboardPage() {
         const handleViewExistingReceipt = async (batch) => {
                 setIsLoading(true);
                 try {
-                    const res = await dispatchManagerApi.getReceiptDetails(batch.id);
+                    const res = await dispatchManagerApi.getReceiptDetails(batch.real_batch_id);
                     
                     // Safely extract the nested receipt object
                     // Axios = res.data.data | Fetch = res.data
