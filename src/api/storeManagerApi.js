@@ -46,4 +46,12 @@ export const storeManagerApi = {
     getTrimBillsForOrder: (orderId) => api.get(`/store-manager/trim-orders/${orderId}/bills`),
     saveTrimBill: (orderId, data) => api.post(`/store-manager/trim-orders/${orderId}/bills`, data),
 
+
+    //spares billing
+    getPendingRequests: () => api.get('/spare-issuance/spares/pending-requests'),
+    getFactoryUsers: () => api.get('/spare-issuance/factory-users'),
+    getStoreSparesInventory: () => api.get('/spare-issuance/spares/inventory'),
+    generateInvoice: (data) => api.post('/spare-issuance/spares/generate-invoice', data),
+    getInvoices: () => api.get('/spare-issuance/spares/invoices')
+
 };

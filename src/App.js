@@ -110,6 +110,7 @@ import DispatchProtectedRoute from './shared/DispatchProtectedRoute';
 import DispatchDashboardPage from './modules/depatch_portal/DispatchDashboardPage';
 import DispatchReceiptsPage from './modules/depatch_portal/DispatchReceiptsPage';
 
+import SparesIssuanceDashboard from './modules/store_manager/SparesIssuanceDashboard';
 function App() {
   return (
     <Routes>
@@ -169,6 +170,7 @@ function App() {
           <Route path="trim-orders/:orderId/billing" element={<TrimBillingPage />} />
 
           <Route path="spare-parts" element={<SparePartsPage />} />
+          <Route path="spare-parts-issuance" element={<SparesIssuanceDashboard />} />
         </Route>
 
         {/* Production Manager Portal */}
