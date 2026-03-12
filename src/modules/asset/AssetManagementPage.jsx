@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
     Camera, Plus, ArrowLeft, Clipboard, 
     X, Download, Upload, Edit2, AlertCircle, Check, Calendar, Shield,
     HardHat, Loader2, Trash2, Filter, Info, IndianRupee, ChevronDown, ChevronUp 
 } from 'lucide-react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
 
 import { assetApi } from '../../api/assetApi';  
 import { maintenanceApi } from '../../api/maintenanceApi';
@@ -75,27 +74,91 @@ const parseCSV = (text) => {
 // --- Modals ---
 const QrScannerModal = ({ onScanSuccess, onClose }) => {
     const [manualCode, setManualCode] = useState('');
+    const [isScannerLoaded, setIsScannerLoaded] = useState(false);
+
+    // Dynamically load the html5-qrcode script to bypass bundler errors
+    useEffect(() => {
+        const scriptId = 'html5-qrcode-script';
+        let script = document.getElementById(scriptId);
+
+        if (!script) {
+            script = document.createElement('script');
+            script.id = scriptId;
+            script.src = 'https://unpkg.com/html5-qrcode';
+            script.async = true;
+            script.onload = () => setIsScannerLoaded(true);
+            document.body.appendChild(script);
+        } else {
+            setIsScannerLoaded(true);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!isScannerLoaded || !window.Html5QrcodeScanner) return;
+
+        let scanner;
+        try {
+            // Initialize the scanner targeting the 'qr-reader' div
+            scanner = new window.Html5QrcodeScanner(
+                "qr-reader", 
+                { 
+                    fps: 10, 
+                    qrbox: { width: 250, height: 250 },
+                    aspectRatio: 1.0,
+                    showTorchButtonIfSupported: true 
+                }, 
+                false
+            );
+
+            scanner.render(
+                (decodedText) => {
+                    // On Success: Stop the camera and pass the result up
+                    scanner.clear().then(() => {
+                        onScanSuccess(decodedText);
+                    }).catch(console.error);
+                }, 
+                (errorMessage) => {
+                    // Ignore continuous scan errors (normal behavior when no QR is in frame)
+                }
+            );
+        } catch (err) { 
+            console.error("Scanner initialization failed:", err); 
+        }
+
+        // Cleanup: Stop the camera when the modal is closed
+        return () => { 
+            if (scanner) {
+                scanner.clear().catch(e => console.error("Failed to clear scanner", e)); 
+            }
+        };
+    }, [isScannerLoaded, onScanSuccess]);
     
     return (
         <Modal title="Scan Asset QR Code" onClose={onClose}>
             <div className="flex flex-col items-center">
-                <div className="w-64 h-64 bg-gray-100 border-2 border-dashed border-gray-300 flex flex-col items-center justify-center mb-6 rounded-2xl relative overflow-hidden">
-                    <Camera size={48} className="text-gray-300 mb-2" />
-                    <span className="text-gray-400 text-sm font-medium">Scanner Active...</span>
-                    <div className="absolute top-0 w-full h-1 bg-blue-500 opacity-70 animate-pulse"></div>
+                
+                {/* Scanner Target Div */}
+                <div id="qr-reader" className="w-full max-w-sm mx-auto overflow-hidden rounded-2xl shadow-inner border-2 border-gray-200 bg-gray-50 mb-6 min-h-[250px] flex items-center justify-center">
+                    {!isScannerLoaded && (
+                        <div className="flex flex-col items-center text-gray-400">
+                            <Loader2 className="animate-spin w-8 h-8 mb-2" />
+                            <span className="text-sm font-medium">Initializing Camera...</span>
+                        </div>
+                    )}
                 </div>
+                
                 <div className="w-full flex gap-3">
                     <input 
                         type="text" 
                         value={manualCode} 
                         onChange={(e) => setManualCode(e.target.value)}
                         placeholder="Or enter QR code manually"
-                        className="flex-1 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 outline-none transition-colors"
-                        autoFocus
+                        className="flex-1 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 outline-none transition-colors font-mono"
                     />
                     <button 
                         onClick={() => manualCode.trim() && onScanSuccess(manualCode.trim())}
-                        className="px-6 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-sm"
+                        disabled={!manualCode.trim()}
+                        className="px-6 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50"
                     >
                         Process
                     </button>
@@ -439,14 +502,17 @@ const AssetList = ({ assets, onSelect }) => {
                             <th className="py-4 px-6 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Asset Info</th>
                             <th className="py-4 px-6 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">System ID</th>
                             <th className="py-4 px-6 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Assignment</th>
+                            <th className="py-4 px-6 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Maintenance</th>
                             <th className="py-4 px-6 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Status</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                        {filtered.length === 0 && <tr><td colSpan="4" className="text-center p-12 text-gray-500 font-medium">No assets match your search criteria.</td></tr>}
+                        {filtered.length === 0 && <tr><td colSpan="5" className="text-center p-12 text-gray-500 font-medium">No assets match your search criteria.</td></tr>}
                         {filtered.map(asset => {
                             const isGreen = asset.status === 'ACTIVE';
                             const isRed = asset.status === 'OUT_OF_SERVICE';
+                            const pmSchedules = asset.pm_schedules || [];
+                            
                             return (
                                 <tr key={asset.id} onClick={() => onSelect(asset)} className="hover:bg-blue-50/60 cursor-pointer transition-colors group">
                                     <td className="py-4 px-6">
@@ -455,6 +521,19 @@ const AssetList = ({ assets, onSelect }) => {
                                     </td>
                                     <td className="py-4 px-6 font-mono text-sm font-bold text-gray-600">{asset.asset_qr_id}</td>
                                     <td className="py-4 px-6 text-sm text-gray-700 font-medium">{asset.current_line || asset.location || 'Unassigned'}</td>
+                                    <td className="py-4 px-6">
+                                        {pmSchedules.length > 0 ? (
+                                            <div className="flex flex-wrap gap-1">
+                                                {pmSchedules.map((pm, i) => (
+                                                    <span key={i} className="px-2 py-1 text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md truncate max-w-[150px]" title={pm.task_name}>
+                                                        {pm.task_name}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs text-gray-400 italic">None Assigned</span>
+                                        )}
+                                    </td>
                                     <td className="py-4 px-6">
                                         <span className={`px-3 py-1 rounded-full text-xs font-bold border ${isGreen ? 'text-green-700 bg-green-50 border-green-200' : isRed ? 'text-red-700 bg-red-50 border-red-200' : 'text-yellow-700 bg-yellow-50 border-yellow-200'}`}>
                                             {asset.status.replace('_', ' ')}

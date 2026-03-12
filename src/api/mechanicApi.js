@@ -15,6 +15,9 @@ export const mechanicApi = {
 
     getComplaintHistory: (complaintId) =>
         api.get(`/mechanics/complaints/${complaintId}/history`),
+    getAssetHistoryByQR: (qrCode) =>
+        api.get(`/maintenance/assets/qr/${qrCode}/history`),
+
 
     // ================================
     // MECHANIC ACTIONS

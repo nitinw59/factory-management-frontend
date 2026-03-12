@@ -19,8 +19,9 @@ export const maintenanceApi = {
 
     createPMSchedule: (data) =>
         api.post('/assets/pm-schedules', data),
-    
-  
+    getOpenComplaints: () =>
+        api.get('/maintenance/open-complaints'),
+   
 
     // ✅ NEW: Scheduling Dashboard Endpoints
     getUpcomingTasks: () => 

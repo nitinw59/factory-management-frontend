@@ -449,7 +449,7 @@ const TrimOrderDetailPage = () => {
                             </div>
                             <ul className="list-disc list-inside pl-12 mt-3 space-y-1 text-sm text-red-900 font-medium">
                                 {missingItems.map(item => (
-                                    <li key={item.id}><strong>{Math.ceil(item.quantity_required)} units</strong> of {item.item_name} - {item.color_name || "AGNOSTIC"}</li>
+                                    <li key={item.id}><strong>{Math.ceil(item.quantity_required)} units</strong> of {item.item_name} - {item.color_name || "AGNOSTIC"} ({item.color_number})</li>
                                 ))}
                             </ul>
                         </div>
