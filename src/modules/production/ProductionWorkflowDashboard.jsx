@@ -690,8 +690,98 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
     if (!po) return null;
     
     // --- BROWSER PRINT REPLACEMENT FOR JSPDF ---
-    const handlePrintPO = () => {
-        window.print();
+        const handlePrintPO = () => {
+        const doc = new jsPDF();
+        const pageWidth = doc.internal.pageSize.width;
+        
+        // --- LETTERHEAD ---
+        // Company Name
+        doc.setFontSize(22);
+        doc.setFont("helvetica", "bold");
+        doc.text("MATRIX OVERSEAS", pageWidth / 2, 20, { align: "center" });
+
+        // Address & Phone
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        const addressLines = [
+            "PLOT NO. 24,26,27, K T STEEL PLOT PREMISSES,",
+            "R K CNG PUMP, WIMCO NAKA, AMBERNATH 421505.",
+            "Phone: +918591383476"
+        ];
+        doc.text(addressLines, pageWidth / 2, 28, { align: "center", lineHeightFactor: 1.5 });
+
+        // Separator Line
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.5);
+        doc.line(14, 45, pageWidth - 14, 45);
+
+        // --- PO HEADER INFO ---
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.text("PURCHASE ORDER", 14, 55);
+
+        // Left Side (PO Details)
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.text("PO Number:", 14, 65);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${po.po_code || po.po_number}`, 40, 65);
+
+        doc.setFont("helvetica", "bold");
+        doc.text("Date:", 14, 72);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${new Date(po.created_at || Date.now()).toLocaleDateString()}`, 40, 72);
+        
+        doc.setFont("helvetica", "bold");
+        doc.text("Ref (SO):", 14, 79);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${po.sales_order_number || 'N/A'}`, 40, 79);
+
+        // Right Side (Supplier Details)
+        doc.setFont("helvetica", "bold");
+        doc.text("To (Supplier):", 120, 55);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${po.supplier_name}`, 120, 62);
+        
+        if (po.supplier_address) {
+            const splitAddress = doc.splitTextToSize(po.supplier_address, 75);
+            doc.text(splitAddress, 120, 69);
+        }
+
+        // --- ITEMS TABLE ---
+        autoTable(doc, { 
+            startY: 90, 
+            head: [['Fabric Type', 'Color Details', 'Quantity', 'UOM', 'Unit Price', 'Total']], 
+            body: po.items.map(i => [
+                i.fabric_type, 
+                `${i.fabric_color} (${i.color_number || ''})`, 
+                i.quantity, 
+                i.uom, 
+                `₹${i.unit_price}`, 
+                `₹${i.total_price}`
+            ]),
+            theme: 'grid',
+            headStyles: { fillColor: [40, 40, 40], textColor: [255, 255, 255] },
+            styles: { fontSize: 9, cellPadding: 3 },
+            columnStyles: {
+                2: { halign: 'right' },
+                3: { halign: 'center' },
+                4: { halign: 'right' },
+                5: { halign: 'right', fontStyle: 'bold' }
+            },
+            foot: [[
+                { content: 'Grand Total', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold' } },
+                { content: `₹${po.items.reduce((sum, item) => sum + parseFloat(item.total_price || 0), 0).toFixed(2)}`, styles: { fontStyle: 'bold' } }
+            ]]
+        });
+
+        // --- FOOTER SIGNATURES ---
+        const finalY = doc.lastAutoTable.finalY + 30;
+        doc.setFont("helvetica", "bold");
+        doc.text("Authorized Signature", 14, finalY);
+        doc.line(14, finalY + 1, 60, finalY + 1);
+
+        doc.save(`PO_${po.po_code}.pdf`);
     };
 
     return (
