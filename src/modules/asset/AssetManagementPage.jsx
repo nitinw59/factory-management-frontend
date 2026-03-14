@@ -76,7 +76,6 @@ const QrScannerModal = ({ onScanSuccess, onClose }) => {
     const [manualCode, setManualCode] = useState('');
     const [isScannerLoaded, setIsScannerLoaded] = useState(false);
 
-    // Dynamically load the html5-qrcode script to bypass bundler errors
     useEffect(() => {
         const scriptId = 'html5-qrcode-script';
         let script = document.getElementById(scriptId);
@@ -98,7 +97,6 @@ const QrScannerModal = ({ onScanSuccess, onClose }) => {
 
         let scanner;
         try {
-            // Initialize the scanner targeting the 'qr-reader' div
             scanner = new window.Html5QrcodeScanner(
                 "qr-reader", 
                 { 
@@ -112,20 +110,16 @@ const QrScannerModal = ({ onScanSuccess, onClose }) => {
 
             scanner.render(
                 (decodedText) => {
-                    // On Success: Stop the camera and pass the result up
                     scanner.clear().then(() => {
                         onScanSuccess(decodedText);
                     }).catch(console.error);
                 }, 
-                (errorMessage) => {
-                    // Ignore continuous scan errors (normal behavior when no QR is in frame)
-                }
+                (errorMessage) => {}
             );
         } catch (err) { 
             console.error("Scanner initialization failed:", err); 
         }
 
-        // Cleanup: Stop the camera when the modal is closed
         return () => { 
             if (scanner) {
                 scanner.clear().catch(e => console.error("Failed to clear scanner", e)); 
@@ -136,8 +130,6 @@ const QrScannerModal = ({ onScanSuccess, onClose }) => {
     return (
         <Modal title="Scan Asset QR Code" onClose={onClose}>
             <div className="flex flex-col items-center">
-                
-                {/* Scanner Target Div */}
                 <div id="qr-reader" className="w-full max-w-sm mx-auto overflow-hidden rounded-2xl shadow-inner border-2 border-gray-200 bg-gray-50 mb-6 min-h-[250px] flex items-center justify-center">
                     {!isScannerLoaded && (
                         <div className="flex flex-col items-center text-gray-400">
@@ -450,8 +442,10 @@ const AssetManagementPage = () => {
                     />
                 )}
                 
+                {/* Notice the added `assets={assets}` prop here */}
                 {!isLoading && viewMode === 'form' && (
                     <AssetForm 
+                        assets={assets}
                         assetTypes={assetTypes} 
                         pmTemplates={pmTemplates}
                         initialData={editingData}
@@ -549,8 +543,8 @@ const AssetList = ({ assets, onSelect }) => {
     );
 };
 
-// --- Asset Form (With Inline Type Addition and Fixed Deletion) ---
-const AssetForm = ({ assetTypes, pmTemplates = [], onSaveSuccess, onCancel, initialData, initialQrId = '', onAssetTypeCreated, showToast }) => {
+// --- Asset Form (With Datalist functionality implemented) ---
+const AssetForm = ({ assets = [], assetTypes, pmTemplates = [], onSaveSuccess, onCancel, initialData, initialQrId = '', onAssetTypeCreated, showToast }) => {
     const isEditMode = Boolean(initialData);
 
     const [formData, setFormData] = useState({
@@ -563,6 +557,12 @@ const AssetForm = ({ assetTypes, pmTemplates = [], onSaveSuccess, onCancel, init
     const [isSaving, setIsSaving] = useState(false);
     const [showTypeModal, setShowTypeModal] = useState(false);
 
+    // Extract unique values for datalists
+    const uniqueLines = [...new Set(assets.map(a => a.current_line).filter(Boolean))].sort();
+    const uniqueLocations = [...new Set(assets.map(a => a.location).filter(Boolean))].sort();
+    const uniqueBrands = [...new Set(assets.map(a => a.brand).filter(Boolean))].sort();
+    const uniqueModels = [...new Set(assets.map(a => a.model).filter(Boolean))].sort();
+
     useEffect(() => {
         if (initialData) {
             const fmtDate = (d) => d ? new Date(d).toISOString().split('T')[0] : '';
@@ -574,7 +574,7 @@ const AssetForm = ({ assetTypes, pmTemplates = [], onSaveSuccess, onCancel, init
             if (initialData.pm_schedules && Array.isArray(initialData.pm_schedules)) {
                 setPmSchedules(initialData.pm_schedules.map(pm => ({
                     id: pm.id, 
-                    _uid: pm.id, // Use database ID as unique key if it exists
+                    _uid: pm.id, 
                     template_id: pm.template_id || pmTemplates.find(t => t.name === pm.task_name)?.id || '',
                     next_due_date: fmtDate(pm.next_due_date), 
                     is_active: pm.is_active !== false
@@ -655,19 +655,70 @@ const AssetForm = ({ assetTypes, pmTemplates = [], onSaveSuccess, onCancel, init
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                     <div>
                         <label className="block text-sm font-bold text-gray-700 mb-1.5">Production Line</label>
-                        <input type="text" name="current_line" value={formData.current_line} onChange={handleChange} placeholder="e.g. Sewing Line 4" className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none" />
+                        <input 
+                            type="text" 
+                            name="current_line" 
+                            value={formData.current_line} 
+                            onChange={handleChange} 
+                            list="lines-list"
+                            placeholder="e.g. Sewing Line 4" 
+                            className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none" 
+                        />
+                        <datalist id="lines-list">
+                            {uniqueLines.map(line => <option key={line} value={line} />)}
+                        </datalist>
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-gray-700 mb-1.5">Facility Location</label>
-                        <input type="text" name="location" value={formData.location} onChange={handleChange} placeholder="e.g. Matrix Overseas - Block A" className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none" />
+                        <input 
+                            type="text" 
+                            name="location" 
+                            value={formData.location} 
+                            onChange={handleChange} 
+                            list="locations-list"
+                            placeholder="e.g. Matrix Overseas - Block A" 
+                            className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none" 
+                        />
+                        <datalist id="locations-list">
+                            {uniqueLocations.map(loc => <option key={loc} value={loc} />)}
+                        </datalist>
                     </div>
                 </div>
 
                 <h3 className="font-bold text-gray-800 bg-gray-50/50 p-3 rounded-lg border border-gray-100 mb-4">Hardware Specifications</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div><label className="block text-sm font-bold text-gray-700 mb-1.5">Manufacturer Brand</label><input type="text" name="brand" value={formData.brand} onChange={handleChange} className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none" /></div>
-                    <div><label className="block text-sm font-bold text-gray-700 mb-1.5">Model Number</label><input type="text" name="model" value={formData.model} onChange={handleChange} className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none" /></div>
-                    <div><label className="block text-sm font-bold text-gray-700 mb-1.5">Serial Number</label><input type="text" name="serial_number" value={formData.serial_number} onChange={handleChange} className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none font-mono text-sm" /></div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">Manufacturer Brand</label>
+                        <input 
+                            type="text" 
+                            name="brand" 
+                            value={formData.brand} 
+                            onChange={handleChange} 
+                            list="brands-list"
+                            className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none" 
+                        />
+                        <datalist id="brands-list">
+                            {uniqueBrands.map(brand => <option key={brand} value={brand} />)}
+                        </datalist>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">Model Number</label>
+                        <input 
+                            type="text" 
+                            name="model" 
+                            value={formData.model} 
+                            onChange={handleChange} 
+                            list="models-list"
+                            className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none" 
+                        />
+                        <datalist id="models-list">
+                            {uniqueModels.map(model => <option key={model} value={model} />)}
+                        </datalist>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">Serial Number</label>
+                        <input type="text" name="serial_number" value={formData.serial_number} onChange={handleChange} className="p-3 w-full border-2 border-gray-200 rounded-lg focus:border-blue-500 outline-none font-mono text-sm" />
+                    </div>
                 </div>
 
                 <h3 className="font-bold text-gray-800 bg-gray-50/50 p-3 rounded-lg border border-gray-100 mb-4">Financial & Acquisition</h3>
@@ -743,7 +794,6 @@ const AssetForm = ({ assetTypes, pmTemplates = [], onSaveSuccess, onCancel, init
 const AssetDetails = ({ asset, onBack, onEdit, onRefetch, showToast }) => { 
     const [showMaintForm, setShowMaintForm] = useState(false);
     
-    // Track which cards are expanded
     const [expandedPmId, setExpandedPmId] = useState(null);
     const [expandedLogId, setExpandedLogId] = useState(null);
 
@@ -832,7 +882,6 @@ const AssetDetails = ({ asset, onBack, onEdit, onRefetch, showToast }) => {
                                         {isOverdue && ' — OVERDUE'}
                                     </p>
                                     
-                                    {/* Expanded PM Content */}
                                     {isExpanded && (
                                         <div className="mt-4 pt-4 border-t border-gray-200/60 animate-fade-in-up text-sm text-gray-700">
                                             <p className="mb-2"><strong>Status:</strong> {pm.is_active !== false ? 'Active Routine' : 'Paused'}</p>
@@ -883,7 +932,6 @@ const AssetDetails = ({ asset, onBack, onEdit, onRefetch, showToast }) => {
                                         "{log.description}"
                                     </p>
                                     
-                                    {/* Expanded Log Content */}
                                     {isExpanded && (
                                         <div className="mt-3 pt-3 border-t border-gray-50 text-sm text-gray-600 animate-fade-in-up">
                                             <p className="mb-1"><strong>Log Entry ID:</strong> #{log.id}</p>
