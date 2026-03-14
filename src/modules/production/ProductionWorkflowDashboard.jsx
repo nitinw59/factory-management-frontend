@@ -7,6 +7,10 @@ import {
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { accountingApi } from '../../api/accountingApi'; 
 import { storeManagerApi } from '../../api/storeManagerApi'; 
+
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+
 // ==========================================
 // STATEFUL MOCKS FOR CANVAS PREVIEW 
 // ==========================================
