@@ -486,14 +486,14 @@ export default function DispatchDashboardPage() {
                                             {batch.po_code && (
                                                 <div className="mb-2 sm:mb-3">
                                                     <span className="inline-flex items-center text-[9px] sm:text-[10px] font-bold tracking-wide uppercase text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
-                                                        <ShoppingBag size={10} className="mr-1 shrink-0"/> <span className="truncate">PO: {batch.po_code}</span>
+                                                        <ShoppingBag size={10} className="mr-1 shrink-0"/> <span className="truncate">ID: {batch.real_batch_id}</span>
                                                     </span>
                                                 </div>
                                             )}
                                             <div className="flex justify-between items-start mb-2 sm:mb-3">
                                                 <div className="bg-blue-50 text-blue-600 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg border border-blue-200 flex items-center shadow-sm max-w-[70%]">
                                                     <Box size={14} className="mr-1.5 sm:mr-2 opacity-70 shrink-0" />
-                                                    <span className="text-xs sm:text-sm font-bold font-mono tracking-tight truncate">ID: {batch.id}</span>
+                                                    <span className="text-xs sm:text-sm font-bold font-mono tracking-tight truncate">CODE: {batch.po_code}</span>
                                                 </div>
                                                 <span className={`px-2 py-0.5 sm:px-3 sm:py-1 text-[9px] sm:text-[10px] uppercase font-bold tracking-wider rounded-full border shrink-0 ${isPartial ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
                                                     {isPartial ? 'Partial' : 'Ready'}
