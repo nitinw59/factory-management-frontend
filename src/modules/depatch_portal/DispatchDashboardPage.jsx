@@ -125,6 +125,7 @@ const DispatchFormModal = ({ batch, onClose, onSuccess }) => {
                 ...batch,
                 dispatchDate: response.data.dispatchDate,
                 receiptId: response.data.receiptId,
+                sizeRatio: response.data.sizeRatio,
                 rolls: payload.dispatchedRolls
             };
             
@@ -377,7 +378,9 @@ export default function DispatchDashboardPage() {
 
     const handleDispatchSuccess = (receiptData) => {
         setDispatchingBatch(null);
+        console.log("Dispatch successful:", receiptData);
         setReceiptView(receiptData);
+
         loadData(); 
         setExpandedSections({ READY: false, DISPATCHED: true });
     };
@@ -388,6 +391,7 @@ export default function DispatchDashboardPage() {
             const res = await dispatchManagerApi.getReceiptDetails(receiptId);
             const receiptData = res.data?.data || res.data || {};
             setReceiptView(receiptData);
+            console.log("Fetched receipt details:", receiptData);
         } catch (err) {
             alert("Failed to fetch receipt data.");
         } finally {
@@ -418,6 +422,7 @@ export default function DispatchDashboardPage() {
 
 
     if (receiptView) {
+        console.log("Rendering receipt view for:", receiptView);    
         return <DispatchReceiptDocument receipt={receiptView} onBack={() => setReceiptView(null)} />;
     }
 

@@ -165,7 +165,7 @@ export default function DispatchReceiptDocument({ receipt, onBack }) {
                             {receipt.po_code && <p className="text-slate-500 text-sm mt-1 print:text-black">PO: {receipt.po_code}</p>}
                         </div>
                     </div>
-
+                {console.log(receipt.sizeRatio)}
                      {receipt.sizeRatio && (
                         <div className="mb-6 bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex flex-col md:flex-row md:items-center gap-4 print:bg-transparent print:border-none print:p-0">
                             <h3 className="text-xs font-bold text-indigo-800 uppercase tracking-wider shrink-0 print:text-slate-600">Size Ratio:</h3>
