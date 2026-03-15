@@ -483,7 +483,7 @@ export default function DispatchDashboardPage() {
                                 return (
                                     <div key={batch.id} className={`bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-all border-t-[4px] sm:border-t-[6px] ${isPartial ? 'border-t-blue-400' : 'border-t-amber-400'}`}>
                                         <div className="p-4 sm:p-5 border-b border-slate-50">
-                                            {batch.po_code && (
+                                            { (
                                                 <div className="mb-2 sm:mb-3">
                                                     <span className="inline-flex items-center text-[9px] sm:text-[10px] font-bold tracking-wide uppercase text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
                                                         <ShoppingBag size={10} className="mr-1 shrink-0"/> <span className="truncate">ID: {batch.real_batch_id}</span>
