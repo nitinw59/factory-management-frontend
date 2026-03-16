@@ -12,8 +12,6 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-
-import BatchReceiptsModal from './BatchReceiptsModal';
 // ==========================================
 // STATEFUL MOCKS FOR CANVAS PREVIEW 
 // ==========================================
@@ -345,78 +343,27 @@ const BatchNode = ({ data, x, y, onViewDetails, onEditBatch, onDeleteBatch }) =>
 };
 
 // --- TERMINAL DISPATCH NODE ---
-const DispatchReceiptNode = ({ data, x, y }) => {
-    const total = data?.totalPieces || 0;
-    const dispatched = data?.totalDispatched || 0;
-    const status = data?.dispatchStatus || 'READY'; 
-    const percentage = total > 0 ? Math.round((dispatched / total) * 100) : 0;
-    
-    const isFullyDispatched = status === 'DISPATCHED';
-    const isPartial = status === 'PARTIAL';
-    
-    const borderColor = isFullyDispatched ? 'border-l-emerald-500' : isPartial ? 'border-l-blue-500' : 'border-l-slate-300';
-    const iconBg = isFullyDispatched ? 'bg-emerald-50' : isPartial ? 'bg-blue-50' : 'bg-slate-50';
-    const iconColor = isFullyDispatched ? 'text-emerald-600' : isPartial ? 'text-blue-600' : 'text-slate-400';
-    
-    // Auto-adjust height if the button is present
-    const nodeHeight = dispatched > 0 ? 135 : 110;
-
-    return (
-        <div 
-            className={`absolute bg-white rounded-xl shadow-sm border-l-4 ${borderColor} border-slate-200 p-3 hover:shadow-md transition-all cursor-default group`}
-            style={{ width: 180, height: nodeHeight, left: x, top: y + (NODE_HEIGHT/2) - (nodeHeight/2) }}
-        >
-            <div className="flex justify-between items-start mb-1">
-                <div className="flex items-center gap-2">
-                    <div className={`p-1 rounded-lg ${iconBg}`}>
-                        <Truck className={iconColor} size={14} />
-                    </div>
-                    <span className="font-bold text-slate-800 text-sm">Dispatch</span>
+const DispatchReceiptNode = ({ data, x, y }) => (
+    <div 
+        className="absolute bg-white rounded-xl shadow-sm border-l-4 border-l-purple-500 border-slate-200 p-3 hover:shadow-md transition-all cursor-default group"
+        style={{ width: 180, height: 100, left: x, top: y + (NODE_HEIGHT/2) - 50 }}
+    >
+        <div className="flex justify-between items-start mb-2">
+            <div className="flex items-center gap-2">
+                <div className="p-1 bg-purple-50 rounded-lg">
+                    <Truck className="text-purple-600" size={14} />
                 </div>
-                {/* Reusing your StatusBadge */}
-                <StatusBadge status={isFullyDispatched ? 'COMPLETED' : isPartial ? 'PARTIAL' : 'PENDING'} />
+                <span className="font-bold text-slate-800 text-sm">Dispatched</span>
             </div>
-            
-            {/* Progress Metrics */}
-            <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1 mt-2">
-                <span>{dispatched} / {total} pcs</span>
-                <span className={isFullyDispatched ? 'text-emerald-600' : isPartial ? 'text-blue-600' : ''}>
-                    {percentage}%
-                </span>
-            </div>
-            
-            {/* Miniature Progress Bar */}
-            <div className="w-full bg-slate-100 rounded-full h-1.5 mb-2 overflow-hidden">
-                <div 
-                    className={`h-full rounded-full transition-all duration-500 ${isFullyDispatched ? 'bg-emerald-500' : 'bg-blue-500'}`} 
-                    style={{ width: `${Math.min(percentage, 100)}%` }}
-                ></div>
-            </div>
-            
-            {/* Interactive Button OR Contextual Subtext */}
-            {dispatched > 0 ? (
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation(); // Prevents dragging the node when clicking the button
-                        // Trigger the parent dashboard's modal
-                        if(data.onViewReceipts) data.onViewReceipts(data.realBatchId); 
-                    }}
-                    className="w-full mt-1 py-1.5 flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-blue-50 text-blue-600 border border-slate-200 hover:border-blue-200 rounded-lg text-[10px] font-bold transition-colors active:scale-95"
-                >
-                    <FileText size={12} />
-                    <span>View Receipts</span>
-                </button>
-            ) : (
-                <p className="text-[9px] text-slate-400 font-medium truncate mt-1">
-                    Awaiting dispatch auth.
-                </p>
-            )}
+            <StatusBadge status="SHIPPED" />
         </div>
-    );
-};
+        <p className="text-xs text-slate-500 mt-2 font-medium truncate">Goods left facility.</p>
+        <p className="text-[10px] text-slate-400 mt-1">Receipt Generated</p>
+    </div>
+);
 
 // --- GRAPH COMPONENT FOR SINGLE SALES ORDER ---
-const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO , onViewReceipts}) => {
+const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO }) => {
     const { nodes, connectors, height } = useMemo(() => {
         const nodesList = [];
         const connList = [];
@@ -448,21 +395,9 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
                 batches.forEach(batch => {
                     nodesList.push({ type: 'BATCH', data: batch, x: batchX, y: currentY });
                     
-                    // --- UPDATED DISPATCH NODE LOGIC HERE ---
-                    if (batch.overall_status === 'SHIPPED' || batch.overall_status === 'DISPATCHED' || batch.is_dispatched || batch.dispatch_receipt || batch.total_dispatched > 0) {
-                        
-                        const dispatchNodeData = {
-                            totalPieces: batch.total_pieces, // Ensure your backend sends this
-                            totalDispatched: batch.total_dispatched, // Ensure your backend sends this
-                            dispatchStatus: batch.dispatch_status || (batch.is_dispatched ? 'DISPATCHED' : 'PARTIAL'),
-                            realBatchId: batch.id,
-                            batchCode: batch.batch_code,
-                            // Pass the function through so the node can call it
-                            onViewReceipts: onViewReceipts 
-                        };
-
-                        nodesList.push({ type: 'DISPATCH', data: dispatchNodeData, x: dispatchX, y: currentY });
-                        
+                    // Render Terminal Dispatch Node if the batch has shipped status or receipt
+                    if (batch.overall_status === 'SHIPPED' || batch.overall_status === 'DISPATCHED' || batch.is_dispatched || batch.dispatch_receipt) {
+                        nodesList.push({ type: 'DISPATCH', data: batch, x: dispatchX, y: currentY });
                         connList.push({
                             start: { x: batchX + NODE_WIDTH, y: currentY + (NODE_HEIGHT / 2) },
                             end: { x: dispatchX, y: currentY + (NODE_HEIGHT / 2) }
@@ -503,7 +438,7 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
 
         return { nodes: nodesList, connectors: connList, height: currentY + 20 };
 
-    }, [so, onViewReceipts]);
+    }, [so]);
 
     return (
         <div style={{ position: 'relative', height: height, minWidth: '1200px' }} className="bg-slate-50/50 rounded-lg border border-slate-100">
@@ -529,7 +464,7 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
 };
 
 // --- TABLE ROW COMPONENT ---
-const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO ,onViewReceipts}) => {
+const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO }) => {
     const [expanded, setExpanded] = useState(false);
     
     const poCount = so.purchase_orders?.length || 0;
@@ -590,14 +525,10 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
                                 onEditBatch={onEditBatch}
                                 onDeleteBatch={onDeleteBatch}
                                 onDeletePO={onDeletePO}
-                                
-                                onViewReceipts={onViewReceipts} 
                             />
                         </div>
                     </td>
                 </tr>
-
-                
             )}
         </React.Fragment>
     );
@@ -1447,7 +1378,6 @@ const ProductionWorkflowDashboard = () => {
     const [selectedSOId, setSelectedSOId] = useState(null); 
     const [poModalSOId, setPoModalSOId] = useState(null);  
     const [selectedPOId, setSelectedPOId] = useState(null); 
-    const [viewingReceiptsForBatch, setViewingReceiptsForBatch] = useState(null); // Will hold an object: { batchId, realBatchId }
 
     const fetchData = async () => {
         setLoading(true);
@@ -1610,7 +1540,6 @@ const ProductionWorkflowDashboard = () => {
                                             onEditBatch={handleEditBatch}
                                             onDeleteBatch={handleDeleteBatch}
                                             onDeletePO={handleDeletePO}
-                                            onViewReceipts={(realBatchId) => setViewingReceiptsForBatch({ batchId: `B-${realBatchId}`, realBatchId: realBatchId })}
                                         />
                                     ))
                                 ) : (
@@ -1633,15 +1562,6 @@ const ProductionWorkflowDashboard = () => {
             {selectedSOId && <SalesOrderDetailsModal orderId={selectedSOId} onClose={() => setSelectedSOId(null)} />}
             {selectedPOId && <PurchaseOrderDetailsModal poId={selectedPOId} onClose={() => setSelectedPOId(null)} />}
             {poModalSOId && <CreatePOModal salesOrderId={poModalSOId} onClose={() => setPoModalSOId(null)} onSave={handleCreatePOSubmit} />}
-                {/* Render the modal if viewingReceiptsForBatch is not null */}
-                {viewingReceiptsForBatch && (
-                    <BatchReceiptsModal 
-                        batchId={viewingReceiptsForBatch.batchId} 
-                        realBatchId={viewingReceiptsForBatch.realBatchId}
-                        onClose={() => setViewingReceiptsForBatch(null)} 
-                    />
-                )}
-
         </div>
     );
 };
