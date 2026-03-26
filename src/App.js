@@ -190,6 +190,14 @@ function App() {
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
           <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
           <Route path="batch-cutting-details/:batchId" element={<BatchCuttingDetailsPage />} />
+          <Route path ="asset-management" element={<AssetManagementPage />} />  
+          <Route path="maintenance-dashboard" element={<AdminMaintenanceDashboard />} />
+          <Route path="maintenance-schedule" element={<MaintenanceSchedulePage />} />
+          {/* <Route path="maintenance-logs" element={<MaintenanceLogsPage />} /> */}
+
+          <Route path="batch-details/:batchId" element={<BatchCuttingDetailsPage />} />
+          <Route path="batch-cutting-details/:batchId" element={<BatchCuttingDetailsPage />} />
+          
 
         </Route>
       </Route>

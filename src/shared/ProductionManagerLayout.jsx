@@ -32,6 +32,33 @@ const NavDropdown = ({ title, children }) => {
   );
 };
 
+const DesktopNavDropdown = ({ title, children }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) setIsOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [ref]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600 focus:outline-none">
+        {title}
+        <LuChevronDown className={`ml-1 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      {isOpen && (
+        <div className="absolute mt-2 w-56 bg-white rounded-md shadow-lg py-1 z-30 border border-gray-100" onClick={() => setIsOpen(false)}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ProductionManagerLayout = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -76,6 +103,17 @@ const ProductionManagerLayout = () => {
                     <NavLink to="/production-manager/workstation-management" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Workstations</NavLink>
                     <NavLink to="/production-manager/factory-layout-planner" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Factory Layout</NavLink>
                 </NavDropdown>
+
+                   <DesktopNavDropdown title="Maintenance">
+                                    <NavLink to="/production-manager/maintenance-dashboard" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Dashboard</NavLink>
+                                     <NavLink to="/production-manager/maintenance-schedule" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Schedule</NavLink>
+                                     <NavLink to="/production-manager/maintenance-logs" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Logs</NavLink>
+                                  </DesktopNavDropdown>
+                  
+                                  <NavLink to="/production-manager/asset-management" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                                    Asset Management
+                                  </NavLink>  
+
                 <NavLink to="/maintenance/sewing-machine-complaints" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                 Sewing Machine Complaints
               </NavLink>
