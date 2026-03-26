@@ -175,8 +175,8 @@ function App() {
 
         {/* Production Manager Portal */}
         <Route path="/production-manager" element={<ProductionManagerProtectedRoute><ProductionManagerLayout /></ProductionManagerProtectedRoute>}>
-          <Route index element={<ProductionPlanningPage />} />
-          <Route path="dashboard" element={<ProductionPlanningPage />} />
+          <Route index element={<ProductionWorkflowDashboard />} />
+          <Route path="dashboard" element={<ProductionWorkflowDashboard />} />
           <Route path="production-lines" element={<ProductionLinesPage />} />
           <Route path="factory-layout-planner" element={<FactoryLayoutPlannerPage />} />
           <Route path="production-line-types" element={<ProductionLineTypesPage />} />

@@ -529,11 +529,30 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
 };
 
 // --- TABLE ROW COMPONENT ---
+// --- TABLE ROW COMPONENT ---
 const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO ,onViewReceipts}) => {
     const [expanded, setExpanded] = useState(false);
     
     const poCount = so.purchase_orders?.length || 0;
     const batchCount = so.purchase_orders?.reduce((acc, po) => acc + (po.production_batches?.length || 0), 0) || 0;
+
+    // --- CALCULATE TOTAL DISPATCH PROGRESS ---
+    let totalDispatched = 0;
+    let totalCut = 0;
+
+    if (so.purchase_orders) {
+        so.purchase_orders.forEach(po => {
+            if (po.production_batches) {
+                po.production_batches.forEach(batch => {
+                    totalDispatched += (parseInt(batch.total_dispatched, 10) || 0);
+                    totalCut += (parseInt(batch.total_pieces, 10) || 0);
+                });
+            }
+        });
+    }
+
+    const isDispatching = totalDispatched > 0 || so.status === 'SHIPPED';
+    const dispatchPercent = totalCut > 0 ? Math.min(100, Math.round((totalDispatched / totalCut) * 100)) : 0;
 
     return (
         <React.Fragment>
@@ -552,7 +571,30 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
                     {so.customer_name}
                 </td>
                 <td className="px-6 py-4">
-                    <StatusBadge status={so.status} />
+                    {/* DYNAMIC DISPATCH PROGRESS BAR OR STATIC BADGE */}
+                    {isDispatching ? (
+                        <div className="w-full max-w-[140px]">
+                            <div className="flex justify-between text-[10px] font-bold mb-1 uppercase tracking-wider">
+                                <span className={dispatchPercent >= 100 ? "text-emerald-600" : "text-blue-600"}>
+                                    {dispatchPercent >= 100 ? 'Shipped' : 'Shipping'}
+                                </span>
+                                <span className={dispatchPercent >= 100 ? "text-emerald-600" : "text-blue-600"}>
+                                    {dispatchPercent}%
+                                </span>
+                            </div>
+                            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                <div 
+                                    className={`${dispatchPercent >= 100 ? 'bg-emerald-500' : 'bg-blue-500'} h-full rounded-full transition-all duration-500`} 
+                                    style={{ width: `${dispatchPercent}%` }}
+                                ></div>
+                            </div>
+                            <div className="text-[9px] text-slate-500 font-medium mt-1 text-right">
+                                {totalDispatched} / {totalCut} pcs
+                            </div>
+                        </div>
+                    ) : (
+                        <StatusBadge status={so.status} />
+                    )}
                 </td>
                 <td className="px-6 py-4 text-xs text-slate-500">
                     <div className="flex gap-3">
@@ -564,7 +606,6 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
                     <button 
                         onClick={(e) => { 
                             e.stopPropagation(); 
-                            // 🚀 BUGFIX: Force the row to expand so the user sees the newly rendered node immediately
                             setExpanded(true); 
                             onAddPO(so.id); 
                         }}
@@ -590,19 +631,15 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
                                 onEditBatch={onEditBatch}
                                 onDeleteBatch={onDeleteBatch}
                                 onDeletePO={onDeletePO}
-                                
                                 onViewReceipts={onViewReceipts} 
                             />
                         </div>
                     </td>
                 </tr>
-
-                
             )}
         </React.Fragment>
     );
 };
-
 
 // --- MODALS FOR DETAILED VIEW ---
 
@@ -1437,6 +1474,8 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
 
 // --- MAIN DASHBOARD ---
 const ProductionWorkflowDashboard = () => {
+
+    const { user } = useAuth();
     const navigate = useNavigate();
     const [data, setData] = useState([]);
     const [filteredData, setFilteredData] = useState([]);
@@ -1499,8 +1538,31 @@ const ProductionWorkflowDashboard = () => {
         navigate(`/initialization-portal/batches/edit/${batchId}`);
     };
 
+    // 2. Role-based router that respects your App.jsx protected routes
     const handleViewBatchDetails = (batchId) => {
-        navigate(`/initialization-portal/batch-details/${batchId}`);
+        const userRole = user?.role || 'default';
+
+        // Map the role to the specific portal route defined in your App.jsx
+        const roleBasedRoutes = {
+            // Send Admins and Production Managers to the Production Manager portal route
+            'factory_admin': `/production-manager/batch-details/${batchId}`, 
+            'production_manager': `/production-manager/batch-details/${batchId}`,
+            
+            // Send Cutting Operators to the Cutting Portal route
+            'cutting_operator': `/cutting-portal/batch-details/${batchId}`,
+            
+            // Send Checking Operators to the Checking Portal route
+            'checking_operator': `/checking-portal/batch-details/${batchId}`,
+            
+            // Send Initialization staff (like cutting_manager) to their portal
+            'cutting_manager': `/initialization-portal/batch-details/${batchId}`,
+            'initialization_user': `/initialization-portal/batch-details/${batchId}`
+        };
+
+        // Fallback to production manager route if the role isn't perfectly mapped
+        const targetRoute = roleBasedRoutes[userRole] || `/production-manager/batch-details/${batchId}`;
+        
+        navigate(targetRoute);
     };
 
     const handleDeleteBatch = async (batchId) => {
