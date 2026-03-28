@@ -45,9 +45,9 @@ export const productionManagerApi = {
   // --- NEW: Specific CRUD for Production Lines ---
   getAllProductionLines: () => api.get('/shared/production-lines/production-lines-detailed'), // Endpoint for detailed view
   getProductionLineById: (id) => api.get(`/shared/production-lines/${id}`), // Fetch single for editing
-  createProductionLine: (data) => api.post('/shared/production-lines', data),
-  updateProductionLine: (id, data) => api.put(`/shared/production-lines/${id}`, data),
-  deleteProductionLine: (id) => api.delete(`/shared/production-lines/${id}`),
+  createProductionLine: (data) => api.post('/shared/production-lines/production-lines', data),
+  updateProductionLine: (id, data) => api.put(`/shared/production-lines/production-lines/${id}`, data),
+  deleteProductionLine: (id) => api.delete(`/shared/production-lines/production-lines/${id}`),
 
   // --- NEW: Functions to fetch data for the Production Line Form ---
   getLineTypes: () => api.get('/shared/production_line_types'),
@@ -65,6 +65,8 @@ export const productionManagerApi = {
 // WORKFLOW FUNCTIONS
   getWorkflowData: () => api.get('/production-manager/production-workflow-data'),
 
+  getCapacityDashboard: (date) => api.get(`/production-manager/capacity-dashboard?date=${date}`),
 
+  assignOperatorToLine: (lineId, operatorId) => api.put(`/production-manager/lines/${lineId}/assign-operator`, { operatorId })
 };
 

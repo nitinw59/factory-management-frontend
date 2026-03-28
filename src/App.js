@@ -28,7 +28,7 @@ import InitializationPortalProtectedRoute from './shared/InitialisationPortalPro
 import PreparationManagerProtectedRoute from './shared/PreperationManagerProtectedRoute';
 import PreparationUnloadProtectedRoute from './shared/PreparationUnloadProtectedRoute';
 import SewingPartProtectedRoute from './shared/SewingPartProtectedRoute'; 
-import SewingManagerLayout from './shared/SewingPartLayout';
+import SewingManagerLayout from './shared/SewingManagerLayout';
 import SewingManagerProtectedRoute from './shared/SewingManagerProtectedRoute'; 
 import AssemblyLayout from './shared/AssemblyLayout';
 import AssemblyProtectedRoute from './shared/AssemblyProtectedRoute'; 
@@ -90,7 +90,7 @@ import CuttingManagerReportPage from './modules/initialisation_portal/CuttingMan
 import CreateSalesOrder from './modules/accounts/sales/CreateSalesOrder';
 //import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
 import ProductionWorkflowDashboard from './modules/production/ProductionWorkflowDashboard';
-
+import ProductionCapacityDashboard from './modules/production/ProductionCapacityDashboard';
 import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
 import CuttingDailyReportPage from './modules/initialisation_portal/CuttingDailyReportPage';
 import InterliningManagerPage from './modules/initialisation_portal/InterliningManagerPage';
@@ -111,6 +111,20 @@ import DispatchDashboardPage from './modules/depatch_portal/DispatchDashboardPag
 import DispatchReceiptsPage from './modules/depatch_portal/DispatchReceiptsPage';
 
 import SparesIssuanceDashboard from './modules/store_manager/SparesIssuanceDashboard';
+
+
+
+
+import HRLayout from './shared/HRLayout'; // Create a layout similar to AdminLayout with a sidebar
+import HRProtectedRoute from './shared/HRProtectedRoute'; // Restrict to 'hr_manager', 'factory_admin'
+import HRDataImportPage from './modules/hr_portal/HRDataImportPage';
+import DailyAttendancePage from './modules/hr_portal/DailyAttendancePage';
+import EmployeeDirectoryPage from './modules/hr_portal/EmployeeDirectoryPage';
+
+//  ... line manager imports ...
+import LineStaffCostingPage from './modules/lineManager/LineStaffCostingPage';
+import OutputLogsPage from './modules/lineManager/OutputLogsPage';
+
 function App() {
   return (
     <Routes>
@@ -197,7 +211,7 @@ function App() {
 
           <Route path="batch-details/:batchId" element={<BatchCuttingDetailsPage />} />
           <Route path="batch-cutting-details/:batchId" element={<BatchCuttingDetailsPage />} />
-          
+          <Route path="capacity-dashboard" element={<ProductionCapacityDashboard />} /> 
 
         </Route>
       </Route>
@@ -271,6 +285,9 @@ function App() {
           <Route path="batches/edit/:batchId" element={<CreateProductionBatchForm />} />
           <Route path="reports/daily" element={<CuttingDailyReportPage />} />
           <Route path="management/interlining-rules" element={<InterliningManagerPage />} />
+          <Route path="maintenance/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+          <Route path="line-staff" element={<LineStaffCostingPage />} />
+          <Route path="production-logs" element={<OutputLogsPage />} />
       </Route>
 
       <Route path="/preparation-unload-portal" element={<PreparationUnloadProtectedRoute><PreparationUnloadLayout /></PreparationUnloadProtectedRoute>}>
@@ -300,7 +317,9 @@ function App() {
           <Route index element={<SewingManagerDashboardPage />} />
           <Route path="dashboard" element={<SewingManagerDashboardPage />} />
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
-
+          <Route path="maintenance/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+          <Route path="line-staff" element={<LineStaffCostingPage />} />
+          <Route path="production-logs" element={<OutputLogsPage />} />
           {/* Add more sewing manager specific routes here later */}
       </Route>  
 
@@ -323,6 +342,18 @@ function App() {
         <Route path="dashboard" element={<DispatchDashboardPage />} />
         <Route path="receipts" element={<DispatchReceiptsPage />} />
         {/* Add more dispatch operator specific routes here later */}
+    </Route>
+
+
+    <Route path="/hr-portal" element={<HRProtectedRoute><HRLayout /></HRProtectedRoute>}>
+            {/* Redirect /hr-portal to dashboard */}
+            <Route index element={<Navigate to="dashboard" />} />
+
+            <Route path="dashboard" element={<DailyAttendancePage />} />
+            <Route path="attendance" element={<DailyAttendancePage />} />
+            <Route path="data-import" element={<HRDataImportPage />} />
+            {/* Future routes: <Route path="payroll" element={<PayrollDashboard />} /> */}
+            <Route path="employees" element={<EmployeeDirectoryPage />} />
     </Route>
 
     <Route path="/maintenance/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />

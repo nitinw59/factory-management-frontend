@@ -44,5 +44,7 @@ export const assetApi = {
     // ================================
 
     getSuppliers: () =>
-        api.get('shared/supplier')
+        api.get('shared/supplier'),
+
+    getMyComplaints: () => api.get('/line-manager/complaints/my'),
 };

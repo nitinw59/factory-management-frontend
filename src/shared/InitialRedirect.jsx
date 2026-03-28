@@ -90,6 +90,9 @@ const InitialRedirect = () => {
         case 'dispatch_officer':
             // Dispatch Officers are sent to their dispatch dashboard.
             return <Navigate to="/dispatch-portal/dashboard" replace />;    
+        case 'hr_manager':
+            // HR Managers are sent to their HR dashboard.
+            return <Navigate to="/hr-portal/dashboard" replace />;
 
         
         default:

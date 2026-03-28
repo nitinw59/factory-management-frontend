@@ -84,6 +84,9 @@ const ProductionManagerLayout = () => {
                   <NavLink to="/production-manager/dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                    Batches
                 </NavLink>
+                <NavLink to="/production-manager/capacity-dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                   Capacity Dashboard
+                </NavLink>
                 </NavDropdown>
                 <NavDropdown title="Products">
                                 <NavLink to="/production-manager/products" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Products</NavLink>
