@@ -271,6 +271,7 @@ const CuttingDashboardPage = () => {
   };
 
   const handleOpenCutForm = (batchId, rollId, meter) => {
+    console.log("Opening cut form for Batch ID:", batchId, "Roll ID:", rollId, "Meter:", meter);
     setSelectedCutInfo({ batchId, rollId, meter });
     setIsFormOpen(true);
   };

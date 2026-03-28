@@ -7,23 +7,36 @@ const Spinner = () => <div className="flex justify-center items-center p-4"><Loa
 const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
     const [batchDetails, setBatchDetails] = useState(null);
     const [lays, setLays] = useState('');
+    const [endBitsMeters, setEndBitsMeters] = useState('');
     const [shortageMeters, setShortageMeters] = useState('');
     
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState(null);
 
-    useEffect(() => {
+   useEffect(() => {
         setIsLoading(true);
+        
         cuttingPortalApi.getBatchCuttingDetails(batchId) 
             .then(res => {
                 const data = res.data;
                 setBatchDetails(data);
                 
-                // Pre-fill lays if already entered
+                // Find the specific roll we are currently editing
                 const currentRoll = data.rolls?.find(r => String(r.id) === String(rollId));
-                if (currentRoll && currentRoll.lays > 0) {
-                    setLays(currentRoll.lays.toString());
+                
+                // Safely pre-fill all inputs if the roll exists and has previous data
+                if (currentRoll) {
+                    if (currentRoll.lays > 0) {
+                        setLays(currentRoll.lays.toString());
+                    }
+                    if (currentRoll.end_bits > 0) {
+                        setEndBitsMeters(currentRoll.end_bits.toString());
+                    }
+                    // THE FIX: Added shortage assignment
+                    if (currentRoll.shortage_meters > 0) {
+                        setShortageMeters(currentRoll.shortage_meters.toString());
+                    }
                 }
             })
             .catch(() => setError("Could not load batch info."))
@@ -57,7 +70,8 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
                 batchId,
                 rollId,
                 lays: numLays,
-                shortageMeters: parseFloat(shortageMeters) || 0
+                shortageMeters: parseFloat(shortageMeters) || 0,
+                endBitsMeters: parseFloat(endBitsMeters) || 0
             });
             onSaveSuccess();
         } catch (err) {
@@ -147,27 +161,40 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
                         </div>
                     </div>
 
-                    {/* Shortage Input */}
-                    <div className="pt-2">
-                         <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                             <AlertTriangle className="mr-2 w-4 h-4 text-orange-500" /> Shortage (Optional)
-                         </label>
-                         <div className="flex items-center">
-                            <input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                value={shortageMeters}
-                                onChange={(e) => setShortageMeters(e.target.value)}
-                                placeholder="0.00"
-                                className="w-full p-3 border border-gray-300 rounded-l-md focus:ring-2 focus:ring-orange-500 outline-none"
-                                style={{ fontSize: '16px' }}
-                            />
-                            <div className="bg-gray-100 border border-l-0 border-gray-300 px-4 py-3 rounded-r-md text-gray-500 text-sm whitespace-nowrap">
-                                meters
+                    {/* Shortage & End Bits Row */}
+                        <div className="grid grid-cols-2 gap-4 pt-2">
+                            
+                            {/* Shortage Input */}
+                            <div>
+                                <label className="block text-sm font-black text-gray-700 mb-2 flex items-center">
+                                    <AlertTriangle className="mr-2 w-4 h-4 text-orange-500" /> Shortage
+                                </label>
+                                <div className="flex items-center shadow-sm rounded-xl overflow-hidden border border-gray-300 focus-within:ring-2 focus-within:ring-orange-500 transition-all">
+                                    <input
+                                        type="number" step="0.01" min="0" placeholder="0.00"
+                                        value={shortageMeters} onChange={(e) => setShortageMeters(e.target.value)}
+                                        className="w-full p-3 font-bold text-gray-800 border-none outline-none bg-white"
+                                    />
+                                    <div className="bg-gray-50 border-l border-gray-200 px-3 py-3 text-gray-500 font-bold text-sm">m</div>
+                                </div>
                             </div>
-                         </div>
-                    </div>
+
+                            {/* End Bits Input */}
+                            <div>
+                                <label className="block text-sm font-black text-gray-700 mb-2 flex items-center">
+                                    <Layers className="mr-2 w-4 h-4 text-purple-500" /> End Bits
+                                </label>
+                                <div className="flex items-center shadow-sm rounded-xl overflow-hidden border border-gray-300 focus-within:ring-2 focus-within:ring-purple-500 transition-all">
+                                    <input
+                                        type="number" step="0.01" min="0" placeholder="0.00"
+                                        value={endBitsMeters} onChange={(e) => setEndBitsMeters(e.target.value)}
+                                        className="w-full p-3 font-bold text-gray-800 border-none outline-none bg-white"
+                                    />
+                                    <div className="bg-gray-50 border-l border-gray-200 px-3 py-3 text-gray-500 font-bold text-sm">m</div>
+                                </div>
+                            </div>
+
+                        </div>
                 </div>
             </div>
 

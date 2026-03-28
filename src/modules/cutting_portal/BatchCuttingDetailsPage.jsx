@@ -64,7 +64,6 @@ const BatchCuttingDetailsPage = () => {
         setError(null);
         try {
             const response = await cuttingPortalApi.getBatchCuttingDetails(batchId);
-            console.log("Batch cutting details response:", response.data);
             setDetails(response.data);
         } catch (err) {
             console.error("Failed to fetch batch details:", err);
@@ -78,17 +77,18 @@ const BatchCuttingDetailsPage = () => {
 
     // --- Calculations ---
     const summaryStats = useMemo(() => {
-        if (!details) return { totalMeters: 0, totalPieces: 0, avgConsumption: 0, totalShortage: 0, allSizes: [], sizeTotals: {} };
+        if (!details) return { totalMeters: 0, totalPieces: 0, avgConsumption: 0, totalShortage: 0, totalEndBits: 0, allSizes: [], sizeTotals: {} };
 
         let totalMeters = 0;
         let totalPieces = 0;
+        let totalEndBits = 0; // NEW: Track End Bits globally
         const sizeTotals = {};
         const allSizesSet = new Set();
 
         (details.rolls || []).forEach(roll => {
-            // We can optionally filter out interlining rolls from this total if needed, 
-            // but usually they are tracked as part of total assigned fabric.
             totalMeters += parseFloat(roll.meter || 0);
+            totalEndBits += parseFloat(roll.end_bits || 0); // NEW: Sum up End Bits
+            
             const uniqueCutsForRoll = {};
             (roll.cuts || []).forEach(cut => {
                 if (uniqueCutsForRoll[cut.size] === undefined) {
@@ -103,11 +103,12 @@ const BatchCuttingDetailsPage = () => {
             });
         });
         
-        const totalShortage = (details.shortages || []).reduce((sum, s) => sum + parseFloat(s.meter || 0), 0);
-        const avgConsumption = totalPieces > 0 ? (totalMeters - totalShortage) / totalPieces : 0;
+        const totalShortage = (details.rolls || []).reduce((sum, r) => sum + parseFloat(r.shortage_meters || 0), 0);
+        // Valid Consumption = Total Fabric Assigned - Shortage - EndBits
+        const avgConsumption = totalPieces > 0 ? (totalMeters - totalShortage - totalEndBits) / totalPieces : 0;
         const allSizes = Array.from(allSizesSet).sort(sortSizes);
 
-        return { totalMeters, totalPieces, avgConsumption, totalShortage, allSizes, sizeTotals };
+        return { totalMeters, totalPieces, avgConsumption, totalShortage, totalEndBits, allSizes, sizeTotals };
     }, [details]);
 
     // --- REPORT GENERATORS ---
@@ -117,14 +118,10 @@ const BatchCuttingDetailsPage = () => {
         setIsGeneratingReport(true);
 
         try {
-            // 1. Fetch Numbering Data
             const res = await cuttingPortalApi.getBatchNumberingDetails(batchId);
             const numberingDetails = res.data;
-
-            // 2. Generate PDF
             const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
             
-            // Header
             const now = new Date().toLocaleString();
             doc.setFontSize(8); doc.setTextColor(100);
             doc.text(`Generated: ${now}`, 280, 10, { align: 'right' });
@@ -143,7 +140,6 @@ const BatchCuttingDetailsPage = () => {
             let totalAltered = 0;
             const defectsBody = [];
 
-            // Body: Rows showing Validated (Approved + Repaired) pieces
             const validatedBody = (numberingDetails.rolls || []).map(roll => {
                 const statsBySize = {};
                 let rollGoodTotal = 0;
@@ -152,7 +148,6 @@ const BatchCuttingDetailsPage = () => {
                     const qty = parseInt(stat.quantity || 0);
                     if (!statsBySize[stat.size]) statsBySize[stat.size] = 0;
                     
-                    // Count Good: Approved or Repaired
                     if (stat.qc_status === 'APPROVED' || stat.qc_status === 'REPAIRED') {
                         statsBySize[stat.size] += qty;
                         rollGoodTotal += qty;
@@ -169,7 +164,6 @@ const BatchCuttingDetailsPage = () => {
                 ];
             });
 
-            // Calculate Defects Aggregates (Batch Level)
             summaryStats.allSizes.forEach(size => {
                 let sizeRej = 0;
                 let sizeAlt = 0;
@@ -190,7 +184,6 @@ const BatchCuttingDetailsPage = () => {
                 }
             });
 
-            // Draw Validated Table
             doc.setFontSize(12); doc.setFont("helvetica", "bold");
             doc.text("Validated Garments (Approved + Repaired)", 14, finalY);
             
@@ -200,26 +193,24 @@ const BatchCuttingDetailsPage = () => {
                 body: validatedBody,
                 theme: 'grid',
                 styles: { fontSize: 8, cellPadding: 1, textColor: 0, lineWidth: 0.1, lineColor: 0 },
-                headStyles: { fillColor: [46, 204, 113], textColor: 255, fontStyle: 'bold' }, // Green header
+                headStyles: { fillColor: [46, 204, 113], textColor: 255, fontStyle: 'bold' }, 
                 columnStyles: { 0: { fontStyle: 'bold' } }
             });
             
             finalY = doc.lastAutoTable.finalY + 15;
 
-            // Draw Summary Statistics Box
             doc.setFillColor(245, 245, 245);
             doc.rect(14, finalY, 120, 25, 'F');
             
             doc.setFontSize(10); doc.setTextColor(0);
             doc.text(`Total Garments OK: ${grandTotalOk}`, 18, finalY + 8);
             
-            doc.setTextColor(200, 100, 0); // Orange
+            doc.setTextColor(200, 100, 0); 
             doc.text(`Pending Alteration: ${totalAltered}`, 18, finalY + 14);
             
-            doc.setTextColor(200, 0, 0); // Red
+            doc.setTextColor(200, 0, 0); 
             doc.text(`Total Rejected: ${totalRejected}`, 18, finalY + 20);
             
-            // Draw Defects Table (if any)
             if (defectsBody.length > 0) {
                 autoTable(doc, {
                     startY: finalY + 30,
@@ -228,7 +219,7 @@ const BatchCuttingDetailsPage = () => {
                     theme: 'grid',
                     styles: { fontSize: 9 },
                     tableWidth: 120,
-                    headStyles: { fillColor: [231, 76, 60], textColor: 255 } // Red header
+                    headStyles: { fillColor: [231, 76, 60], textColor: 255 }
                 });
             }
 
@@ -243,11 +234,10 @@ const BatchCuttingDetailsPage = () => {
     };
 
     const handleGenerateLaySheet = () => {
-        
         if (!details) return;
         const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a5' });
-        const pageWidth = doc.internal.pageSize.width; // A5 width is 148mm
-        const pageHeight = doc.internal.pageSize.height; // A5 height is 210mm
+        const pageWidth = doc.internal.pageSize.width; 
+        const pageHeight = doc.internal.pageSize.height; 
 
         doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(0);
         doc.text("MATRIX OVERSEAS", pageWidth / 2, 15, { align: 'center' });
@@ -271,33 +261,52 @@ const BatchCuttingDetailsPage = () => {
         doc.setFontSize(10); doc.text("CUTTING LAY DETAILS", 10, doc.lastAutoTable.finalY + 8);
 
         let totalAssigned = 0;
-        console.log("Rolls for lay sheet:", details.rolls);
+        let totalShortage = 0;
+        let totalEndBits = 0;
+
         const tableBody = (details.rolls || []).map(roll => {
             const meter = parseFloat(roll.meter || 0);
+            const shortage = parseFloat(roll.shortage_meters || 0);
+            const endBits = parseFloat(roll.end_bits || 0);
+            
             totalAssigned += meter;
+            totalShortage += shortage;
+            totalEndBits += endBits;
+
             return [
                 roll.id%100, 
                 roll.type_name || '-', 
                 `${roll.color_name || ''} ${roll.color_number || ''}`,
                 meter.toFixed(2), 
-                "", "", "", "Mtr"
+                roll.lays || "", 
+                shortage > 0 ? shortage.toFixed(2) : "", 
+                endBits > 0 ? endBits.toFixed(2) : "", // NEW: End Bits Column
+                "", "Mtr"
             ];
         });
-        tableBody.push(["TOTAL", "", "", totalAssigned.toFixed(2), "", "", "", "Mtr"]);
+        
+        // Push footer total row
+        tableBody.push([
+            "TOTAL", "", "", 
+            totalAssigned.toFixed(2), "", 
+            totalShortage > 0 ? totalShortage.toFixed(2) : "", 
+            totalEndBits > 0 ? totalEndBits.toFixed(2) : "", 
+            "", "Mtr"
+        ]);
 
         autoTable(doc, {
-            startY: doc.lastAutoTable.finalY + 10,
-            head: [["Roll ID", "Fabric", "Color", "Asigned", "Lays", "Shortage", "Cons", "UOM"]],
+            startY: doc.lastAutoTable.finalY + 4,
+            head: [["Roll ID", "Fabric", "Color", "Asigned", "Lays", "Short", "EndBit", "Cons", "UOM"]],
             body: tableBody,
             theme: 'grid',
             headStyles: { fillColor: 255, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold', fontSize: 7, halign: 'center' },
             styles: { fontSize: 7, cellPadding: 1.5, textColor: 0, lineWidth: 0.1, lineColor: 0, halign: 'center', valign: 'middle' },
-            columnStyles: { 0: { halign: 'left', cellWidth: 15 }, 1: { halign: 'left', cellWidth: 12 }, 2: { halign: 'left', cellWidth: 20 }, 3: { halign: 'right', fontStyle: 'bold', cellWidth: 15 }, 4: { cellWidth: 12 }, 5: { cellWidth: 15 }, 6: { cellWidth: 15 }, 7: { cellWidth: 10 } },
+            columnStyles: { 0: { halign: 'left', cellWidth: 12 }, 1: { halign: 'left', cellWidth: 12 }, 2: { halign: 'left', cellWidth: 20 }, 3: { halign: 'right', fontStyle: 'bold', cellWidth: 15 }, 4: { cellWidth: 10 }, 5: { cellWidth: 12 }, 6: { cellWidth: 12 }, 7: { cellWidth: 12 }, 8: { cellWidth: 10 } },
             didParseCell: (data) => { if (data.row.index === tableBody.length - 1) data.cell.styles.fontStyle = 'bold'; }
         });
 
         let finalY = doc.lastAutoTable.finalY + 10;
-        if (finalY > 180) { doc.addPage(); finalY = 20; }
+        if (finalY > 170) { doc.addPage(); finalY = 20; }
 
         doc.setFontSize(10); doc.text("SUMMARY STATISTICS", 10, finalY);
         autoTable(doc, {
@@ -305,7 +314,8 @@ const BatchCuttingDetailsPage = () => {
             body: [
                 ["TOTAL FABRIC ASSIGNED :", totalAssigned.toFixed(2)], 
                 ["TOTAL FABRIC CONSUMED :", ""],
-                ["TOTAL SHORTAGE QTY :", ""], 
+                ["TOTAL SHORTAGE QTY :", totalShortage > 0 ? totalShortage.toFixed(2) : ""], 
+                ["TOTAL END BITS :", totalEndBits > 0 ? totalEndBits.toFixed(2) : ""], // NEW: End Bits Summary
                 ["TOTAL NO OF LAY :", ""], 
                 ["TOTAL CUT QTY :", ""]
             ],
@@ -314,28 +324,17 @@ const BatchCuttingDetailsPage = () => {
             columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 20 } }
         });
 
-        // --- ADDED: Signature Lines ---
-        let sigY = doc.lastAutoTable.finalY + 25; // 25mm below the summary box
-        
-        // Safety check to ensure signatures don't print off the bottom of the page
-        if (sigY > pageHeight - 15) { 
-            doc.addPage();
-            sigY = 25;
-        }
+        let sigY = doc.lastAutoTable.finalY + 25; 
+        if (sigY > pageHeight - 15) { doc.addPage(); sigY = 25; }
 
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "bold");
-        
-        // Bottom Left
-        doc.text("Prepared By ___________________", 10, sigY);
-        
-        // Bottom Right (pageWidth - 10mm right margin)
-        doc.text("Authorised By ___________________", pageWidth - 10, sigY, { align: 'right' });
+        doc.setFontSize(9); doc.setFont("helvetica", "bold");
+        doc.text("Prepared By ___________________", pageWidth - 10, sigY-50,  { align: 'right' });
+        doc.text("Authorised By ___________________", pageWidth - 10, sigY-25, { align: 'right' });
 
         doc.save(`Lay_Sheet_${details.batch_code || batchId}.pdf`);
     };
 
-const handleGenerateCutReport = () => {
+    const handleGenerateCutReport = () => {
         if (!details) return;
         const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
         const marginLeft = 10;
@@ -349,7 +348,8 @@ const handleGenerateCutReport = () => {
         doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.text(`Layer Length: ${details.length_of_layer_inches || '0'} in`, marginLeft, 27);
 
         let finalY = 32;
-        const cutLogHead = ["Roll ID", "Fabric", "Color", "Mtrs", "Lays", ...summaryStats.allSizes.map(getSizeLabel), "Tot"];
+        // NEW: Added Shortage and EndBits to Cut Report Header
+        const cutLogHead = ["Roll ID", "Fabric", "Color", "Mtrs", "Short", "EndBit", "Lays", ...summaryStats.allSizes.map(getSizeLabel), "Tot"];
         
         const cutLogBody = (details.rolls || []).map(roll => {
             const rollCutsBySize = (roll.cuts || []).reduce((acc, cut) => {
@@ -359,15 +359,26 @@ const handleGenerateCutReport = () => {
             const rollTotalPieces = Object.values(rollCutsBySize).reduce((sum, qty) => sum + qty, 0);
             return [
                 roll.roll_identifier, roll.type_name || '-', `${roll.color_name || ''} ${roll.color_number ? `(${roll.color_number})` : ''}`,
-                parseFloat(roll.meter || 0).toFixed(2), roll.lays || 0,
+                parseFloat(roll.meter || 0).toFixed(2), 
+                parseFloat(roll.shortage_meters || 0).toFixed(2), // NEW
+                parseFloat(roll.end_bits || 0).toFixed(2),        // NEW
+                roll.lays || 0,
                 ...summaryStats.allSizes.map(size => rollCutsBySize[size] || 0), rollTotalPieces
             ];
         });
 
-        const footerRow = ["TOTAL", "", "", summaryStats.totalMeters.toFixed(2), "", ...summaryStats.allSizes.map(size => (details.rolls || []).reduce((sum, roll) => {
-             const cut = (roll.cuts || []).find(c => c.size === size);
-             return sum + (cut ? parseInt(cut.quantity_cut) : 0);
-        }, 0)), summaryStats.totalPieces];
+        const footerRow = [
+            "TOTAL", "", "", 
+            summaryStats.totalMeters.toFixed(2), 
+            summaryStats.totalShortage.toFixed(2), // NEW
+            summaryStats.totalEndBits.toFixed(2),  // NEW
+            "", 
+            ...summaryStats.allSizes.map(size => (details.rolls || []).reduce((sum, roll) => {
+                 const cut = (roll.cuts || []).find(c => c.size === size);
+                 return sum + (cut ? parseInt(cut.quantity_cut) : 0);
+            }, 0)), 
+            summaryStats.totalPieces
+        ];
 
         doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.text("Cut Log Details", marginLeft, finalY);
         autoTable(doc, {
@@ -383,28 +394,19 @@ const handleGenerateCutReport = () => {
         
         doc.setFontSize(10);
         const printLine = (label, value, y) => { doc.setFont("helvetica", "normal"); doc.text(label, marginLeft, y); doc.setFont("helvetica", "bold"); doc.text(value, valueX, y); };
+        
         printLine("Total Fabric Assigned:", `${summaryStats.totalMeters.toFixed(2)} m`, summaryY);
         printLine("Total Pieces Cut:", `${summaryStats.totalPieces}`, summaryY + lineHeight);
         printLine("Avg. Consumption:", `${summaryStats.avgConsumption.toFixed(3)} m/pc`, summaryY + (lineHeight * 2));
         printLine("Total Shortage:", `${summaryStats.totalShortage.toFixed(2)} m`, summaryY + (lineHeight * 3));
+        printLine("Total End Bits:", `${summaryStats.totalEndBits.toFixed(2)} m`, summaryY + (lineHeight * 4)); // NEW
 
-        // --- ADDED: Signature Lines ---
-        let sigY = summaryY + (lineHeight * 3) + 30; // 30mm below the last summary line
-        
-        // Safety check to ensure signatures don't print off the bottom of the A4 page
-        if (sigY > pageHeight - 20) { 
-            doc.addPage();
-            sigY = 30;
-        }
+        let sigY = summaryY + (lineHeight * 4) + 30; 
+        if (sigY > pageHeight - 20) { doc.addPage(); sigY = 30; }
 
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "bold");
-        
-        // Bottom Left
-        doc.text("Prepared By ___________________", marginLeft, sigY);
-        
-        // Bottom Right
-        doc.text("Authorised By ___________________", pageWidth - marginLeft, sigY, { align: 'right' });
+        doc.setFontSize(10); doc.setFont("helvetica", "bold");
+        doc.text("Prepared By ___________________", pageWidth - marginLeft, sigY-50, { align: 'right' });
+        doc.text("Authorised By ___________________", pageWidth - marginLeft, sigY-30, { align: 'right' });
 
         doc.save(`Cutting_Report_${details.batch_code || batchId}.pdf`);
     };
@@ -414,7 +416,7 @@ const handleGenerateCutReport = () => {
     if (!details) return <div className="p-6 text-center text-gray-500">No details found for this batch.</div>;
 
     return (
-        <div className="p-6 bg-gray-50 min-h-screen">
+        <div className="p-4 md:p-6 bg-gray-50 min-h-screen">
             <header className="mb-6">
                 <div className="flex justify-between items-center mb-4">
                     <Link to={backLink} className="text-sm text-blue-600 hover:underline flex items-center no-print">
@@ -423,7 +425,7 @@ const handleGenerateCutReport = () => {
                     
                     <div className="flex gap-2 no-print">
                         <button onClick={handleGenerateLaySheet} className="flex items-center px-3 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-900 transition-colors shadow-sm">
-                            <FiClipboard className="mr-2"/> Lay sssSheet (A5)
+                            <FiClipboard className="mr-2"/> Lay Sheet (A5)
                         </button>
                         <button onClick={handleGenerateCutReport} className="flex items-center px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm">
                             <FiDownload className="mr-2"/> Cut Report
@@ -466,27 +468,32 @@ const handleGenerateCutReport = () => {
                 </div>
             </header>
 
-            {/* Summary Header */}
-            <section className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+            {/* Summary Header - Expanded to 5 columns for End Bits */}
+            <section className="mb-6 grid grid-cols-2 md:grid-cols-5 gap-4">
                 <div className="bg-white p-4 rounded-lg shadow-sm border text-center print-bg-white">
-                    <h2 className="text-xs text-gray-500 uppercase font-semibold">Total Fabric Assigned</h2>
+                    <h2 className="text-xs text-gray-500 uppercase font-semibold">Fabric Assigned</h2>
                     <p className="text-2xl font-bold text-blue-600">{summaryStats.totalMeters.toFixed(2)} m</p>
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow-sm border text-center print-bg-white">
-                    <h2 className="text-xs text-gray-500 uppercase font-semibold">Total Pieces Cut</h2>
+                    <h2 className="text-xs text-gray-500 uppercase font-semibold">Total Pieces</h2>
                     <p className="text-2xl font-bold text-green-600">{summaryStats.totalPieces}</p>
                 </div>
                  <div className="bg-white p-4 rounded-lg shadow-sm border text-center print-bg-white">
-                    <h2 className="text-xs text-gray-500 uppercase font-semibold">Avg. Consumption</h2>
-                    <p className="text-2xl font-bold text-purple-600">{summaryStats.avgConsumption > 0 ? `${summaryStats.avgConsumption.toFixed(3)} m/pc` : 'N/A'}</p>
+                    <h2 className="text-xs text-gray-500 uppercase font-semibold">Avg. Cons.</h2>
+                    <p className="text-2xl font-bold text-indigo-600">{summaryStats.avgConsumption > 0 ? `${summaryStats.avgConsumption.toFixed(3)}` : 'N/A'}</p>
                  </div>
                  <div className="bg-white p-4 rounded-lg shadow-sm border text-center print-bg-white">
                     <h2 className="text-xs text-gray-500 uppercase font-semibold">Total Shortage</h2>
-                    <p className={`text-2xl font-bold ${summaryStats.totalShortage > 0 ? 'text-red-600' : 'text-gray-700'}`}>{summaryStats.totalShortage.toFixed(2)} m</p>
+                    <p className={`text-2xl font-bold ${summaryStats.totalShortage > 0 ? 'text-red-500' : 'text-gray-700'}`}>{summaryStats.totalShortage.toFixed(2)} m</p>
+                 </div>
+                 {/* NEW: End Bits Summary Card */}
+                 <div className="bg-white p-4 rounded-lg shadow-sm border text-center print-bg-white">
+                    <h2 className="text-xs text-gray-500 uppercase font-semibold">End Bits</h2>
+                    <p className={`text-2xl font-bold ${summaryStats.totalEndBits > 0 ? 'text-purple-500' : 'text-gray-700'}`}>{summaryStats.totalEndBits.toFixed(2)} m</p>
                  </div>
             </section>
 
-            {/* ✅ NEW: Interlining Requirements Section */}
+            {/* Interlining Requirements Section */}
             {details.interlining_requirements && details.interlining_requirements.length > 0 && (
                 <section className="bg-white rounded-lg shadow-sm border overflow-hidden print-bg-white mb-6">
                     <div className="p-4 border-b bg-amber-50/50 flex justify-between items-center">
@@ -536,7 +543,10 @@ const handleGenerateCutReport = () => {
                                 <th className="py-3 px-4 text-left">Roll ID</th>
                                 <th className="py-3 px-4 text-left">Color</th>
                                 <th className="py-3 px-4 text-left">Type</th>
-                                <th className="py-3 px-4 text-right">Meters</th>
+                                <th className="py-3 px-4 text-right border-l border-gray-200">Meters</th>
+                                {/* NEW: Added Shortage and End Bits visually to the UI Table */}
+                                <th className="py-3 px-4 text-right text-red-600">Shortage</th>
+                                <th className="py-3 px-4 text-right text-purple-600">End Bits</th>
                                 <th className="py-3 px-4 text-center font-bold text-blue-700 bg-blue-50/50 border-x border-blue-100/50">Lays</th>
                                 {summaryStats.allSizes.map(size => (
                                     <th key={size} className="py-3 px-4 text-center font-bold text-indigo-700 bg-indigo-50/50 border-x border-indigo-100/50">{getSizeLabel(size)}</th>
@@ -556,9 +566,12 @@ const handleGenerateCutReport = () => {
                                 return (
                                     <tr key={roll.id} className="hover:bg-gray-50">
                                         <td className="py-3 px-4 font-medium">{roll.roll_identifier}</td>
-                                        <td className="py-3 px-4">{roll.color_name || 'N/A'}({roll.color_number || 'N/A'  })</td>
+                                        <td className="py-3 px-4">{roll.color_name || 'N/A'}({roll.color_number || 'N/A'})</td>
                                         <td className="py-3 px-4">{roll.type_name || 'N/A'}</td>
-                                        <td className="py-3 px-4 text-right">{parseFloat(roll.meter || 0).toFixed(2)}</td>
+                                        <td className="py-3 px-4 text-right border-l border-gray-200 font-medium">{parseFloat(roll.meter || 0).toFixed(2)}</td>
+                                        {/* Display Shortage & EndBits */}
+                                        <td className="py-3 px-4 text-right text-red-600">{roll.shortage_meters > 0 ? parseFloat(roll.shortage_meters).toFixed(2) : '-'}</td>
+                                        <td className="py-3 px-4 text-right text-purple-600">{roll.end_bits > 0 ? parseFloat(roll.end_bits).toFixed(2) : '-'}</td>
                                         <td className="py-3 px-4 text-center font-bold text-blue-700 bg-blue-50/20 border-x border-blue-100/30">
                                             {roll.lays || 0}
                                         </td>
@@ -574,7 +587,11 @@ const handleGenerateCutReport = () => {
                         </tbody>
                         <tfoot className="bg-gray-100 border-t-2 border-gray-300">
                              <tr className="font-bold text-gray-700">
-                                 <td colSpan="5" className="py-3 px-4 text-right uppercase text-xs">Total Pieces Cut:</td>
+                                 <td colSpan="3" className="py-3 px-4 text-right uppercase text-xs">Total:</td>
+                                 <td className="py-3 px-4 text-right text-gray-900 border-l border-gray-300">{summaryStats.totalMeters.toFixed(2)}</td>
+                                 <td className="py-3 px-4 text-right text-red-600">{summaryStats.totalShortage.toFixed(2)}</td>
+                                 <td className="py-3 px-4 text-right text-purple-600">{summaryStats.totalEndBits.toFixed(2)}</td>
+                                 <td className="py-3 px-4 bg-gray-200 border-x border-gray-300/30"></td>
                                  {summaryStats.allSizes.map(size => (
                                      <td key={size} className="py-3 px-4 text-center text-indigo-700 border-x border-gray-300/30">
                                          {summaryStats.sizeTotals[size] || 0}
