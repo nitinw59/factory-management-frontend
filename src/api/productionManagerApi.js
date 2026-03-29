@@ -70,12 +70,7 @@ export const productionManagerApi = {
   assignOperatorToLine: (lineId, operatorId) => api.put(`/production-manager/lines/${lineId}/assign-operator`, { operatorId }),
 
 
-getCostingReportRange: (config) => api.get('/costing/daily', config),
-
-    // Fetches the exact employee breakdown for a specific department on a specific date
-    // Expects: { params: { date: '2026-03-28', department: 'LINE - 1' } }
-    getCostingDrilldown: (config) => api.get('/costing/drilldown', config),
-
+    
     getFactorySettings: () => api.get('/production-manager/settings'),
     updateFactorySettings: (settingsData) => api.put('/production-manager/settings', settingsData),
 };
