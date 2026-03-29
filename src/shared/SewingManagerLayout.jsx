@@ -12,7 +12,7 @@ export default function SewingManagerLayout() {
         <BaseManagerLayout 
             portalName="Sewing Portal" 
             basePath="/sewing-manager" 
-            customLinks={sewingLinks} 
+            // customLinks={sewingLinks} 
         />
     );
 }

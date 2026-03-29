@@ -24,8 +24,8 @@ const SewingPartLayout = () => {
                     <div className="text-xl font-bold text-gray-800">Sewing Part Portal</div>
 
                     {/* Desktop Navigation */}
-                    <nav className="hidden md:flex items-center space-x-6">
-                        <NavLink 
+                    {/* <nav className="hidden md:flex items-center space-x-6">
+                        <NavLink disable={true}
                             to="/sewing-part-operator/dashboard" 
                             className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}
                         >
@@ -38,7 +38,7 @@ const SewingPartLayout = () => {
                         >
                             <FiFileText className="mr-2" /> Batch QC Summary
                         </NavLink>
-                    </nav>
+                    </nav> */}
 
                     <div className="flex items-center space-x-4">
                         {/* Placeholder for Notifications */}
@@ -62,7 +62,7 @@ const SewingPartLayout = () => {
                 {isMobileMenuOpen && (
                     <div className="md:hidden bg-white shadow-md">
                         <nav className="flex flex-col p-4 space-y-4">
-                            <NavLink 
+                            {/* <NavLink 
                                 to="/sewing-part-operator/dashboard" 
                                 onClick={closeMobileMenu} 
                                 className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
@@ -76,7 +76,7 @@ const SewingPartLayout = () => {
                                 className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
                             >
                                 <FiFileText className="mr-2" /> Batch QC Summary
-                            </NavLink>
+                            </NavLink> */}
                             <hr />
                             <div className="px-4 py-2 text-sm text-gray-500">Welcome, {user?.name}</div>
                             <button onClick={handleLogout} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"><FiLogOut className="mr-2" /> Logout</button>
