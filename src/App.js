@@ -120,10 +120,17 @@ import HRProtectedRoute from './shared/HRProtectedRoute'; // Restrict to 'hr_man
 import HRDataImportPage from './modules/hr_portal/HRDataImportPage';
 import DailyAttendancePage from './modules/hr_portal/DailyAttendancePage';
 import EmployeeDirectoryPage from './modules/hr_portal/EmployeeDirectoryPage';
+import ShiftConfigurationPage from './modules/hr_portal/ShiftConfigurationPage';
+
+import ProductionCostingDashboard from './modules/production/ProductionCostingDashboard';
 
 //  ... line manager imports ...
 import LineStaffCostingPage from './modules/lineManager/LineStaffCostingPage';
 import OutputLogsPage from './modules/lineManager/OutputLogsPage';
+
+
+import ProductionSettingsPage from './modules/production/ProductionSettingsPage'; 
+
 
 function App() {
   return (
@@ -211,7 +218,9 @@ function App() {
 
           <Route path="batch-details/:batchId" element={<BatchCuttingDetailsPage />} />
           <Route path="batch-cutting-details/:batchId" element={<BatchCuttingDetailsPage />} />
-          <Route path="capacity-dashboard" element={<ProductionCapacityDashboard />} /> 
+          <Route path="capacity-dashboard" element={<ProductionCapacityDashboard />} />
+          <Route path="reports/daily-costing" element={<ProductionCostingDashboard />} />
+          <Route path="settings" element={<ProductionSettingsPage />} />
 
         </Route>
       </Route>
@@ -352,6 +361,7 @@ function App() {
             <Route path="dashboard" element={<DailyAttendancePage />} />
             <Route path="attendance" element={<DailyAttendancePage />} />
             <Route path="data-import" element={<HRDataImportPage />} />
+            <Route path="shifts" element={<ShiftConfigurationPage />} />
             {/* Future routes: <Route path="payroll" element={<PayrollDashboard />} /> */}
             <Route path="employees" element={<EmployeeDirectoryPage />} />
     </Route>

@@ -27,6 +27,7 @@ const HRLayout = () => {
     const navLinks = [
         { name: 'Daily Attendance', path: '/hr-portal/attendance', icon: Clock },
         { name: 'Data Imports', path: '/hr-portal/data-import', icon: UploadCloud },
+        { name: 'Shift Management', path: '/hr-portal/shifts', icon: Clock, disabled: false },
         
         // Placeholders for the features we discussed building next:
         { name: 'Employee Directory', path: '/hr-portal/employees', icon: Users, disabled: false },

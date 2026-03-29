@@ -1,5 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { UploadCloud, Users, Clock, CheckCircle, AlertCircle, Loader2, FileText, FileSpreadsheet } from 'lucide-react';
+import { 
+    UploadCloud, Users, Clock, CalendarDays, CheckCircle, 
+    AlertCircle, Loader2, FileText, FileSpreadsheet 
+} from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { hrApi } from '../../api/hrApi';
 
@@ -20,7 +23,7 @@ const FileUploader = ({ title, description, icon: Icon, apiMethod, accept, color
         const file = acceptedFiles[0];
         if (!file) return;
 
-        // 2. Hard extension check as a fallback (Windows sometimes messes up MIME types)
+        // 2. Hard extension check as a fallback
         const fileName = file.name.toLowerCase();
         if (!fileName.endsWith('.csv') && !fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
             setResult({ 
@@ -55,10 +58,9 @@ const FileUploader = ({ title, description, icon: Icon, apiMethod, accept, color
         onDrop, 
         accept, 
         maxFiles: 1,
-        multiple: false // Strictly enforce one file at a time
+        multiple: false 
     });
 
-    // Helper to determine which icon to show for the uploaded file
     const getFileExtension = (filename) => {
         if (!filename) return '';
         return filename.split('.').pop().toLowerCase();
@@ -72,7 +74,7 @@ const FileUploader = ({ title, description, icon: Icon, apiMethod, accept, color
                 <h3 className={`text-lg font-extrabold flex items-center gap-2 ${colorClass}`}>
                     <Icon size={24} /> {title}
                 </h3>
-                <p className="text-sm text-slate-500 mt-1">{description}</p>
+                <p className="text-sm text-slate-500 mt-1 leading-relaxed">{description}</p>
             </div>
             
             <div 
@@ -95,7 +97,6 @@ const FileUploader = ({ title, description, icon: Icon, apiMethod, accept, color
                         <p className="font-bold text-slate-700">Drag & Drop File Here</p>
                         <p className="text-sm mt-1 mb-3">Supports .CSV and .XLSX</p>
                         
-                        {/* Render the selected file pill if successful/pending */}
                         {acceptedFiles[0] && result?.type !== 'error' && (
                             <div className="bg-white border border-slate-200 px-3 py-1.5 rounded-lg flex items-center text-xs text-slate-700 shadow-sm mt-2">
                                 {fileExt === 'csv' ? (
@@ -146,28 +147,40 @@ export default function HRDataImportPage() {
             <div className="mb-8">
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">HR Data Imports</h1>
                 <p className="text-slate-500 mt-1 text-sm sm:text-base">
-                    Synchronize third-party biometric and employee master data with EnterpriseOS.
+                    Synchronize third-party biometric, shift schedules, and employee master data with EnterpriseOS.
                 </p>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+            {/* Updated Grid: 1 column on mobile, 2 on medium, 3 on extra-large screens */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 lg:gap-8">
+                
                 <FileUploader 
                     title="1. Sync Employee Master" 
                     description="Upload the latest employee list to update salaries, departments, and active statuses."
                     icon={Users} 
-                    apiMethod={hrApi.importEmployees} // <-- Directly passing the API function
+                    apiMethod={hrApi.importEmployees} 
                     accept={acceptedFileTypes} 
                     colorClass="text-indigo-700"
                 />
 
                 <FileUploader 
-                    title="2. Sync Biometric Punch Logs" 
-                    description="Upload the daily or monthly cross-tab punch report to calculate attendance and payroll."
+                    title="2. Sync Shift Schedules" 
+                    description="Upload the weekly shift assignment matrix to map working hours and week-offs for attendance logic."
+                    icon={CalendarDays} 
+                    apiMethod={hrApi.importShifts} // NEW SHIFT IMPORT
+                    accept={acceptedFileTypes} 
+                    colorClass="text-amber-600"
+                />
+
+                <FileUploader 
+                    title="3. Sync Biometric Logs" 
+                    description="Upload the daily or monthly cross-tab punch report to calculate present days, half-days, and overtime."
                     icon={Clock} 
-                    apiMethod={hrApi.importAttendance} // <-- Directly passing the API function
+                    apiMethod={hrApi.importAttendance} 
                     accept={acceptedFileTypes} 
                     colorClass="text-emerald-700"
                 />
+                
             </div>
         </div>
     );

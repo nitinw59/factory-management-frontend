@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LuCircleUserRound, LuLogOut, LuChevronDown, LuPencil } from 'react-icons/lu';
-
+// Added LuSettings to the import
+import { LuCircleUserRound, LuLogOut, LuChevronDown, LuPencil, LuSettings } from 'react-icons/lu';
 
 // A reusable dropdown component for the navbar
 const NavDropdown = ({ title, children }) => {
@@ -76,30 +76,24 @@ const ProductionManagerLayout = () => {
             <div className="text-xl font-bold text-gray-800">Production Portal</div>
             <nav className="hidden md:flex items-center space-x-6">
 
-
                 <NavDropdown title="WORKFLOW">
                   <NavLink to="/production-manager/production-workflow" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                    Workflow Dashboard
-                </NavLink>
+                  </NavLink>
                   <NavLink to="/production-manager/dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                    Batches
-                </NavLink>
-                <NavLink to="/production-manager/capacity-dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                  </NavLink>
+                  <NavLink to="/production-manager/capacity-dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                    Capacity Dashboard
-                </NavLink>
+                  </NavLink>
                 </NavDropdown>
+
                 <NavDropdown title="Products">
-                                <NavLink to="/production-manager/products" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Products</NavLink>
-                                {/* <NavLink to="/production-manager/product-piece-parts" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Piece Parts</NavLink> */}
-                                <NavLink to="/production-manager/product-brands" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Brands</NavLink>
-                                <NavLink to="/production-manager/product-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Style</NavLink>
+                  <NavLink to="/production-manager/products" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Products</NavLink>
+                  <NavLink to="/production-manager/product-brands" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Brands</NavLink>
+                  <NavLink to="/production-manager/product-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Style</NavLink>
                 </NavDropdown>
-                {/* <NavDropdown title="Line Management">
-                    <NavLink to="/production-manager/production-lines" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Lines</NavLink>
-                    <NavLink to="/production-manager/production-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Line Types</NavLink>
-                    <NavLink to="/production-manager/workstations" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Workstations</NavLink>
-                    <NavLink to="/production-manager/workstation-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Workstation Types</NavLink>
-                </NavDropdown> */}
+
                 <NavDropdown title="Floor Management">
                     <NavLink to="/production-manager/production-lines" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Lines</NavLink>
                     <NavLink to="/production-manager/production-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Line Types</NavLink>
@@ -107,28 +101,43 @@ const ProductionManagerLayout = () => {
                     <NavLink to="/production-manager/factory-layout-planner" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Factory Layout</NavLink>
                 </NavDropdown>
 
-                   <DesktopNavDropdown title="Maintenance">
-                                    <NavLink to="/production-manager/maintenance-dashboard" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Dashboard</NavLink>
-                                     <NavLink to="/production-manager/maintenance-schedule" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Schedule</NavLink>
-                                     <NavLink to="/production-manager/maintenance-logs" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Logs</NavLink>
-                                  </DesktopNavDropdown>
+                <DesktopNavDropdown title="Maintenance">
+                  <NavLink to="/production-manager/maintenance-dashboard" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Dashboard</NavLink>
+                  <NavLink to="/production-manager/maintenance-schedule" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Schedule</NavLink>
+                  <NavLink to="/production-manager/maintenance-logs" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Logs</NavLink>
+                </DesktopNavDropdown>
                   
-                                  <NavLink to="/production-manager/asset-management" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
-                                    Asset Management
-                                  </NavLink>  
+                <NavLink to="/production-manager/asset-management" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                  Asset Management
+                </NavLink>  
 
                 <NavLink to="/maintenance/sewing-machine-complaints" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
-                Sewing Machine Complaints
-              </NavLink>
-                 
+                  Sewing Machine Complaints
+                </NavLink>
+              
+                <NavDropdown title='Reports'>
+                  <NavLink to="/production-manager/reports/daily-costing" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Daily Costing Report</NavLink>
+                </NavDropdown>
+
             </nav>
           </div>
-          <div className="flex items-center">
+          
+          <div className="flex items-center space-x-6">
             {user && (
               <>
-                <span className="text-sm font-medium mr-4">Welcome, {user.name}</span>
-                <button onClick={handleLogout} className="flex items-center text-sm text-gray-600 hover:text-red-600">
-                  <LuLogOut className="mr-1" />
+                <span className="text-sm font-medium text-gray-700">Welcome, {user.name}</span>
+                
+                {/* NEW: Settings Link */}
+                <NavLink 
+                  to="/production-manager/settings" 
+                  className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}
+                >
+                  <LuSettings className="mr-1.5" />
+                  Settings
+                </NavLink>
+
+                <button onClick={handleLogout} className="flex items-center text-sm font-medium text-gray-600 hover:text-red-600 transition-colors">
+                  <LuLogOut className="mr-1.5" />
                   Logout
                 </button>
               </>
@@ -144,4 +153,3 @@ const ProductionManagerLayout = () => {
 };
 
 export default ProductionManagerLayout;
-

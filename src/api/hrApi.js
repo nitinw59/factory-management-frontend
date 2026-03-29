@@ -57,5 +57,9 @@ export const hrApi = {
     // (Optional future endpoints for editing profiles)
     getEmployeeById: (empId) => api.get(`hr/employees/${empId}`),
     updateEmployee: (empId, employeeData) => api.put(`hr/employees/${empId}`, employeeData),
+    importShifts: (formData) => api.post('/hr/import/shifts', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+    getShifts: () => api.get('/hr/shifts'),
+    createShift: (data) => api.post('/hr/shifts', data),
+    updateShift: (id, data) => api.put(`/hr/shifts/${id}`, data),
 
 };
