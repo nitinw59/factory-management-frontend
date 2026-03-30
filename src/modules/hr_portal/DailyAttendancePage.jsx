@@ -5,6 +5,31 @@ import {
 } from 'lucide-react';
 import { hrApi } from '../../api/hrApi'; 
 
+// --- TIMEZONE UTILITIES (Enterprise Rigid) ---
+
+/**
+ * Gets the current date in YYYY-MM-DD format specifically for IST
+ */
+const getIndiaDate = () => {
+    return new Intl.DateTimeFormat('en-CA', { 
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(new Date());
+};
+
+/**
+ * Gets the current hour specifically in IST to prevent Vercel UTC drift
+ */
+const getIndiaHour = () => {
+    return parseInt(new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Kolkata',
+        hour: 'numeric',
+        hour12: false
+    }).format(new Date()));
+};
+
 // --- SUBCOMPONENTS ---
 
 const KpiCard = ({ title, value, icon: Icon, colorClass, bgColorClass, isLoading, isActive, onClick }) => (
@@ -98,7 +123,7 @@ const ResolveAnomalyModal = ({ anomaly, onClose, onSuccess }) => {
 // --- MAIN PAGE ---
 
 export default function DailyAttendancePage() {
-    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [date, setDate] = useState(getIndiaDate());
     const [logs, setLogs] = useState([]);
     const [totalHeadcount, setTotalHeadcount] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
@@ -106,7 +131,7 @@ export default function DailyAttendancePage() {
     
     // Interactive State
     const [resolvingAnomaly, setResolvingAnomaly] = useState(null);
-    const [activeFilter, setActiveFilter] = useState('ALL'); // 'ALL', 'PRESENT', 'ABSENT', 'HALF_DAY', 'ANOMALIES'
+    const [activeFilter, setActiveFilter] = useState('ALL'); 
     const [deptFilter, setDeptFilter] = useState('ALL');
     const [showExpenseModal, setShowExpenseModal] = useState(false);
 
@@ -136,32 +161,49 @@ export default function DailyAttendancePage() {
     
     const kpis = useMemo(() => {
         let present = 0, absent = 0, halfDay = 0, anomalies = 0, dailyExpense = 0;
+        const currentHourIST = getIndiaHour();
+        const isToday = date === getIndiaDate();
+
         logs.forEach(log => {
+            // Logic: If it's today and before 7 PM (19:00), don't flag missing punch as anomaly yet.
             if (log.status === 'PRESENT') present++;
             else if (log.status === 'HALF_DAY') halfDay++;
-            else if (log.status === 'MISSED_OUT_PUNCH') anomalies++;
+            else if (log.status === 'MISSED_OUT_PUNCH') {
+                if (isToday && currentHourIST < 19) {
+                    present++; // Treat as present while shift is active
+                } else {
+                    anomalies++;
+                }
+            }
             else if (log.status === 'ABSENT') absent++;
             
             dailyExpense += log.expense || 0;
         });
         return { present, absent, halfDay, anomalies, dailyExpense };
-    }, [logs]);
+    }, [logs, date]);
 
     const filteredLogs = useMemo(() => {
+        const currentHourIST = getIndiaHour();
+        const isToday = date === getIndiaDate();
+
         return logs.filter(log => {
             const matchDept = deptFilter === 'ALL' || log.dept === deptFilter;
             let matchStatus = true;
             
-            if (activeFilter === 'PRESENT') matchStatus = log.status === 'PRESENT';
-            if (activeFilter === 'HALF_DAY') matchStatus = log.status === 'HALF_DAY';
-            if (activeFilter === 'ANOMALIES') matchStatus = log.status === 'MISSED_OUT_PUNCH';
-            if (activeFilter === 'ABSENT') matchStatus = log.status === 'ABSENT';
+            // Adjust filtering logic to match KPI counts (Active workers vs true anomalies)
+            const effectiveStatus = (log.status === 'MISSED_OUT_PUNCH' && isToday && currentHourIST < 19) 
+                ? 'PRESENT' 
+                : log.status;
+
+            if (activeFilter === 'PRESENT') matchStatus = effectiveStatus === 'PRESENT';
+            if (activeFilter === 'HALF_DAY') matchStatus = effectiveStatus === 'HALF_DAY';
+            if (activeFilter === 'ANOMALIES') matchStatus = effectiveStatus === 'MISSED_OUT_PUNCH';
+            if (activeFilter === 'ABSENT') matchStatus = effectiveStatus === 'ABSENT';
             
             return matchDept && matchStatus;
         });
-    }, [logs, activeFilter, deptFilter]);
+    }, [logs, activeFilter, deptFilter, date]);
 
-    // Department Summary for the Modal
     const departmentSummary = useMemo(() => {
         const summary = {};
         logs.forEach(log => {
@@ -179,7 +221,6 @@ export default function DailyAttendancePage() {
 
     const formatCurrency = (amount) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
 
-    // --- CSV EXPORT ---
     const handleExportCSV = () => {
         const headers = ["Emp ID", "Name", "Department", "Punch In", "Punch Out", "Status", "Daily Expense"];
         const csvRows = filteredLogs.map(log => [
@@ -193,14 +234,14 @@ export default function DailyAttendancePage() {
         ]);
         
         let csvContent = "data:text/csv;charset=utf-8,";
-        csvContent += `ATTENDANCE REPORT - ${date} (Filter: ${activeFilter})\n\n`;
+        csvContent += `ATTENDANCE REPORT - ${date}\n\n`;
         csvContent += headers.join(",") + "\n";
         csvRows.forEach(row => { csvContent += row.join(",") + "\n"; });
         
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
         link.setAttribute("href", encodedUri);
-        link.setAttribute("download", `Attendance_${date}_${activeFilter}.csv`);
+        link.setAttribute("download", `Attendance_${date}.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -212,7 +253,7 @@ export default function DailyAttendancePage() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                 <div>
                     <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">Attendance Analytics</h1>
-                    <p className="text-slate-500 mt-1 text-sm font-medium">Monitor real-time presence and estimated labor expenses.</p>
+                    <p className="text-slate-500 mt-1 text-sm font-medium">IST Synchronization Active • Precise Cost Tracking</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center bg-white border border-slate-300 rounded-xl px-3 py-2 shadow-sm">
@@ -232,7 +273,6 @@ export default function DailyAttendancePage() {
                             className="bg-transparent border-none focus:ring-0 text-sm font-bold text-slate-700 cursor-pointer pr-2 outline-none"
                         />
                     </div>
-                    {/* NEW: Export Button */}
                     <button 
                         onClick={handleExportCSV}
                         className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-sm text-sm h-full"
@@ -242,13 +282,6 @@ export default function DailyAttendancePage() {
                 </div>
             </div>
 
-            {error && (
-                <div className="mb-6 p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl flex items-center font-bold">
-                    <AlertTriangle size={20} className="mr-3 text-rose-500" /> {error}
-                </div>
-            )}
-
-            {/* INTERACTIVE KPI ROW */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
                 <KpiCard title="Headcount" value={totalHeadcount} icon={Users} colorClass="text-slate-700" bgColorClass="bg-slate-100" isLoading={isLoading} isActive={activeFilter === 'ALL'} onClick={() => setActiveFilter('ALL')} />
                 <KpiCard title="Present" value={kpis.present} icon={CheckCircle2} colorClass="text-emerald-600" bgColorClass="bg-emerald-50" isLoading={isLoading} isActive={activeFilter === 'PRESENT'} onClick={() => setActiveFilter('PRESENT')} />
@@ -268,7 +301,6 @@ export default function DailyAttendancePage() {
                 </div>
             </div>
 
-            {/* DATA TABLE */}
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-8">
                 <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                     <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2 uppercase tracking-wider text-sm">
@@ -332,7 +364,6 @@ export default function DailyAttendancePage() {
                 </div>
             </div>
 
-            {/* EXPENSE DRILLDOWN MODAL - WITH NEW DEPARTMENT SUMMARY */}
             {showExpenseModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
@@ -341,14 +372,12 @@ export default function DailyAttendancePage() {
                                 <h3 className="font-black text-xl text-indigo-900 flex items-center gap-2">
                                     <DollarSign className="text-indigo-600" /> Estimated Expense Drilldown
                                 </h3>
-                                <p className="text-sm font-medium text-slate-500 mt-1">Calculated from Base Salary for {date}</p>
+                                <p className="text-sm font-medium text-slate-500 mt-1">IST Calculated Wage Pool for {date}</p>
                             </div>
                             <button onClick={() => setShowExpenseModal(false)} className="p-2 bg-white text-slate-400 hover:text-rose-600 rounded-full shadow-sm border border-slate-200 transition-colors"><X size={20} /></button>
                         </div>
                         
                         <div className="flex-1 overflow-y-auto bg-slate-50/30">
-                            
-                            {/* NEW: DEPARTMENT SUMMARY GRID */}
                             <div className="p-6 border-b border-slate-200 bg-white">
                                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Department Summary</h4>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -370,7 +399,6 @@ export default function DailyAttendancePage() {
                                 </div>
                             </div>
 
-                            {/* EMPLOYEE TABLE */}
                             <table className="w-full text-left text-sm bg-white">
                                 <thead className="bg-slate-100 sticky top-0 shadow-sm text-xs uppercase font-bold text-slate-500">
                                     <tr>
@@ -392,11 +420,9 @@ export default function DailyAttendancePage() {
                                                 </span>
                                             </td>
                                             <td className="px-6 py-3 font-mono text-right text-slate-500">{formatCurrency(emp.base_salary)}</td>
-                                            {/* Find this block at the very bottom of the DailyAttendancePage table */}
                                             <td className="px-6 py-3 text-right bg-indigo-50/30">
                                                 <div className="font-bold text-indigo-700">{formatCurrency(emp.expense)}</div>
                                                 <div className="text-[10px] text-indigo-400 mt-0.5 font-bold">
-                                                    {/* THE FIX: Dynamically show their specific working days */}
                                                     {emp.status === 'HALF_DAY' ? `(Base / ${emp.working_days * 2})` : `(Base / ${emp.working_days} days)`}
                                                 </div>
                                             </td>
