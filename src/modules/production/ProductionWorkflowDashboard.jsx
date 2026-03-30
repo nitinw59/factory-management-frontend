@@ -530,7 +530,7 @@ const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onV
 
 // --- TABLE ROW COMPONENT ---
 // --- TABLE ROW COMPONENT ---
-const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO ,onViewReceipts}) => {
+const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO, onViewReceipts }) => {
     const [expanded, setExpanded] = useState(false);
     
     const poCount = so.purchase_orders?.length || 0;
@@ -551,6 +551,35 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
         });
     }
 
+    // --- CALCULATE DERIVED WORKFLOW STATUS ---
+    let displayStatus = 'UNKNOWN';
+    let statusClasses = 'bg-slate-100 text-slate-600 border-slate-200';
+
+    // Check if ANY purchase order has received its goods/rolls
+    // (Adjust 'RECEIVED' or 'DELIVERED' to match your exact DB status for a fulfilled PO)
+    const goodsArrived = so.purchase_orders?.some(po => 
+        po.status === 'RECEIVED' || po.status === 'DELIVERED' || po.status === 'COMPLETED'
+    );
+
+    if (poCount === 0) {
+        // 1. SO exists, but no POs created
+        displayStatus = "SO Received";
+        statusClasses = "bg-purple-100 text-purple-800 border-purple-200";
+    } else if (batchCount > 0) {
+        // 4. Batches have been created
+        displayStatus = "In Production";
+        statusClasses = "bg-blue-100 text-blue-800 border-blue-200";
+    } else if (goodsArrived) {
+        // 3. POs exist, Goods arrived, but NO batches created yet
+        displayStatus = "Awaiting Batch";
+        statusClasses = "bg-amber-100 text-amber-800 border-amber-200";
+    } else {
+        // 2. POs exist, but Goods have NOT arrived
+        displayStatus = "Awaiting Goods";
+        statusClasses = "bg-orange-100 text-orange-800 border-orange-200";
+    }
+
+    // Dispatch logic takes priority if shipping has started
     const isDispatching = totalDispatched > 0 || so.status === 'SHIPPED';
     const dispatchPercent = totalCut > 0 ? Math.min(100, Math.round((totalDispatched / totalCut) * 100)) : 0;
 
@@ -571,7 +600,7 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
                     {so.customer_name}
                 </td>
                 <td className="px-6 py-4">
-                    {/* DYNAMIC DISPATCH PROGRESS BAR OR STATIC BADGE */}
+                    {/* DYNAMIC DISPATCH PROGRESS BAR OR DERIVED WORKFLOW STATUS */}
                     {isDispatching ? (
                         <div className="w-full max-w-[140px]">
                             <div className="flex justify-between text-[10px] font-bold mb-1 uppercase tracking-wider">
@@ -593,7 +622,9 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
                             </div>
                         </div>
                     ) : (
-                        <StatusBadge status={so.status} />
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border shadow-sm ${statusClasses}`}>
+                            {displayStatus}
+                        </span>
                     )}
                 </td>
                 <td className="px-6 py-4 text-xs text-slate-500">
