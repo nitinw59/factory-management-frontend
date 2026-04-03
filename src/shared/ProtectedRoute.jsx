@@ -1,57 +1,51 @@
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { jwtDecode } from 'jwt-decode';
 
 const ProtectedRoute = () => {
-  const { token } = useAuth();
+  // Grab 'user' and 'isLoading' directly from context.
+  // AuthContext has ALREADY safely decoded the token and bypassed dev mode!
+  const { user, isLoading } = useAuth();
 
-  if (!token) {
-    // If no token exists, the user is not logged in. Redirect to the login page.
+  // 1. Wait for AuthContext to finish its checks
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center h-screen bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  // 2. If no user exists (no token, or invalid token), redirect to login.
+  if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  try {
-    const user = jwtDecode(token);
-    // This is the new, more generic security check. It allows access to any user
-    // with a role that is valid for this application.
-    const allowedRoles = ['factory_admin',
-       'store_manager',
-        'production_manager',
-        'cutting_operator',
-        'line_loader',
-        'validation_user',
-        'line_manager',
-        'supplier',
-        'accountant',
-        'hr_manager',
-        'checking_user',
-        'numbering_user',
-        'cutting_manager',
-        'preparation_loader',
-        'preparation_manager' ,
-        'preparation_unloader' ,
-        'sewing_part_operator',
-        'sewing_manager',
-        'assembly_operator',
-        'accountant',
-        'mechanic',
-        'dispatch_officer',
-        'hr_manager',
-    ];
-    if (!user.role || !allowedRoles.includes(user.role)) {
-      // If the user's role is not recognized for this app, they are unauthorized.
-      return <Navigate to="/unauthorized" replace />;
-    }
-  } catch (error) {
-    // If the token is invalid or expired, it's a security risk. Redirect to login.
-    console.error("Invalid token:", error);
-    return <Navigate to="/login" replace />;
+  // 3. Your centralized role check
+  const allowedRoles = [
+                'factory_admin',
+                'store_manager',
+                'line_manager',
+                'supplier',
+                'production_manager',
+                'accountant',
+                'hr_manager',
+                'universal_checker',
+                'garment_checker',
+                'cutting_operator',
+                'line_loader',
+                'cutting_manager',
+                'mechanic',
+                'dispatch_officer'
+  ];
+
+  if (!user.role || !allowedRoles.includes(user.role)) {
+    // If the user's role is not recognized for this app, they are unauthorized.
+    return <Navigate to="/unauthorized" replace />;
   }
 
-  // If the token is valid and the role is recognized, render the protected pages.
+  // 4. If the token is valid and the role is recognized, render the protected pages.
   return <Outlet />;
 };
 
 export default ProtectedRoute;
-

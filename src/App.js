@@ -21,8 +21,8 @@ import LineLoaderDashboardPage from './modules/line_loader/LineLoaderDashboardPa
 import LineLoaderLayout from './shared/LineLoaderLayout'; // New  
 import CheckingPortalLayout from './shared/CheckingPortalLayout';
 import CheckingUserProtectedRoute from './shared/CheckingUserProtectedRoute';
-import NumberingPortalLayout from './shared/NumberingPortalLayout';
-import NumberingUserProtectedRoute from './shared/NumberingUserProtectedRoute';
+import UniversalCheckerLayout from './shared/UniversalCheckerLayout';
+
 import InitializationPortalLayout from './shared/InitialisationPortalLayout'; 
 import InitializationPortalProtectedRoute from './shared/InitialisationPortalProtectedRoute';
 import PreparationManagerProtectedRoute from './shared/PreperationManagerProtectedRoute';
@@ -30,7 +30,7 @@ import PreparationUnloadProtectedRoute from './shared/PreparationUnloadProtected
 import SewingPartProtectedRoute from './shared/SewingPartProtectedRoute'; 
 import SewingManagerLayout from './shared/SewingManagerLayout';
 import SewingManagerProtectedRoute from './shared/SewingManagerProtectedRoute'; 
-import AssemblyLayout from './shared/AssemblyLayout';
+import GarmentLayout from './shared/GarmentLayout';
 import AssemblyProtectedRoute from './shared/AssemblyProtectedRoute'; 
 import AccountsLayout from './shared/AccountsLayout';
 import SalesAccessProtectedRoute from './shared/SalesAccessProtectedRoute'; // <--- NEW IMPORT
@@ -137,8 +137,8 @@ import AdminLineConfigPage from './modules/asset/AdminLineConfigPage';
 import UniversalWorkstationDashboard from './modules/Universal/UniversalWorkstationDashboard';
 
 
-import AssemblyProcessingPortal from './modules/assembly_portal/AssemblyProcessingPortal';
-import AssemblyMonitor from './modules/assembly_portal/AssemblyMonitor';
+import GarmentProcessingPortal from './modules/garment_checker/GarmentProcessingPortal';
+import GarmentMonitor from './modules/garment_checker/GarmentMonitor';
 
 function App() {
   return (
@@ -278,13 +278,11 @@ function App() {
           <Route path="dashboard" element={<CheckingWorkstationDashboardPage />} />
           <Route path="batch-details/:batchId" element={<BatchCuttingDetailsPage />} />
       </Route>
-      
-      <Route path="/numbering-portal" element={<NumberingUserProtectedRoute><NumberingPortalLayout /></NumberingUserProtectedRoute>}>
+
+      <Route path="/universal-checker" element={<UniversalCheckerLayout />}>
           <Route index element={<UniversalWorkstationDashboard />} />
-          <Route path="dashboard" element={<NumberingWorkstationDashboardPage />} />
-          <Route path="summary" element={<NumberingBatchDetailsPage />} />
-          <Route path="checker-summary" element={<NumberingCheckerSummaryPage />} />
-          <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+          <Route path="dashboard" element={<UniversalWorkstationDashboard />} />
+          
 
       </Route>
 
@@ -341,10 +339,10 @@ function App() {
           {/* Add more sewing manager specific routes here later */}
       </Route>  
 
-      <Route path="/assembly-portal" element={<AssemblyProtectedRoute><AssemblyLayout /></AssemblyProtectedRoute>}>
-          <Route index element={<AssemblyProcessingPortal />} />
-          <Route path="dashboard" element={<AssemblyProcessingPortal />} />
-          <Route path="monitor" element={<AssemblyMonitor />} />
+      <Route path="/garment-checker" element={<GarmentLayout />}>
+          <Route index element={<GarmentProcessingPortal />} />
+          <Route path="dashboard" element={<GarmentProcessingPortal />} />
+          <Route path="monitor" element={<GarmentMonitor />} />
           {/* Add more assembly operator specific routes here later */}
       </Route>  
 

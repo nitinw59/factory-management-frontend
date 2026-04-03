@@ -35,53 +35,31 @@ const InitialRedirect = () => {
         case 'line_loader':
             // Line Loaders are sent to their line loader dashboard.
             return <Navigate to="/line-loader/dashboard" replace />;
-        case 'validation_user':
-            // Validation Users are sent to their validation dashboard.
-            return <Navigate to="/validation-portal/dashboard" replace />;
-
+       
         case 'line_manager':
             // Line Managers are sent to their line manager dashboard.
             return <Navigate to="/line-manager/dashboard" replace />;
-        case 'checking_user':
-            // Checking Users are sent to their checking workstation.
-            return <Navigate to="/checking-portal" replace />;
-        case 'numbering_user':
-            // Numbering Users are sent to their numbering workstation.
-            return <Navigate to="/numbering-portal" replace />;
+        
         case 'cutting_manager':
             // Cutting Managers are sent to their cutting management dashboard.
             return <Navigate to="/initialization-portal/dashboard" replace />;
 
-        case 'preparation_loader':
-            // Preparation Loaders are sent to their preparation workstation.
-            return <Navigate to="/preparation-portal" replace />;
+        case 'universal_checker':
+            // Universal Checkers are sent to their universal checking dashboard.
+            return <Navigate to="/universal-checker/dashboard" replace />;
 
-        case 'preparation_manager':
-            // Preparation Managers are sent to their preparation management dashboard.
-            return <Navigate to="/preparation-manager" replace />;
-
-        case 'preparation_unloader':
-            // Preparation Unloaders are sent to their preparation unloading workstation.
-            return <Navigate to="/preparation-unload-portal" replace />;
-        
-        case 'sewing_part_operator':
-            // Sewing Part Operators are sent to their sewing part operator dashboard.
-            return <Navigate to="/sewing-part-operator/dashboard" replace />;
-        
-       
         case 'sewing_manager':
             // Sewing Managers are sent to their sewing management dashboard.
             return <Navigate to="/sewing-manager/dashboard" replace />;
-        case 'assembly_operator':
-            // Assembly Operators are sent to their assembly operator dashboard.
-            return <Navigate to="/assembly-portal/dashboard" replace />;
+        case 'garment_checker':
+            // Garment Checkers are sent to their garment checking dashboard.
+            return <Navigate to="/garment-checker/dashboard" replace />;
+       
         case 'accountant':
             // Accountants are sent to their accounting dashboard.
             return <Navigate to="/accounts/sales/orders" replace />;
 
-         case 'sales_manager':
-            // Sales Managers are sent to their sales management dashboard.
-            return <Navigate to="/accounts/sales/dashboard" replace />;
+         
 
         case 'mechanic':
             // Mechanics are sent to their mechanic dashboard.

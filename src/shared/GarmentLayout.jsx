@@ -26,14 +26,14 @@ const AssemblyLayout = () => {
                     {/* Desktop Navigation */}
                     <nav className="hidden md:flex items-center space-x-6">
                         <NavLink 
-                            to="/assembly-portal/dashboard" 
+                            to="/garment-checker/dashboard" 
                             className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}
                         >
                             <FiClipboard className="mr-2" /> Assembly Queue
                         </NavLink>
                        
                         <NavLink 
-                            to="/assembly-portal/summary" 
+                            to="/garment-checker/summary" 
                             className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}
                         >
                             <FiFileText className="mr-2" /> Batch QC Summary
@@ -41,7 +41,7 @@ const AssemblyLayout = () => {
 
 
                         <NavLink 
-                            to="/assembly-portal/monitor" 
+                            to="/garment-checker/monitor" 
                             className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}
                         >
                             <FiClipboard className="mr-2" /> Monitor
@@ -71,7 +71,7 @@ const AssemblyLayout = () => {
                     <div className="md:hidden bg-white shadow-md">
                         <nav className="flex flex-col p-4 space-y-4">
                             <NavLink 
-                                to="/assembly-portal/dashboard" 
+                                to="/garment-checker/dashboard" 
                                 onClick={closeMobileMenu} 
                                 className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
                             >
@@ -79,7 +79,7 @@ const AssemblyLayout = () => {
                             </NavLink>
 
                             <NavLink 
-                                to="/assembly-portal/summary" 
+                                to="/garment-checker/summary" 
                                 onClick={closeMobileMenu} 
                                 className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
                             >
