@@ -25,7 +25,7 @@ const ProtectedRoute = () => {
   const allowedRoles = [
                 'factory_admin',
                 'store_manager',
-                'line_manager',
+                'line_supervisor',
                 'supplier',
                 'production_manager',
                 'accountant',

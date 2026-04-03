@@ -48,7 +48,7 @@ const InitialRedirect = () => {
             // Universal Checkers are sent to their universal checking dashboard.
             return <Navigate to="/universal-checker/dashboard" replace />;
 
-        case 'sewing_manager':
+        case 'line_supervisor':
             // Sewing Managers are sent to their sewing management dashboard.
             return <Navigate to="/sewing-manager/dashboard" replace />;
         case 'garment_checker':
