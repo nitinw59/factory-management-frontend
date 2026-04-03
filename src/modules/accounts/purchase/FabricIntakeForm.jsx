@@ -212,7 +212,7 @@ const FabricIntakeForm = ({ onSave, onClose, purchaseOrder }) => {
                                     className="w-full p-2 border border-gray-300 rounded-md text-sm focus:border-blue-500 outline-none bg-white"
                                 >
                                     <option value="">Select Color</option>
-                                    {fabricColors.map(fc => <option key={fc.id} value={fc.id}>{fc.name} {fc.color_number ? `(${fc.color_number})` : ''}</option>)}
+                                    {fabricColors.map(fc => <option key={fc.id} value={fc.id}>{fc.color_number} {fc.name ? `(${fc.name})` : ''}</option>)}
                                 </select>
                             </div>
                             

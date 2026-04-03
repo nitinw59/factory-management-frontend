@@ -38,6 +38,14 @@ const AssemblyLayout = () => {
                         >
                             <FiFileText className="mr-2" /> Batch QC Summary
                         </NavLink>
+
+
+                        <NavLink 
+                            to="/assembly-portal/monitor" 
+                            className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}
+                        >
+                            <FiClipboard className="mr-2" /> Monitor
+                        </NavLink>
                     </nav>
 
                     <div className="flex items-center space-x-4">

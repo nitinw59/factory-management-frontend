@@ -104,7 +104,6 @@ const CreateProductionBatchForm = () => {
     // --- State ---
     const [purchaseOrderId, setPurchaseOrderId] = useState('');
     const [productId, setProductId] = useState('');
-    const [productionLineId, setProductionLineId] = useState('');
     const [layerLength, setLayerLength] = useState('');
     const [notes, setNotes] = useState('');
     const [plannedCutQty, setPlannedCutQty] = useState(''); 
@@ -123,7 +122,7 @@ const CreateProductionBatchForm = () => {
     // Interlining State
     const [interliningTemplates, setInterliningTemplates] = useState([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
-    const [interliningConfirmed, setInterliningConfirmed] = useState(false); // ✅ User approval state
+    const [interliningConfirmed, setInterliningConfirmed] = useState(false);
     
     // Combined options
     const [options, setOptions] = useState({ 
@@ -131,7 +130,6 @@ const CreateProductionBatchForm = () => {
         availableRolls: [], 
         fabricTypes: [], 
         fabricColors: [], 
-        productionLines: [],
         purchaseOrders: []
     });
     
@@ -151,10 +149,9 @@ const CreateProductionBatchForm = () => {
             setIsLoading(true);
             setError(null);
             try {
-                const [typesRes, colorsRes, linesRes, poRes, templatesRes] = await Promise.all([
+                const [typesRes, colorsRes, poRes, templatesRes] = await Promise.all([
                     productionManagerApi.getFabricTypes(),
                     productionManagerApi.getFabricColors(),
-                    productionManagerApi.getLinesWithLoaders(),
                     accountingApi.getPurchaseOrders(),
                     initializationPortalApi.getInterliningTemplates()
                 ]);
@@ -162,7 +159,6 @@ const CreateProductionBatchForm = () => {
                 const commonOptions = {
                     fabricTypes: typesRes.data || [],
                     fabricColors: colorsRes.data || [],
-                    productionLines: linesRes.data || [],
                     purchaseOrders: poRes.data || []
                 };
 
@@ -175,7 +171,6 @@ const CreateProductionBatchForm = () => {
 
                     setProductId(String(data.batchDetails.product_id || ''));
                     setPurchaseOrderId(String(data.batchDetails.purchase_order_id || ''));
-                    setProductionLineId(String(data.batchDetails.assigned_production_line_id || '')); 
                     setLayerLength(data.batchDetails.length_of_layer_inches || '');
                     setNotes(data.batchDetails.notes || '');
                     setSelectedTemplateId(data.batchDetails.interlining_template_id ? String(data.batchDetails.interlining_template_id) : '');
@@ -184,7 +179,7 @@ const CreateProductionBatchForm = () => {
                     if(notesMatch) setPlannedCutQty(notesMatch[1]);
                     
                     if (data.batchDetails.interlining_template_id) {
-                        setInterliningConfirmed(true); // Assume confirmed if previously saved
+                        setInterliningConfirmed(true); 
                     }
 
                     const initialRatios = SIZES.map(s => {
@@ -216,7 +211,7 @@ const CreateProductionBatchForm = () => {
                     });
                 } else {
                     const formDataRes = await productionManagerApi.getFormData(); 
-                    console.log("Form ddata response:", formDataRes.data);
+                    console.log("Form data response:", formDataRes.data);
                     setOptions({
                         ...commonOptions,
                         products: formDataRes.data.products || [],
@@ -227,7 +222,6 @@ const CreateProductionBatchForm = () => {
                      setSelectedShellRolls([]);
                      setProductId('');
                      setPurchaseOrderId(prefillPoId || ''); 
-                     setProductionLineId('');
                      setLayerLength('');
                      setNotes('');
                      setSelectedTemplateId('');
@@ -302,7 +296,6 @@ const CreateProductionBatchForm = () => {
     const selectedShellDetails = useMemo(() => (options.availableRolls || []).filter(roll => selectedShellRolls.includes(roll.id)), [selectedShellRolls, options.availableRolls]);
 
     const interliningRequirements = useMemo(() => {
-        // console.log("Calculating interlining requirements with:", { selectedTemplate, layerLength, sizeRatios, selectedShellDetails });
         if (!selectedTemplate || !layerLength || sizeRatios.length === 0 || selectedShellDetails.length === 0) return [];
         
         const totalRatio = sizeRatios.reduce((sum, r) => sum + (parseInt(r.ratio) || 0), 0);
@@ -311,7 +304,6 @@ const CreateProductionBatchForm = () => {
         const requirementsByColor = {}; 
         
         selectedShellDetails.forEach(roll => {
-            console.log("Processing roll for rr interlining calculation:", roll);
             const conversionFactor = (roll.uom === 'yard') ? 36 : 39.3701; 
             const rollInches = (parseFloat(roll.meter) || 0) * conversionFactor;
             
@@ -319,23 +311,15 @@ const CreateProductionBatchForm = () => {
             const rollPieces = lays * totalRatio;
 
             const rollColorName = roll.color || roll.fabric_color;
-            // const rollColorObj = options.fabricColors.find(c => 
-            //     (c.display_name && c.display_name.includes(rollColorName)) || c.name === rollColorName
-            // );
-
              const rollColorObj = options.fabricColors.find(c => String(c.id) === String(roll.color_id));
 
-            console.log ("rollcolfffforobj:", rollColorObj, rollColorName, options.fabricColors);
-            // console.log(`Processing Roll ID ${roll.id}: Type=${roll.type || roll.fabric_type}, Color=${rollColorName}, Inches=${rollInches.toFixed(2)}, Lays=${lays}, Pieces=${rollPieces}`);
-
             if (rollColorObj) {
-                console.log("selected template:", selectedTemplate);
                 const mapping = selectedTemplate.mappings.find(m => m.fabric_color_id == rollColorObj.id);
                 if (mapping) {
                     const iColorId = mapping.interlining_color_id;
                     const consumption = parseFloat(selectedTemplate.consumption_per_piece);
                     const reqMeters = rollPieces * consumption;
-                    console.log(`  Matched Template Mappingg : Fabric Color ID=${mapping.fabric_color_id} -> Interlining Color ID=${iColorId}, Consumption=${consumption}m/pc, Required Meters=${reqMeters.toFixed(2)}`);
+                    
                     if (!requirementsByColor[iColorId]) {
                         const iColorObj = options.fabricColors.find(c => c.id === iColorId);
                         requirementsByColor[iColorId] = {
@@ -347,13 +331,9 @@ const CreateProductionBatchForm = () => {
                     }
                     requirementsByColor[iColorId].required += reqMeters;
                     requirementsByColor[iColorId].potentialPieces += rollPieces;
-                }else{
-                    console.log(`  NN o template mapping found for roll color "${rollColorName}" (ID: ${rollColorObj.id}) in selected template.`);
                 }
             }
-            console.log(`After Roll ID ${roll.id}, Requirements:`, requirementsByColor);
         });
-        console.log("Calculatedf Interlining Requirements:", requirementsByColor);
         return Object.values(requirementsByColor);
     }, [selectedTemplate, layerLength, sizeRatios, selectedShellDetails, options.fabricColors]);
 
@@ -386,7 +366,6 @@ const CreateProductionBatchForm = () => {
         e.preventDefault();
         if (!purchaseOrderId) { setError("Purchase Order selection is required."); return; }
         if (!productId) { setError("Product selection is required."); return; }
-        if (!productionLineId) { setError("Production Line assignment is required."); return; }
         if (selectedShellRolls.length === 0) { setError("At least one shell fabric roll must be selected."); return; }
         
         // Interlining Approval Check
@@ -409,7 +388,6 @@ const CreateProductionBatchForm = () => {
             const payload = {
                 purchase_order_id: purchaseOrderId, 
                 product_id: productId,
-                assigned_production_line_id: productionLineId, 
                 length_of_layer_inches: layerLength || null,
                 notes: (notes || '') + metaNotes,
                 interlining_template_id: selectedTemplateId || null, 
@@ -417,7 +395,7 @@ const CreateProductionBatchForm = () => {
                 size_ratios: sizeRatios
                     .map(r => ({ ...r, ratio: parseInt(r.ratio, 10) }))
                     .filter(r => !isNaN(r.ratio) && r.ratio > 0),
-                rolls: selectedShellRolls, // Only Shell Rolls
+                rolls: selectedShellRolls, 
             };
 
             if (isEditMode) {
@@ -438,7 +416,6 @@ const CreateProductionBatchForm = () => {
 
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
-            {/* ✅ Dynamic Back Link */}
             <Link to={returnPath} className="text-sm text-blue-600 hover:underline flex items-center mb-4">
                  <ArrowLeft className="mr-2 h-4 w-4" /> {returnLabel}
             </Link>
@@ -454,7 +431,6 @@ const CreateProductionBatchForm = () => {
                      <TabButton label="Sales Order" icon={FileText} isActive={activeTab === 'sales_order'} onClick={() => setActiveTab('sales_order')} />
                      <TabButton label="Size Ratios" icon={Ruler} isActive={activeTab === 'ratios'} onClick={() => setActiveTab('ratios')} />
                      <TabButton label="Shell Fabric" icon={Layers} isActive={activeTab === 'rolls'} onClick={() => setActiveTab('rolls')} />
-                     {/* ✅ NEW TAB */}
                      <TabButton label="Interlining" icon={Scissors} isActive={activeTab === 'interlining'} onClick={() => setActiveTab('interlining')} />
                 </div>
 
@@ -495,19 +471,18 @@ const CreateProductionBatchForm = () => {
                             <hr className="border-gray-200"/>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div>
-                                     <label className="block text-sm font-medium">Assign to Line*</label>
-                                     <select value={productionLineId} onChange={e => setProductionLineId(e.target.value)} className="mt-1 p-2 w-full border rounded-md" required>
-                                         <option value="">Select a Line</option>
-                                         {(options.productionLines || []).map(line => (<option key={line.line_id} value={line.line_id}>{line.line_name}</option>))}
-                                     </select>
-                                </div>
-                                <div>
                                     <label className="block text-sm font-medium">Planned Cut Quantity (Pcs)</label>
                                     <input type="number" value={plannedCutQty} onChange={e => setPlannedCutQty(e.target.value)} placeholder="Estimated output..." className="mt-1 p-2 w-full border rounded-md" />
                                     <p className="text-xs text-gray-400 mt-1">Used to estimate interlining requirements.</p>
                                 </div>
-                                <div><label className="block text-sm font-medium">Layer Length (inches)</label><input type="number" step="0.01" value={layerLength} onChange={e => setLayerLength(e.target.value)} className="mt-1 p-2 w-full border rounded-md" /></div>
-                                <div className="md:col-span-2"><label className="block text-sm font-medium">Notes</label><textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="mt-1 p-2 w-full border rounded-md"></textarea></div>
+                                <div>
+                                    <label className="block text-sm font-medium">Layer Length (inches)</label>
+                                    <input type="number" step="0.01" value={layerLength} onChange={e => setLayerLength(e.target.value)} className="mt-1 p-2 w-full border rounded-md" />
+                                </div>
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-medium">Notes</label>
+                                    <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="mt-1 p-2 w-full border rounded-md"></textarea>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -585,7 +560,6 @@ const CreateProductionBatchForm = () => {
                         <div className="space-y-6">
                              <div>
                                  <h3 className="text-lg font-semibold text-gray-800 mb-4">Assign Shell Fabric Rolls*</h3>
-                                 {/* Shell rolls are selected here. We also display a summary here so user knows what drives calculation in next tab */}
                                  {selectedShellDetails.length > 0 && (
                                      <div className="mb-4 bg-blue-50 p-3 rounded-md text-sm text-blue-700">
                                          <span className="font-bold">{selectedShellDetails.length} Rolls Selected.</span> These will determine interlining requirements.
@@ -602,10 +576,8 @@ const CreateProductionBatchForm = () => {
                         </div>
                     )}
 
-                    {/* ✅ NEW TAB: INTERLINING ASSIGNMENT */}
                     {activeTab === 'interlining' && (
                         <div className="space-y-6">
-                            {/* Warning if no shell rolls selected */}
                             {selectedShellRolls.length === 0 && (
                                 <div className="p-4 bg-amber-100 text-amber-800 rounded-lg flex items-center mb-4">
                                     <AlertTriangle className="mr-2 h-5 w-5" />
@@ -632,7 +604,6 @@ const CreateProductionBatchForm = () => {
                                         </select>
                                     </div>
                                     
-                                    {/* Requirement Table */}
                                     {selectedTemplate && (
                                         <div className="bg-white rounded-md border border-amber-200 overflow-hidden">
                                             <table className="w-full text-sm text-left">
@@ -665,7 +636,6 @@ const CreateProductionBatchForm = () => {
                                 </div>
                             </div>
                             
-                            {/* APPROVAL CHECKBOX */}
                             {selectedTemplate && interliningRequirements.length > 0 && (
                                 <div className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm">
                                     <label className="flex items-start cursor-pointer">

@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // 1. Define the baseURLs as constants
-export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5002';
+export const API_BASE_URL = process.env.REACT_APP_API_URL || `http://${window.location.hostname}:5002`;
 
 // ✅ FIX: 'baseURLImage' is not a valid Axios setting. 
 // Instead, export it as a separate constant so your React components can use it for <img src={...} /> tags.

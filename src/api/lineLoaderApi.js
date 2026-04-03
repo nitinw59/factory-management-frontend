@@ -22,4 +22,5 @@ export const lineLoaderApi = {
   assignLineAndLogRolls: (data) => api.post('/line-loader/assign-line', data),
   
   getRollsForBatch: (batchId) => api.get(`/line-loader/batch/${batchId}/rolls`),
+  checkLineWip: (lineId) => api.get(`/line-loader/check-wip/${lineId}`)
 };

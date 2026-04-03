@@ -216,7 +216,7 @@ const SalesOrderExpandedDetails = ({ orderId }) => {
                                                     <div key={i} className="text-xs bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-md flex justify-between items-center w-full max-w-[240px] shadow-sm">
                                                         <span className="text-slate-700 font-medium flex items-center">
                                                             <Palette size={12} className="text-slate-400 mr-1.5"/>
-                                                            {c.color_name} <span className="text-slate-400 font-normal ml-1">({c.color_number})</span>
+                                                            {c.color_number} <span className="text-slate-400 font-normal ml-1">({c.color_name})</span>
                                                         </span>
                                                         <span className="font-bold text-blue-700">{c.quantity} pcs</span>
                                                     </div>
@@ -301,7 +301,7 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
                                 {po.items.map((item, idx) => (
                                     <tr key={idx} className="hover:bg-gray-50">
                                         <td className="px-4 py-2 font-medium text-gray-800">{item.fabric_type}</td>
-                                        <td className="px-4 py-2 text-gray-600">{item.fabric_color} <span className="text-xs text-gray-400">({item.color_number})</span></td>
+                                        <td className="px-4 py-2 text-gray-600">{item.color_number} <span className="text-xs text-gray-400">({item.fabric_color})</span></td>
                                         <td className="px-4 py-2 text-right font-bold">{item.quantity} {item.uom}</td>
                                         <td className="px-4 py-2 text-right text-gray-500">${item.unit_price}</td>
                                         <td className="px-4 py-2 text-right text-gray-800">${item.total_price}</td>

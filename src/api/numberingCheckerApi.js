@@ -11,4 +11,5 @@ export const numberingCheckerApi = {
     getPieceHistory: (pieceId) => api.get(`/numbering-checker/piece-history/${pieceId}`),
     getStatistics: () => api.get('/numbering-checker/statistics'),
     getBatchQCSummary: () => api.get('/numbering-checker/summary'),
+    getDefectCodes: () => api.get('/qc/defect-codes'),
 };

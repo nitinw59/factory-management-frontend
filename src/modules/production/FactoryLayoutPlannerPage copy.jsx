@@ -345,7 +345,6 @@ export default function FactoryLayoutPlannerPage() {
                  if (targetLineId) await productionManagerApi.assignManagerToLine(targetLineId, itemData.id);
             } 
             else if (itemType === 'loader') {
-                    console.log("Assigning Loader:", { sourceLineId, targetLineId, itemData });
                  if (sourceLineId) await productionManagerApi.assignLoaderToLine(sourceLineId, null);
                  if (targetLineId) await productionManagerApi.assignLoaderToLine(targetLineId, itemData.id);
             }

@@ -4,7 +4,8 @@ import { cuttingPortalApi } from '../../api/cuttingPortalApi';
 import { 
     FiArrowLeft, FiPackage, FiScissors, FiAlertTriangle, 
     FiCheckCircle, FiFileText, FiPrinter, FiShare2, FiDownload, 
-    FiClipboard, FiLayers, FiLoader 
+    FiClipboard, FiLayers, FiLoader, 
+    FiChevronDown, FiChevronRight, FiBox, FiHash, FiTag // 🆕 New Icons
 } from 'react-icons/fi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -36,6 +37,76 @@ const sortSizes = (a, b) => {
     if (indexB !== -1) return 1;
     return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 };
+
+
+
+
+// ==============================================================================
+// 🆕 NEW COMPONENT: Expandable Bundle Card
+// ==============================================================================
+const BundleCard = ({ bundle }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+
+    return (
+        <div className="border border-slate-200 rounded-lg shadow-sm bg-white overflow-hidden transition-all duration-200">
+            {/* Header (Clickable) */}
+            <div 
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-50 select-none"
+            >
+                <div className="flex items-center gap-4">
+                    <div className="bg-indigo-50 text-indigo-600 p-2 rounded-md">
+                        <FiBox size={18} />
+                    </div>
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-700">{bundle.part_name}</span>
+                            <span className="bg-slate-100 text-slate-600 text-xs font-bold px-2 py-0.5 rounded border border-slate-200">
+                                Size: {bundle.size}
+                            </span>
+                        </div>
+                        <span className="text-xs text-slate-400 font-mono mt-0.5 block">{bundle.bundle_code}</span>
+                    </div>
+                </div>
+                
+                <div className="flex items-center gap-4">
+                    <div className="text-right">
+                        <span className="block text-xs text-slate-500 uppercase font-semibold">Quantity</span>
+                        <span className="font-bold text-slate-800">{bundle.total_pieces} pcs</span>
+                    </div>
+                    <div className="text-slate-400">
+                        {isExpanded ? <FiChevronDown size={20} /> : <FiChevronRight size={20} />}
+                    </div>
+                </div>
+            </div>
+
+            {/* Expanded Body (Exploded Pieces) */}
+            {isExpanded && (
+                <div className="p-4 bg-slate-50/50 border-t border-slate-100 animate-in slide-in-from-top-2">
+                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center">
+                        <FiHash className="mr-1.5" /> Serialized Contents (Ply Sequence)
+                    </h4>
+                    
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                        {bundle.pieces?.map(piece => (
+                            <div key={piece.piece_id} className="bg-white border border-slate-200 p-2 rounded-md shadow-sm flex flex-col items-center justify-center relative group">
+                                <span className="absolute top-1 right-1">
+                                    <FiTag size={10} className="text-slate-300 group-hover:text-indigo-400 transition-colors" />
+                                </span>
+                                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Ply Seq</span>
+                                <span className="text-lg font-black text-indigo-600 leading-none my-1">#{piece.piece_sequence}</span>
+                                <span className="text-[9px] text-slate-400 font-mono bg-slate-50 px-1 py-0.5 rounded w-full text-center truncate" title={piece.uid}>
+                                    {piece.uid}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 
 const BatchCuttingDetailsPage = () => {
     const { batchId } = useParams();
@@ -111,6 +182,17 @@ const BatchCuttingDetailsPage = () => {
         return { totalMeters, totalPieces, avgConsumption, totalShortage, totalEndBits, allSizes, sizeTotals };
     }, [details]);
 
+
+
+    // 🆕 Group Bundles by Roll ID for the UI
+    const bundlesByRoll = useMemo(() => {
+        if (!details?.bundles) return {};
+        return details.bundles.reduce((acc, bundle) => {
+            if (!acc[bundle.fabric_roll_id]) acc[bundle.fabric_roll_id] = [];
+            acc[bundle.fabric_roll_id].push(bundle);
+            return acc;
+        }, {});
+    }, [details]);
     // --- REPORT GENERATORS ---
 
     const handleGenerateNumberingPDF = async () => {
@@ -603,6 +685,50 @@ const BatchCuttingDetailsPage = () => {
                     </table>
                 </div>
             </section>
+
+
+
+                                    {details.bundles && details.bundles.length > 0 && (
+                <section className="bg-white rounded-lg shadow-sm border overflow-hidden mt-6 print:hidden">
+                    <div className="p-4 border-b bg-slate-800 text-white flex justify-between items-center">
+                        <div>
+                            <h3 className="text-lg font-semibold flex items-center">
+                                <FiPackage className="mr-3 text-indigo-400"/> Physical Bundles & Serialization
+                            </h3>
+                            <p className="text-xs text-slate-300 mt-1 ml-8">Click a bundle to explode and view individual ply sequences.</p>
+                        </div>
+                        <span className="bg-slate-700 px-3 py-1 rounded-full text-xs font-bold text-slate-200">
+                            {details.bundles.length} Bundles Generated
+                        </span>
+                    </div>
+                    
+                    <div className="p-4 bg-slate-50 space-y-6">
+                        {Object.entries(bundlesByRoll).map(([rollId, rollBundles]) => {
+                            // Find roll info for header
+                            const rollInfo = details.rolls?.find(r => r.id.toString() === rollId);
+                            const rollName = rollInfo ? rollInfo.roll_identifier : `Roll #${rollId}`;
+                            
+                            return (
+                                <div key={rollId} className="space-y-3">
+                                    <h4 className="font-bold text-slate-600 flex items-center border-b border-slate-200 pb-2">
+                                        <span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded text-xs mr-2 border border-slate-300">
+                                            Roll Source
+                                        </span>
+                                        {rollName}
+                                    </h4>
+                                    
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {rollBundles.map(bundle => (
+                                            <BundleCard key={bundle.id} bundle={bundle} />
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </section>
+            )}
+
         </div>
     );
 };

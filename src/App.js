@@ -35,6 +35,7 @@ import AssemblyProtectedRoute from './shared/AssemblyProtectedRoute';
 import AccountsLayout from './shared/AccountsLayout';
 import SalesAccessProtectedRoute from './shared/SalesAccessProtectedRoute'; // <--- NEW IMPORT
 
+
 // --- PUBLIC PAGES ---
 import LoginPage from './login/LoginPage';
 import AuthCallbackPage from './login/AuthCallbackPage';
@@ -81,7 +82,7 @@ import AssetManagementPage from './modules/asset/AssetManagementPage';
 import SewingPartLayout from './shared/SewingPartLayout';
 import SewingPartDashboardPage from './modules/sewing_portal/SewingPartDashboardPage';
 import SewingManagerDashboardPage from './modules/sewing_portal/SewingManagerDashboardPage'; 
-import AssemblyDashboardPage from './modules/sewing_portal/AssemblyDashboardPage';
+// import AssemblyDashboardPage from './modules/sewing_portal/AssemblyDashboardPage';
 import TrimOrderSummaryPage from './modules/store_manager/TrimOrderSummaryPage';
 import NumberingCheckerSummaryPage from './modules/numbering_portal/NumberingCheckerSummaryPage';
 import SewingMachineComplaintPage from './modules/asset/SewingMachineComplaintPage';
@@ -131,6 +132,13 @@ import OutputLogsPage from './modules/lineManager/OutputLogsPage';
 
 import ProductionSettingsPage from './modules/production/ProductionSettingsPage'; 
 
+import AdminLineConfigPage from './modules/asset/AdminLineConfigPage';
+
+import UniversalWorkstationDashboard from './modules/Universal/UniversalWorkstationDashboard';
+
+
+import AssemblyProcessingPortal from './modules/assembly_portal/AssemblyProcessingPortal';
+import AssemblyMonitor from './modules/assembly_portal/AssemblyMonitor';
 
 function App() {
   return (
@@ -161,6 +169,7 @@ function App() {
           <Route path="fabric-types" element={<FabricTypesPage />} />
           <Route path ="asset-management" element={<AssetManagementPage />} />  
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+          <Route path="line-config" element={<AdminLineConfigPage />} />  
 
           
          
@@ -271,7 +280,7 @@ function App() {
       </Route>
       
       <Route path="/numbering-portal" element={<NumberingUserProtectedRoute><NumberingPortalLayout /></NumberingUserProtectedRoute>}>
-          <Route index element={<NumberingWorkstationDashboardPage />} />
+          <Route index element={<UniversalWorkstationDashboard />} />
           <Route path="dashboard" element={<NumberingWorkstationDashboardPage />} />
           <Route path="summary" element={<NumberingBatchDetailsPage />} />
           <Route path="checker-summary" element={<NumberingCheckerSummaryPage />} />
@@ -333,8 +342,9 @@ function App() {
       </Route>  
 
       <Route path="/assembly-portal" element={<AssemblyProtectedRoute><AssemblyLayout /></AssemblyProtectedRoute>}>
-          <Route index element={<AssemblyDashboardPage />} />
-          <Route path="dashboard" element={<AssemblyDashboardPage />} />
+          <Route index element={<AssemblyProcessingPortal />} />
+          <Route path="dashboard" element={<AssemblyProcessingPortal />} />
+          <Route path="monitor" element={<AssemblyMonitor />} />
           {/* Add more assembly operator specific routes here later */}
       </Route>  
 
