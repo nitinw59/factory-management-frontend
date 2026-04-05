@@ -13,8 +13,8 @@ const SewingManagerProtectedRoute = ({ children }) => {
 
   try {
     const user = jwtDecode(token);
-    // This gatekeeper allows 'sewing_manager' or 'factory_admin'
-    if (user.role !== 'sewing_manager' && user.role !== 'factory_admin') {
+    // This gatekeeper allows 'line_supervisor' or 'factory_admin'
+    if (user.role !== 'line_supervisor' && user.role !== 'factory_admin') {
       return <Navigate to="/unauthorized" />;
     }
   } catch (error) {
