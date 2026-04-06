@@ -140,6 +140,9 @@ import UniversalWorkstationDashboard from './modules/Universal/UniversalWorkstat
 import GarmentProcessingPortal from './modules/garment_checker/GarmentProcessingPortal';
 import GarmentMonitor from './modules/garment_checker/GarmentMonitor';
 
+
+import ProductionAnalyticsDashboard from './modules/management/FactoryLineControlBoard';
+
 function App() {
   return (
     <Routes>
@@ -230,6 +233,7 @@ function App() {
           <Route path="capacity-dashboard" element={<ProductionCapacityDashboard />} />
           <Route path="reports/daily-costing" element={<ProductionCostingDashboard />} />
           <Route path="settings" element={<ProductionSettingsPage />} />
+          <Route path="reports/production-analytics" element={<ProductionAnalyticsDashboard />} />
 
         </Route>
       </Route>

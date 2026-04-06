@@ -11,7 +11,7 @@ import {
 // ============================================================================
 const Spinner = () => (
     <div className="flex justify-center items-center p-12">
-        <Loader2 className="animate-spin h-16 w-16 text-slate-800" />
+        <Loader2 className="animate-spin h-12 w-12 text-slate-800" />
     </div>
 );
 
@@ -28,7 +28,9 @@ const checkEntityStatus = (entity) => {
     const total_rejected = pieces.filter(p => p.qc_status === 'QC_REJECTED').length;
     const total_repaired = pieces.filter(p => p.qc_status === 'REPAIRED').length;
     const pending_alter = pieces.filter(p => p.qc_status === 'NEEDS_REWORK').length;
+    
     const previously_rejected = pieces.filter(p => p.qc_status === 'PREVIOUSLY_REJECTED').length;
+    
     const total_processed = total_validated + total_rejected + total_repaired + previously_rejected;
     const isComplete = (total_processed + pending_alter) >= total_cut && total_cut > 0 && pending_alter === 0;
 
@@ -37,11 +39,11 @@ const checkEntityStatus = (entity) => {
 
 // High-Contrast Industrial Palette
 const getPieceColorClass = (status, isSelected) => {
-    if (isSelected) return "bg-indigo-600 border-indigo-600 text-white shadow-[0_0_20px_rgba(79,70,229,0.8)] transform scale-105 z-10";
+    if (isSelected) return "bg-indigo-600 border-indigo-600 text-white shadow-[0_0_15px_rgba(79,70,229,0.5)] transform scale-105 z-10";
     switch(status) {
-        case 'APPROVED': return "bg-slate-800 border-slate-700 text-emerald-500 opacity-60 cursor-not-allowed shadow-[inset_0_0_10px_rgba(16,185,129,0.2)]";
-        case 'REPAIRED': return "bg-slate-800 border-slate-700 text-teal-400 opacity-60 cursor-not-allowed";
-        case 'QC_REJECTED': return "bg-rose-950 border-rose-900 text-rose-400 opacity-60 cursor-not-allowed shadow-[inset_0_0_10px_rgba(225,29,72,0.3)]";
+        case 'APPROVED': return "bg-slate-800 border-slate-700 text-slate-500 opacity-40 cursor-not-allowed";
+        case 'REPAIRED': return "bg-slate-800 border-slate-700 text-slate-500 opacity-40 cursor-not-allowed";
+        case 'QC_REJECTED': return "bg-rose-900/20 border-rose-900/50 text-rose-800 opacity-40 cursor-not-allowed";
         case 'PREVIOUSLY_REJECTED': return "bg-slate-200 border-slate-300 text-slate-400 opacity-30 cursor-not-allowed line-through";
         case 'NEEDS_REWORK': return "bg-amber-400 border-amber-500 text-amber-900 shadow-md cursor-not-allowed opacity-80"; 
         case 'PENDING':
@@ -49,8 +51,9 @@ const getPieceColorClass = (status, isSelected) => {
     }
 };
 
-
-
+// ============================================================================
+// STAGE COMPLETION HANDOFF WIDGET
+// ============================================================================
 const StageCompletionHandoff = ({ batchId, lineId, onBatchComplete }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [wipReport, setWipReport] = useState(null);
@@ -99,22 +102,25 @@ const StageCompletionHandoff = ({ batchId, lineId, onBatchComplete }) => {
         </>
     );
 };
+
 // ============================================================================
 // PRIMARY INSPECTION MODAL (Black/Industrial)
 // ============================================================================
 const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidationSubmit }) => {
-    const pieces = itemInfo.pieces || []; 
+    // 🚨 BUG FIX: Initialize local state first.
+    // const [localPieces, setLocalPieces] = useState(itemInfo.pieces || []);
     
-    // ACTIONABLE PIECES: Strictly PENDING. Ignores Rework items completely.
-    const actionablePieces = pieces.filter(p => p.qc_status === 'PENDING' || !p.qc_status);
-    
-    // BUNDLE CHECK: Is the bundle blocked from approval due to active reworks?
-    const hasActiveReworks = pieces.some(p => p.qc_status === 'NEEDS_REWORK');
+    // Sync if parent updates
+    // useEffect(() => { setLocalPieces(itemInfo.pieces || []); }, [itemInfo.pieces]);
+
+    // 🚨 BUG FIX: Derive ALL UI arrays from localPieces, not the frozen prop!
+    const actionablePieces = localPieces.filter(p => p.qc_status === 'PENDING' || !p.qc_status);
+    const hasActiveReworks = localPieces.some(p => p.qc_status === 'NEEDS_REWORK');
     const isBundleLocked = itemInfo.isBundle && hasActiveReworks;
 
     const { allowMultiple } = itemInfo;
 
-    const groupedPieces = pieces.reduce((acc, p) => {
+    const groupedPieces = localPieces.reduce((acc, p) => {
         const group = p._displayGroup || 'Default';
         if (!acc[group]) acc[group] = [];
         acc[group].push(p);
@@ -123,6 +129,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     const groups = Object.entries(groupedPieces);
 
     const [selectedIds, setSelectedIds] = useState(new Set());
+    const [submittingAction, setSubmittingAction] = useState(null); 
     const [intendedAction, setIntendedAction] = useState(null); 
     const [selectedCategory, setSelectedCategory] = useState(null);
 
@@ -131,7 +138,8 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     const displayPartSize = `${itemInfo.partName} | SIZE ${itemInfo.size || 'MIXED'}`;
 
     const togglePiece = (piece) => {
-        if (piece.qc_status !== 'PENDING' && piece.qc_status) return; // Prevent clicking completed/rework pieces
+        if (submittingAction) return;
+        if (piece.qc_status !== 'PENDING' && piece.qc_status) return;
 
         const newSet = new Set(selectedIds);
         if (!allowMultiple && !newSet.has(piece.id)) newSet.clear(); 
@@ -140,8 +148,12 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     };
 
     const toggleSelectAll = () => {
-        if (selectedIds.size === actionablePieces.length) setSelectedIds(new Set());
-        else setSelectedIds(new Set(actionablePieces.map(p => p.id))); // ONLY selects actionable pieces!
+        if (submittingAction) return;
+        if (selectedIds.size === actionablePieces.length) {
+            setSelectedIds(new Set());
+        } else {
+            setSelectedIds(new Set(actionablePieces.map(p => p.id)));
+        }
     };
 
     const handleActionInitiation = (action) => {
@@ -151,43 +163,55 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     };
 
     const submitValidation = async (qcStatus, defectCodeId) => {
-        const selectedPiecesList = pieces.filter(p => selectedIds.has(p.id));
-        let payloads = [];
-
-        // Bundle Grouping Logic to prevent backend crashes on massive rolls
-        if (itemInfo.isRollInspect) {
-            const grouped = selectedPiecesList.reduce((acc, p) => {
-                const key = p.bundle_id ? `b_${p.bundle_id}` : `p_${p.part_id}_s_${p.size}`;
-                if (!acc[key]) {
-                    acc[key] = {
-                        batchId: itemInfo.batchId, rollId: itemInfo.rollId, partId: p.part_id || itemInfo.partId,
-                        size: p.size || itemInfo.size, pieceIds: [], qcStatus, defectCodeId: defectCodeId || null, bundleId: p.bundle_id || null
-                    };
-                }
-                acc[key].pieceIds.push(p.id);
-                return acc;
-            }, {});
-            payloads = Object.values(grouped);
-        } else {
-            payloads = [{
-                batchId: itemInfo.batchId, rollId: itemInfo.rollId, partId: itemInfo.partId, 
-                size: itemInfo.size, pieceIds: Array.from(selectedIds), qcStatus, defectCodeId: defectCodeId || null, bundleId: itemInfo.bundle_id || null
-            }];
-        }
-
-        // Trigger Full Screen Lock via Parent
-        await onValidationSubmit(payloads);
+        if (submittingAction) return;
+        setSubmittingAction(qcStatus);
         
-        // After success, clear selections
-        setSelectedIds(new Set()); setIntendedAction(null); setSelectedCategory(null);
+        try {
+            const selectedPiecesList = localPieces.filter(p => selectedIds.has(p.id));
+            let payloads = [];
+
+            if (itemInfo.isRollInspect) {
+                const grouped = selectedPiecesList.reduce((acc, p) => {
+                    const key = p.bundle_id ? `b_${p.bundle_id}` : `p_${p.part_id}_s_${p.size}`;
+                    if (!acc[key]) {
+                        acc[key] = {
+                            batchId: itemInfo.batchId, rollId: itemInfo.rollId, partId: p.part_id || itemInfo.partId,
+                            size: p.size || itemInfo.size, pieceIds: [], qcStatus, defectCodeId: defectCodeId || null, bundleId: p.bundle_id || null
+                        };
+                    }
+                    acc[key].pieceIds.push(p.id);
+                    return acc;
+                }, {});
+                payloads = Object.values(grouped);
+            } else {
+                payloads = [{
+                    batchId: itemInfo.batchId, rollId: itemInfo.rollId, partId: itemInfo.partId, 
+                    size: itemInfo.size, pieceIds: Array.from(selectedIds), qcStatus, defectCodeId: defectCodeId || null,
+                    bundleId: itemInfo.bundle_id || null
+                }];
+            }
+
+            await onValidationSubmit(payloads);
+            
+            // 🚨 UI INSTANT UPDATE: Pieces turn grey/red/amber instantly!
+            const updated = localPieces.map(p => selectedIds.has(p.id) ? { ...p, qc_status: qcStatus } : p);
+            // setLocalPieces(updated);
+            
+            setSelectedIds(new Set()); setIntendedAction(null); setSelectedCategory(null);
+        } catch (err) {
+            console.error("Backend rejected the submission.");
+            setSelectedIds(new Set()); setIntendedAction(null); setSelectedCategory(null);
+        } finally {
+            setSubmittingAction(null);
+        }
     };
 
     const categories = Array.from(new Set(defectCodes.map(d => d.category)));
     const availableDefects = defectCodes.filter(d => d.category === selectedCategory);
 
     return (
-        <div className="fixed inset-0 bg-black/95 z-[150] flex flex-col p-0 font-inter">
-            <div className="bg-black text-white p-6 flex justify-between items-center border-b-4 border-slate-800 shrink-0">
+        <div className="fixed inset-0 bg-black/90 z-[150] flex flex-col p-0 font-inter">
+            <div className="bg-black text-white p-6 flex justify-between items-center border-b-2 border-slate-800 shrink-0">
                 <div className="flex flex-col md:flex-row md:items-center gap-6 md:gap-16">
                     <div className="flex flex-col"><span className="text-slate-500 text-sm font-black uppercase tracking-widest">Batch</span><h2 className="text-4xl font-black">{displayBatch}</h2></div>
                     <div className="flex flex-col border-l-0 md:border-l-2 border-slate-800 md:pl-12"><span className="text-slate-500 text-sm font-black uppercase tracking-widest">Source</span><h2 className="text-4xl font-black text-indigo-400">{displayRoll}</h2></div>
@@ -195,6 +219,13 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                 </div>
                 <button onClick={onClose} className="p-4 bg-slate-900 hover:bg-rose-600 rounded-full transition-all border border-slate-700"><X className="w-8 h-8 text-white"/></button>
             </div>
+
+            {submittingAction && (
+                <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center">
+                    <Loader2 className="w-24 h-24 text-white animate-spin mb-8" />
+                    <span className="text-white text-4xl font-black tracking-widest uppercase">Recording {submittingAction.replace('_', ' ')}...</span>
+                </div>
+            )}
 
             <div className="flex-grow overflow-hidden flex flex-col bg-slate-100">
                 <div className="bg-slate-200 px-8 py-5 border-b-2 border-slate-300 flex justify-between items-center shrink-0 shadow-inner">
@@ -216,15 +247,17 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                     <div className="space-y-10">
                         {groups.map(([groupName, groupPieces]) => (
                             <div key={groupName}>
-                                {groupName !== 'Default' && <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-4 border-b-2 border-slate-300 pb-2">{groupName}</h4>}
+                                {groupName !== 'Default' && (
+                                    <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-4 border-b-2 border-slate-300 pb-2">{groupName}</h4>
+                                )}
                                 <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-4">
                                     {groupPieces.map(piece => {
                                         const isSelected = selectedIds.has(piece.id);
                                         return (
-                                            <button key={piece.id} disabled={piece.qc_status === 'NEEDS_REWORK'} onClick={() => togglePiece(piece)} className={`relative aspect-square rounded-2xl border-4 font-mono font-black text-3xl flex items-center justify-center transition-all active:scale-95 ${getPieceColorClass(piece.qc_status, isSelected)}`}>
+                                            <button key={piece.id} disabled={submittingAction !== null || piece.qc_status === 'NEEDS_REWORK'} onClick={() => togglePiece(piece)} className={`relative aspect-square rounded-2xl border-4 font-mono font-black text-2xl flex items-center justify-center transition-all active:scale-95 ${getPieceColorClass(piece.qc_status, isSelected)}`}>
                                                 {piece.piece_sequence}
-                                                {isSelected && <Check className="absolute top-2 right-2 w-8 h-8 text-white bg-indigo-500 rounded-full p-1 shadow-md" strokeWidth={4} />}
-                                                {piece.qc_status === 'NEEDS_REWORK' && <Hammer className="absolute top-2 right-2 w-6 h-6 text-amber-900" />}
+                                                {isSelected && <Check className="absolute top-2 right-2 w-6 h-6 text-white" strokeWidth={4} />}
+                                                {piece.qc_status === 'NEEDS_REWORK' && <Hammer className="absolute top-1 right-1 w-5 h-5 text-amber-900" />}
                                             </button>
                                         );
                                     })}
@@ -234,6 +267,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                     </div>
                 </div>
 
+                {/* BOTTOM COMMAND BAR */}
                 <div className="bg-white p-8 border-t-4 border-slate-300 shadow-[0_-20px_50px_rgba(0,0,0,0.15)] flex flex-col shrink-0">
                     {!intendedAction ? (
                         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-8">
@@ -244,11 +278,20 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                             
                             <div className="flex-grow grid grid-cols-3 gap-6 h-[100px]">
                                 <div className="relative h-full">
-                                    {/* RULE: Lock bundle approval if active reworks OR partial selection */}
-                                    {isBundleLocked && selectedIds.size > 0 && <div className="absolute -top-10 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-4 py-1.5 rounded-md shadow-lg">Bundle Locked: Active Reworks</span></div>}
-                                    {itemInfo.isBundle && !isBundleLocked && selectedIds.size > 0 && selectedIds.size !== actionablePieces.length && <div className="absolute -top-10 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-4 py-1.5 rounded-md shadow-lg">Partial Selection: Reject/Rework Only</span></div>}
-                                    
-                                    <button onClick={() => handleActionInitiation('APPROVED')} disabled={selectedIds.size === 0 || isBundleLocked || (itemInfo.isBundle && selectedIds.size !== actionablePieces.length)} className="w-full h-full bg-black text-white rounded-2xl font-black text-2xl shadow-xl hover:bg-slate-800 active:scale-95 disabled:opacity-20 disabled:bg-slate-400 flex items-center justify-center border-b-4 border-slate-800">
+                                    {isBundleLocked && selectedIds.size > 0 && (
+                                         <div className="absolute -top-10 left-0 w-full text-center pointer-events-none">
+                                            <span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-4 py-1.5 rounded-md shadow-lg">Bundle Locked: Active Reworks</span>
+                                        </div>
+                                    )}
+                                    {itemInfo.isBundle && !isBundleLocked && selectedIds.size > 0 && selectedIds.size !== actionablePieces.length && (
+                                         <div className="absolute -top-10 left-0 w-full text-center pointer-events-none">
+                                            <span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-4 py-1.5 rounded-md shadow-lg">Partial Selection: Reject/Rework Only</span>
+                                        </div>
+                                    )}
+                                    <button onClick={() => handleActionInitiation('APPROVED')} 
+                                        disabled={selectedIds.size === 0 || isBundleLocked || (itemInfo.isBundle && selectedIds.size !== actionablePieces.length)} 
+                                        className="w-full h-full bg-black text-white rounded-2xl font-black text-2xl shadow-xl hover:bg-slate-800 active:scale-95 disabled:opacity-20 disabled:bg-slate-400 flex items-center justify-center border-b-4 border-slate-800"
+                                    >
                                         <CheckCircle2 className="w-8 h-8 mr-3" /> APPROVE
                                     </button>
                                 </div>
@@ -290,12 +333,15 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
 };
 
 // ============================================================================
-// REPAIR VALIDATION MODAL (Double-Reject Enabled)
+// REPAIR VALIDATION MODAL (Black/Industrial)
 // ============================================================================
 const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
-    // 🚨 BUG FIX: Capture initial target IDs so pieces don't disappear when they change to 'APPROVED' or 'REJECTED'
-    const [targetIds] = useState(() => new Set(itemInfo.pieces.filter(p => p.qc_status === 'NEEDS_REWORK').map(p => p.id)));
-    const reworkPieces = itemInfo.pieces.filter(p => targetIds.has(p.id));
+    // 🚨 BUG FIX: Initialize live local state for the Rework Modal too!
+    const [localPieces, setLocalPieces] = useState(itemInfo.pieces || []);
+    useEffect(() => { setLocalPieces(itemInfo.pieces || []); }, [itemInfo.pieces]);
+
+    // Derive rework queues from the LIVE local state
+    const reworkPieces = localPieces.filter(p => p.qc_status === 'NEEDS_REWORK');
 
     const groupedPieces = reworkPieces.reduce((acc, p) => {
         const group = p._displayGroup || 'Default';
@@ -306,8 +352,10 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
     const groups = Object.entries(groupedPieces);
 
     const [selectedIds, setSelectedIds] = useState(new Set());
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const [intendedAction, setIntendedAction] = useState(null); 
     const [selectedCategory, setSelectedCategory] = useState(null);
+    const submitLock = useRef(false);
 
     const togglePiece = (id) => {
         if (intendedAction) return;
@@ -318,36 +366,52 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
 
     const toggleSelectAll = () => {
         if (intendedAction) return;
-        // Only select pieces that are STILL in NEEDS_REWORK
-        const actionableReworks = reworkPieces.filter(p => p.qc_status === 'NEEDS_REWORK');
-        if (selectedIds.size === actionableReworks.length) setSelectedIds(new Set());
-        else setSelectedIds(new Set(actionableReworks.map(p => p.id)));
+        if (selectedIds.size === reworkPieces.length) setSelectedIds(new Set());
+        else setSelectedIds(new Set(reworkPieces.map(p => p.id)));
     };
 
     const executeAction = async (status, defectCodeId = null) => {
-        await onSave({ pieceIds: Array.from(selectedIds), status, defectCodeId }); 
-        setSelectedIds(new Set()); setIntendedAction(null); setSelectedCategory(null);
+        if (submitLock.current || isSubmitting) return;
+        if (selectedIds.size === 0) return;
+        submitLock.current = true; setIsSubmitting(true);
+        
+        try { 
+            // Send payload to parent to process
+            await onSave({ pieceIds: Array.from(selectedIds), status, defectCodeId }); 
+            
+            // 🚨 UI INSTANT UPDATE: Removes the piece from the rework grid by updating its status locally!
+            const updated = localPieces.map(p => selectedIds.has(p.id) ? { ...p, qc_status: status } : p);
+            setLocalPieces(updated);
+            
+            setSelectedIds(new Set());
+            setIntendedAction(null);
+            setSelectedCategory(null);
+        } catch (err) { 
+            setIntendedAction(null); setSelectedCategory(null);
+        } finally {
+            submitLock.current = false; setIsSubmitting(false); 
+        }
     };
 
     const categories = Array.from(new Set(defectCodes.map(d => d.category)));
     const availableDefects = defectCodes.filter(d => d.category === selectedCategory);
 
     return (
-        <div className="fixed inset-0 bg-black/95 z-[150] flex flex-col p-0 font-inter">
-            <div className="bg-amber-400 text-black p-6 flex justify-between items-center shrink-0 border-b-4 border-amber-600">
+        <div className="fixed inset-0 bg-black/90 z-[110] flex flex-col p-0 font-inter" onClick={!isSubmitting ? onClose : undefined}>
+            <div className="bg-amber-400 text-black p-6 flex justify-between items-center shrink-0 border-b-4 border-amber-600" onClick={e => e.stopPropagation()}>
                 <div>
                     <h3 className="text-4xl font-black uppercase tracking-tight">{itemInfo.titleOverride || `VALIDATE REPAIRS`}</h3>
                     <p className="text-lg text-amber-900 mt-1 font-bold">Select pieces returning from alteration line.</p>
                 </div>
-                <button onClick={onClose} className="p-4 bg-black/10 hover:bg-black hover:text-amber-400 rounded-full transition-all"><X className="w-8 h-8"/></button>
+                <button onClick={onClose} disabled={isSubmitting} className="p-4 bg-black/10 hover:bg-black hover:text-amber-400 rounded-full transition-all"><X className="w-8 h-8"/></button>
             </div>
             
-            <div className="flex-grow overflow-y-auto bg-slate-100 p-8">
+            <div className="flex-grow overflow-y-auto bg-slate-100 p-8" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-center mb-8 pb-4 border-b-2 border-slate-300">
                     <label className="text-xl font-black text-slate-800 uppercase tracking-widest">Active Rework Tickets</label>
                     <button onClick={toggleSelectAll} className="flex items-center text-sm font-black text-white hover:bg-slate-800 transition-colors bg-black px-6 py-3 rounded-xl shadow-lg uppercase tracking-widest">
-                        {selectedIds.size === reworkPieces.filter(p => p.qc_status === 'NEEDS_REWORK').length && reworkPieces.length > 0 ? <CheckSquare className="w-5 h-5 mr-3" /> : <Square className="w-5 h-5 mr-3" />}
-                        {selectedIds.size === reworkPieces.filter(p => p.qc_status === 'NEEDS_REWORK').length ? 'DESELECT ALL' : 'SELECT ALL'}
+                        {selectedIds.size === reworkPieces.length && reworkPieces.length > 0 ? <CheckSquare className="w-5 h-5 mr-3" /> : <Square className="w-5 h-5 mr-3" />}
+                        {selectedIds.size === reworkPieces.length ? 'DESELECT ALL' : 'SELECT ALL'}
                     </button>
                 </div>
                 <div className="space-y-10">
@@ -358,8 +422,8 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
                                 {groupPieces.map((piece) => {
                                     const isSelected = selectedIds.has(piece.id);
                                     return (
-                                        <button key={piece.id} disabled={intendedAction !== null || piece.qc_status !== 'NEEDS_REWORK'} onClick={() => togglePiece(piece.id)} className={`relative aspect-square rounded-2xl border-4 font-mono font-black text-3xl flex items-center justify-center transition-all duration-200 select-none ${isSelected ? "bg-amber-400 border-amber-600 text-black shadow-xl transform scale-110 z-10" : getPieceColorClass(piece.qc_status, false)}`}>
-                                            {!isSelected && piece.qc_status === 'NEEDS_REWORK' && <Hammer size={24} className="absolute text-amber-200 opacity-50" />}
+                                        <button key={piece.id} disabled={isSubmitting || intendedAction !== null} onClick={() => togglePiece(piece.id)} className={`relative aspect-square rounded-2xl border-4 font-mono font-black text-2xl flex items-center justify-center transition-all duration-200 select-none ${isSelected ? "bg-amber-400 border-amber-600 text-black shadow-xl transform scale-110 z-10" : "bg-white border-amber-200 text-amber-900 hover:border-amber-400 shadow-sm"}`}>
+                                            {!isSelected && <Hammer size={24} className="absolute text-amber-200 opacity-50" />}
                                             <span className="relative z-10">{piece.piece_sequence}</span>
                                             {isSelected && <Check className="absolute -top-3 -right-3 w-8 h-8 bg-black text-white rounded-full shadow-lg p-1.5" strokeWidth={4} />}
                                         </button>
@@ -371,21 +435,21 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
                 </div>
             </div>
 
-            <div className="px-8 py-8 border-t-4 border-slate-300 bg-white shrink-0">
+            <div className="px-8 py-8 border-t-4 border-slate-300 bg-white shrink-0" onClick={e => e.stopPropagation()}>
                  {!intendedAction ? (
                     <div className="flex justify-between items-center gap-8">
                         <span className="text-lg font-black text-slate-500 uppercase tracking-widest bg-slate-100 px-6 py-4 rounded-2xl border-2 border-slate-200">
                             Validating: <strong className="text-amber-500 text-4xl ml-3 align-middle">{selectedIds.size}</strong>
                         </span>
                         <div className="flex space-x-6 flex-grow justify-end h-20">
-                            <button onClick={onClose} className="px-8 bg-slate-200 text-slate-700 font-black rounded-2xl hover:bg-slate-300 transition-colors uppercase tracking-widest">Cancel</button>
+                            <button onClick={onClose} disabled={isSubmitting} className="px-8 bg-slate-200 text-slate-700 font-black rounded-2xl hover:bg-slate-300 disabled:opacity-50 transition-colors uppercase tracking-widest">Cancel</button>
                             
                             {/* FLOW FIX: The operator can now FAIL a piece that comes back from Rework */}
-                            <button onClick={() => setIntendedAction('QC_REJECTED')} disabled={selectedIds.size === 0} className="px-8 bg-rose-600 text-white font-black rounded-2xl shadow-xl hover:bg-rose-700 disabled:opacity-30 disabled:bg-slate-300 flex items-center text-2xl uppercase tracking-wider border-b-4 border-rose-800">
+                            <button onClick={() => setIntendedAction('QC_REJECTED')} disabled={isSubmitting || selectedIds.size === 0} className="px-8 bg-rose-600 text-white font-black rounded-2xl shadow-xl hover:bg-rose-700 disabled:opacity-30 disabled:bg-slate-300 flex items-center text-2xl uppercase tracking-wider border-b-4 border-rose-800">
                                 <XCircle className="w-6 h-6 mr-3" /> FAILED
                             </button>
-                            <button onClick={() => executeAction('APPROVED')} disabled={selectedIds.size === 0} className="px-10 bg-black text-amber-400 font-black rounded-2xl shadow-xl hover:bg-slate-800 disabled:opacity-30 disabled:bg-slate-300 flex items-center text-2xl uppercase tracking-wider border-b-4 border-slate-800">
-                                <CheckCircle2 className="w-8 h-8 mr-3" /> PASSED
+                            <button onClick={() => executeAction('APPROVED')} disabled={isSubmitting || selectedIds.size === 0} className="px-10 bg-black text-amber-400 font-black rounded-2xl shadow-xl hover:bg-slate-800 disabled:opacity-30 disabled:bg-slate-300 flex items-center text-2xl uppercase tracking-wider border-b-4 border-slate-800">
+                                {isSubmitting ? <Loader2 className="w-8 h-8 animate-spin mr-3"/> : <CheckCircle2 className="w-8 h-8 mr-3" />} PASSED
                             </button>
                         </div>
                     </div>
@@ -547,11 +611,9 @@ const UniversalWorkstationDashboard = () => {
         try {
             const res = await universalApi.getWorkstationData();
             if (res.data.error) throw new Error(res.data.error);
-            const newBatches = res.data.batches || [];
-            setBatches(newBatches);
+            setBatches(res.data.batches || []);
             setHeaderInfo(res.data.workstationInfo || {});
-            return newBatches; // 🚨 BUG FIX: Return fresh data to update the modal
-        } catch (err) { setError(err.message || "Failed to load workstation data."); return []; } 
+        } catch (err) { setError(err.message || "Failed to load workstation data."); } 
         finally { setIsLoading(false); }
     }, []);
 
@@ -560,55 +622,34 @@ const UniversalWorkstationDashboard = () => {
         universalApi.getDefectCodes().then(res => setDefectCodes(res.data)).catch(console.error);
     }, [fetchQueue]);
 
-    // 🚨 BUG FIX: Updates modal state instantly after API response
-    const refreshLiveModalPieces = (newBatches) => {
-        setModalState(prevState => {
-            if (!prevState) return null;
-            let freshPieces = [];
-            const batch = newBatches.find(b => b.batch_id === prevState.batchId);
-            if (batch) {
-                if (prevState.isBundle && prevState.bundle_id) {
-                    freshPieces = batch.bundles?.find(b => b.bundle_id === prevState.bundle_id)?.pieces || [];
-                } else if (prevState.isRollInspect) {
-                    if (batch.bundles) freshPieces = batch.bundles.filter(b => b.roll_id === prevState.rollId).flatMap(b => b.pieces.map(p => ({...p, _displayGroup: `${b.part_name} | Size ${b.size}`})));
-                    else if (batch.rolls) freshPieces = batch.rolls.find(r => r.roll_id === prevState.rollId)?.parts_details.flatMap(pt => pt.size_details.flatMap(sz => sz.pieces.map(p => ({...p, part_id: pt.part_id, size: sz.size, _displayGroup: `${pt.part_name} | Size ${sz.size}`})))) || [];
-                } else {
-                    freshPieces = batch.rolls?.find(r => r.roll_id === prevState.rollId)?.parts_details?.find(p => p.part_id === prevState.partId)?.size_details.flatMap(sz => sz.pieces.map(p => ({ ...p, _displayGroup: `${prevState.partName} | Size ${sz.size}` }))) || [];
-                }
-            }
-            return { ...prevState, pieces: freshPieces };
-        });
-    };
-
     const handleValidationSubmit = async (validationData) => {
-        setIsProcessing(true); // 🚨 Global Full-Screen Lock ON
+        setIsProcessing(true);
         try {
             if (Array.isArray(validationData)) {
                 await Promise.all(validationData.map(data => universalApi.logPieceCheck(data)));
             } else {
                 await universalApi.logPieceCheck(validationData);
             }
-            const newBatches = await fetchQueue(); 
-            refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
+            await fetchQueue(); 
         } catch (err) { 
             alert(err.response?.data?.error || `Error: ${err.message}`); 
             throw err; 
         } finally {
-            setIsProcessing(false); // 🚨 Global Full-Screen Lock OFF
+            setIsProcessing(false);
         }
     };
 
     const handleApproveAlterSubmit = async ({ pieceIds, status, defectCodeId }) => {
-        setIsProcessing(true); // 🚨 Global Full-Screen Lock ON
+        setIsProcessing(true);
         try {
             await universalApi.approveAlteredPieces({ batchId: modalState.batchId, pieceIds, status, defectCodeId });
-            const newBatches = await fetchQueue();
-            refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
+            // 🚨 REMOVED setModalState(null) SO MODAL STAYS OPEN!
+            await fetchQueue();
         } catch (err) { 
             alert(err.response?.data?.error || `Error: ${err.message}`); 
-            throw err; 
+            throw err; // Ensure modal catches it
         } finally {
-            setIsProcessing(false); // 🚨 Global Full-Screen Lock OFF
+            setIsProcessing(false);
         }
     };
 
@@ -640,12 +681,10 @@ const UniversalWorkstationDashboard = () => {
 
     return (
         <div className="p-4 sm:p-10 bg-slate-200 min-h-screen font-inter text-slate-800 relative">
-            
-            {/* 🚨 THE GLOBAL FULL-SCREEN LOCK: z-[9999] physically blocks the whole window */}
             {isProcessing && (
-                <div className="fixed inset-0 w-screen h-screen bg-black/90 backdrop-blur-sm z-[9999] flex flex-col items-center justify-center">
-                    <Loader2 className="w-20 h-20 text-white animate-spin mb-8" />
-                    <h2 className="text-white text-4xl font-black tracking-widest uppercase shadow-sm">Syncing Database...</h2>
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[300] flex flex-col items-center justify-center">
+                    <Loader2 className="w-16 h-16 text-white animate-spin mb-6" />
+                    <h2 className="text-white text-3xl font-black tracking-widest uppercase shadow-sm">Syncing Factory Floor...</h2>
                 </div>
             )}
 
@@ -700,7 +739,7 @@ const UniversalWorkstationDashboard = () => {
                                                         bundles.flatMap(b => b.pieces.map(p => ({ 
                                                             ...p, 
                                                             bundle_id: b.bundle_id, part_id: b.part_id, size: b.size, 
-                                                            _displayGroup: `${partName} | Size ${b.size}` 
+                                                            _displayGroup: `${partName} | Size ${b.size}`
                                                         })))
                                                     );
                                                     const rollStatus = checkEntityStatus({ pieces: allRollPieces });

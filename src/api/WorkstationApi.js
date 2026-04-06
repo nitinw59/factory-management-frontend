@@ -15,7 +15,7 @@ export const workstationApi = {
   deleteWorkstation: (id) => api.delete(`/workstations/workstations/${id}`),
 
   // --- Dropdowns ---
-  getUsersForDropdown: () => api.get('/workstations/factory-users/dropdown'),
+  getUsersForDropdown: (workstationId) => api.get(`/workstations/factory-users/dropdown/${workstationId}`),
   getPortalsSimple: () => api.get('/shared/portals'),
 };
 
