@@ -75,9 +75,9 @@ const StageCompletionHandoff = ({ batchId, lineId, onBatchComplete }) => {
 
     return (
         <>
-            <button onClick={handleHandoff} disabled={isLoading || !lineId} className="bg-black hover:bg-slate-800 text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all flex items-center disabled:opacity-50">
+            {/* <button onClick={handleHandoff} disabled={isLoading || !lineId} className="bg-black hover:bg-slate-800 text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all flex items-center disabled:opacity-50">
                 {isLoading ? <Loader2 className="w-6 h-6 animate-spin mr-3" /> : <Send className="w-6 h-6 mr-3" />} HAND OFF
-            </button>
+            </button> */}
 
             {wipReport && (
                 <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[200] p-4" onClick={() => setWipReport(null)}>
