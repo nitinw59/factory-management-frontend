@@ -223,25 +223,47 @@ const BatchProgressModal = ({ batchId, onClose, onCutRoll }) => {
 
 // --- START BATCH MODAL ---
 const StartBatchModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave }) => {
+    
+    console.log("StartBatchModal Rendered with Props:", { batchId, cycleFlow, currentLineId });
     const [rolls, setRolls] = useState([]);
     const [selectedRolls, setSelectedRolls] = useState(new Set());
     const [isLoading, setIsLoading] = useState(true);
 
+    // 🚨 DEBUG LOGGER
+    const debugLog = (stepName, message, data) => {
+        const time = new Date().toISOString().split('T')[1].slice(0, -1);
+        console.log(`[${time}] [StartBatchModal Debug | ${stepName}] -> ${message}`, data || '');
+    };
+
     useEffect(() => {
         const fetchModalData = async () => {
             setIsLoading(true);
+            debugLog('Fetch', `Requesting Rolls for Batch ${batchId}...`);
             try {
                 const rollsRes = await initializationPortalApi.getRollsForBatch(batchId);
                 const rollData = rollsRes.data || [];
+                
+                debugLog('Fetch', `Received ${rollData.length} rolls from API. Inspecting first 3...`, rollData.slice(0, 3));
+                
                 setRolls(rollData);
-                setSelectedRolls(new Set(rollData.map(r => r.id))); 
-            } catch (error) { console.error("Failed to fetch modal data", error); }
-            finally { setIsLoading(false); }
+                
+                // Note: Ensure the API returns an array of objects with an 'id' or 'roll_id' property
+                const initialSelected = new Set(rollData.map(r => r.roll_id || r.id));
+                setSelectedRolls(initialSelected); 
+                
+                debugLog('Initial Map', 'Created default selection map:', initialSelected);
+                
+            } catch (error) { 
+                console.error("Failed to fetch modal data", error); 
+            } finally { 
+                setIsLoading(false); 
+            }
         };
         fetchModalData();
     }, [batchId]);
 
     const handleRollToggle = (rollId) => {
+        debugLog('Toggle', `User clicked Roll #${rollId}. Current State:`, selectedRolls.has(rollId));
         setSelectedRolls(prev => {
             const newSelected = new Set(prev);
             if (newSelected.has(rollId)) newSelected.delete(rollId);
@@ -251,8 +273,19 @@ const StartBatchModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave })
     };
 
     const handleSave = async () => {
-        if (!currentLineId || selectedRolls.size === 0) return alert("Batch must be assigned to a line and have rolls selected.");
-        await onSave({ batchId, cycleFlowId: cycleFlow.id, lineId: currentLineId, selectedRollIds: Array.from(selectedRolls) });
+        debugLog('Save', `Attempting to save assignment. CurrentLineId: ${currentLineId}, SelectedRolls:`, Array.from(selectedRolls));
+        
+        if (!currentLineId || selectedRolls.size === 0) {
+            debugLog('Save | ERROR', `Validation failed. CurrentLineId: ${currentLineId}, Selected Rolls Size: ${selectedRolls.size}`);
+            return alert("Batch must be assigned to a line and have rolls selected.");
+        }
+        
+        await onSave({ 
+            batchId, 
+            cycleFlowId: cycleFlow.id, 
+            lineId: currentLineId, 
+            selectedRollIds: Array.from(selectedRolls) 
+        });
     };
 
     return (
@@ -271,29 +304,34 @@ const StartBatchModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave })
                 <div>
                     <label className="block text-sm font-semibold text-slate-600 mb-2">Confirm Fabric Rolls</label>
                     <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                        {isLoading ? <div className="flex justify-center p-6"><Loader2 className="animate-spin w-6 h-6 text-slate-300"/></div> : rolls.map(roll => (
-                            <div 
-                                key={roll.roll_id || roll.id} 
-                                onClick={() => handleRollToggle(roll.roll_id || roll.id)} 
-                                className={`flex items-center p-3 rounded-xl cursor-pointer transition-all border ${
-                                    selectedRolls.has(roll.roll_id || roll.id) 
-                                    ? 'bg-indigo-50 border-indigo-100 shadow-sm' 
-                                    : 'bg-white border-slate-100 hover:border-indigo-100 hover:bg-slate-50'
-                                }`}
-                            >
-                                {selectedRolls.has(roll.roll_id || roll.id) ? 
-                                    <CheckSquare className="text-indigo-500 mr-3" size={20}/> : 
-                                    <Square className="text-slate-300 mr-3" size={20}/>
-                                }
-                                <div className="flex flex-col">
-                                    <span className="font-semibold text-slate-700 text-sm">Roll #{Number(roll.roll_id || roll.id) % 1000}</span>
-                                    <span className="text-xs text-slate-500">{roll.fabric_type} • {roll.color_name || roll.color}</span>
+                        {isLoading ? <div className="flex justify-center p-6"><Loader2 className="animate-spin w-6 h-6 text-slate-300"/></div> : rolls.map(roll => {
+                            const rollId = roll.roll_id || roll.id;
+                            const isSelected = selectedRolls.has(rollId);
+                            
+                            return (
+                                <div 
+                                    key={rollId} 
+                                    onClick={() => handleRollToggle(rollId)} 
+                                    className={`flex items-center p-3 rounded-xl cursor-pointer transition-all border ${
+                                        isSelected 
+                                        ? 'bg-indigo-50 border-indigo-100 shadow-sm' 
+                                        : 'bg-white border-slate-100 hover:border-indigo-100 hover:bg-slate-50'
+                                    }`}
+                                >
+                                    {isSelected ? 
+                                        <CheckSquare className="text-indigo-500 mr-3" size={20}/> : 
+                                        <Square className="text-slate-300 mr-3" size={20}/>
+                                    }
+                                    <div className="flex flex-col">
+                                        <span className="font-semibold text-slate-700 text-sm">Roll #{Number(rollId) % 1000}</span>
+                                        <span className="text-xs text-slate-500">{roll.fabric_type} • {roll.color_name || roll.color}</span>
+                                    </div>
+                                    <span className="ml-auto text-xs font-mono font-medium text-slate-500 bg-white px-2 py-1 rounded-lg border border-slate-100">
+                                        {roll.meter}m
+                                    </span>
                                 </div>
-                                <span className="ml-auto text-xs font-mono font-medium text-slate-500 bg-white px-2 py-1 rounded-lg border border-slate-100">
-                                    {roll.meter}m
-                                </span>
-                            </div>
-                        ))}
+                            );
+                        })}
                         {!isLoading && rolls.length === 0 && <p className="text-sm text-slate-400 italic text-center py-4">No rolls linked to this batch.</p>}
                     </div>
                 </div>
@@ -553,6 +591,7 @@ const InitializationDashboardPortalPage = () => {
         setIsLoading(true);
         try {
             const response = await initializationPortalApi.getDashboardData();
+            console.log("Fetched dashboard data:", response.data);
             setBatches(response.data);
         } catch (err) {
             setError("Could not load initialization queue.");
@@ -566,6 +605,7 @@ const InitializationDashboardPortalPage = () => {
 
     const handleStartBatch = async (data) => {
         try {
+            console.log("Starting batch with data:", data);
             await initializationPortalApi.startBatch(data);
             setModalState({ type: null, data: null });
             fetchDashboardData(); 

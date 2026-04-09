@@ -21,6 +21,8 @@ export const lineLoaderApi = {
    */
   assignLineAndLogRolls: (data) => api.post('/line-loader/assign-line', data),
   
-  getRollsForBatch: (batchId) => api.get(`/line-loader/batch/${batchId}/rolls`),
-  checkLineWip: (lineId) => api.get(`/line-loader/check-wip/${lineId}`)
+  getRollsForBatch: (batchId, cycleFlowId) => api.get(`/line-loader/batch/${batchId}/rolls`, { params: { cycle_flow_id: cycleFlowId } }),
+  checkLineWip: (lineId) => api.get(`/line-loader/check-wip/${lineId}`),
+  getAllActiveLineWip: () => api.get('/line-loader/active-lines-wip'),
+  checkAndCompleteStage: (batchId, cycleFlowId) => api.post(`/line-loader/batch/${batchId}/stage/${cycleFlowId}/check-complete`),
 };

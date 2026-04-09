@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { 
-    QrCode, ShieldCheck, ShieldAlert, Check, X, Camera,
-    Hammer, AlertCircle, ArrowLeft, Package, CheckCircle2, 
-    RefreshCw, Maximize, HardDrive, List, Barcode, Clock
+import {
+    QrCode, ShieldCheck, ShieldAlert, Check, X,
+    Hammer, AlertCircle, ArrowLeft, Package, CheckCircle2,
+    RefreshCw, Maximize, HardDrive, List, Barcode, Clock, Layers
 } from 'lucide-react';
-import { Html5Qrcode } from "html5-qrcode";
 import { assemblyApi } from '../../api/assemblyApi';
 
 // Standard Enterprise Status Enums
@@ -33,9 +32,9 @@ const AssemblyProcessingPortal = () => {
     const [selectedBatch, setSelectedBatch] = useState(null);
     const [batchPieces, setBatchPieces] = useState([]);
 
-    // Camera Specific State
-    const [isCameraActive, setIsCameraActive] = useState(false);
-    const scannerRef = useRef(null);
+    // Batch Mode — selected piece for in-batch action
+    const [selectedPiece, setSelectedPiece] = useState(null);
+    const [isPieceLoading, setIsPieceLoading] = useState(false);
 
     // Hardware Scanner Buffer Refs
     const scanBuffer = useRef('');
@@ -94,6 +93,7 @@ const AssemblyProcessingPortal = () => {
         setSelectedBatch(batch);
         try {
             const res = await assemblyApi.getBatchGarments(batch.batch_id);
+            console.log("Fetcheddd batch garments:", res.data);
             setBatchPieces(res.data);
         } catch (e) {
             alert("Failed to load pieces for this batch.");
@@ -103,22 +103,30 @@ const AssemblyProcessingPortal = () => {
         }
     };
 
-    const handlePieceClick = (piece) => {
-        if (piece.status === 'APPROVED') {
-            alert("This piece is already approved and assembled.");
-            return;
+    const handlePieceClick = async (piece) => {
+        setIsPieceLoading(true);
+        setError(null);
+        setGarment(null);
+        setSelectedPiece(piece);
+        try {
+            const res = await assemblyApi.getGarmentDetails(piece.garment_uid);
+            setGarment(res.data);
+            playFeedback('success');
+        } catch (err) {
+            playFeedback('error');
+            const errData = err.response?.data;
+            setError(errData?.message || errData?.error || "Failed to load piece.");
+            setSelectedPiece(null);
+        } finally {
+            setIsPieceLoading(false);
         }
-        // Auto-switch to scanner mode and load the piece
-        setViewMode('SCANNER');
-        processScan(piece.garment_uid);
     };
 
     // --- CORE SCAN PROCESSING ---
     const processScan = async (uid) => {
         if (isLoading || isProcessingAction) return;
-        
+
         const cleanUid = uid.trim();
-        if (isCameraActive) stopCamera();
 
         // Ensure we switch to scanner view if hardware scan happens during batch view
         if (viewMode !== 'SCANNER') setViewMode('SCANNER');
@@ -130,11 +138,14 @@ const AssemblyProcessingPortal = () => {
         setScannedTextVisual(cleanUid); // Display what was scanned
 
         try {
+            console.log("Processing scan for UID:", cleanUid);
             const res = await assemblyApi.getGarmentDetails(cleanUid);
+            console.log("Fetched garment details:", res.data);
             setGarment(res.data);
             playFeedback('success');
             setScannedTextVisual(''); // Clear text on success
         } catch (err) {
+            console.error("Scan processing error:", err);
             playFeedback('error');
             const errData = err.response?.data;
             if (err.response?.status === 403 && errData?.error === "Batch Mismatch") {
@@ -156,43 +167,10 @@ const AssemblyProcessingPortal = () => {
         }
     };
 
-    // --- CAMERA SCANNING LOGIC ---
-    const startCamera = () => {
-        setGarment(null);
-        setMismatch(null);
-        setError(null);
-        setIsCameraActive(true);
-        
-        setTimeout(() => {
-            const html5QrCode = new Html5Qrcode("reader");
-            scannerRef.current = html5QrCode;
-            html5QrCode.start(
-                { facingMode: "environment" }, 
-                { fps: 10, qrbox: { width: 300, height: 150 }, aspectRatio: 1.777778 },
-                (decodedText) => processScan(decodedText),
-                () => { /* silent failure */ }
-            ).catch(err => {
-                setError("Camera access denied.");
-                setIsCameraActive(false);
-            });
-        }, 300);
-    };
-
-    const stopCamera = () => {
-        if (scannerRef.current && scannerRef.current.isScanning) {
-            scannerRef.current.stop().then(() => {
-                setIsCameraActive(false);
-                scannerRef.current = null;
-            }).catch(e => console.error(e));
-        } else {
-            setIsCameraActive(false);
-        }
-    };
-
     // --- HARDWARE SCANNER LOGIC ---
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if (isCameraActive || isProcessingAction || showManualBox) return;
+            if (isProcessingAction || showManualBox) return;
 
             const now = Date.now();
             if (now - lastKeyStrokeAt.current > 40) {
@@ -213,7 +191,7 @@ const AssemblyProcessingPortal = () => {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [garment, mismatch, isLoading, isCameraActive, isProcessingAction, showManualBox, viewMode]);
+    }, [garment, mismatch, isLoading, isProcessingAction, showManualBox, viewMode]);
 
     // --- FINAL ACTIONS ---
     const handleAction = async (status, defectCodeId = null) => {
@@ -228,9 +206,15 @@ const AssemblyProcessingPortal = () => {
             setLastAction({ uid: garment.garment_uid, status });
             setGarment(null);
             setShowDefectModal(null);
+            setSelectedPiece(null);
             playFeedback('success');
-            
-            // Refresh batch data in background in case they switch back to batch view
+
+            // If in batch mode, refresh the batch pieces so status updates live
+            if (viewMode === 'BATCH' && selectedBatch) {
+                const res = await assemblyApi.getBatchGarments(selectedBatch.batch_id);
+                setBatchPieces(res.data);
+                console.log("Refreshed dbatch garments after action:", res.data);
+            }
             loadRequiredData();
 
             setTimeout(() => setLastAction(null), 4000);
@@ -244,8 +228,8 @@ const AssemblyProcessingPortal = () => {
 
     return (
         <div className="min-h-screen bg-[#F8FAFC] p-4 md:p-10 font-inter select-none">
-            {/* Global Loader for Batch Fetching */}
-            {isLoading && viewMode === 'BATCH' && (
+            {/* Global Loader for Batch Selection only */}
+            {isLoading && viewMode === 'BATCH' && !selectedBatch && (
                 <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-[500] flex items-center justify-center">
                     <RefreshCw className="w-10 h-10 animate-spin text-indigo-600" />
                 </div>
@@ -289,14 +273,6 @@ const AssemblyProcessingPortal = () => {
                     </div>
 
                     <div className="flex gap-3">
-                        {viewMode === 'SCANNER' && !garment && !mismatch && !isCameraActive && (
-                            <button 
-                                onClick={startCamera}
-                                className="flex items-center px-6 py-3 bg-white border-2 border-slate-200 rounded-2xl font-black text-slate-600 hover:bg-slate-50 transition-all active:scale-95"
-                            >
-                                <Camera className="w-5 h-5 mr-2 text-indigo-500" /> CAM
-                            </button>
-                        )}
                         {lastAction && (
                             <div className="bg-emerald-50 text-emerald-700 px-6 py-3 rounded-2xl border-2 border-emerald-100 flex items-center font-black text-sm animate-in fade-in slide-in-from-right-4">
                                 <CheckCircle2 className="w-5 h-5 mr-3" /> {lastAction.uid} {lastAction.status}
@@ -311,20 +287,8 @@ const AssemblyProcessingPortal = () => {
                 {viewMode === 'SCANNER' && (
                     <div className="animate-in fade-in zoom-in-95 duration-200">
                         
-                        {/* CAMERA VIEWPORT MODAL */}
-                        {isCameraActive && (
-                            <div className="fixed inset-0 bg-slate-900 z-[200] flex flex-col items-center justify-center p-6 animate-in fade-in">
-                                <div className="w-full max-w-2xl bg-black rounded-[3rem] overflow-hidden relative border-8 border-white/10 shadow-2xl">
-                                    <div id="reader" className="w-full"></div>
-                                </div>
-                                <button onClick={stopCamera} className="mt-12 px-12 py-5 bg-white text-black font-black rounded-3xl hover:bg-rose-600 hover:text-white transition-all shadow-xl flex items-center">
-                                    <X className="mr-3" /> CLOSE CAMERA
-                                </button>
-                            </div>
-                        )}
-
                         {/* IDLE SCAN STATE WITH SCANNED TEXT VISUAL */}
-                        {!garment && !mismatch && !isCameraActive && (
+                        {!garment && !mismatch && (
                             <div className="text-center py-32 bg-white rounded-[3rem] border-4 border-dashed border-slate-200 shadow-inner">
                                 <div className="relative inline-block mb-8">
                                     <QrCode size={140} className="text-slate-100" />
@@ -464,94 +428,229 @@ const AssemblyProcessingPortal = () => {
                     MODE B: BATCH & PIECE SELECTION
                 ========================================= */}
                 {viewMode === 'BATCH' && (
-                    <div className="animate-in fade-in duration-200 w-full bg-white rounded-[3rem] p-8 md:p-12 shadow-sm border border-slate-200">
-                        
+                    <div className="animate-in fade-in duration-200 space-y-6">
+
                         {!selectedBatch ? (
-                            <>
+                            <div className="w-full bg-white rounded-[3rem] p-8 md:p-12 shadow-sm border border-slate-200">
                                 <h2 className="text-xl font-black text-slate-400 mb-8 uppercase tracking-widest flex items-center">
                                     <List className="mr-3" size={24}/> Select Active Batch
                                 </h2>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                    {activeBatches.map(batch => (
-                                        <button 
-                                            key={batch.batch_id}
-                                            onClick={() => handleBatchClick(batch)}
-                                            className="bg-slate-50 p-8 rounded-[2rem] text-left border-2 border-slate-100 hover:border-indigo-500 hover:shadow-lg transition-all group"
-                                        >
-                                            <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-600 font-black text-[10px] uppercase rounded-lg mb-4">
-                                                Batch {batch.batch_code}
-                                            </span>
-                                            <h3 className="text-2xl font-black text-slate-800 mb-6 group-hover:text-indigo-600 transition-colors">{batch.product_name}</h3>
-                                            
-                                            <div className="space-y-2">
-                                                <div className="flex justify-between text-[10px] font-black uppercase text-slate-500">
-                                                    <span>Completion</span>
-                                                    <span className="text-indigo-600">{batch.completed_units} / {batch.total_units}</span>
+                                    {activeBatches.map(batch => {
+                                        const approved = batch.approved_units ?? batch.completed_units ?? 0;
+                                        const pending = (batch.total_units ?? 0) - (batch.completed_units ?? 0);
+                                        const rejected = batch.rejected_units ?? batch.qc_rejected_units ?? 0;
+                                        const total = batch.total_units ?? 0;
+                                        return (
+                                            <button
+                                                key={batch.batch_id}
+                                                onClick={() => handleBatchClick(batch)}
+                                                className="bg-slate-50 p-8 rounded-[2rem] text-left border-2 border-slate-100 hover:border-indigo-500 hover:shadow-lg transition-all group"
+                                            >
+                                                <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-600 font-black text-[10px] uppercase rounded-lg mb-4">
+                                                    {batch.batch_code}
+                                                </span>
+                                                <h3 className="text-2xl font-black text-slate-800 mb-5 group-hover:text-indigo-600 transition-colors">{batch.product_name}</h3>
+
+                                                {/* Summary chips */}
+                                                <div className="flex gap-2 flex-wrap mb-4">
+                                                    <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-700">{approved} Approved</span>
+                                                    <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-slate-200 text-slate-600">{pending} Pending</span>
+                                                    {rejected > 0 && <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-rose-100 text-rose-700">{rejected} Rejected</span>}
                                                 </div>
-                                                <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex">
-                                                    <div className="bg-indigo-500 h-full" style={{ width: `${(batch.completed_units/batch.total_units)*100}%` }} />
+
+                                                <div className="space-y-1.5">
+                                                    <div className="flex justify-between text-[10px] font-black uppercase text-slate-500">
+                                                        <span>Completion</span>
+                                                        <span className="text-indigo-600">{batch.completed_units} / {total}</span>
+                                                    </div>
+                                                    <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden flex">
+                                                        <div className="bg-emerald-500 h-full" style={{ width: `${total > 0 ? (approved/total)*100 : 0}%` }} />
+                                                        <div className="bg-rose-400 h-full" style={{ width: `${total > 0 ? (rejected/total)*100 : 0}%` }} />
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        </button>
-                                    ))}
+                                            </button>
+                                        );
+                                    })}
                                     {activeBatches.length === 0 && (
                                         <div className="col-span-full py-12 text-center text-slate-400 font-bold uppercase">
                                             No active batches running on this line.
                                         </div>
                                     )}
                                 </div>
-                            </>
+                            </div>
                         ) : (
-                            <div className="animate-in slide-in-from-right-8">
-                                <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-6 border-b border-slate-100 pb-8">
-                                    <div>
-                                        <button 
-                                            onClick={() => setSelectedBatch(null)}
-                                            className="flex items-center text-slate-400 hover:text-indigo-600 font-bold text-sm mb-4 transition-colors"
-                                        >
-                                            <ArrowLeft size={16} className="mr-2" /> Back to Batches
-                                        </button>
-                                        <h2 className="text-3xl font-black text-slate-900">{selectedBatch.product_name}</h2>
-                                        <p className="text-indigo-600 font-black text-sm uppercase tracking-widest mt-1">Batch {selectedBatch.batch_code}</p>
-                                    </div>
-                                    
-                                    <div className="flex gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                                        <div className="flex items-center text-[10px] font-black uppercase text-slate-500"><div className="w-3 h-3 rounded-full bg-slate-300 mr-2"/> Pending</div>
-                                        <div className="flex items-center text-[10px] font-black uppercase text-emerald-600"><div className="w-3 h-3 rounded-full bg-emerald-500 mr-2"/> Approved</div>
-                                        <div className="flex items-center text-[10px] font-black uppercase text-rose-600"><div className="w-3 h-3 rounded-full bg-rose-500 mr-2"/> Rework/Reject</div>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-3">
-                                    {batchPieces.map(piece => {
-                                        let bgClass = "bg-white border-slate-200 text-slate-500 hover:border-indigo-400 hover:shadow-md";
-                                        let icon = <Clock size={14} className="opacity-40" />;
-                                        
-                                        if (piece.status === 'APPROVED') {
-                                            bgClass = "bg-emerald-50 border-emerald-200 text-emerald-600 opacity-60";
-                                            icon = <CheckCircle2 size={14} />;
-                                        } else if (piece.status === 'NEEDS_REWORK' || piece.status === 'QC_REJECTED') {
-                                            bgClass = "bg-rose-50 border-rose-200 text-rose-600 hover:border-rose-400";
-                                            icon = <AlertCircle size={14} />;
-                                        }
-
-                                        return (
-                                            <button
-                                                key={piece.id}
-                                                onClick={() => handlePieceClick(piece)}
-                                                className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all active:scale-95 ${bgClass}`}
-                                            >
-                                                <span className="font-black text-lg mb-1">{piece.garment_uid.split('-').pop()}</span>
-                                                {icon}
+                            <div className={`animate-in slide-in-from-right-8 space-y-6 ${garment ? 'pb-64' : ''}`}>
+                                {/* Batch header */}
+                                <div className="w-full bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-200">
+                                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                        <div>
+                                            <button onClick={() => { setSelectedBatch(null); setGarment(null); setSelectedPiece(null); }}
+                                                className="flex items-center text-slate-400 hover:text-indigo-600 font-bold text-sm mb-3 transition-colors">
+                                                <ArrowLeft size={16} className="mr-2" /> Back to Batches
                                             </button>
-                                        );
-                                    })}
+                                            <h2 className="text-2xl font-black text-slate-900">{selectedBatch.product_name}</h2>
+                                            <p className="text-indigo-600 font-black text-sm uppercase tracking-widest mt-0.5">{selectedBatch.batch_code}</p>
+                                        </div>
+                                        {/* Summary */}
+                                        {(() => {
+                                            const approved = batchPieces.filter(p => p.status === 'APPROVED').length;
+                                            const rejected = batchPieces.filter(p => p.status === 'QC_REJECTED').length;
+                                            const rework = batchPieces.filter(p => p.status === 'NEEDS_REWORK').length;
+                                            const pending = batchPieces.filter(p => !p.status || p.status === 'PENDING').length;
+                                            return (
+                                                <div className="flex gap-3 flex-wrap">
+                                                    <span className="text-xs font-black px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">{approved} Approved</span>
+                                                    <span className="text-xs font-black px-4 py-2 rounded-xl bg-slate-100 text-slate-600 border border-slate-200">{pending} Pending</span>
+                                                    {rework > 0 && <span className="text-xs font-black px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-200">{rework} Rework</span>}
+                                                    {rejected > 0 && <span className="text-xs font-black px-4 py-2 rounded-xl bg-rose-50 text-rose-700 border border-rose-200">{rejected} Rejected</span>}
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
                                 </div>
+
+                                {/* Pieces grouped by roll */}
+                                {(() => {
+                                    const byRoll = batchPieces.reduce((acc, p) => {
+                                        const key = p.fabric_roll_id || 'Unknown';
+                                        if (!acc[key]) acc[key] = [];
+                                        acc[key].push(p);
+                                        return acc;
+                                    }, {});
+                                    return Object.entries(byRoll).map(([rollId, pieces]) => {
+                                        const sortedPieces = [...pieces].sort((a, b) => (a.piece_sequence ?? 0) - (b.piece_sequence ?? 0));
+                                        return (
+                                        <div key={rollId} className="bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-200">
+                                            <div className="flex items-center gap-3 mb-5">
+                                                <Layers size={18} className="text-indigo-500" />
+                                                <span className="font-black text-slate-700 uppercase tracking-widest text-sm">Roll #{rollId}</span>
+                                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{pieces.length} pcs</span>
+                                            </div>
+                                            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-12 gap-2">
+                                                {sortedPieces.map(piece => {
+                                                    const st = piece.status;
+                                                    const isSelected = selectedPiece?.id === piece.id;
+                                                    let cls = "bg-white border-slate-200 text-slate-500 hover:border-indigo-400 hover:shadow-md";
+                                                    let icon = <Clock size={12} className="opacity-40" />;
+                                                    if (st === 'APPROVED') { cls = "bg-emerald-50 border-emerald-300 text-emerald-600"; icon = <CheckCircle2 size={12} />; }
+                                                    else if (st === 'QC_REJECTED') { cls = "bg-rose-50 border-rose-300 text-rose-600 hover:border-rose-500"; icon = <X size={12} />; }
+                                                    else if (st === 'NEEDS_REWORK') { cls = "bg-amber-50 border-amber-300 text-amber-700 hover:border-amber-500"; icon = <Hammer size={12} />; }
+                                                    if (isSelected) cls += " ring-2 ring-indigo-500 ring-offset-1";
+
+                                                    const tooltipLines = [
+                                                        `UID: ${piece.garment_uid}`,
+                                                        `Status: ${st || 'PENDING'}`,
+                                                        piece.active_garment_defect_count > 0 ? `Defects: ${piece.active_garment_defect_count}` : null,
+                                                        piece.garment_defects?.length > 0 ? piece.garment_defects.map(d => d.description || d.defect_description).join(', ') : null,
+                                                    ].filter(Boolean).join('\n');
+
+                                                    const isLoadingThis = isPieceLoading && selectedPiece?.id === piece.id;
+                                                    return (
+                                                        <button
+                                                            key={piece.id}
+                                                            title={tooltipLines}
+                                                            onClick={() => handlePieceClick(piece)}
+                                                            disabled={isPieceLoading}
+                                                            className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all active:scale-95 disabled:cursor-wait ${cls}`}
+                                                        >
+                                                            <span className="font-black text-base leading-none mb-1">{piece.piece_sequence}</span>
+                                                            {isLoadingThis ? <RefreshCw size={12} className="animate-spin" /> : icon}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                        );
+                                    });
+                                })()}
+
                             </div>
                         )}
                     </div>
                 )}
             </div>
+
+            {/* FIXED BOTTOM DRAWER — piece action panel (BATCH mode) */}
+            {viewMode === 'BATCH' && (garment || isPieceLoading) && (
+                <div className="fixed bottom-0 left-0 right-0 z-[200] animate-in slide-in-from-bottom-4 duration-200">
+                    <div className="max-w-6xl mx-auto px-4 pb-4">
+                        <div className="bg-white rounded-[2rem] shadow-2xl border-2 border-indigo-200 overflow-hidden">
+                            {isPieceLoading && !garment ? (
+                                <div className="flex items-center justify-center py-8 gap-3 text-indigo-500">
+                                    <RefreshCw size={20} className="animate-spin" />
+                                    <span className="font-black text-sm uppercase tracking-widest">Loading piece...</span>
+                                </div>
+                            ) : garment ? (
+                                <div className="p-5 md:p-6">
+                                    {/* Header row */}
+                                    <div className="flex items-start justify-between mb-4">
+                                        <div>
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Selected Piece</span>
+                                            <h3 className="text-xl font-black text-slate-900 leading-tight">{garment.garment_uid}</h3>
+                                            <p className="text-slate-500 font-bold text-xs mt-0.5">
+                                                Size {garment.size}
+                                                {garment.current_active_location && <span className="ml-2 text-indigo-400">· {garment.current_active_location}</span>}
+                                            </p>
+                                        </div>
+                                        <button onClick={() => { setGarment(null); setSelectedPiece(null); }}
+                                            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-95 transition-all ml-4 shrink-0">
+                                            <X size={16} className="text-slate-600" />
+                                        </button>
+                                    </div>
+
+                                    {/* Component map — compact horizontal */}
+                                    {garment.components?.length > 0 && (
+                                        <div className="flex gap-2 flex-wrap mb-4">
+                                            {garment.components.map((comp, i) => (
+                                                <div key={i} className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${comp.has_active_defect ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                                                    {comp.has_active_defect ? <X size={10} strokeWidth={3} /> : <Check size={10} strokeWidth={3} />}
+                                                    {comp.part_name}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* QC note */}
+                                    {garment.qc_status && garment.qc_status !== 'CLEAN' && (
+                                        <div className="mb-4 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-800">
+                                            QC: {garment.qc_status}
+                                            {garment.garment_defects?.length > 0 && (
+                                                <span className="ml-1.5 text-amber-600">· {garment.garment_defects.map(d => d.description || d.defect_description).join(', ')}</span>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Action buttons */}
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={() => handleAction(STATUS.APPROVED)}
+                                            disabled={isProcessingAction || garment.components?.some(c => c.has_active_defect)}
+                                            className="flex-1 bg-emerald-600 text-white rounded-2xl py-3.5 font-black text-sm flex items-center justify-center gap-2 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                                        >
+                                            <ShieldCheck size={16} /> APPROVE
+                                        </button>
+                                        <button
+                                            onClick={() => setShowDefectModal('REWORK')}
+                                            disabled={isProcessingAction}
+                                            className="flex-1 bg-amber-500 text-white rounded-2xl py-3.5 font-black text-sm flex items-center justify-center gap-2 hover:bg-amber-600 active:scale-95 disabled:opacity-40 transition-all"
+                                        >
+                                            <Hammer size={16} /> REWORK
+                                        </button>
+                                        <button
+                                            onClick={() => setShowDefectModal('REJECT')}
+                                            disabled={isProcessingAction}
+                                            className="flex-1 bg-rose-600 text-white rounded-2xl py-3.5 font-black text-sm flex items-center justify-center gap-2 hover:bg-rose-700 active:scale-95 disabled:opacity-40 transition-all"
+                                        >
+                                            <X size={16} /> REJECT
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : null}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* DEFECT DICTIONARY MODAL (Preserved) */}
             {showDefectModal && (

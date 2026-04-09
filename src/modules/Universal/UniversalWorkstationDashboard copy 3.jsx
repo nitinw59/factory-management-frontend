@@ -234,27 +234,27 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                     </div>
                 </div>
 
-                <div className="bg-white p-4 border-t-4 border-slate-300 shadow-[0_-20px_50px_rgba(0,0,0,0.15)] flex flex-col shrink-0">
+                <div className="bg-white p-8 border-t-4 border-slate-300 shadow-[0_-20px_50px_rgba(0,0,0,0.15)] flex flex-col shrink-0">
                     {!intendedAction ? (
-                        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-                            <div className="bg-slate-100 px-5 py-3 rounded-xl border-2 border-slate-300 text-center min-w-[140px]">
-                                <span className="block text-slate-500 text-xs font-black uppercase mb-0.5 tracking-widest">Selected</span>
-                                <span className="text-4xl font-black text-black leading-none">{selectedIds.size}</span>
+                        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-8">
+                            <div className="bg-slate-100 p-6 rounded-2xl border-2 border-slate-300 text-center min-w-[200px]">
+                                <span className="block text-slate-500 text-sm font-black uppercase mb-1 tracking-widest">Selected</span>
+                                <span className="text-6xl font-black text-black leading-none">{selectedIds.size}</span>
                             </div>
-
-                            <div className="flex-grow grid grid-cols-3 gap-4 h-[60px]">
+                            
+                            <div className="flex-grow grid grid-cols-3 gap-6 h-[100px]">
                                 <div className="relative h-full">
                                     {/* RULE: Lock bundle approval if active reworks OR partial selection */}
-                                    {isBundleLocked && selectedIds.size > 0 && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Bundle Locked: Active Reworks</span></div>}
-                                    {itemInfo.isBundle && !isBundleLocked && selectedIds.size > 0 && selectedIds.size !== actionablePieces.length && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Partial Selection: Reject/Rework Only</span></div>}
-
-                                    <button onClick={() => handleActionInitiation('APPROVED')} disabled={selectedIds.size === 0 || isBundleLocked || (itemInfo.isBundle && selectedIds.size !== actionablePieces.length)} className="w-full h-full bg-black text-white rounded-xl font-black text-lg shadow-xl hover:bg-slate-800 active:scale-95 disabled:opacity-20 disabled:bg-slate-400 flex items-center justify-center border-b-4 border-slate-800">
-                                        <CheckCircle2 className="w-5 h-5 mr-2" /> APPROVE
+                                    {isBundleLocked && selectedIds.size > 0 && <div className="absolute -top-10 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-4 py-1.5 rounded-md shadow-lg">Bundle Locked: Active Reworks</span></div>}
+                                    {itemInfo.isBundle && !isBundleLocked && selectedIds.size > 0 && selectedIds.size !== actionablePieces.length && <div className="absolute -top-10 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-4 py-1.5 rounded-md shadow-lg">Partial Selection: Reject/Rework Only</span></div>}
+                                    
+                                    <button onClick={() => handleActionInitiation('APPROVED')} disabled={selectedIds.size === 0 || isBundleLocked || (itemInfo.isBundle && selectedIds.size !== actionablePieces.length)} className="w-full h-full bg-black text-white rounded-2xl font-black text-2xl shadow-xl hover:bg-slate-800 active:scale-95 disabled:opacity-20 disabled:bg-slate-400 flex items-center justify-center border-b-4 border-slate-800">
+                                        <CheckCircle2 className="w-8 h-8 mr-3" /> APPROVE
                                     </button>
                                 </div>
 
-                                <button onClick={() => handleActionInitiation('NEEDS_REWORK')} disabled={selectedIds.size === 0} className="w-full h-full bg-amber-400 text-black rounded-xl font-black text-lg shadow-xl hover:bg-amber-500 active:scale-95 disabled:opacity-30 disabled:bg-slate-200 flex items-center justify-center border-b-4 border-amber-600"><Hammer className="w-5 h-5 mr-2" /> REWORK</button>
-                                <button onClick={() => handleActionInitiation('QC_REJECTED')} disabled={selectedIds.size === 0} className="w-full h-full bg-rose-600 text-white rounded-xl font-black text-lg shadow-xl hover:bg-rose-700 active:scale-95 disabled:opacity-30 disabled:bg-slate-200 flex items-center justify-center border-b-4 border-rose-800"><XCircle className="w-5 h-5 mr-2" /> REJECT</button>
+                                <button onClick={() => handleActionInitiation('NEEDS_REWORK')} disabled={selectedIds.size === 0} className="w-full h-full bg-amber-400 text-black rounded-2xl font-black text-2xl shadow-xl hover:bg-amber-500 active:scale-95 disabled:opacity-30 disabled:bg-slate-200 flex items-center justify-center border-b-4 border-amber-600"><Hammer className="w-8 h-8 mr-3" /> REWORK</button>
+                                <button onClick={() => handleActionInitiation('QC_REJECTED')} disabled={selectedIds.size === 0} className="w-full h-full bg-rose-600 text-white rounded-2xl font-black text-2xl shadow-xl hover:bg-rose-700 active:scale-95 disabled:opacity-30 disabled:bg-slate-200 flex items-center justify-center border-b-4 border-rose-800"><XCircle className="w-8 h-8 mr-3" /> REJECT</button>
                             </div>
                         </div>
                     ) : (
@@ -455,10 +455,11 @@ const PartAccordion = ({ batch, roll, part, setModalState, allowMultiple }) => {
                     {status.pending_alter > 0 && (
                         <button onClick={handleBulkRepair} className="px-4 py-2 text-sm bg-amber-100 text-amber-900 border border-amber-200 rounded-xl hover:bg-amber-200 font-black shadow-sm flex items-center active:scale-95"><Hammer className="w-4 h-4 mr-2"/> Fix Rework ({status.pending_alter})</button>
                     )}
-                    {!status.isComplete ? (
+                    {!status.isComplete && (
                         <button onClick={handleBulkInspect} className="px-6 py-2 text-sm bg-slate-800 text-white rounded-xl hover:bg-black font-black shadow-md active:scale-95 flex items-center transition-all">Bulk Inspect <ChevronRight className="w-4 h-4 ml-1" /></button>
-                    ) : (
-                        <button onClick={handleBulkInspect} className="px-4 py-2 text-sm bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl font-black flex items-center shadow-sm hover:bg-emerald-100 hover:border-emerald-400 active:scale-95 transition-all"><Check className="w-4 h-4 mr-2"/> Validated</button>
+                    )}
+                    {status.isComplete && (
+                        <span className="px-4 py-2 text-sm bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl font-black flex items-center shadow-sm"><Check className="w-4 h-4 mr-2"/> Validated</span>
                     )}
                 </div>
             </div>
@@ -483,7 +484,7 @@ const PartAccordion = ({ batch, roll, part, setModalState, allowMultiple }) => {
 // ============================================================================
 // DYNAMIC PROGRESS ROWS
 // ============================================================================
-const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect, onRepair, canApproveBundle, onQuickApprove }) => {
+const ValidationProgressRow = ({ label, icon: Icon, entity, onInspect, onRepair, canApproveBundle, onQuickApprove }) => {
     const { total_cut, total_processed, pending_alter, isComplete, total_validated, total_rejected, total_repaired } = checkEntityStatus(entity);
     if (total_cut === 0) return null;
 
@@ -493,7 +494,6 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
                 <div className="p-3 bg-slate-100 text-indigo-600 rounded-xl mr-4"><Icon size={24}/></div>
                 <div>
                     <span className="font-black text-slate-800 tracking-tight block text-lg">{label}</span>
-                    {subLabel && <span className="text-xs text-indigo-500 font-black uppercase tracking-widest">{subLabel}</span>}
                     <span className="text-xs text-slate-500 font-bold uppercase tracking-widest">{total_processed} / {total_cut} pieces</span>
                 </div>
             </div>
@@ -519,7 +519,7 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
                         )}
                     </>
                 ) : (
-                    <button onClick={() => onInspect(entity)} className="px-5 py-2 text-sm text-emerald-600 bg-emerald-50 border-2 border-emerald-200 rounded-xl font-black flex items-center w-max hover:bg-emerald-100 hover:border-emerald-400 active:scale-95 transition-all"><Check className="w-4 h-4 mr-2"/> DONE</button>
+                    <span className="px-5 py-2 text-sm text-emerald-600 bg-emerald-50 border-2 border-emerald-200 rounded-xl font-black flex items-center w-max"><Check className="w-4 h-4 mr-2"/> DONE</span>
                 )}
             </div>
         </div>
@@ -537,7 +537,6 @@ const UniversalWorkstationDashboard = () => {
     const [error, setError] = useState(null);
     const [modalState, setModalState] = useState(null);
     const [headerInfo, setHeaderInfo] = useState({});
-    const [selectedBatchId, setSelectedBatchId] = useState('ALL');
 
     const allowMultiple = headerInfo.can_approve_multiple_piece || false;
     const allowBundle = headerInfo.can_approve_whole_bundle || false;
@@ -547,7 +546,6 @@ const UniversalWorkstationDashboard = () => {
         setIsLoading(true);
         try {
             const res = await universalApi.getWorkstationData();
-            console.log("Fetched workstation data:", res.data); // Debug log to verify API response
             if (res.data.error) throw new Error(res.data.error);
             const newBatches = res.data.batches || [];
             setBatches(newBatches);
@@ -575,9 +573,7 @@ const UniversalWorkstationDashboard = () => {
                     if (batch.bundles) freshPieces = batch.bundles.filter(b => b.roll_id === prevState.rollId).flatMap(b => b.pieces.map(p => ({...p, _displayGroup: `${b.part_name} | Size ${b.size}`})));
                     else if (batch.rolls) freshPieces = batch.rolls.find(r => r.roll_id === prevState.rollId)?.parts_details.flatMap(pt => pt.size_details.flatMap(sz => sz.pieces.map(p => ({...p, part_id: pt.part_id, size: sz.size, _displayGroup: `${pt.part_name} | Size ${sz.size}`})))) || [];
                 } else {
-                    const partDetails = batch.rolls?.find(r => r.roll_id === prevState.rollId)?.parts_details?.find(p => p.part_id === prevState.partId);
-                    const sizeDetails = partDetails?.size_details?.filter(sz => prevState.size ? sz.size === prevState.size : true) || [];
-                    freshPieces = sizeDetails.flatMap(sz => sz.pieces.map(p => ({ ...p, _displayGroup: `${prevState.partName} | Size ${sz.size}` })));
+                    freshPieces = batch.rolls?.find(r => r.roll_id === prevState.rollId)?.parts_details?.find(p => p.part_id === prevState.partId)?.size_details.flatMap(sz => sz.pieces.map(p => ({ ...p, _displayGroup: `${prevState.partName} | Size ${sz.size}` }))) || [];
                 }
             }
             return { ...prevState, pieces: freshPieces };
@@ -635,9 +631,7 @@ const UniversalWorkstationDashboard = () => {
     if (isLoading && !isProcessing) return <Spinner />;
     if (error) return <div className="p-8"><ErrorDisplay message={error} /></div>;
 
-    const filteredBatches = selectedBatchId === 'ALL' ? batches : batches.filter(b => String(b.batch_id) === String(selectedBatchId));
-
-    const groupedBatches = filteredBatches.reduce((acc, batch) => {
+    const groupedBatches = batches.reduce((acc, batch) => {
         const lineName = headerInfo.line_name || 'Unassigned Line';
         if (!acc[lineName]) acc[lineName] = [];
         acc[lineName].push(batch);
@@ -667,21 +661,6 @@ const UniversalWorkstationDashboard = () => {
                             {allowMultiple && <span className="text-sm font-bold bg-amber-400 text-black px-4 py-2.5 rounded-xl flex items-center shadow-sm uppercase tracking-widest"><Zap size={16} className="mr-2"/> Multi-Select ON</span>}
                         </div>
                     </div>
-                    {batches.length > 1 && (
-                        <div className="flex flex-col gap-1">
-                            <span className="text-xs font-black uppercase tracking-widest text-slate-500">Filter Batch</span>
-                            <select
-                                value={selectedBatchId}
-                                onChange={e => setSelectedBatchId(e.target.value)}
-                                className="bg-slate-900 text-white font-black text-sm px-5 py-3 rounded-xl shadow-md border-2 border-slate-700 hover:border-indigo-500 focus:outline-none focus:border-indigo-500 cursor-pointer uppercase tracking-widest"
-                            >
-                                <option value="ALL">ALL BATCHES</option>
-                                {batches.map(b => (
-                                    <option key={b.batch_id} value={String(b.batch_id)}>BATCH #{b.batch_id} ({b.batch_code})</option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
                 </header>
 
                 <div className="space-y-12">
@@ -699,24 +678,9 @@ const UniversalWorkstationDashboard = () => {
                                 return (
                                     <div key={batch.batch_id} className="bg-white rounded-[2rem] shadow-xl border-2 border-slate-300 overflow-hidden">
                                         <div className="bg-black p-8 flex flex-col md:flex-row md:justify-between md:items-center gap-6">
-                                            <div className="flex flex-col gap-3">
-                                                <h2 className="text-4xl font-black text-white flex items-center tracking-tight uppercase">
-                                                    <Shirt className="w-10 h-10 mr-5 text-indigo-400" /> BATCH #{batch.batch_id} <span className="ml-5 text-2xl font-bold text-slate-500 font-mono tracking-widest">({batch.batch_code})</span>
-                                                </h2>
-                                                {(batch.cut_rolls != null || batch.total_rolls != null) && (
-                                                    <div className="flex items-center gap-3 ml-1">
-                                                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Rolls</span>
-                                                        <span className="text-sm font-black text-white bg-slate-800 px-4 py-1.5 rounded-lg border border-slate-700">
-                                                            {batch.cut_rolls ?? '—'} <span className="text-slate-500">/ {batch.total_rolls ?? '—'} CUT</span>
-                                                        </span>
-                                                        {batch.cut_rolls != null && batch.total_rolls != null && (
-                                                            <span className={`text-xs font-black px-3 py-1.5 rounded-lg uppercase tracking-widest ${batch.cut_rolls >= batch.total_rolls ? 'bg-emerald-500 text-black' : 'bg-amber-400 text-black'}`}>
-                                                                {batch.cut_rolls >= batch.total_rolls ? 'All Cut' : `${batch.total_rolls - batch.cut_rolls} Remaining`}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
+                                            <h2 className="text-4xl font-black text-white flex items-center tracking-tight uppercase">
+                                                <Shirt className="w-10 h-10 mr-5 text-indigo-400" /> BATCH #{batch.batch_id} <span className="ml-5 text-2xl font-bold text-slate-500 font-mono tracking-widest">({batch.batch_code})</span>
+                                            </h2>
                                             <StageCompletionHandoff batchId={batch.batch_id} lineId={headerInfo.line_id} onBatchComplete={() => fetchQueue()} />
                                         </div>
 
@@ -761,7 +725,7 @@ const UniversalWorkstationDashboard = () => {
                                                                     </h4>
                                                                     <div className="space-y-4 pl-4">
                                                                         {bundles.map(bundle => (
-                                                                            <ValidationProgressRow key={bundle.bundle_id} label={`Size ${bundle.size}`} subLabel={`Bundle ${bundle.bundle_code}`} icon={Package} entity={bundle}
+                                                                            <ValidationProgressRow key={bundle.bundle_id} label={`Bundle ${bundle.bundle_code}`} icon={Package} entity={bundle} 
                                                                                 canApproveBundle={allowBundle}
                                                                                 onQuickApprove={(entity) => handleQuickBulkApprove(entity, batch.batch_id, rollId)}
                                                                                 onInspect={() => setModalState({ type: 'validate', isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, allowMultiple, ...bundle, pieces: bundle.pieces.map(p => ({...p, _displayGroup: `${partName} | Size ${bundle.size}`})) })}
