@@ -52,6 +52,7 @@ const AssemblyProcessingPortal = () => {
     const [debugLastGap, setDebugLastGap] = useState(0);
     const [debugListenerVersion, setDebugListenerVersion] = useState(0);
     const [showDebug, setShowDebug] = useState(true);
+    const [debugFocusTarget, setDebugFocusTarget] = useState('(none)');
     const debugLogRef = useRef([]);
 
     const addDebug = (msg, type = 'info') => {
@@ -59,6 +60,60 @@ const AssemblyProcessingPortal = () => {
         debugLogRef.current = [entry, ...debugLogRef.current.slice(0, 49)];
         setDebugLog([...debugLogRef.current]);
     };
+
+    // ===== CAPTURE-PHASE LISTENER — runs BEFORE any element can steal the event =====
+    // This fires even if an input/iframe has focus. If you see keys here but NOT in the
+    // main scanner log below, a focused element is consuming them.
+    useEffect(() => {
+        const getFocusDesc = (el) => {
+            if (!el) return 'null';
+            const tag = el.tagName?.toLowerCase() || '?';
+            const id = el.id ? `#${el.id}` : '';
+            const cls = el.className ? `.${String(el.className).split(' ')[0]}` : '';
+            const name = el.name ? `[name=${el.name}]` : '';
+            return `${tag}${id}${cls}${name}`;
+        };
+
+        const captureHandler = (e) => {
+            if (e.key.length !== 1 && e.key !== 'Enter') return; // only printable + Enter
+            const focused = document.activeElement;
+            const focusDesc = getFocusDesc(focused);
+            const isStealingEl = ['input', 'textarea', 'select'].includes(focused?.tagName?.toLowerCase())
+                || focused?.tagName?.toLowerCase() === 'iframe'
+                || focused?.isContentEditable;
+
+            setDebugFocusTarget(focusDesc);
+
+            if (isStealingEl) {
+                addDebug(`🔴 KEY STOLEN by <${focusDesc}> | key="${e.key}" | event will NOT reach scanner`, 'error');
+            } else {
+                addDebug(`🟢 CAPTURE key="${e.key}" | focus=<${focusDesc}> | reaching scanner ✓`, 'capture');
+            }
+        };
+
+        // Track focus changes
+        const focusHandler = (e) => {
+            const desc = getFocusDesc(e.target);
+            setDebugFocusTarget(desc);
+            const tag = e.target?.tagName?.toLowerCase();
+            if (['input', 'textarea', 'select', 'iframe'].includes(tag) || e.target?.isContentEditable) {
+                addDebug(`⚠️ FOCUS moved to <${desc}> — scanner will be BLOCKED while focused`, 'warn');
+            } else {
+                addDebug(`📍 focus → <${desc}>`, 'system');
+            }
+        };
+
+        // useCapture: true means this runs in capture phase, BEFORE element handlers
+        document.addEventListener('keydown', captureHandler, true);
+        document.addEventListener('focusin', focusHandler, true);
+
+        addDebug(`👁 Capture-phase listener ACTIVE — will intercept ALL keystrokes`, 'system');
+
+        return () => {
+            document.removeEventListener('keydown', captureHandler, true);
+            document.removeEventListener('focusin', focusHandler, true);
+        };
+    }, []); // intentionally empty — capture listener never needs re-registration
 
     // --- AUDIO FEEDBACK ENGINE ---
     const playFeedback = (type) => {
@@ -231,8 +286,11 @@ const AssemblyProcessingPortal = () => {
                 return;
             }
 
-            if (gap > 40 && scanBuffer.current.length > 0) {
-                addDebug(`⏱ Gap ${gap}ms > 40ms — buffer RESET (was: "${scanBuffer.current}")`, 'warn');
+            // QR codes (Retsol D 5015) need a larger gap threshold than Code 128.
+            // USB HID scanners can have inter-character gaps up to ~80ms for QR payloads.
+            const GAP_THRESHOLD = 120;
+            if (gap > GAP_THRESHOLD && scanBuffer.current.length > 0) {
+                addDebug(`⏱ Gap ${gap}ms > ${GAP_THRESHOLD}ms — buffer RESET (was: "${scanBuffer.current}")`, 'warn');
                 scanBuffer.current = '';
             }
 
@@ -333,7 +391,7 @@ const AssemblyProcessingPortal = () => {
                             </div>
                             <div className="bg-slate-800 rounded p-1.5">
                                 <div className="text-slate-500 uppercase text-[9px]">Last Gap</div>
-                                <div className={debugLastGap > 40 ? 'text-red-400 font-bold' : 'text-green-400'}>{debugLastGap}ms</div>
+                                <div className={debugLastGap > 120 ? 'text-red-400 font-bold' : 'text-green-400'}>{debugLastGap}ms {debugLastGap > 120 ? '⚠ RESET' : ''}</div>
                             </div>
                             <div className="bg-slate-800 rounded p-1.5 col-span-2">
                                 <div className="text-slate-500 uppercase text-[9px]">Live Buffer</div>
@@ -342,6 +400,10 @@ const AssemblyProcessingPortal = () => {
                             <div className="bg-slate-800 rounded p-1.5 col-span-2">
                                 <div className="text-slate-500 uppercase text-[9px]">garment loaded</div>
                                 <div className={garment ? 'text-green-400 font-bold' : 'text-slate-500'}>{garment ? `✅ ${garment.garment_uid} (id:${garment.garment_id})` : 'null'}</div>
+                            </div>
+                            <div className="bg-slate-800 rounded p-1.5 col-span-2">
+                                <div className="text-slate-500 uppercase text-[9px]">🎯 focused element</div>
+                                <div className={['input','textarea','select','iframe'].some(t => debugFocusTarget.startsWith(t)) ? 'text-red-400 font-bold' : 'text-green-400 font-bold'}>{debugFocusTarget}</div>
                             </div>
                         </div>
                         {/* Log entries */}
@@ -353,6 +415,7 @@ const AssemblyProcessingPortal = () => {
                                     entry.type === 'success' ? 'bg-green-950 text-green-300' :
                                     entry.type === 'system' ? 'bg-slate-800 text-slate-400' :
                                     entry.type === 'key' ? 'bg-blue-950 text-blue-300' :
+                                    entry.type === 'capture' ? 'bg-violet-950 text-violet-300' :
                                     'bg-slate-900 text-slate-300'
                                 }`}>
                                     <span className="text-slate-600 mr-1">{entry.ts}</span>{entry.msg}
@@ -453,7 +516,7 @@ const AssemblyProcessingPortal = () => {
                                     <h2 className="text-4xl font-black text-slate-300 tracking-tighter uppercase">Ready for Scan</h2>
                                 )}
                                 
-                                <p className="text-slate-400 font-bold mt-4 uppercase text-xs tracking-[0.2em]">Hardware Wedge Active • Code 128</p>
+                                <p className="text-slate-400 font-bold mt-4 uppercase text-xs tracking-[0.2em]">Hardware Wedge Active • QR Code • Retsol D 5015</p>
                                 
                                 {error && (
                                     <div className="mt-12 max-w-md mx-auto p-5 bg-rose-50 border-2 border-rose-100 rounded-3xl text-rose-700 font-black flex items-center justify-center shadow-sm animate-in shake">
