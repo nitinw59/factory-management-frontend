@@ -39,11 +39,26 @@ const AssemblyProcessingPortal = () => {
     // Hardware Scanner Buffer Refs
     const scanBuffer = useRef('');
     const lastKeyStrokeAt = useRef(0);
-    const [scannedTextVisual, setScannedTextVisual] = useState(''); // NEW: Show scanned text
+    const [scannedTextVisual, setScannedTextVisual] = useState('');
 
     const [manualInput, setManualInput] = useState('');
     const [showManualBox, setShowManualBox] = useState(false);
     const manualInputRef = useRef(null);
+
+    // ===== DEBUG STATE =====
+    const [debugLog, setDebugLog] = useState([]);
+    const [debugBuffer, setDebugBuffer] = useState('');
+    const [debugLastKey, setDebugLastKey] = useState('');
+    const [debugLastGap, setDebugLastGap] = useState(0);
+    const [debugListenerVersion, setDebugListenerVersion] = useState(0);
+    const [showDebug, setShowDebug] = useState(true);
+    const debugLogRef = useRef([]);
+
+    const addDebug = (msg, type = 'info') => {
+        const entry = { msg, type, ts: new Date().toISOString().slice(11, 23) };
+        debugLogRef.current = [entry, ...debugLogRef.current.slice(0, 49)];
+        setDebugLog([...debugLogRef.current]);
+    };
 
     // --- AUDIO FEEDBACK ENGINE ---
     const playFeedback = (type) => {
@@ -75,14 +90,20 @@ const AssemblyProcessingPortal = () => {
 
     // --- DATA INITIALIZATION ---
     const loadRequiredData = useCallback(async () => {
+        addDebug('🔃 loadRequiredData START', 'system');
         try {
             const [defectsRes, monitorRes] = await Promise.all([
                 assemblyApi.getDefectCodes(),
-                assemblyApi.getMonitorData() // Fetch active batches for Batch Mode
+                assemblyApi.getMonitorData()
             ]);
+            addDebug(`✅ loadRequiredData OK | defects=${defectsRes.data?.length} | activeBatches=${monitorRes.data?.activeBatches?.length}`, 'success');
+            console.log('[GarmentPortal] monitorData:', monitorRes.data);
             setDefectCodes(defectsRes.data);
             setActiveBatches(monitorRes.data.activeBatches || []);
-        } catch (e) { console.error("Failed to load portal data."); }
+        } catch (e) {
+            addDebug(`❌ loadRequiredData FAILED: ${e.message}`, 'error');
+            console.error("Failed to load portal data.", e);
+        }
     }, []);
 
     useEffect(() => { loadRequiredData(); }, [loadRequiredData]);
@@ -124,37 +145,51 @@ const AssemblyProcessingPortal = () => {
 
     // --- CORE SCAN PROCESSING ---
     const processScan = async (uid) => {
-        if (isLoading || isProcessingAction) return;
+        addDebug(`📡 processScan called | uid="${uid}" | isLoading=${isLoading} | isProcessingAction=${isProcessingAction}`, 'info');
+
+        if (isLoading || isProcessingAction) {
+            addDebug(`🚫 processScan ABORTED — isLoading=${isLoading} isProcessingAction=${isProcessingAction}`, 'error');
+            return;
+        }
 
         const cleanUid = uid.trim();
+        addDebug(`🧹 cleanUid="${cleanUid}" | viewMode=${viewMode}`, 'info');
 
-        // Ensure we switch to scanner view if hardware scan happens during batch view
-        if (viewMode !== 'SCANNER') setViewMode('SCANNER');
+        if (viewMode !== 'SCANNER') {
+            addDebug(`🔀 Switching viewMode SCANNER→SCANNER`, 'system');
+            setViewMode('SCANNER');
+        }
 
         setIsLoading(true);
         setError(null);
         setMismatch(null);
         setGarment(null);
-        setScannedTextVisual(cleanUid); // Display what was scanned
+        setScannedTextVisual(cleanUid);
 
         try {
-            console.log("Processing scan for UID:", cleanUid);
+            addDebug(`🌐 API CALL: getGarmentDetails("${cleanUid}")`, 'info');
+            console.log('[GarmentPortal] API call start:', cleanUid);
             const res = await assemblyApi.getGarmentDetails(cleanUid);
-            console.log("Fetched garment details:", res.data);
+            console.log('[GarmentPortal] API response:', res.data);
+            addDebug(`✅ API SUCCESS | garment_id=${res.data?.garment_id} uid=${res.data?.garment_uid} status=${res.data?.status}`, 'success');
             setGarment(res.data);
             playFeedback('success');
-            setScannedTextVisual(''); // Clear text on success
+            setScannedTextVisual('');
         } catch (err) {
-            console.error("Scan processing error:", err);
-            playFeedback('error');
+            const status = err.response?.status;
             const errData = err.response?.data;
-            if (err.response?.status === 403 && errData?.error === "Batch Mismatch") {
+            console.error('[GarmentPortal] API error:', status, errData);
+            addDebug(`❌ API ERROR | HTTP ${status} | ${JSON.stringify(errData)}`, 'error');
+            playFeedback('error');
+            if (status === 403 && errData?.error === "Batch Mismatch") {
+                addDebug(`⚠️ Batch Mismatch detected`, 'warn');
                 setMismatch(errData);
             } else {
                 setError(errData?.message || errData?.error || "Invalid Scan: Check Barcode Integrity.");
             }
         } finally {
             setIsLoading(false);
+            addDebug(`🏁 processScan DONE | isLoading→false`, 'system');
         }
     };
 
@@ -169,28 +204,63 @@ const AssemblyProcessingPortal = () => {
 
     // --- HARDWARE SCANNER LOGIC ---
     useEffect(() => {
-        const handleKeyDown = (e) => {
-            if (isProcessingAction || showManualBox) return;
+        setDebugListenerVersion(v => {
+            const next = v + 1;
+            addDebug(`🔄 keydown listener REGISTERED (v${next}) | guards: isProcessingAction=${isProcessingAction} showManualBox=${showManualBox} isLoading=${isLoading} viewMode=${viewMode}`, 'system');
+            return next;
+        });
 
+        const handleKeyDown = (e) => {
             const now = Date.now();
-            if (now - lastKeyStrokeAt.current > 40) {
-                scanBuffer.current = ''; 
+            const gap = now - lastKeyStrokeAt.current;
+
+            // Log every key except modifier-only keys
+            if (e.key.length === 1 || e.key === 'Enter') {
+                setDebugLastKey(e.key === 'Enter' ? '↵ ENTER' : e.key);
+                setDebugLastGap(gap);
+                setDebugBuffer(scanBuffer.current + (e.key.length === 1 ? e.key : ''));
+            }
+
+            // Guard check log
+            if (isProcessingAction) {
+                addDebug(`🚫 KEY BLOCKED — isProcessingAction=true | key="${e.key}"`, 'warn');
+                return;
+            }
+            if (showManualBox) {
+                addDebug(`🚫 KEY BLOCKED — showManualBox=true | key="${e.key}"`, 'warn');
+                return;
+            }
+
+            if (gap > 40 && scanBuffer.current.length > 0) {
+                addDebug(`⏱ Gap ${gap}ms > 40ms — buffer RESET (was: "${scanBuffer.current}")`, 'warn');
+                scanBuffer.current = '';
             }
 
             if (e.key === 'Enter') {
-                if (scanBuffer.current.length > 3) {
-                    processScan(scanBuffer.current);
+                const captured = scanBuffer.current;
+                addDebug(`↵ ENTER pressed | buffer="${captured}" | length=${captured.length}`, captured.length > 3 ? 'success' : 'warn');
+                if (captured.length > 3) {
+                    addDebug(`🚀 FIRING processScan("${captured}")`, 'success');
+                    processScan(captured);
+                } else {
+                    addDebug(`❌ Buffer too short (${captured.length} chars) — scan IGNORED`, 'error');
                 }
                 scanBuffer.current = '';
+                setDebugBuffer('');
             } else if (e.key.length === 1) {
                 scanBuffer.current += e.key;
+                setDebugBuffer(scanBuffer.current);
+                addDebug(`⌨ key="${e.key}" gap=${gap}ms | buffer="${scanBuffer.current}"`, 'key');
             }
-            
+
             lastKeyStrokeAt.current = now;
         };
 
         window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
+        return () => {
+            addDebug(`🗑 keydown listener REMOVED`, 'system');
+            window.removeEventListener('keydown', handleKeyDown);
+        };
     }, [garment, mismatch, isLoading, isProcessingAction, showManualBox, viewMode]);
 
     // --- FINAL ACTIONS ---
@@ -228,6 +298,75 @@ const AssemblyProcessingPortal = () => {
 
     return (
         <div className="min-h-screen bg-[#F8FAFC] p-4 md:p-10 font-inter select-none">
+
+            {/* ===== DEBUG OVERLAY ===== */}
+            <div className="fixed top-2 right-2 z-[9999] w-[420px] max-h-[95vh] flex flex-col font-mono text-[10px]">
+                <div className="bg-slate-900 text-white px-3 py-2 rounded-t-lg flex items-center justify-between border-b border-slate-700">
+                    <span className="font-bold uppercase tracking-widest text-yellow-400">🐛 Scanner Debug</span>
+                    <button onClick={() => setShowDebug(p => !p)} className="text-slate-400 hover:text-white text-xs px-2 py-0.5 bg-slate-800 rounded">
+                        {showDebug ? 'HIDE' : 'SHOW'}
+                    </button>
+                </div>
+                {showDebug && (
+                    <div className="bg-slate-950 border border-slate-800 rounded-b-lg overflow-hidden flex flex-col">
+                        {/* Live status row */}
+                        <div className="grid grid-cols-2 gap-1 p-2 border-b border-slate-800 bg-slate-900">
+                            <div className="bg-slate-800 rounded p-1.5">
+                                <div className="text-slate-500 uppercase text-[9px]">viewMode</div>
+                                <div className="text-cyan-400 font-bold">{viewMode}</div>
+                            </div>
+                            <div className="bg-slate-800 rounded p-1.5">
+                                <div className="text-slate-500 uppercase text-[9px]">isLoading</div>
+                                <div className={isLoading ? 'text-yellow-400 font-bold' : 'text-slate-400'}>{String(isLoading)}</div>
+                            </div>
+                            <div className="bg-slate-800 rounded p-1.5">
+                                <div className="text-slate-500 uppercase text-[9px]">isProcessingAction</div>
+                                <div className={isProcessingAction ? 'text-red-400 font-bold' : 'text-slate-400'}>{String(isProcessingAction)}</div>
+                            </div>
+                            <div className="bg-slate-800 rounded p-1.5">
+                                <div className="text-slate-500 uppercase text-[9px]">showManualBox</div>
+                                <div className={showManualBox ? 'text-red-400 font-bold' : 'text-slate-400'}>{String(showManualBox)}</div>
+                            </div>
+                            <div className="bg-slate-800 rounded p-1.5">
+                                <div className="text-slate-500 uppercase text-[9px]">Last Key</div>
+                                <div className="text-green-400 font-bold">{debugLastKey || '—'}</div>
+                            </div>
+                            <div className="bg-slate-800 rounded p-1.5">
+                                <div className="text-slate-500 uppercase text-[9px]">Last Gap</div>
+                                <div className={debugLastGap > 40 ? 'text-red-400 font-bold' : 'text-green-400'}>{debugLastGap}ms</div>
+                            </div>
+                            <div className="bg-slate-800 rounded p-1.5 col-span-2">
+                                <div className="text-slate-500 uppercase text-[9px]">Live Buffer</div>
+                                <div className="text-yellow-300 font-bold break-all">{debugBuffer || '(empty)'}</div>
+                            </div>
+                            <div className="bg-slate-800 rounded p-1.5 col-span-2">
+                                <div className="text-slate-500 uppercase text-[9px]">garment loaded</div>
+                                <div className={garment ? 'text-green-400 font-bold' : 'text-slate-500'}>{garment ? `✅ ${garment.garment_uid} (id:${garment.garment_id})` : 'null'}</div>
+                            </div>
+                        </div>
+                        {/* Log entries */}
+                        <div className="overflow-y-auto max-h-64 p-1.5 space-y-0.5">
+                            {debugLog.map((entry, i) => (
+                                <div key={i} className={`px-2 py-0.5 rounded text-[10px] leading-snug ${
+                                    entry.type === 'error' ? 'bg-red-950 text-red-300' :
+                                    entry.type === 'warn' ? 'bg-yellow-950 text-yellow-300' :
+                                    entry.type === 'success' ? 'bg-green-950 text-green-300' :
+                                    entry.type === 'system' ? 'bg-slate-800 text-slate-400' :
+                                    entry.type === 'key' ? 'bg-blue-950 text-blue-300' :
+                                    'bg-slate-900 text-slate-300'
+                                }`}>
+                                    <span className="text-slate-600 mr-1">{entry.ts}</span>{entry.msg}
+                                </div>
+                            ))}
+                            {debugLog.length === 0 && <div className="text-slate-600 text-center py-4">Waiting for events...</div>}
+                        </div>
+                        <div className="p-1.5 border-t border-slate-800">
+                            <button onClick={() => { debugLogRef.current = []; setDebugLog([]); }} className="w-full text-[9px] uppercase tracking-widest text-slate-500 hover:text-white py-1 bg-slate-800 rounded hover:bg-slate-700">Clear Log</button>
+                        </div>
+                    </div>
+                )}
+            </div>
+
             {/* Global Loader for Batch Selection only */}
             {isLoading && viewMode === 'BATCH' && !selectedBatch && (
                 <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-[500] flex items-center justify-center">
