@@ -421,6 +421,42 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
 };
 
 // ============================================================================
+// ROLL-LEVEL HANDOFF BUTTON
+// ============================================================================
+const RollHandoffButton = ({ batchId, lineId, rollId, onComplete }) => {
+    const [isLoading, setIsLoading] = useState(false);
+
+    const handleHandoff = async () => {
+        setIsLoading(true);
+        try {
+            const response = await universalApi.checkCompletion({ batchId, lineId, rollId });
+            const data = response.data;
+            if (data.isComplete) {
+                alert(`ROLL #${rollId} COMPLETE: ${data.message}`);
+                if (onComplete) onComplete();
+            } else {
+                alert(`NOT READY: ${data.message || 'Pieces still pending on this roll.'}`);
+            }
+        } catch (error) {
+            alert(error.response?.data?.error || 'SYSTEM ERROR: Check connection.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <button
+            onClick={handleHandoff}
+            disabled={isLoading || !lineId}
+            className="px-6 py-3 bg-slate-700 hover:bg-slate-900 text-white text-sm font-black rounded-xl shadow-lg active:scale-95 transition-all flex items-center uppercase tracking-widest disabled:opacity-50 border-b-4 border-slate-900"
+        >
+            {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
+            COMPLETE ROLL
+        </button>
+    );
+};
+
+// ============================================================================
 // PART ACCORDION (Piece Mode Grouping)
 // ============================================================================
 const PartAccordion = ({ batch, roll, part, setModalState, allowMultiple }) => {
@@ -538,6 +574,7 @@ const UniversalWorkstationDashboard = () => {
     const [modalState, setModalState] = useState(null);
     const [headerInfo, setHeaderInfo] = useState({});
     const [selectedBatchId, setSelectedBatchId] = useState('ALL');
+    const [openBatchId, setOpenBatchId] = useState(null);
 
     const allowMultiple = headerInfo.can_approve_multiple_piece || false;
     const allowBundle = headerInfo.can_approve_whole_bundle || false;
@@ -552,6 +589,7 @@ const UniversalWorkstationDashboard = () => {
             const newBatches = res.data.batches || [];
             setBatches(newBatches);
             setHeaderInfo(res.data.workstationInfo || {});
+            setOpenBatchId(prev => prev ?? (newBatches[0]?.batch_id ?? null));
             return newBatches; // 🚨 BUG FIX: Return fresh data to update the modal
         } catch (err) { setError(err.message || "Failed to load workstation data."); return []; } 
         finally { setIsLoading(false); }
@@ -698,9 +736,15 @@ const UniversalWorkstationDashboard = () => {
                                 
                                 return (
                                     <div key={batch.batch_id} className="bg-white rounded-[2rem] shadow-xl border-2 border-slate-300 overflow-hidden">
-                                        <div className="bg-black p-8 flex flex-col md:flex-row md:justify-between md:items-center gap-6">
+                                        <div
+                                            className="bg-black p-8 flex flex-col md:flex-row md:justify-between md:items-center gap-6 cursor-pointer select-none"
+                                            onClick={() => setOpenBatchId(prev => prev === batch.batch_id ? null : batch.batch_id)}
+                                        >
                                             <div className="flex flex-col gap-3">
                                                 <h2 className="text-4xl font-black text-white flex items-center tracking-tight uppercase">
+                                                    {openBatchId === batch.batch_id
+                                                        ? <ChevronDown className="w-8 h-8 mr-4 text-slate-500" />
+                                                        : <ChevronRight className="w-8 h-8 mr-4 text-slate-500" />}
                                                     <Shirt className="w-10 h-10 mr-5 text-indigo-400" /> BATCH #{batch.batch_id} <span className="ml-5 text-2xl font-bold text-slate-500 font-mono tracking-widest">({batch.batch_code})</span>
                                                 </h2>
                                                 {(batch.cut_rolls != null || batch.total_rolls != null) && (
@@ -717,10 +761,12 @@ const UniversalWorkstationDashboard = () => {
                                                     </div>
                                                 )}
                                             </div>
-                                            <StageCompletionHandoff batchId={batch.batch_id} lineId={headerInfo.line_id} onBatchComplete={() => fetchQueue()} />
+                                            <div onClick={e => e.stopPropagation()}>
+                                                <StageCompletionHandoff batchId={batch.batch_id} lineId={headerInfo.line_id} onBatchComplete={() => fetchQueue()} />
+                                            </div>
                                         </div>
 
-                                        <div className="p-6 md:p-10 bg-slate-100">
+                                        {openBatchId === batch.batch_id && <div className="p-6 md:p-10 bg-slate-100">
                                             {isBundleMode && batch.bundles && batch.bundles.length > 0 ? (() => {
                                                 const groupedBundles = batch.bundles.reduce((acc, bundle) => {
                                                     const rId = bundle.roll_id || 'Unknown';
@@ -747,11 +793,14 @@ const UniversalWorkstationDashboard = () => {
                                                                 <h3 className="font-black text-black flex items-center text-3xl uppercase tracking-widest bg-slate-100 px-8 py-4 rounded-2xl w-max border-2 border-slate-300">
                                                                     <Layers className="w-10 h-10 mr-5 text-indigo-600"/> ROLL #{rollId}
                                                                 </h3>
-                                                                {allowRoll && !rollStatus.isComplete && (
-                                                                    <button onClick={() => setModalState({ type: 'validate', isBundle: true, isRollInspect: true, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: rollId, partName: 'ALL PARTS', pieces: allRollPieces, titleOverride: `Bulk Inspect: Roll #${rollId}`, allowMultiple })} className="px-10 py-5 bg-black hover:bg-slate-800 text-white text-xl font-black rounded-2xl shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
-                                                                        <CheckCircle2 className="w-8 h-8 mr-4 text-amber-400"/> INSPECT WHOLE ROLL
-                                                                    </button>
-                                                                )}
+                                                                <div className="flex items-center gap-4">
+                                                                    {allowRoll && !rollStatus.isComplete && (
+                                                                        <button onClick={() => setModalState({ type: 'validate', isBundle: true, isRollInspect: true, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: rollId, partName: 'ALL PARTS', pieces: allRollPieces, titleOverride: `Bulk Inspect: Roll #${rollId}`, allowMultiple })} className="px-10 py-5 bg-black hover:bg-slate-800 text-white text-xl font-black rounded-2xl shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
+                                                                            <CheckCircle2 className="w-8 h-8 mr-4 text-amber-400"/> INSPECT WHOLE ROLL
+                                                                        </button>
+                                                                    )}
+                                                                    <RollHandoffButton batchId={batch.batch_id} lineId={headerInfo.line_id} rollId={rollId} onComplete={() => fetchQueue()} />
+                                                                </div>
                                                             </div>
                                                             
                                                             {Object.entries(parts).map(([partName, bundles]) => (
@@ -783,14 +832,17 @@ const UniversalWorkstationDashboard = () => {
                                                             <h3 className="font-black text-black flex items-center text-3xl uppercase tracking-widest bg-slate-100 px-8 py-4 rounded-2xl w-max border-2 border-slate-300">
                                                                 <Layers className="w-10 h-10 mr-5 text-indigo-600"/> ROLL #{roll.roll_id}
                                                             </h3>
-                                                            {allowRoll && (
-                                                                <button onClick={() => {
-                                                                    const allRollPieces = roll.parts_details.flatMap(pt => pt.size_details.flatMap(sz => sz.pieces.map(p => ({ ...p, part_id: pt.part_id, size: sz.size, _displayGroup: `${pt.part_name} | Size ${sz.size}` }))));
-                                                                    setModalState({ type: 'validate', isBundle: false, isRollInspect: true, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: roll.roll_id, partName: 'ALL PARTS', pieces: allRollPieces, titleOverride: `Bulk Inspect: Roll #${roll.roll_id}`, allowMultiple });
-                                                                }} className="px-10 py-5 bg-black hover:bg-slate-800 text-white text-xl font-black rounded-2xl shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
-                                                                    <CheckCircle2 className="w-8 h-8 mr-4 text-amber-400"/> INSPECT WHOLE ROLL
-                                                                </button>
-                                                            )}
+                                                            <div className="flex items-center gap-4">
+                                                                {allowRoll && (
+                                                                    <button onClick={() => {
+                                                                        const allRollPieces = roll.parts_details.flatMap(pt => pt.size_details.flatMap(sz => sz.pieces.map(p => ({ ...p, part_id: pt.part_id, size: sz.size, _displayGroup: `${pt.part_name} | Size ${sz.size}` }))));
+                                                                        setModalState({ type: 'validate', isBundle: false, isRollInspect: true, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: roll.roll_id, partName: 'ALL PARTS', pieces: allRollPieces, titleOverride: `Bulk Inspect: Roll #${roll.roll_id}`, allowMultiple });
+                                                                    }} className="px-10 py-5 bg-black hover:bg-slate-800 text-white text-xl font-black rounded-2xl shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
+                                                                        <CheckCircle2 className="w-8 h-8 mr-4 text-amber-400"/> INSPECT WHOLE ROLL
+                                                                    </button>
+                                                                )}
+                                                                <RollHandoffButton batchId={batch.batch_id} lineId={headerInfo.line_id} rollId={roll.roll_id} onComplete={() => fetchQueue()} />
+                                                            </div>
                                                         </div>
                                                         {roll.parts_details.map(part => (
                                                             <PartAccordion key={part.part_id} batch={batch} roll={roll} part={part} setModalState={setModalState} allowMultiple={allowMultiple} />
@@ -798,7 +850,7 @@ const UniversalWorkstationDashboard = () => {
                                                     </div>
                                                 ))
                                             ) : null}
-                                        </div>
+                                        </div>}
                                     </div>
                                 );
                             })}
