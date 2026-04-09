@@ -47,6 +47,9 @@ export const storeManagerApi = {
     saveTrimBill: (orderId, data) => api.post(`/store-manager/trim-orders/${orderId}/bills`, data),
 
 
+    // Barcode
+    markBatchBarcodePrinted: (data) => api.post('/store-manager/batch-barcode-printed', data),
+
     //spares billing
     getPendingRequests: () => api.get('/spare-issuance/spares/pending-requests'),
     getFactoryUsers: () => api.get('/spare-issuance/factory-users'),

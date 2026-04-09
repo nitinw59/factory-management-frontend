@@ -1,13 +1,131 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { 
-    LuClock, LuPackageCheck, LuPackage, LuTriangleAlert, LuRefreshCw, 
-    LuReplace, LuArrowLeft, LuListOrdered, LuCircleCheck, LuWand, 
-    LuTrash2, LuFileText, LuBookOpen, LuScissors, LuTag
+import {
+    LuClock, LuPackageCheck, LuPackage, LuTriangleAlert, LuRefreshCw,
+    LuReplace, LuArrowLeft, LuListOrdered, LuCircleCheck, LuWand,
+    LuTrash2, LuFileText, LuBookOpen, LuScissors, LuTag, LuPrinter, LuDownload, LuX
 } from 'react-icons/lu';
-import { Loader2, Info } from 'lucide-react'; 
+import { Loader2, Info } from 'lucide-react';
 import { storeManagerApi } from '../../api/storeManagerApi';
 const Spinner = () => <div className="flex justify-center items-center p-12"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
+
+// --- Barcode Print/Download Modal ---
+const BarcodePrintModal = ({ isOpen, onClose, batchId }) => {
+    const [seqFrom, setSeqFrom] = useState('');
+    const [seqTo, setSeqTo] = useState('');
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [result, setResult] = useState(null);
+    const [error, setError] = useState(null);
+
+    const reset = () => { setSeqFrom(''); setSeqTo(''); setResult(null); setError(null); };
+    const handleClose = () => { reset(); onClose(); };
+
+    const handleSubmit = async () => {
+        setIsProcessing(true);
+        setResult(null);
+        setError(null);
+        try {
+            const payload = { batchId };
+            if (seqFrom !== '' && seqTo !== '') {
+                payload.sequenceFrom = parseInt(seqFrom, 10);
+                payload.sequenceTo = parseInt(seqTo, 10);
+            }
+            const res = await storeManagerApi.markBatchBarcodePrinted(payload);
+            setResult(res.data);
+        } catch (err) {
+            setError(err.response?.data?.error || 'Failed to mark barcodes.');
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleDownloadCSV = () => {
+        if (!result?.garments?.length) return;
+        const header = 'garment_uid,size,piece_sequence,barcode_printed_at';
+        const rows = result.garments.map(g =>
+            `${g.garment_uid},${g.size},${g.piece_sequence},${g.barcode_printed_at}`
+        );
+        const csv = [header, ...rows].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `barcodes-batch-${batchId}${seqFrom && seqTo ? `-seq${seqFrom}-${seqTo}` : ''}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md border border-gray-200">
+                <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                    <div className="flex items-center gap-2">
+                        <LuPrinter className="h-5 w-5 text-indigo-600" />
+                        <h2 className="text-base font-bold text-gray-900">Print / Download Barcodes</h2>
+                    </div>
+                    <button onClick={handleClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                        <LuX className="h-4 w-4 text-gray-500" />
+                    </button>
+                </div>
+
+                <div className="p-5 space-y-4">
+                    <p className="text-sm text-gray-500">Batch <span className="font-bold text-gray-700">#{batchId}</span>. Leave range empty to mark <span className="font-semibold">all unprinted</span> pieces.</p>
+
+                    <div className="flex gap-3">
+                        <div className="flex-1">
+                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Seq From</label>
+                            <input
+                                type="number" min="1" value={seqFrom}
+                                onChange={e => setSeqFrom(e.target.value)}
+                                placeholder="e.g. 1"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                            />
+                        </div>
+                        <div className="flex-1">
+                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Seq To</label>
+                            <input
+                                type="number" min="1" value={seqTo}
+                                onChange={e => setSeqTo(e.target.value)}
+                                placeholder="e.g. 50"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                            />
+                        </div>
+                    </div>
+
+                    {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-100">{error}</p>}
+
+                    {result && (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                            <p className="text-sm font-bold text-emerald-800">{result.message}</p>
+                            <p className="text-xs text-emerald-600 mt-1">{result.count} barcode(s) marked as printed.</p>
+                            <button
+                                onClick={handleDownloadCSV}
+                                className="mt-3 flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 transition-colors"
+                            >
+                                <LuDownload className="h-3.5 w-3.5" /> Download CSV
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                <div className="flex gap-3 px-5 pb-5">
+                    <button onClick={handleClose} className="flex-1 px-4 py-2.5 text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
+                        Cancel
+                    </button>
+                    <button
+                        onClick={handleSubmit}
+                        disabled={isProcessing || !!result}
+                        className="flex-1 px-4 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {isProcessing ? <><Loader2 className="h-4 w-4 animate-spin" /> Processing...</> : <><LuPrinter className="h-4 w-4" /> Mark & Print</>}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 // --- Reference Data Modal (BOM & Cutting) ---
 const ReferenceDataModal = ({ isOpen, onClose, orderId }) => {
@@ -247,7 +365,8 @@ const TrimOrderDetailPage = () => {
     
     // Modals state
     const [modalState, setModalState] = useState({ isOpen: false, item: null });
-    const [refModalOpen, setRefModalOpen] = useState(false); // NEW: Reference Modal State
+    const [refModalOpen, setRefModalOpen] = useState(false);
+    const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
 
     const fetchDetails = useCallback(async () => {
         setIsLoading(true); 
@@ -417,13 +536,22 @@ const TrimOrderDetailPage = () => {
                                 View Ref & BOM
                             </button>
 
-                            <Link 
-                                to={`/store-manager/trim-orders/${orderId}/summary`} 
+                            <Link
+                                to={`/store-manager/trim-orders/${orderId}/summary`}
                                 className="px-5 py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-100 hover:border-indigo-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center group"
                             >
-                                <LuFileText className="mr-2 h-5 w-5 text-indigo-500 group-hover:text-indigo-200 transition-colors" /> 
+                                <LuFileText className="mr-2 h-5 w-5 text-indigo-500 group-hover:text-indigo-200 transition-colors" />
                                 View Order Summary
                             </Link>
+                            {orderInfo?.batchId && (
+                                <button
+                                    onClick={() => setBarcodeModalOpen(true)}
+                                    className="px-5 py-2.5 bg-white text-gray-700 hover:bg-gray-100 border border-gray-300 hover:border-gray-400 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center"
+                                >
+                                    <LuPrinter className="mr-2 h-5 w-5 text-gray-500" />
+                                    Print Barcodes
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -603,8 +731,8 @@ const TrimOrderDetailPage = () => {
                 <FulfillmentModal item={modalState.item} onClose={() => setModalState({ isOpen: false, item: null })} onSubmit={handleFulfillmentSubmit} />
             )}
 
-            {/* NEW Reference & BOM Modal */}
             <ReferenceDataModal isOpen={refModalOpen} onClose={() => setRefModalOpen(false)} orderId={orderId} />
+            <BarcodePrintModal isOpen={barcodeModalOpen} onClose={() => setBarcodeModalOpen(false)} batchId={orderInfo?.batchId} />
 
         </div>
     );
