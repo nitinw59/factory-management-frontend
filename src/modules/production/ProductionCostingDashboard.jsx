@@ -117,45 +117,98 @@ export default function ProductionCostingDashboard() {
                                             <tr>
                                                 <td colSpan="6" className="p-0 bg-slate-50 border-b-2 border-indigo-100">
                                                     <div className="p-4 md:pl-16 md:pr-4">
-                                                        <table className="w-full text-left bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                                                            <thead className="bg-slate-100 text-[10px] uppercase font-bold text-slate-500">
-                                                                <tr>
-                                                                    <th className="px-4 py-3">Department</th>
-                                                                    <th className="px-4 py-3 text-center">Type</th>
-                                                                    <th className="px-4 py-3 text-center">Strength</th>
-                                                                    <th className="px-4 py-3 text-center">Production</th>
-                                                                    <th className="px-4 py-3 text-right">Regular Cost</th>
-                                                                    <th className="px-4 py-3 text-right">OT Cost</th>
-                                                                    <th className="px-4 py-3 text-right">Total</th>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody className="divide-y divide-slate-100">
-                                                                {dayReport.departments.map((dept, idx) => (
-                                                                    <tr key={idx} className="hover:bg-slate-50 text-sm">
-                                                                        <td className="px-4 py-3 font-bold text-slate-700">{dept.department_name}</td>
-                                                                        <td className="px-4 py-3 text-center text-xs font-bold text-slate-400 uppercase">{dept.is_overhead ? 'Overhead' : 'Direct'}</td>
-                                                                        
-                                                                        {/* STRENGTH CELL */}
-                                                                        <td onClick={() => openDrilldown(dayReport.date, dept.department_name, 'STRENGTH')} className="px-4 py-3 text-center font-bold text-blue-600 cursor-pointer hover:bg-blue-50 hover:underline">
-                                                                            {dept.strength}
-                                                                        </td>
+                                                        {(() => {
+                                                            const directDepts = dayReport.departments.filter(d => !d.is_overhead);
+                                                            const overheadDepts = dayReport.departments.filter(d => d.is_overhead);
+                                                            const directTotal = directDepts.reduce((s, d) => s + (d.total_cost || 0), 0);
+                                                            const overheadTotal = overheadDepts.reduce((s, d) => s + (d.total_cost || 0), 0);
+                                                            const grandTotal = directTotal + overheadTotal;
+                                                            const directPct = grandTotal > 0 ? ((directTotal / grandTotal) * 100).toFixed(1) : 0;
+                                                            const overheadPct = grandTotal > 0 ? ((overheadTotal / grandTotal) * 100).toFixed(1) : 0;
 
-                                                                        {/* PRODUCTION CELL */}
-                                                                        <td onClick={() => dept.production_qty > 0 && openDrilldown(dayReport.date, dept.department_name, 'PRODUCTION')} className={`px-4 py-3 text-center font-medium ${dept.production_qty > 0 ? 'text-indigo-600 cursor-pointer hover:bg-indigo-50 hover:underline' : 'text-slate-400'}`}>
-                                                                            {dept.production_qty > 0 ? dept.production_qty : '-'}
-                                                                        </td>
-                                                                        
-                                                                        {/* COST CELL */}
-                                                                        <td onClick={() => openDrilldown(dayReport.date, dept.department_name, 'COST')} className="px-4 py-3 text-right font-medium text-emerald-600 cursor-pointer hover:bg-emerald-50 hover:underline">
-                                                                            {formatMoney(dept.regular_cost)}
-                                                                        </td>
-                                                                        
-                                                                        <td className="px-4 py-3 text-right font-medium text-amber-600">{dept.ot_cost > 0 ? formatMoney(dept.ot_cost) : '-'}</td>
-                                                                        <td className="px-4 py-3 text-right font-bold text-slate-800">{formatMoney(dept.total_cost)}</td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
+                                                            const DeptTable = ({ depts, label, isDirect }) => (
+                                                                <div className="mb-4">
+                                                                    <div className={`px-4 py-2 text-[10px] font-black uppercase tracking-widest rounded-t-xl ${isDirect ? 'bg-indigo-600 text-white' : 'bg-slate-500 text-white'}`}>
+                                                                        {label}
+                                                                    </div>
+                                                                    <table className="w-full text-left bg-white border border-slate-200 rounded-b-xl overflow-hidden shadow-sm">
+                                                                        <thead className="bg-slate-100 text-[10px] uppercase font-bold text-slate-500">
+                                                                            <tr>
+                                                                                <th className="px-4 py-2.5">Department</th>
+                                                                                <th className="px-4 py-2.5 text-center">Strength</th>
+                                                                                <th className="px-4 py-2.5 text-center">Production</th>
+                                                                                <th className="px-4 py-2.5 text-right">Regular Cost</th>
+                                                                                <th className="px-4 py-2.5 text-right">OT Cost</th>
+                                                                                <th className="px-4 py-2.5 text-right">Total</th>
+                                                                                {isDirect && <th className="px-4 py-2.5 text-right bg-indigo-50 text-indigo-600">Cost / Piece</th>}
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody className="divide-y divide-slate-100">
+                                                                            {depts.map((dept, idx) => {
+                                                                                const cpp = dept.production_qty > 0 ? (dept.total_cost / dept.production_qty).toFixed(2) : null;
+                                                                                return (
+                                                                                    <tr key={idx} className="hover:bg-slate-50 text-sm">
+                                                                                        <td className="px-4 py-3 font-bold text-slate-700">{dept.department_name}</td>
+                                                                                        <td onClick={() => openDrilldown(dayReport.date, dept.department_name, 'STRENGTH')} className="px-4 py-3 text-center font-bold text-blue-600 cursor-pointer hover:bg-blue-50 hover:underline">
+                                                                                            {dept.strength}
+                                                                                        </td>
+                                                                                        <td onClick={() => dept.production_qty > 0 && openDrilldown(dayReport.date, dept.department_name, 'PRODUCTION')} className={`px-4 py-3 text-center font-medium ${dept.production_qty > 0 ? 'text-indigo-600 cursor-pointer hover:bg-indigo-50 hover:underline' : 'text-slate-400'}`}>
+                                                                                            {dept.production_qty > 0 ? dept.production_qty : '-'}
+                                                                                        </td>
+                                                                                        <td onClick={() => openDrilldown(dayReport.date, dept.department_name, 'COST')} className="px-4 py-3 text-right font-medium text-emerald-600 cursor-pointer hover:bg-emerald-50 hover:underline">
+                                                                                            {formatMoney(dept.regular_cost)}
+                                                                                        </td>
+                                                                                        <td className="px-4 py-3 text-right font-medium text-amber-600">{dept.ot_cost > 0 ? formatMoney(dept.ot_cost) : '-'}</td>
+                                                                                        <td className="px-4 py-3 text-right font-bold text-slate-800">{formatMoney(dept.total_cost)}</td>
+                                                                                        {isDirect && (
+                                                                                            <td className="px-4 py-3 text-right bg-indigo-50/40">
+                                                                                                {cpp ? <span className="font-black text-indigo-700">₹{cpp}</span> : <span className="text-slate-300 font-bold">—</span>}
+                                                                                            </td>
+                                                                                        )}
+                                                                                    </tr>
+                                                                                );
+                                                                            })}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            );
+
+                                                            return (
+                                                                <>
+                                                                    {directDepts.length > 0 && <DeptTable depts={directDepts} label="Direct Cost Departments" isDirect={true} />}
+                                                                    {overheadDepts.length > 0 && <DeptTable depts={overheadDepts} label="Admin / Overhead Departments" isDirect={false} />}
+
+                                                                    {/* Cost Split Summary */}
+                                                                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                                                                        <div className="px-4 py-2 bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest">Cost Split Summary</div>
+                                                                        <div className="p-4 flex flex-col md:flex-row gap-4 items-center">
+                                                                            <div className="flex-1 w-full">
+                                                                                <div className="flex text-[10px] font-black uppercase justify-between mb-1">
+                                                                                    <span className="text-indigo-600">Direct {directPct}%</span>
+                                                                                    <span className="text-slate-500">Admin {overheadPct}%</span>
+                                                                                </div>
+                                                                                <div className="w-full h-4 bg-slate-200 rounded-full overflow-hidden flex">
+                                                                                    <div className="bg-indigo-500 h-full transition-all" style={{ width: `${directPct}%` }} />
+                                                                                    <div className="bg-slate-400 h-full transition-all" style={{ width: `${overheadPct}%` }} />
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className="flex gap-3 shrink-0">
+                                                                                <div className="flex flex-col items-center bg-indigo-50 border border-indigo-200 rounded-xl px-5 py-3 min-w-[130px]">
+                                                                                    <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-1">Direct Cost</span>
+                                                                                    <span className="text-xl font-black text-indigo-700">{formatMoney(directTotal)}</span>
+                                                                                    <span className="text-xs font-bold text-indigo-400 mt-0.5">{directPct}% of total</span>
+                                                                                </div>
+                                                                                <div className="flex flex-col items-center bg-slate-50 border border-slate-200 rounded-xl px-5 py-3 min-w-[130px]">
+                                                                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Admin Cost</span>
+                                                                                    <span className="text-xl font-black text-slate-700">{formatMoney(overheadTotal)}</span>
+                                                                                    <span className="text-xs font-bold text-slate-400 mt-0.5">{overheadPct}% of total</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </>
+                                                            );
+                                                        })()}
                                                     </div>
                                                 </td>
                                             </tr>
