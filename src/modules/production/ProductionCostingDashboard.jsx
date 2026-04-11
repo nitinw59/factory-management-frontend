@@ -120,8 +120,8 @@ export default function ProductionCostingDashboard() {
                                                         {(() => {
                                                             const directDepts = dayReport.departments.filter(d => !d.is_overhead);
                                                             const overheadDepts = dayReport.departments.filter(d => d.is_overhead);
-                                                            const directTotal = directDepts.reduce((s, d) => s + (d.total_cost || 0), 0);
-                                                            const overheadTotal = overheadDepts.reduce((s, d) => s + (d.total_cost || 0), 0);
+                                                            const directTotal = directDepts.reduce((s, d) => s + (parseFloat(d.total_cost) || 0), 0);
+                                                            const overheadTotal = overheadDepts.reduce((s, d) => s + (parseFloat(d.total_cost) || 0), 0);
                                                             const grandTotal = directTotal + overheadTotal;
                                                             const directPct = grandTotal > 0 ? ((directTotal / grandTotal) * 100).toFixed(1) : 0;
                                                             const overheadPct = grandTotal > 0 ? ((overheadTotal / grandTotal) * 100).toFixed(1) : 0;
@@ -145,7 +145,7 @@ export default function ProductionCostingDashboard() {
                                                                         </thead>
                                                                         <tbody className="divide-y divide-slate-100">
                                                                             {depts.map((dept, idx) => {
-                                                                                const cpp = dept.production_qty > 0 ? (dept.total_cost / dept.production_qty).toFixed(2) : null;
+                                                                                const cpp = dept.production_qty > 0 ? (parseFloat(dept.total_cost) / parseFloat(dept.production_qty)).toFixed(2) : null;
                                                                                 return (
                                                                                     <tr key={idx} className="hover:bg-slate-50 text-sm">
                                                                                         <td className="px-4 py-3 font-bold text-slate-700">{dept.department_name}</td>
