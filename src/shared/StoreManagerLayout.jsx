@@ -82,11 +82,14 @@ const StoreManagerLayout = () => {
                         <div className="text-xl font-bold text-gray-800">Store Portal</div>
                         {/* This is the original desktop navigation */}
                         <nav className="hidden md:flex items-center space-x-6">
-                            {/* <NavDropdown title="Fabric">
+                            <NavDropdown title="Fabric">
                                 <NavLink to="/store-manager/fabric-stock" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuLayers className="mr-2" /> Fabric Intake & Stock
                                 </NavLink>
-                            </NavDropdown> */}
+                                <NavLink to="/store-manager/fabric-stock-by-po" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuPackage className="mr-2" /> Stock by PO
+                                </NavLink>
+                            </NavDropdown>
                              <NavDropdown title="Trims">
                                 <NavLink to="/store-manager/trim-management" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuScissors className="mr-2" /> Trim Management
@@ -160,10 +163,12 @@ const StoreManagerLayout = () => {
                 {isMobileMenuOpen && (
                     <div className="md:hidden bg-white shadow-md">
                         <nav className="flex flex-col p-4 space-y-4">
-                            {/* Re-using NavLink for consistency */}
-                            {/* <NavLink to="/store-manager/fabric-stock" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                            <NavLink to="/store-manager/fabric-stock" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuLayers className="mr-2" /> Fabric Intake & Stock
-                            </NavLink> */}
+                            </NavLink>
+                            <NavLink to="/store-manager/fabric-stock-by-po" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuPackage className="mr-2" /> Stock by PO
+                            </NavLink>
                             <NavLink to="/store-manager/trim-management" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuScissors className="mr-2" /> Trim Management
                             </NavLink>

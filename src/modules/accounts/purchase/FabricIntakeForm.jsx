@@ -1,99 +1,107 @@
 import React, { useState, useEffect } from 'react';
 import { storeManagerApi } from '../../../api/storeManagerApi';
-import { Plus, Trash2, Loader2, AlertCircle, CheckSquare } from 'lucide-react';
+import { Plus, Trash2, Loader2, AlertCircle, CheckSquare, Pencil } from 'lucide-react';
 
 const Spinner = () => (
-    <div className="flex justify-center p-2">
-        <Loader2 className="animate-spin h-6 w-6 text-blue-600" />
+    <div className="flex justify-center p-8">
+        <Loader2 className="animate-spin h-8 w-8 text-blue-600" />
     </div>
 );
 
-const FabricIntakeForm = ({ onSave, onClose, purchaseOrder }) => {
-    // --- State ---
+// intake prop = existing intake object for edit mode; omit for create mode
+const FabricIntakeForm = ({ onSave, onClose, purchaseOrder, intake }) => {
+    const isEditMode = !!intake;
+
+    // --- Dropdown Options ---
     const [suppliers, setSuppliers] = useState([]);
     const [fabricTypes, setFabricTypes] = useState([]);
     const [fabricColors, setFabricColors] = useState([]);
     const [isLoadingData, setIsLoadingData] = useState(true);
 
+    // --- Form Fields ---
     const [supplierId, setSupplierId] = useState('');
     const [billDate, setBillDate] = useState(new Date().toISOString().split('T')[0]);
     const [referenceNumber, setReferenceNumber] = useState('');
-    
-    // Updated rolls state to include 'uom'
     const [rolls, setRolls] = useState([
         { fabric_type_id: '', fabric_color_id: '', meter: '', uom: 'meter' }
     ]);
-    
+
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState(null);
 
-    // --- 1. Load Dropdown Options ---
+    // --- 1. Load Dropdown Options (and existing intake if edit mode) ---
     useEffect(() => {
-        const loadFormData = async () => {
+        const load = async () => {
             setIsLoadingData(true);
             try {
-                const res = await storeManagerApi.getFabricIntakeFormData();
-                if (res.data) {
-                    setSuppliers(res.data.suppliers || []);
-                    setFabricTypes(res.data.fabricTypes || []);
-                    setFabricColors(res.data.fabricColors || []);
+                const promises = [storeManagerApi.getFabricIntakeFormData()];
+                if (isEditMode) promises.push(storeManagerApi.getFabricIntakeById(intake.id));
+
+                const [formRes, intakeRes] = await Promise.all(promises);
+
+                setSuppliers(formRes.data.suppliers || []);
+                setFabricTypes(formRes.data.fabricTypes || []);
+                setFabricColors(formRes.data.fabricColors || []);
+
+                if (isEditMode && intakeRes?.data) {
+                    const d = intakeRes.data;
+                    setSupplierId(String(d.supplier_id || ''));
+                    setBillDate(d.bill_date ? d.bill_date.split('T')[0] : new Date().toISOString().split('T')[0]);
+                    setReferenceNumber(d.reference_number || '');
+                    if (d.rolls?.length > 0) {
+                        setRolls(d.rolls.map(r => ({
+                            id: r.id,                          // keep existing roll ID for update
+                            fabric_type_id: String(r.fabric_type_id || ''),
+                            fabric_color_id: String(r.fabric_color_id || ''),
+                            meter: String(r.meter || ''),
+                            uom: r.uom || 'meter',
+                        })));
+                    }
                 }
             } catch (err) {
                 console.error("Failed to load form data:", err);
-                setError("Failed to load dropdown options. Please check your connection.");
+                setError("Failed to load form data. Please check your connection.");
             } finally {
                 setIsLoadingData(false);
             }
         };
-        loadFormData();
+        load();
     }, []);
 
-    // --- 2. Initialize from Purchase Order (if provided) ---
+    // --- 2. Initialize from PO (create mode only) ---
     useEffect(() => {
-        if (purchaseOrder) {
-            setSupplierId(purchaseOrder.supplier_id || '');
-            // Use PO Code as the reference number by default
+        if (!isEditMode && purchaseOrder) {
+            setSupplierId(String(purchaseOrder.supplier_id || ''));
             setReferenceNumber(purchaseOrder.po_code || purchaseOrder.po_number || '');
         }
     }, [purchaseOrder]);
 
-    // --- Handlers ---
-
+    // --- Roll Handlers ---
     const handleRollChange = (index, field, value) => {
-        const newRolls = [...rolls];
-        newRolls[index][field] = value;
-        setRolls(newRolls);
+        const updated = [...rolls];
+        updated[index][field] = value;
+        setRolls(updated);
     };
 
     const addRoll = () => {
-        // Default new rolls to 'meter'
         setRolls([...rolls, { fabric_type_id: '', fabric_color_id: '', meter: '', uom: 'meter' }]);
     };
 
     const removeRoll = (index) => {
-        if (rolls.length > 1) {
-            setRolls(rolls.filter((_, i) => i !== index));
-        }
+        if (rolls.length > 1) setRolls(rolls.filter((_, i) => i !== index));
     };
 
+    // --- Submit ---
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError(null);
 
-        // Validation
-        if (!supplierId) {
-            setError("Please select a supplier.");
-            return;
-        }
+        if (!supplierId) { setError("Please select a supplier."); return; }
 
-        const invalidRolls = rolls.some(r => 
+        const invalidRolls = rolls.some(r =>
             !r.fabric_type_id || !r.fabric_color_id || !r.meter || parseFloat(r.meter) <= 0 || !r.uom
         );
-        
-        if (invalidRolls) {
-            setError("Please ensure all rolls have a valid Type, Color, Quantity, and Unit.");
-            return;
-        }
+        if (invalidRolls) { setError("Please ensure all rolls have a valid Type, Color, Quantity, and Unit."); return; }
 
         setIsSaving(true);
         try {
@@ -101,18 +109,25 @@ const FabricIntakeForm = ({ onSave, onClose, purchaseOrder }) => {
                 supplier_id: supplierId,
                 bill_date: billDate,
                 reference_number: referenceNumber,
-                purchase_order_id: purchaseOrder?.id || null, 
+                purchase_order_id: purchaseOrder?.id || null,
                 rolls: rolls.map(r => ({
-                    ...r,
+                    ...(r.id ? { id: r.id } : {}),   // include roll ID only on edit
+                    fabric_type_id: r.fabric_type_id,
+                    fabric_color_id: r.fabric_color_id,
                     meter: parseFloat(r.meter),
-                    uom: r.uom // Send UOM to backend
+                    uom: r.uom,
                 }))
             };
 
-            await onSave(payload);
+            if (isEditMode) {
+                await storeManagerApi.updateFabricIntake(intake.id, payload);
+                await onSave(payload, intake.id);
+            } else {
+                await onSave(payload);
+            }
         } catch (err) {
             console.error("Submission error:", err);
-            setError(err.response?.data?.error || "Failed to submit fabric intake.");
+            setError(err.response?.data?.error || `Failed to ${isEditMode ? 'update' : 'submit'} fabric intake.`);
         } finally {
             setIsSaving(false);
         }
@@ -122,8 +137,17 @@ const FabricIntakeForm = ({ onSave, onClose, purchaseOrder }) => {
 
     return (
         <form onSubmit={handleSubmit} className="space-y-5 text-gray-800">
-            {/* Context Header for PO linking */}
-            {purchaseOrder ? (
+
+            {/* Mode banner */}
+            {isEditMode ? (
+                <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg flex items-start gap-3">
+                    <Pencil className="text-amber-600 mt-0.5 shrink-0" size={18} />
+                    <div>
+                        <h4 className="text-sm font-bold text-amber-900">Editing Intake #{intake.id}</h4>
+                        <p className="text-xs text-amber-700">Changes will update the existing intake record and its rolls.</p>
+                    </div>
+                </div>
+            ) : purchaseOrder ? (
                 <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-lg flex items-start gap-3">
                     <CheckSquare className="text-indigo-600 mt-0.5 shrink-0" size={18} />
                     <div>
@@ -139,7 +163,7 @@ const FabricIntakeForm = ({ onSave, onClose, purchaseOrder }) => {
 
             {error && (
                 <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm flex items-center border border-red-200">
-                    <AlertCircle className="mr-2 shrink-0" size={16}/> {error}
+                    <AlertCircle className="mr-2 shrink-0" size={16} /> {error}
                 </div>
             )}
 
@@ -147,37 +171,37 @@ const FabricIntakeForm = ({ onSave, onClose, purchaseOrder }) => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Supplier</label>
-                    <select 
-                        value={supplierId} 
-                        onChange={e => setSupplierId(e.target.value)} 
-                        required 
-                        disabled={!!purchaseOrder} 
+                    <select
+                        value={supplierId}
+                        onChange={e => setSupplierId(e.target.value)}
+                        required
+                        disabled={!isEditMode && !!purchaseOrder}
                         className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:text-gray-500"
                     >
                         <option value="">Select Supplier</option>
-                        {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        {suppliers.map(s => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
                     </select>
                 </div>
                 <div>
                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Intake Date</label>
-                    <input 
-                        type="date" 
-                        value={billDate} 
-                        onChange={e => setBillDate(e.target.value)} 
-                        className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
-                        required 
+                    <input
+                        type="date"
+                        value={billDate}
+                        onChange={e => setBillDate(e.target.value)}
+                        className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                        required
                     />
                 </div>
             </div>
-            
+
             <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Reference / Challan No.</label>
-                <input 
-                    type="text" 
-                    value={referenceNumber} 
-                    onChange={e => setReferenceNumber(e.target.value)} 
-                    placeholder="Enter Bill No, Challan No, or PO Code" 
-                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                <input
+                    type="text"
+                    value={referenceNumber}
+                    onChange={e => setReferenceNumber(e.target.value)}
+                    placeholder="Enter Bill No, Challan No, or PO Code"
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                 />
             </div>
 
@@ -189,52 +213,51 @@ const FabricIntakeForm = ({ onSave, onClose, purchaseOrder }) => {
                     <h3 className="font-bold text-gray-700">Fabric Rolls</h3>
                     <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">Total: {rolls.length}</span>
                 </div>
-                
+
                 <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-1">
                     {rolls.map((roll, index) => (
-                        <div key={index} className="flex flex-col md:flex-row gap-2 items-start md:items-center bg-gray-50 p-3 rounded-lg border border-gray-200">
+                        <div key={roll.id || index} className={`flex flex-col md:flex-row gap-2 items-start md:items-center p-3 rounded-lg border ${roll.id ? 'bg-blue-50/40 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
+                            {isEditMode && roll.id && (
+                                <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider shrink-0 hidden md:block">#{roll.id}</span>
+                            )}
                             <div className="flex-1 w-full">
-                                <select 
-                                    value={roll.fabric_type_id} 
-                                    onChange={e => handleRollChange(index, 'fabric_type_id', e.target.value)} 
-                                    required 
+                                <select
+                                    value={roll.fabric_type_id}
+                                    onChange={e => handleRollChange(index, 'fabric_type_id', e.target.value)}
+                                    required
                                     className="w-full p-2 border border-gray-300 rounded-md text-sm focus:border-blue-500 outline-none bg-white"
                                 >
                                     <option value="">Select Type</option>
-                                    {fabricTypes.map(ft => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                                    {fabricTypes.map(ft => <option key={ft.id} value={String(ft.id)}>{ft.name}</option>)}
                                 </select>
                             </div>
                             <div className="flex-1 w-full">
-                                <select 
-                                    value={roll.fabric_color_id} 
-                                    onChange={e => handleRollChange(index, 'fabric_color_id', e.target.value)} 
-                                    required 
+                                <select
+                                    value={roll.fabric_color_id}
+                                    onChange={e => handleRollChange(index, 'fabric_color_id', e.target.value)}
+                                    required
                                     className="w-full p-2 border border-gray-300 rounded-md text-sm focus:border-blue-500 outline-none bg-white"
                                 >
                                     <option value="">Select Color</option>
-                                    {fabricColors.map(fc => <option key={fc.id} value={fc.id}>{fc.color_number} {fc.name ? `(${fc.name})` : ''}</option>)}
+                                    {fabricColors.map(fc => <option key={fc.id} value={String(fc.id)}>{fc.color_number} {fc.name ? `(${fc.name})` : ''}</option>)}
                                 </select>
                             </div>
-                            
-                            {/* Quantity Input */}
                             <div className="w-full md:w-32">
-                                <input 
-                                    type="number" 
-                                    step="0.01" 
-                                    placeholder="Qty" 
-                                    value={roll.meter} 
-                                    onChange={e => handleRollChange(index, 'meter', e.target.value)} 
-                                    required 
-                                    className="w-full p-2 border border-gray-300 rounded-md text-sm focus:border-blue-500 outline-none" 
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    placeholder="Qty"
+                                    value={roll.meter}
+                                    onChange={e => handleRollChange(index, 'meter', e.target.value)}
+                                    required
+                                    className="w-full p-2 border border-gray-300 rounded-md text-sm focus:border-blue-500 outline-none"
                                 />
                             </div>
-
-                            {/* UOM Dropdown */}
                             <div className="w-full md:w-24">
-                                <select 
-                                    value={roll.uom} 
-                                    onChange={e => handleRollChange(index, 'uom', e.target.value)} 
-                                    required 
+                                <select
+                                    value={roll.uom}
+                                    onChange={e => handleRollChange(index, 'uom', e.target.value)}
+                                    required
                                     className="w-full p-2 border border-gray-300 rounded-md text-sm focus:border-blue-500 outline-none bg-white font-medium text-gray-600"
                                 >
                                     <option value="meter">Meters</option>
@@ -242,11 +265,11 @@ const FabricIntakeForm = ({ onSave, onClose, purchaseOrder }) => {
                                     <option value="kg">Kgs</option>
                                 </select>
                             </div>
-
-                            <button 
-                                type="button" 
-                                onClick={() => removeRoll(index)} 
-                                className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                            <button
+                                type="button"
+                                onClick={() => removeRoll(index)}
+                                disabled={rolls.length === 1}
+                                className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                                 title="Remove Roll"
                             >
                                 <Trash2 size={18} />
@@ -255,31 +278,35 @@ const FabricIntakeForm = ({ onSave, onClose, purchaseOrder }) => {
                     ))}
                 </div>
 
-                <button 
-                    type="button" 
-                    onClick={addRoll} 
+                <button
+                    type="button"
+                    onClick={addRoll}
                     className="mt-3 text-sm text-blue-600 font-semibold flex items-center hover:text-blue-800 transition-colors"
                 >
-                    <Plus size={16} className="mr-1"/> Add Another Roll
+                    <Plus size={16} className="mr-1" /> Add Another Roll
                 </button>
             </div>
 
             {/* Footer Actions */}
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-                <button 
-                    type="button" 
-                    onClick={onClose} 
+                <button
+                    type="button"
+                    onClick={onClose}
                     className="px-5 py-2.5 border border-gray-300 rounded-lg text-gray-600 font-medium hover:bg-gray-50 transition-colors"
                 >
                     Cancel
                 </button>
-                <button 
-                    type="submit" 
-                    disabled={isSaving} 
-                    className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed shadow-md transition-all flex items-center"
+                <button
+                    type="submit"
+                    disabled={isSaving}
+                    className={`px-6 py-2.5 text-white rounded-lg font-bold shadow-md transition-all flex items-center disabled:cursor-not-allowed ${
+                        isEditMode
+                            ? 'bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300'
+                            : 'bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300'
+                    }`}
                 >
                     {isSaving && <Loader2 className="animate-spin mr-2 h-4 w-4" />}
-                    {isSaving ? 'Saving...' : 'Confirm Intake'}
+                    {isSaving ? 'Saving...' : isEditMode ? 'Save Changes' : 'Confirm Intake'}
                 </button>
             </div>
         </form>

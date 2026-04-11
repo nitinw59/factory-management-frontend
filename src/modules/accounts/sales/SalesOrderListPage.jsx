@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { productionManagerApi } from '../../../api/productionManagerApi'; 
 import { storeManagerApi } from '../../../api/storeManagerApi';
 import { accountingApi } from '../../../api/accountingApi'; 
-import { 
-    FileText, ShoppingCart, Truck, ChevronDown, ChevronRight, Package, Edit3, Eye, Layers, Loader2, X, Search, Filter, Box, Calendar, DollarSign, Info, Palette
+import {
+    FileText, ShoppingCart, Truck, ChevronDown, Package, Edit3, Eye, Layers, Loader2, Search, Box, DollarSign, Palette, Pencil
 } from 'lucide-react';
 import Modal from '../../../shared/Modal';
 import FabricIntakeForm from '../purchase/FabricIntakeForm'; 
@@ -16,6 +16,7 @@ const ReceivedRollsList = ({ purchaseOrderId }) => {
     const [error, setError] = useState(null);
     const [meterFilter, setMeterFilter] = useState('');
     const [editingRoll, setEditingRoll] = useState(null);
+    const [editingIntake, setEditingIntake] = useState(null); // { id } for edit mode
 
     const fetchRolls = async () => {
         setLoading(true);
@@ -36,14 +37,46 @@ const ReceivedRollsList = ({ purchaseOrderId }) => {
 
     const handleUpdateRoll = async (updatedData) => {
         try {
-            await storeManagerApi.updateFabricRoll(updatedData.id, { meter: updatedData.meter });
-            fetchRolls(); 
+            await storeManagerApi.updateFabricRoll(updatedData.id, {
+                meter: updatedData.meter,
+                uom: updatedData.uom,
+                fabric_color_id: updatedData.fabric_color_id,
+            });
+            setEditingRoll(null);
+            fetchRolls();
         } catch (err) {
-            alert("Failed to update roll.");
+            throw err;
         }
     };
 
+    const handleDeleteRoll = async (rollId) => {
+        await storeManagerApi.deleteFabricRoll(rollId);
+        setEditingRoll(null);
+        fetchRolls();
+    };
+
+    const handleEditIntakeSave = async () => {
+        setEditingIntake(null);
+        fetchRolls();
+    };
+
     const filteredRolls = rolls.filter(r => !meterFilter || r.meter.toString().includes(meterFilter));
+
+    // Group filtered rolls by intake_id
+    const intakeGroups = filteredRolls.reduce((acc, roll) => {
+        const key = roll.intake_id ?? 'unknown';
+        if (!acc[key]) {
+            acc[key] = {
+                intake_id: roll.intake_id,
+                intake_date: roll.intake_date || roll.bill_date,
+                reference_number: roll.reference_number,
+                rolls: [],
+            };
+        }
+        acc[key].rolls.push(roll);
+        return acc;
+    }, {});
+    const intakeGroupList = Object.values(intakeGroups);
 
     if (loading) return <div className="text-xs text-gray-500 p-2 flex items-center"><Loader2 className="animate-spin mr-2 h-3 w-3"/> Loading rolls...</div>;
     if (error) return <div className="text-xs text-red-500 p-2">{error}</div>;
@@ -57,66 +90,99 @@ const ReceivedRollsList = ({ purchaseOrderId }) => {
                 </h6>
                 <div className="relative">
                     <Search className="absolute left-2 top-1.5 text-gray-400 w-3 h-3" />
-                    <input 
-                        type="number" 
-                        placeholder="Filter by meters..." 
+                    <input
+                        type="number"
+                        placeholder="Filter by meters..."
                         value={meterFilter}
                         onChange={(e) => setMeterFilter(e.target.value)}
                         className="pl-6 pr-2 py-1 text-xs border rounded w-32 focus:outline-none focus:border-blue-400"
                     />
                 </div>
             </div>
-            
-            <div className="max-h-40 overflow-y-auto">
-                <table className="w-full text-xs text-left">
-                    <thead>
-                        <tr className="text-gray-400">
-                            <th className="pb-1 font-medium w-16">Roll ID</th>
-                            <th className="pb-1 font-medium">Fabric Details</th>
-                            <th className="pb-1 font-medium text-right w-16">Meters</th>
-                            <th className="pb-1 font-medium text-center w-12">Unit</th>
-                            <th className="pb-1 font-medium text-center w-12">Status</th>
-                            <th className="pb-1 font-medium text-center w-8"></th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                        {filteredRolls.map(roll => (
-                            <tr key={roll.id} className="hover:bg-gray-100 transition-colors">
-                                <td className="py-1.5 font-mono text-indigo-600">R-{roll.id}</td>
-                                <td className="py-1.5 text-gray-700">
-                                    {roll.fabric_type} <span className="text-gray-400 mx-1">•</span> {roll.fabric_color}
-                                </td>
-                                <td className="py-1.5 text-right font-bold text-gray-800">{roll.meter}</td>
-                                <td className="py-1.5 text-center text-gray-500">{roll.uom || 'm'}</td>
-                                <td className="py-1.5 text-center">
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                        roll.status === 'IN_STOCK' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
-                                    }`}>
-                                        {roll.status === 'IN_STOCK' ? 'Stock' : 'Prod'}
+
+            <div className="max-h-60 overflow-y-auto space-y-2">
+                {intakeGroupList.map(group => (
+                    <div key={group.intake_id ?? 'unknown'} className="border border-gray-200 rounded-md overflow-hidden">
+                        {/* Intake group header */}
+                        <div className="flex items-center justify-between bg-indigo-50 px-2.5 py-1.5 border-b border-indigo-100">
+                            <div className="flex items-center gap-2 text-[11px] text-indigo-700">
+                                <span className="font-bold">Intake #{group.intake_id ?? '—'}</span>
+                                {group.intake_date && (
+                                    <span className="text-indigo-400">
+                                        {new Date(group.intake_date).toLocaleDateString()}
                                     </span>
-                                </td>
-                                <td className="py-1.5 text-center">
-                                    <button 
-                                        onClick={() => setEditingRoll(roll)}
-                                        className="text-gray-400 hover:text-blue-600 transition-colors" 
-                                        title="Edit Roll"
-                                        disabled={roll.status !== 'IN_STOCK'}
-                                    >
-                                        <Edit3 size={12} />
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
-                        {filteredRolls.length === 0 && <tr><td colSpan="6" className="text-center py-2 text-gray-400">No matching rolls found.</td></tr>}
-                    </tbody>
-                </table>
+                                )}
+                                {group.reference_number && (
+                                    <span className="text-indigo-500 font-medium">· {group.reference_number}</span>
+                                )}
+                                <span className="text-indigo-300">({group.rolls.length} roll{group.rolls.length !== 1 ? 's' : ''})</span>
+                            </div>
+                            {group.intake_id != null && (
+                                <button
+                                    onClick={() => setEditingIntake({ id: group.intake_id })}
+                                    className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-100 px-1.5 py-0.5 rounded transition-colors"
+                                    title="Edit this intake"
+                                >
+                                    <Pencil size={11} /> Edit
+                                </button>
+                            )}
+                        </div>
+                        {/* Rolls table */}
+                        <table className="w-full text-xs text-left">
+                            <tbody className="divide-y divide-gray-100">
+                                {group.rolls.map(roll => (
+                                    <tr key={roll.id} className="hover:bg-gray-100 transition-colors">
+                                        <td className="py-1.5 pl-2.5 font-mono text-indigo-600 w-16">R-{roll.id}</td>
+                                        <td className="py-1.5 text-gray-700">
+                                            {roll.fabric_type} <span className="text-gray-400 mx-1">•</span> {roll.fabric_color}
+                                        </td>
+                                        <td className="py-1.5 text-right font-bold text-gray-800 w-16">{roll.meter}</td>
+                                        <td className="py-1.5 text-center text-gray-500 w-12">{roll.uom || 'm'}</td>
+                                        <td className="py-1.5 text-center w-12">
+                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                                roll.status === 'IN_STOCK' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                                            }`}>
+                                                {roll.status === 'IN_STOCK' ? 'Stock' : 'Prod'}
+                                            </span>
+                                        </td>
+                                        <td className="py-1.5 pr-2 text-center w-8">
+                                            <button
+                                                onClick={() => setEditingRoll(roll)}
+                                                className="text-gray-400 hover:text-blue-600 transition-colors"
+                                                title="Edit Roll"
+                                                disabled={roll.status !== 'IN_STOCK'}
+                                            >
+                                                <Edit3 size={12} />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                ))}
+                {filteredRolls.length === 0 && (
+                    <p className="text-center py-2 text-gray-400 text-xs">No matching rolls found.</p>
+                )}
             </div>
+
             {editingRoll && (
-                <EditFabricRollModal 
-                    roll={editingRoll} 
-                    onSave={handleUpdateRoll} 
-                    onClose={() => setEditingRoll(null)} 
+                <EditFabricRollModal
+                    roll={editingRoll}
+                    onSave={handleUpdateRoll}
+                    onDelete={handleDeleteRoll}
+                    onClose={() => setEditingRoll(null)}
                 />
+            )}
+
+            {editingIntake && (
+                <Modal title={`Edit Intake #${editingIntake.id}`} onClose={() => setEditingIntake(null)}>
+                    <FabricIntakeForm
+                        intake={editingIntake}
+                        onSave={handleEditIntakeSave}
+                        onClose={() => setEditingIntake(null)}
+                    />
+                </Modal>
             )}
         </div>
     );

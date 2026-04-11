@@ -7,7 +7,11 @@ export const storeManagerApi = {
     getFabricInventory: () => api.get('/store-manager/fabric-inventory'),
     createFabricIntake: (data) => api.post('/store-manager/fabric-intake', data),
     getFabricIntakeFormData: () => api.get('/store-manager/form-data/fabric-intake'),
-    getFabricRollsByPO: (poId) => api.get(`/store-manager/fabric-rolls/po/${poId}`),
+    getFabricIntakeById: (intakeId) => api.get(`/store-manager/fabric-intake/${intakeId}`),
+    updateFabricIntake: (intakeId, data) => api.put(`/store-manager/fabric-intake/${intakeId}`, data),
+    getFabricRollsByPO: (poId) => api.get(`/store-manager/fabric-stock/po/${poId}`),
+    updateFabricRoll: (rollId, data) => api.put(`/store-manager/fabric-roll/${rollId}`, data),
+    deleteFabricRoll: (rollId) => api.delete(`/store-manager/fabric-roll/${rollId}`),
     // Trims
     getAllTrimItems: () => api.get('/store-manager/trim-items'),
     getVariantsByTrimItem: (trimItemId) => api.get(`/store-manager/trim-item-variants/${trimItemId}`),

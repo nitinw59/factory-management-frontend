@@ -1,9 +1,9 @@
 // --- File: src/shared/Modal.jsx ---
-import React from 'react';
+import { createPortal } from 'react-dom';
 import { LuX } from 'react-icons/lu';
 
-const Modal = ({ title, onClose, children }) => (
-  <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+const Modal = ({ title, onClose, children }) => createPortal(
+  <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-[500]">
     <div
       className="
         bg-white rounded-xl shadow-2xl relative
@@ -30,7 +30,8 @@ const Modal = ({ title, onClose, children }) => (
         {children}
       </div>
     </div>
-  </div>
+  </div>,
+  document.body
 );
 
 export default Modal;
