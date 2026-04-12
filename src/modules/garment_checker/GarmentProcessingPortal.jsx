@@ -199,10 +199,16 @@ const AssemblyProcessingPortal = () => {
         if (isProcessingAction) return;
         setIsProcessingAction(true);
         try {
+            const detectedAtLineId =
+                garment.current_production_line_id ??
+                selectedBatch?.line_id ??
+                null;
+
             await assemblyApi.processGarmentStatus({
                 garmentId: garment.garment_id,
                 status,
-                defectCodeId
+                defectCodeId,
+                detected_at_line_id: detectedAtLineId
             });
             setLastAction({ uid: garment.garment_uid, status });
             setGarment(null);
