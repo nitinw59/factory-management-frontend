@@ -115,6 +115,11 @@ const AdminLayout = () => {
                 <NavLink to="/admin/line-config" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                   Line Config
                 </NavLink>
+
+                <DesktopNavDropdown title="Quality">
+                  <NavLink to="/admin/qc-analytics" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">QC Analytics</NavLink>
+                  <NavLink to="/admin/defect-code-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Defect Code Config</NavLink>
+                </DesktopNavDropdown>
               </nav>
             </div>
 
@@ -177,6 +182,11 @@ const AdminLayout = () => {
               <NavLink to="/admin/asset-management" onClick={closeMenu} className={({ isActive }) => `block py-2 text-base font-medium ${isActive ? 'text-blue-600' : 'text-gray-700'}`}>
                 Asset Management
               </NavLink>
+
+              <MobileNavDropdown title="Quality">
+                <NavLink to="/admin/qc-analytics" onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">QC Analytics</NavLink>
+                <NavLink to="/admin/defect-code-line-types" onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Defect Code Config</NavLink>
+              </MobileNavDropdown>
 
               <div className="border-t border-gray-200 pt-4 mt-2">
                 <div className="flex items-center mb-3">

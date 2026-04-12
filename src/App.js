@@ -43,6 +43,8 @@ import UnauthorizedPage from './login/UnauthorizedPage';
 
 // --- MODULE PAGES ---
 import AdminDashboardPage from './modules/admin/AdminDashboardPage';
+import DefectCodeLineTypePage from './modules/admin/DefectCodeLineTypePage';
+import QCAnalyticsDashboard from './modules/admin/QCAnalyticsDashboard';
 import UserManagementPage from './modules/users/UserManagementPage';
 import SupplierManagementPage from './modules/suppliers/SupplierManagementPage';
 import TrimsDashboardPage from './modules/trims/TrimsDashboardPage';
@@ -144,6 +146,7 @@ import GarmentMonitor from './modules/garment_checker/GarmentMonitor';
 
 import ProductionAnalyticsDashboard from './modules/management/FactoryLineControlBoard';
 
+
 function App() {
   return (
     <Routes>
@@ -236,6 +239,8 @@ function App() {
           <Route path="reports/daily-costing" element={<ProductionCostingDashboard />} />
           <Route path="settings" element={<ProductionSettingsPage />} />
           <Route path="reports/production-analytics" element={<ProductionAnalyticsDashboard />} />
+          <Route path="defect-code-line-types" element={<DefectCodeLineTypePage />} />
+          <Route path="qc-analytics" element={<QCAnalyticsDashboard />} />
 
         </Route>
       </Route>
