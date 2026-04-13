@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { universalApi } from '../../api/universalApi'; 
 import { 
     Shirt, Layers, ClipboardCheck, Component, Check, X, 
-    Hammer, Loader2, ChevronDown, ChevronRight, CheckCircle2, 
+    Hammer, Loader2, Menu, ChevronDown, ChevronRight, CheckCircle2,
     Square, CheckSquare, XCircle, ArrowLeft, Package, Send, AlertCircle, Zap
 } from 'lucide-react';
 
@@ -187,27 +187,27 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
 
     return (
         <div className="fixed inset-0 bg-black/95 z-[150] flex flex-col p-0 font-inter">
-            <div className="bg-black text-white p-6 flex justify-between items-center border-b-4 border-slate-800 shrink-0">
-                <div className="flex flex-col md:flex-row md:items-center gap-6 md:gap-16">
-                    <div className="flex flex-col"><span className="text-slate-500 text-sm font-black uppercase tracking-widest">Batch</span><h2 className="text-4xl font-black">{displayBatch}</h2></div>
-                    <div className="flex flex-col border-l-0 md:border-l-2 border-slate-800 md:pl-12"><span className="text-slate-500 text-sm font-black uppercase tracking-widest">Source</span><h2 className="text-4xl font-black text-indigo-400">{displayRoll}</h2></div>
-                    <div className="flex flex-col border-l-0 md:border-l-2 border-slate-800 md:pl-12"><span className="text-slate-500 text-sm font-black uppercase tracking-widest">Component</span><h2 className="text-4xl font-black uppercase">{displayPartSize}</h2></div>
+            <div className="bg-black text-white px-5 py-3 flex justify-between items-center border-b-2 border-slate-800 shrink-0">
+                <div className="flex flex-wrap items-center gap-4 md:gap-8">
+                    <div className="flex flex-col"><span className="text-slate-500 text-xs font-black uppercase tracking-widest">Batch</span><h2 className="text-xl font-black">{displayBatch}</h2></div>
+                    <div className="flex flex-col border-l border-slate-700 pl-4"><span className="text-slate-500 text-xs font-black uppercase tracking-widest">Source</span><h2 className="text-xl font-black text-indigo-400">{displayRoll}</h2></div>
+                    <div className="flex flex-col border-l border-slate-700 pl-4"><span className="text-slate-500 text-xs font-black uppercase tracking-widest">Component</span><h2 className="text-xl font-black uppercase">{displayPartSize}</h2></div>
                 </div>
-                <button onClick={onClose} className="p-4 bg-slate-900 hover:bg-rose-600 rounded-full transition-all border border-slate-700"><X className="w-8 h-8 text-white"/></button>
+                <button onClick={onClose} className="p-2 bg-slate-900 hover:bg-rose-600 rounded-full transition-all border border-slate-700"><X className="w-5 h-5 text-white"/></button>
             </div>
 
             <div className="flex-grow overflow-hidden flex flex-col bg-slate-100">
-                <div className="bg-slate-200 px-8 py-5 border-b-2 border-slate-300 flex justify-between items-center shrink-0 shadow-inner">
+                <div className="bg-slate-200 px-5 py-2 border-b border-slate-300 flex justify-between items-center shrink-0">
                     <div className="flex items-center">
-                        <Zap className={`w-6 h-6 mr-3 ${allowMultiple ? 'text-black' : 'text-slate-400'}`} />
-                        <span className="font-black text-black uppercase tracking-widest text-lg">
+                        <Zap className={`w-4 h-4 mr-2 ${allowMultiple ? 'text-black' : 'text-slate-400'}`} />
+                        <span className="font-black text-black uppercase tracking-widest text-sm">
                             {allowMultiple ? 'MULTI-SELECT ACTIVE' : 'SINGLE-PLY OVERRIDE'}
                         </span>
                     </div>
                     {allowMultiple && actionablePieces.length > 0 && (
-                        <button onClick={toggleSelectAll} className="px-8 py-3 bg-black text-white font-black rounded-xl hover:bg-slate-800 active:scale-95 transition-all flex items-center shadow-lg tracking-widest">
-                            {selectedIds.size === actionablePieces.length ? <Square className="w-5 h-5 mr-3" /> : <CheckSquare className="w-5 h-5 mr-3" />}
-                            {selectedIds.size === actionablePieces.length ? 'DESELECT ALL PENDING' : 'SELECT ALL PENDING'}
+                        <button onClick={toggleSelectAll} className="px-4 py-2 bg-black text-white font-black rounded-xl hover:bg-slate-800 active:scale-95 transition-all flex items-center shadow-lg tracking-widest text-sm">
+                            {selectedIds.size === actionablePieces.length ? <Square className="w-4 h-4 mr-2" /> : <CheckSquare className="w-4 h-4 mr-2" />}
+                            {selectedIds.size === actionablePieces.length ? 'DESELECT ALL' : 'SELECT ALL'}
                         </button>
                     )}
                 </div>
@@ -259,24 +259,24 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                         </div>
                     ) : (
                         <div className="animate-in fade-in slide-in-from-bottom-4">
-                            <div className="flex justify-between items-center mb-6">
-                                <h4 className="text-3xl font-black flex items-center uppercase tracking-tight text-black">
-                                    <AlertCircle className={`w-10 h-10 mr-4 ${intendedAction === 'NEEDS_REWORK' ? 'text-amber-500' : 'text-rose-600'}`} /> Reason for {intendedAction.replace('_', ' ')}?
+                            <div className="flex justify-between items-center mb-3">
+                                <h4 className="text-base font-black flex items-center uppercase tracking-tight text-black">
+                                    <AlertCircle className={`w-5 h-5 mr-2 ${intendedAction === 'NEEDS_REWORK' ? 'text-amber-500' : 'text-rose-600'}`} /> Reason for {intendedAction.replace('_', ' ')}?
                                 </h4>
-                                <button onClick={() => {setIntendedAction(null); setSelectedCategory(null);}} className="bg-slate-200 px-8 py-4 rounded-xl font-black text-slate-700 uppercase tracking-widest active:scale-95">Cancel</button>
+                                <button onClick={() => {setIntendedAction(null); setSelectedCategory(null);}} className="bg-slate-200 px-4 py-2 rounded-lg font-black text-slate-700 text-sm uppercase tracking-widest active:scale-95">Cancel</button>
                             </div>
                             {!selectedCategory ? (
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-56 overflow-y-auto">
+                                <div className="grid grid-cols-3 md:grid-cols-5 gap-2 max-h-32 overflow-y-auto">
                                     {Array.from(new Set(defectCodes.map(d => d.category))).map(cat => (
-                                        <button key={cat} onClick={() => setSelectedCategory(cat)} className="bg-white border-4 border-slate-200 p-6 rounded-2xl font-black text-2xl hover:border-black hover:text-black transition-all text-slate-600 uppercase tracking-wide">{cat}</button>
+                                        <button key={cat} onClick={() => setSelectedCategory(cat)} className="bg-white border-2 border-slate-200 p-2.5 rounded-xl font-black text-sm hover:border-black hover:text-black transition-all text-slate-600 uppercase">{cat}</button>
                                     ))}
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-56 overflow-y-auto">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-36 overflow-y-auto">
                                     {availableDefects.map(defect => (
-                                        <button key={defect.id} onClick={() => submitValidation(intendedAction, defect.id)} className="bg-black text-white p-6 rounded-2xl text-left shadow-xl hover:bg-indigo-600 active:scale-95 transition-all border-b-4 border-slate-800">
-                                            <span className="block text-sm font-bold text-slate-400 uppercase tracking-widest mb-2">{defect.code}</span>
-                                            <span className="text-2xl font-black leading-tight">{defect.description}</span>
+                                        <button key={defect.id} onClick={() => submitValidation(intendedAction, defect.id)} className="bg-black text-white p-2.5 rounded-xl text-left shadow-xl hover:bg-indigo-600 active:scale-95 transition-all">
+                                            <span className="block text-xs font-bold text-slate-400 uppercase tracking-widest">{defect.code}</span>
+                                            <span className="text-sm font-black leading-tight">{defect.description}</span>
                                         </button>
                                     ))}
                                 </div>
@@ -334,12 +334,12 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
 
     return (
         <div className="fixed inset-0 bg-black/95 z-[150] flex flex-col p-0 font-inter">
-            <div className="bg-amber-400 text-black p-6 flex justify-between items-center shrink-0 border-b-4 border-amber-600">
+            <div className="bg-amber-400 text-black px-5 py-3 flex justify-between items-center shrink-0 border-b-2 border-amber-600">
                 <div>
-                    <h3 className="text-4xl font-black uppercase tracking-tight">{itemInfo.titleOverride || `VALIDATE REPAIRS`}</h3>
-                    <p className="text-lg text-amber-900 mt-1 font-bold">Select pieces returning from alteration line.</p>
+                    <h3 className="text-xl font-black uppercase tracking-tight">{itemInfo.titleOverride || `VALIDATE REPAIRS`}</h3>
+                    <p className="text-sm text-amber-900 mt-0.5 font-bold">Select pieces returning from alteration line.</p>
                 </div>
-                <button onClick={onClose} className="p-4 bg-black/10 hover:bg-black hover:text-amber-400 rounded-full transition-all"><X className="w-8 h-8"/></button>
+                <button onClick={onClose} className="p-2 bg-black/10 hover:bg-black hover:text-amber-400 rounded-full transition-all"><X className="w-5 h-5"/></button>
             </div>
             
             <div className="flex-grow overflow-y-auto bg-slate-100 p-8">
@@ -371,44 +371,42 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
                 </div>
             </div>
 
-            <div className="px-8 py-8 border-t-4 border-slate-300 bg-white shrink-0">
+            <div className="px-5 py-3 border-t-2 border-slate-300 bg-white shrink-0">
                  {!intendedAction ? (
-                    <div className="flex justify-between items-center gap-8">
-                        <span className="text-lg font-black text-slate-500 uppercase tracking-widest bg-slate-100 px-6 py-4 rounded-2xl border-2 border-slate-200">
-                            Validating: <strong className="text-amber-500 text-4xl ml-3 align-middle">{selectedIds.size}</strong>
+                    <div className="flex justify-between items-center gap-4">
+                        <span className="text-sm font-black text-slate-500 uppercase tracking-widest bg-slate-100 px-4 py-2.5 rounded-xl border border-slate-200">
+                            Validating: <strong className="text-amber-500 text-2xl ml-2 align-middle">{selectedIds.size}</strong>
                         </span>
-                        <div className="flex space-x-6 flex-grow justify-end h-20">
-                            <button onClick={onClose} className="px-8 bg-slate-200 text-slate-700 font-black rounded-2xl hover:bg-slate-300 transition-colors uppercase tracking-widest">Cancel</button>
-                            
-                            {/* FLOW FIX: The operator can now FAIL a piece that comes back from Rework */}
-                            <button onClick={() => setIntendedAction('QC_REJECTED')} disabled={selectedIds.size === 0} className="px-8 bg-rose-600 text-white font-black rounded-2xl shadow-xl hover:bg-rose-700 disabled:opacity-30 disabled:bg-slate-300 flex items-center text-2xl uppercase tracking-wider border-b-4 border-rose-800">
-                                <XCircle className="w-6 h-6 mr-3" /> FAILED
+                        <div className="flex space-x-3 flex-grow justify-end h-11">
+                            <button onClick={onClose} className="px-5 bg-slate-200 text-slate-700 font-black rounded-xl hover:bg-slate-300 transition-colors uppercase tracking-widest text-sm">Cancel</button>
+                            <button onClick={() => setIntendedAction('QC_REJECTED')} disabled={selectedIds.size === 0} className="px-5 bg-rose-600 text-white font-black rounded-xl shadow-xl hover:bg-rose-700 disabled:opacity-30 disabled:bg-slate-300 flex items-center text-base uppercase tracking-wider border-b-2 border-rose-800">
+                                <XCircle className="w-4 h-4 mr-2" /> FAILED
                             </button>
-                            <button onClick={() => executeAction('APPROVED')} disabled={selectedIds.size === 0} className="px-10 bg-black text-amber-400 font-black rounded-2xl shadow-xl hover:bg-slate-800 disabled:opacity-30 disabled:bg-slate-300 flex items-center text-2xl uppercase tracking-wider border-b-4 border-slate-800">
-                                <CheckCircle2 className="w-8 h-8 mr-3" /> PASSED
+                            <button onClick={() => executeAction('APPROVED')} disabled={selectedIds.size === 0} className="px-6 bg-black text-amber-400 font-black rounded-xl shadow-xl hover:bg-slate-800 disabled:opacity-30 disabled:bg-slate-300 flex items-center text-base uppercase tracking-wider border-b-2 border-slate-800">
+                                <CheckCircle2 className="w-4 h-4 mr-2" /> PASSED
                             </button>
                         </div>
                     </div>
                 ) : (
                     <div className="animate-in fade-in slide-in-from-bottom-4">
-                        <div className="flex justify-between items-center mb-6">
-                            <h4 className="text-3xl font-black flex items-center uppercase tracking-tight text-black">
-                                <AlertCircle className={`w-10 h-10 mr-4 text-rose-600`} /> Reason Repair Failed?
+                        <div className="flex justify-between items-center mb-3">
+                            <h4 className="text-base font-black flex items-center uppercase tracking-tight text-black">
+                                <AlertCircle className="w-5 h-5 mr-2 text-rose-600" /> Reason Repair Failed?
                             </h4>
-                            <button onClick={() => {setIntendedAction(null); setSelectedCategory(null);}} className="bg-slate-200 px-8 py-4 rounded-xl font-black text-slate-700 uppercase tracking-widest active:scale-95">Cancel</button>
+                            <button onClick={() => {setIntendedAction(null); setSelectedCategory(null);}} className="bg-slate-200 px-4 py-2 rounded-lg font-black text-slate-700 text-sm uppercase tracking-widest active:scale-95">Cancel</button>
                         </div>
                         {!selectedCategory ? (
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-48 overflow-y-auto">
+                            <div className="grid grid-cols-3 md:grid-cols-5 gap-2 max-h-32 overflow-y-auto">
                                 {categories.map(cat => (
-                                    <button key={cat} onClick={() => setSelectedCategory(cat)} className="bg-white border-4 border-slate-200 p-6 rounded-2xl font-black text-2xl hover:border-black hover:text-black transition-all text-slate-600 uppercase tracking-wide">{cat}</button>
+                                    <button key={cat} onClick={() => setSelectedCategory(cat)} className="bg-white border-2 border-slate-200 p-2.5 rounded-xl font-black text-sm hover:border-black hover:text-black transition-all text-slate-600 uppercase">{cat}</button>
                                 ))}
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-48 overflow-y-auto">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-36 overflow-y-auto">
                                 {availableDefects.map(defect => (
-                                    <button key={defect.id} onClick={() => executeAction('QC_REJECTED', defect.id)} className="bg-rose-600 text-white p-6 rounded-2xl text-left shadow-xl hover:bg-rose-700 active:scale-95 transition-all border-b-4 border-rose-800">
-                                        <span className="block text-sm font-bold text-rose-200 uppercase tracking-widest mb-2">{defect.code}</span>
-                                        <span className="text-2xl font-black leading-tight">{defect.description}</span>
+                                    <button key={defect.id} onClick={() => executeAction('QC_REJECTED', defect.id)} className="bg-rose-600 text-white p-2.5 rounded-xl text-left shadow-xl hover:bg-rose-700 active:scale-95 transition-all">
+                                        <span className="block text-xs font-bold text-rose-200 uppercase tracking-widest">{defect.code}</span>
+                                        <span className="text-sm font-black leading-tight">{defect.description}</span>
                                     </button>
                                 ))}
                             </div>
@@ -575,6 +573,7 @@ const UniversalWorkstationDashboard = () => {
     const [headerInfo, setHeaderInfo] = useState({});
     const [selectedBatchId, setSelectedBatchId] = useState('ALL');
     const [openBatchId, setOpenBatchId] = useState(null);
+    const [showHeader, setShowHeader] = useState(false);
 
     const allowMultiple = headerInfo.can_approve_multiple_piece || false;
     const allowBundle = headerInfo.can_approve_whole_bundle || false;
@@ -694,33 +693,73 @@ const UniversalWorkstationDashboard = () => {
             )}
 
             <div className="max-w-[1400px] mx-auto">
-                <header className="mb-12 bg-white p-8 rounded-[2rem] shadow-sm border-b-4 border-slate-300 flex flex-col md:flex-row md:justify-between md:items-center gap-6">
-                    <div>
-                        <h1 className="text-4xl font-black text-slate-900 flex items-center tracking-tight">
-                            <ClipboardCheck className="w-12 h-12 mr-5 text-indigo-600"/>
-                            {headerInfo.line_name || 'Workstation Terminal'}
-                        </h1>
-                        <div className="flex items-center gap-4 mt-5">
-                            <span className="text-sm font-black uppercase tracking-widest bg-slate-900 text-white px-5 py-2.5 rounded-xl shadow-md">MODE: {headerInfo.processing_mode}</span>
-                            {allowMultiple && <span className="text-sm font-bold bg-amber-400 text-black px-4 py-2.5 rounded-xl flex items-center shadow-sm uppercase tracking-widest"><Zap size={16} className="mr-2"/> Multi-Select ON</span>}
-                        </div>
+
+                {/* Compact always-visible strip */}
+                <div className="flex items-center justify-between bg-white rounded-xl shadow-sm border border-slate-200 px-4 py-2 mb-3">
+                    <div className="flex items-center gap-3">
+                        {/* Donut button — circle with menu icon */}
+                        <button
+                            onClick={() => setShowHeader(h => !h)}
+                            title={showHeader ? 'Hide details' : 'Show details'}
+                            className="w-8 h-8 rounded-full border-2 border-slate-300 bg-white hover:bg-slate-50 flex items-center justify-center shadow-sm transition shrink-0"
+                        >
+                            <Menu className="w-4 h-4 text-slate-600" />
+                        </button>
+                        <span className="text-xs font-black uppercase tracking-widest bg-slate-900 text-white px-3 py-1.5 rounded-lg">
+                            {headerInfo.processing_mode || '…'}
+                        </span>
+                        {allowMultiple && (
+                            <span className="text-xs font-bold bg-amber-400 text-black px-2.5 py-1.5 rounded-lg flex items-center uppercase tracking-widest">
+                                <Zap size={11} className="mr-1" /> Multi
+                            </span>
+                        )}
                     </div>
-                    {batches.length > 1 && (
-                        <div className="flex flex-col gap-1">
-                            <span className="text-xs font-black uppercase tracking-widest text-slate-500">Filter Batch</span>
-                            <select
-                                value={selectedBatchId}
-                                onChange={e => setSelectedBatchId(e.target.value)}
-                                className="bg-slate-900 text-white font-black text-sm px-5 py-3 rounded-xl shadow-md border-2 border-slate-700 hover:border-indigo-500 focus:outline-none focus:border-indigo-500 cursor-pointer uppercase tracking-widest"
-                            >
-                                <option value="ALL">ALL BATCHES</option>
-                                {batches.map(b => (
-                                    <option key={b.batch_id} value={String(b.batch_id)}>BATCH #{b.batch_id} ({b.batch_code})</option>
-                                ))}
-                            </select>
+                    {/* Workstation name + line — top right */}
+                    <div className="flex items-center gap-2">
+                        {headerInfo.workstation_name && (
+                            <span className="text-sm font-black text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-100">
+                                {headerInfo.workstation_name}
+                            </span>
+                        )}
+                        {headerInfo.line_name && (
+                            <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg">
+                                {headerInfo.line_name}
+                            </span>
+                        )}
+                    </div>
+                </div>
+
+                {/* Collapsible full header — toggled by donut button */}
+                {showHeader && (
+                    <header className="mb-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+                        <div className="flex items-center gap-3">
+                            <ClipboardCheck className="w-8 h-8 text-indigo-600 shrink-0" />
+                            <div>
+                                <h1 className="text-lg font-black text-slate-900 tracking-tight">
+                                    {headerInfo.line_name || 'Workstation Terminal'}
+                                </h1>
+                                {headerInfo.workstation_name && (
+                                    <p className="text-xs text-slate-500 font-bold">{headerInfo.workstation_name}</p>
+                                )}
+                            </div>
                         </div>
-                    )}
-                </header>
+                        {batches.length > 1 && (
+                            <div className="flex flex-col gap-1">
+                                <span className="text-xs font-black uppercase tracking-widest text-slate-500">Filter Batch</span>
+                                <select
+                                    value={selectedBatchId}
+                                    onChange={e => setSelectedBatchId(e.target.value)}
+                                    className="bg-slate-900 text-white font-black text-xs px-3 py-2 rounded-xl shadow-md border border-slate-700 hover:border-indigo-500 focus:outline-none cursor-pointer uppercase tracking-widest"
+                                >
+                                    <option value="ALL">ALL BATCHES</option>
+                                    {batches.map(b => (
+                                        <option key={b.batch_id} value={String(b.batch_id)}>BATCH #{b.batch_id} ({b.batch_code})</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+                    </header>
+                )}
 
                 <div className="space-y-12">
                     {Object.keys(groupedBatches).length === 0 && (
@@ -737,25 +776,25 @@ const UniversalWorkstationDashboard = () => {
                                 return (
                                     <div key={batch.batch_id} className="bg-white rounded-[2rem] shadow-xl border-2 border-slate-300 overflow-hidden">
                                         <div
-                                            className="bg-black p-8 flex flex-col md:flex-row md:justify-between md:items-center gap-6 cursor-pointer select-none"
+                                            className="bg-black px-5 py-3 flex flex-row justify-between items-center gap-4 cursor-pointer select-none"
                                             onClick={() => setOpenBatchId(prev => prev === batch.batch_id ? null : batch.batch_id)}
                                         >
-                                            <div className="flex flex-col gap-3">
-                                                <h2 className="text-4xl font-black text-white flex items-center tracking-tight uppercase">
-                                                    {openBatchId === batch.batch_id
-                                                        ? <ChevronDown className="w-8 h-8 mr-4 text-slate-500" />
-                                                        : <ChevronRight className="w-8 h-8 mr-4 text-slate-500" />}
-                                                    <Shirt className="w-10 h-10 mr-5 text-indigo-400" /> BATCH #{batch.batch_id} <span className="ml-5 text-2xl font-bold text-slate-500 font-mono tracking-widest">({batch.batch_code})</span>
+                                            <div className="flex items-center gap-3 flex-wrap">
+                                                {openBatchId === batch.batch_id
+                                                    ? <ChevronDown className="w-5 h-5 text-slate-500 shrink-0" />
+                                                    : <ChevronRight className="w-5 h-5 text-slate-500 shrink-0" />}
+                                                <Shirt className="w-5 h-5 text-indigo-400 shrink-0" />
+                                                <h2 className="text-lg font-black text-white tracking-tight uppercase">
+                                                    BATCH #{batch.batch_id} <span className="text-sm font-bold text-slate-500 font-mono">({batch.batch_code})</span>
                                                 </h2>
                                                 {(batch.cut_rolls != null || batch.total_rolls != null) && (
-                                                    <div className="flex items-center gap-3 ml-1">
-                                                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Rolls</span>
-                                                        <span className="text-sm font-black text-white bg-slate-800 px-4 py-1.5 rounded-lg border border-slate-700">
-                                                            {batch.cut_rolls ?? '—'} <span className="text-slate-500">/ {batch.total_rolls ?? '—'} CUT</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-xs font-black text-white bg-slate-800 px-3 py-1 rounded-lg border border-slate-700">
+                                                            {batch.cut_rolls ?? '—'} / {batch.total_rolls ?? '—'} CUT
                                                         </span>
                                                         {batch.cut_rolls != null && batch.total_rolls != null && (
-                                                            <span className={`text-xs font-black px-3 py-1.5 rounded-lg uppercase tracking-widest ${batch.cut_rolls >= batch.total_rolls ? 'bg-emerald-500 text-black' : 'bg-amber-400 text-black'}`}>
-                                                                {batch.cut_rolls >= batch.total_rolls ? 'All Cut' : `${batch.total_rolls - batch.cut_rolls} Remaining`}
+                                                            <span className={`text-xs font-black px-2 py-1 rounded-lg uppercase tracking-widest ${batch.cut_rolls >= batch.total_rolls ? 'bg-emerald-500 text-black' : 'bg-amber-400 text-black'}`}>
+                                                                {batch.cut_rolls >= batch.total_rolls ? 'All Cut' : `${batch.total_rolls - batch.cut_rolls} Left`}
                                                             </span>
                                                         )}
                                                     </div>

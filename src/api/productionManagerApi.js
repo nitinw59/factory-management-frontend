@@ -73,5 +73,13 @@ export const productionManagerApi = {
     
     getFactorySettings: () => api.get('/production-manager/settings'),
     updateFactorySettings: (settingsData) => api.put('/production-manager/settings', settingsData),
+
+    // Production Targets
+    getTargetFormData: (targetDate) => api.get('/production-manager/production-targets/form-data', { params: { target_date: targetDate } }),
+    saveTargets: (data) => api.post('/production-manager/production-targets', data),
+    getTargetSummary: (params) => api.get('/production-manager/production-targets/summary', { params }),
+
+    // Line output (hourly breakdown + defects per line)
+    getLineOutput: (params) => api.get('/production-manager/line-output', { params }),
 };
 

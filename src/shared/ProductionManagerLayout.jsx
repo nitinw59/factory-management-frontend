@@ -32,32 +32,6 @@ const NavDropdown = ({ title, children }) => {
   );
 };
 
-const DesktopNavDropdown = ({ title, children }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (ref.current && !ref.current.contains(event.target)) setIsOpen(false);
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [ref]);
-
-  return (
-    <div className="relative" ref={ref}>
-      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600 focus:outline-none">
-        {title}
-        <LuChevronDown className={`ml-1 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-      {isOpen && (
-        <div className="absolute mt-2 w-56 bg-white rounded-md shadow-lg py-1 z-30 border border-gray-100" onClick={() => setIsOpen(false)}>
-          {children}
-        </div>
-      )}
-    </div>
-  );
-};
 
 const ProductionManagerLayout = () => {
   const { user, logout } = useAuth();
@@ -76,16 +50,12 @@ const ProductionManagerLayout = () => {
             <div className="text-xl font-bold text-gray-800">Production Portal</div>
             <nav className="hidden md:flex items-center space-x-6">
 
-                <NavDropdown title="WORKFLOW">
-                  <NavLink to="/production-manager/production-workflow" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
-                   Workflow Dashboard
-                  </NavLink>
-                  <NavLink to="/production-manager/dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
-                   Batches
-                  </NavLink>
-                  <NavLink to="/production-manager/capacity-dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
-                   Capacity Dashboard
-                  </NavLink>
+                <NavDropdown title="Workflow">
+                  <NavLink to="/production-manager/production-workflow" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Workflow Dashboard</NavLink>
+                  <NavLink to="/production-manager/dashboard" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Batches</NavLink>
+                  {/* <NavLink to="/production-manager/capacity-dashboard" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Capacity Dashboard</NavLink> */}
+                  <NavLink to="/production-manager/production-targets" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Targets</NavLink>
+                  <NavLink to="/production-manager/scorecard" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Scorecard</NavLink>
                 </NavDropdown>
 
                 <NavDropdown title="Products">
@@ -94,42 +64,34 @@ const ProductionManagerLayout = () => {
                   <NavLink to="/production-manager/product-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Style</NavLink>
                 </NavDropdown>
 
-                <NavDropdown title="Floor Management">
-                    <NavLink to="/production-manager/production-lines" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Lines</NavLink>
-                    <NavLink to="/production-manager/production-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Line Types</NavLink>
-                    <NavLink to="/production-manager/workstation-management" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Workstations</NavLink>
-                    <NavLink to="/production-manager/factory-layout-planner" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Factory Layout</NavLink>
+                <NavDropdown title="Floor">
+                  <NavLink to="/production-manager/production-lines" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Lines</NavLink>
+                  <NavLink to="/production-manager/production-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Line Types</NavLink>
+                  <NavLink to="/production-manager/workstation-management" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Workstations</NavLink>
+                  <NavLink to="/production-manager/factory-layout-planner" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Factory Layout</NavLink>
                 </NavDropdown>
 
-                <DesktopNavDropdown title="Maintenance">
+                <NavDropdown title="Maintenance">
                   <NavLink to="/production-manager/maintenance-dashboard" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Dashboard</NavLink>
                   <NavLink to="/production-manager/maintenance-schedule" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Schedule</NavLink>
                   <NavLink to="/production-manager/maintenance-logs" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Maintenance Logs</NavLink>
-                </DesktopNavDropdown>
-                  
-                <NavLink to="/production-manager/asset-management" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
-                  Asset Management
-                </NavLink>  
+                  <NavLink to="/production-manager/asset-management" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Asset Management</NavLink>
+                  <NavLink to="/maintenance/sewing-machine-complaints" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Sewing Machine Complaints</NavLink>
+                </NavDropdown>
 
-                <NavLink to="/maintenance/sewing-machine-complaints" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
-                  Sewing Machine Complaints
-                </NavLink>
-              
-                <NavDropdown title='Reports'>
+                <NavDropdown title="Quality">
+                  <NavLink to="/production-manager/qc-analytics" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">QC Analytics</NavLink>
+                  <NavLink to="/production-manager/defect-code-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Defect Codes</NavLink>
+                </NavDropdown>
+
+                <NavDropdown title="Reports">
                   <NavLink to="/production-manager/reports/daily-costing" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Daily Costing Report</NavLink>
                   <NavLink to="/production-manager/reports/production-analytics" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Production Analytics</NavLink>
                 </NavDropdown>
 
-                <NavDropdown title='Settings'>
-                  <NavLink to="/production-manager/defect-code-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Defect Codes</NavLink>
-                  <NavLink to="/production-manager/settings" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Settings</NavLink>
-                </NavDropdown>
-
-
-                <NavDropdown title="Quality Control">
-                  <NavLink to="/production-manager/qc-analytics" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">QC Analytics</NavLink>
-                </NavDropdown>
-
+                <NavLink to="/production-manager/settings" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                  Settings
+                </NavLink>
 
             </nav>
           </div>
