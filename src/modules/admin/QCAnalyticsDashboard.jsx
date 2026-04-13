@@ -130,6 +130,9 @@ const QCAnalyticsDashboard = () => {
             if (tRes.status === 'fulfilled') setTrend(tRes.value.data || []);
             if (dRes.status === 'fulfilled') setTopDefects(dRes.value.data || []);
             if (bRes.status === 'fulfilled') setBatches(bRes.value.data || []);
+
+
+            console.log({ summary: sRes, byLine: lRes, byCategory: cRes, trend: tRes, topDefects: dRes, batches: bRes });
         } catch (e) {
             setError('Failed to load analytics.');
             console.error(e);
