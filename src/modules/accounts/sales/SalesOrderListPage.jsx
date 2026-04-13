@@ -150,7 +150,7 @@ const ReceivedRollsList = ({ purchaseOrderId }) => {
                                                 onClick={() => setEditingRoll(roll)}
                                                 className="text-gray-400 hover:text-blue-600 transition-colors"
                                                 title="Edit Roll"
-                                                disabled={roll.status !== 'IN_STOCK'}
+                                                disabled={roll.status == 'COMPLETED'}
                                             >
                                                 <Edit3 size={12} />
                                             </button>
