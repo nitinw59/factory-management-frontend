@@ -80,6 +80,52 @@ const CustomTooltip = ({ active, payload, label }) => {
     );
 };
 
+// ─── data normalizers (all API values arrive as strings) ─────────────────────
+
+const normSummary = (s) => s && {
+    total_inspected: parseInt(s.total_inspected) || 0,
+    total_defects:   parseInt(s.total_defects)   || 0,
+    dhu:             parseFloat(s.dhu)            ?? null,
+    pass_rate:       parseFloat(s.pass_rate)      ?? null,
+    rework_rate:     parseFloat(s.rework_rate)    ?? null,
+};
+const normByLine = (rows) => {
+    const parsed = rows.map(l => ({
+        ...l,
+        defect_count: parseInt(l.defect_count) || 0,
+        inspected:    parseInt(l.inspected)    || 0,
+        dhu:          l.dhu != null ? parseFloat(l.dhu) : null,
+    }));
+    const hasDhu = parsed.some(l => l.dhu != null);
+    const maxCount = Math.max(...parsed.map(l => l.defect_count), 1);
+    return parsed.map(l => ({
+        ...l,
+        // chartValue: prefer DHU, fall back to defect_count
+        chartValue: l.dhu != null ? l.dhu : l.defect_count,
+        // color: DHU-based when available, else relative-heat by count
+        fill: l.dhu != null
+            ? DHU_STYLES[dhuLevel(l.dhu)].bar
+            : (() => {
+                const ratio = l.defect_count / maxCount;
+                if (ratio > 0.7) return DHU_STYLES.critical.bar;
+                if (ratio > 0.4) return DHU_STYLES.bad.bar;
+                if (ratio > 0.1) return DHU_STYLES.warn.bar;
+                return DHU_STYLES.good.bar;
+            })(),
+        _hasDhu: hasDhu,
+    }));
+};
+const normCategory  = (rows) => rows.map(c => ({ ...c, count: parseInt(c.count) || 0 }));
+const normTrend     = (rows) => rows.map(d => ({ ...d, dhu: parseFloat(d.dhu) || 0, defects: parseInt(d.defects) || 0, inspected: parseInt(d.inspected) || 0 }));
+const normTopDef    = (rows) => rows.map(d => ({ ...d, count: parseInt(d.count) || 0 }));
+const normBatches   = (rows) => rows.map(b => ({
+    ...b,
+    inspected:  parseInt(b.inspected)    || 0,
+    defects:    parseInt(b.defects)      || 0,
+    dhu:        parseFloat(b.dhu)        ?? null,
+    pass_rate:  parseFloat(b.pass_rate)  ?? null,
+}));
+
 // ─── main component ────────────────────────────────────────────────────────────
 
 const QCAnalyticsDashboard = () => {
@@ -124,15 +170,12 @@ const QCAnalyticsDashboard = () => {
                 qcApi.getQCTopDefects(params),
                 qcApi.getQCBatches(params),
             ]);
-            if (sRes.status === 'fulfilled') setSummary(sRes.value.data);
-            if (lRes.status === 'fulfilled') setByLine(lRes.value.data || []);
-            if (cRes.status === 'fulfilled') setByCategory(cRes.value.data || []);
-            if (tRes.status === 'fulfilled') setTrend(tRes.value.data || []);
-            if (dRes.status === 'fulfilled') setTopDefects(dRes.value.data || []);
-            if (bRes.status === 'fulfilled') setBatches(bRes.value.data || []);
-
-
-            console.log({ summary: sRes, byLine: lRes, byCategory: cRes, trend: tRes, topDefects: dRes, batches: bRes });
+            if (sRes.status === 'fulfilled') setSummary(normSummary(sRes.value.data));
+            if (lRes.status === 'fulfilled') setByLine(normByLine(lRes.value.data || []));
+            if (cRes.status === 'fulfilled') setByCategory(normCategory(cRes.value.data || []));
+            if (tRes.status === 'fulfilled') setTrend(normTrend(tRes.value.data || []));
+            if (dRes.status === 'fulfilled') setTopDefects(normTopDef(dRes.value.data || []));
+            if (bRes.status === 'fulfilled') setBatches(normBatches(bRes.value.data || []));
         } catch (e) {
             setError('Failed to load analytics.');
             console.error(e);
@@ -154,12 +197,11 @@ const QCAnalyticsDashboard = () => {
         });
     }, [topDefects]);
 
-    // Color-code each line bar by its DHU
-    const byLineColored = useMemo(() =>
-        byLine.map(l => ({ ...l, fill: DHU_STYLES[dhuLevel(l.dhu)].bar })),
-        [byLine]);
-
     const applyFilters = () => setFilters(pendingFilters);
+
+    const byLineHasDhu   = byLine.some(l => l._hasDhu);
+    const byLineLabel    = byLineHasDhu ? 'DHU' : 'Defect Count';
+    const byLineTitle    = byLineHasDhu ? 'DHU by Production Line' : 'Defects by Production Line';
 
     const summaryDhu = summary?.dhu ?? null;
     const dhuStyle = DHU_STYLES[dhuLevel(summaryDhu)];
@@ -283,26 +325,31 @@ const QCAnalyticsDashboard = () => {
                     {/* ── Charts row 1 ──────────────────────────────────────── */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
-                        {/* DHU by Line */}
-                        <SectionCard title="DHU by Production Line">
-                            {byLineColored.length === 0 ? <EmptyChart /> : (
-                                <ResponsiveContainer width="100%" height={220}>
+                        {/* DHU / Defects by Line */}
+                        <SectionCard title={byLineTitle}>
+                            {byLine.length === 0 ? <EmptyChart /> : (
+                                <ResponsiveContainer width="100%" height={Math.max(180, byLine.length * 52)}>
                                     <BarChart
                                         layout="vertical"
-                                        data={byLineColored}
-                                        margin={{ top: 0, right: 30, left: 0, bottom: 0 }}
+                                        data={byLine}
+                                        margin={{ top: 0, right: 40, left: 0, bottom: 0 }}
                                     >
                                         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
                                         <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                                        <YAxis dataKey="line_name" type="category" tick={{ fontSize: 11 }} width={90} tickLine={false} axisLine={false} />
+                                        <YAxis dataKey="line_name" type="category" tick={{ fontSize: 11 }} width={110} tickLine={false} axisLine={false} />
                                         <Tooltip content={<CustomTooltip />} />
-                                        <Bar dataKey="dhu" name="DHU" radius={[0, 4, 4, 0]}>
-                                            {byLineColored.map((entry, i) => (
+                                        <Bar dataKey="chartValue" name={byLineLabel} radius={[0, 4, 4, 0]}>
+                                            {byLine.map((entry, i) => (
                                                 <Cell key={i} fill={entry.fill} />
                                             ))}
                                         </Bar>
                                     </BarChart>
                                 </ResponsiveContainer>
+                            )}
+                            {!byLineHasDhu && byLine.length > 0 && (
+                                <p className="text-[10px] text-amber-600 mt-2 italic">
+                                    DHU unavailable — no inspected count recorded. Showing defect count per line.
+                                </p>
                             )}
                             {/* legend */}
                             <div className="flex flex-wrap gap-3 mt-3">
@@ -430,7 +477,7 @@ const QCAnalyticsDashboard = () => {
                                             const ds = DHU_STYLES[level];
                                             return (
                                                 <tr key={b.batch_id ?? i} className="hover:bg-slate-50 transition-colors">
-                                                    <td className="py-2 pr-4 font-mono text-xs text-slate-700">{b.batch_id}</td>
+                                                    <td className="py-2 pr-4 font-mono text-xs text-slate-700">{b.batch_code ?? b.batch_id}</td>
                                                     <td className="py-2 pr-4 text-slate-700">{b.line_name ?? '—'}</td>
                                                     <td className="py-2 pr-4 text-slate-500 whitespace-nowrap">{b.date ?? '—'}</td>
                                                     <td className="py-2 pr-4 text-slate-700">{b.inspected?.toLocaleString() ?? '—'}</td>
