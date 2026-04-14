@@ -32,6 +32,7 @@ const BarcodePrintModal = ({ isOpen, onClose, batchId }) => {
             }
             const res = await storeManagerApi.markBatchBarcodePrinted(payload);
             setResult(res.data);
+            console.log("Mark Barcode Result:", res.data);
         } catch (err) {
             setError(err.response?.data?.error || 'Failed to mark barcodes.');
         } finally {
@@ -42,6 +43,8 @@ const BarcodePrintModal = ({ isOpen, onClose, batchId }) => {
     const handleDownloadCSV = () => {
         if (!result?.garments?.length) return;
         const header = 'garment_uid,size,piece_sequence,barcode_printed_at';
+        //const header = '';
+        console.log("Garments for CSV:", result.garments);
         const rows = result.garments.map(g =>
             `${g.garment_uid},${g.size},${g.piece_sequence},${g.barcode_printed_at}`
         );

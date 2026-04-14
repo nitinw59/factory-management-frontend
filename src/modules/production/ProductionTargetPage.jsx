@@ -414,6 +414,7 @@ export default function ProductionTargetPage() {
         setLoading(true);
         try {
             const res     = await productionManagerApi.getTargetFormData(targetDate);
+            console.log('Loaded target form data:', res.data);
             const fetched = res.data?.lines ?? [];
             setLines(fetched);
             setTargets(buildInitialTargets(fetched));
@@ -477,6 +478,7 @@ export default function ProductionTargetPage() {
         setSaving(true);
         try {
             const res = await productionManagerApi.saveTargets({ target_date: targetDate, entries });
+            console.log('Save response:', res.data);
             showToast('success', `Saved ${res.data?.saved ?? entries.length} targets.`);
             loadData();
         } catch (err) {

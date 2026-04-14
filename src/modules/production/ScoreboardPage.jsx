@@ -218,6 +218,7 @@ export default function ScoreboardPage() {
                 productionManagerApi.getTargetSummary({ target_date: date }),
                 productionManagerApi.getLineOutput({ date }),
             ]);
+            console.log('Data load results:', { formRes, summaryRes, outputRes });
 
             const formLines   = formRes.status    === 'fulfilled' ? (formRes.value.data?.lines   ?? []) : [];
             const summaryRows = summaryRes.status === 'fulfilled' ? (summaryRes.value.data       ?? []) : [];
