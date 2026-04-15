@@ -42,11 +42,10 @@ const BarcodePrintModal = ({ isOpen, onClose, batchId }) => {
 
     const handleDownloadCSV = () => {
         if (!result?.garments?.length) return;
-        const header = 'garment_uid,size,piece_sequence,barcode_printed_at';
-        //const header = '';
+        const header = 'sr_no,garment_uid,size,piece_sequence,barcode_printed_at';
         console.log("Garments for CSV:", result.garments);
-        const rows = result.garments.map(g =>
-            `${g.garment_uid},${g.size},${g.piece_sequence},${g.barcode_printed_at}`
+        const rows = result.garments.map((g, i) =>
+            `${i + 1},${g.garment_uid},${g.size},${g.piece_sequence},${g.barcode_printed_at}`
         );
         const csv = [header, ...rows].join('\n');
         const blob = new Blob([csv], { type: 'text/csv' });
