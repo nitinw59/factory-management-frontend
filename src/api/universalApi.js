@@ -21,5 +21,10 @@ export const universalApi = {
     getPieceHistory: (pieceId) => api.get(`/workstation-universal/piece-history/${pieceId}`),
     getStatistics: () => api.get('/workstation-universal/statistics'),
     getBatchQCSummary: () => api.get('/workstation-universal/summary'),
-    checkCompletion: (data) => api.post('/workstation-universal/check-completion', data)
+    checkCompletion: (data) => api.post('/workstation-universal/check-completion', data),
+
+    // Checker summary: pending rework count + today's rework count
+    getCheckerStats: () => api.get('/workstation-universal/checker-stats'),
+    // Today's work log for export (scans done by logged-in user today)
+    getTodayWork: (date) => api.get('/workstation-universal/today-work', { params: date ? { date } : {} }),
 };

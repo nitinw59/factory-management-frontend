@@ -140,6 +140,7 @@ export default function DailyAttendancePage() {
         setError(null);
         try {
             const response = await hrApi.getDailyAttendanceDashboard(selectedDate);
+            console.log("Fetched Dashboard Data:", response.data);
             setLogs(response.data.logs || []);
             setTotalHeadcount(response.data.totalHeadcount || 0);
         } catch (err) {
