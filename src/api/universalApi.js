@@ -10,7 +10,7 @@ export const universalApi = {
     getDefectCodes: () => api.get('/workstation-universal/defect-codes'),
 
     // 3. Manual Overrides / Reconciliations
-    checkAndCompleteStages: (data) => api.post('/workstation-universal/check-completion', data),
+    checkAndCompleteStages: (data) => api.post('/workstation-universal/check-roll-completion', data),
 
     // ------------------------------------------------------------------------
     // Optional / Future Expansion Routes (Generalized for any department)
