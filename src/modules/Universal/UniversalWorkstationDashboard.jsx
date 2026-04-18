@@ -1,13 +1,193 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-
-
-import { universalApi } from '../../api/universalApi'; 
-import { 
-    Shirt, Layers, ClipboardCheck, Component, Check, X, 
+import { NavLink, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
+import { LuClock, LuLayers, LuChevronRight, LuDownload, LuLoader, LuCircleCheck, LuX } from 'react-icons/lu';
+import { universalApi } from '../../api/universalApi';
+import {
+    Shirt, Layers, ClipboardCheck, Component, Check, X,
     Hammer, Loader2, Menu, ChevronDown, ChevronRight, CheckCircle2,
-    Square, CheckSquare, XCircle, ArrowLeft, Package, Send, AlertCircle, Zap
+    Square, CheckSquare, XCircle, ArrowLeft, Package, Send, AlertCircle, Zap,
+    LogOut, FileText, ThumbsUp, LayoutGrid,
 } from 'lucide-react';
+
 const PART_FILTER_LS_KEY = 'ws-part-filter';
+const STATS_REFRESH_MS   = 60_000;
+
+// ── Work Log helpers ──────────────────────────────────────────────────────────
+const ACTION_STYLE = {
+    APPROVED:     'bg-emerald-100 text-emerald-700',
+    NEEDS_REWORK: 'bg-amber-100  text-amber-700',
+    QC_REJECTED:  'bg-red-100    text-red-700',
+    REPAIRED:     'bg-teal-100   text-teal-700',
+};
+const ActionBadge = ({ action }) => (
+    <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wide whitespace-nowrap ${ACTION_STYLE[action] ?? 'bg-gray-100 text-gray-600'}`}>
+        {action?.replace(/_/g, ' ') ?? '—'}
+    </span>
+);
+const fmtTime = (iso) => {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+    catch { return iso; }
+};
+function mergeWorkData(data) {
+    if (!data) return [];
+    // NEEDS_REWORK is already captured in defect_logs — skip those scan rows to avoid double entry
+    const scans = (data.rows || []).filter(r => r.action !== 'NEEDS_REWORK').map(r => ({ ...r, _type: 'scan' }));
+    const defects = (data.defect_logs || []).map(d => ({
+        time: d.time, batch_id: d.batch_id, batch_code: d.batch_code,
+        part_name: d.part_name, size: d.size, fabric_roll_id: d.fabric_roll_id,
+        piece_sequence: d.piece_sequence, action: d.severity,
+        defect_code: d.defect_code, defect_description: d.defect_description,
+        is_resolved: d.is_resolved, _type: 'defect',
+    }));
+    return [...scans, ...defects].sort((a, b) => new Date(a.time) - new Date(b.time));
+}
+
+const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) => {
+    const [mode,       setMode]       = useState('hourly');
+    const [openGroups, setOpenGroups] = useState(new Set());
+    const [modalDate,  setModalDate]  = useState(
+        workData?.date ?? new Date().toISOString().split('T')[0]
+    );
+    const merged = useMemo(() => mergeWorkData(workData), [workData]);
+    const top3Defects = useMemo(() => {
+        const freq = {};
+        (workData?.defect_logs ?? []).forEach(d => {
+            const k = d.defect_code ?? '—';
+            if (!freq[k]) freq[k] = { code: d.defect_code, description: d.defect_description, count: 0 };
+            freq[k].count += 1;
+        });
+        return Object.values(freq).sort((a, b) => b.count - a.count).slice(0, 3);
+    }, [workData]);
+    const grouped = useMemo(() => {
+        const groups = {};
+        merged.forEach(row => {
+            const key = mode === 'hourly'
+                ? (() => { const h = new Date(row.time).getHours(); return `${String(h).padStart(2,'0')}:00 – ${String(h+1).padStart(2,'0')}:00`; })()
+                : `Roll #${row.fabric_roll_id ?? 'Unknown'}`;
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(row);
+        });
+        return Object.entries(groups).sort(([a],[b]) => a.localeCompare(b));
+    }, [merged, mode]);
+    useEffect(() => { setOpenGroups(new Set()); }, [mode, workData]);
+    const toggleGroup = (key) => setOpenGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+    const handleDateChange = (e) => { const d = e.target.value; setModalDate(d); onDateChange(d); };
+    return (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-gray-100">
+                    <div className="flex items-center gap-3">
+                        <div>
+                            <h2 className="text-base font-black text-gray-900">Work Log</h2>
+                            <p className="text-xs text-gray-400">{merged.length} entries · {grouped.length} groups</p>
+                        </div>
+                        <input type="date" value={modalDate} onChange={handleDateChange}
+                            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-400 bg-gray-50" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="flex bg-gray-100 rounded-lg p-0.5">
+                            <button onClick={() => setMode('hourly')} className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-md transition ${mode==='hourly'?'bg-white shadow-sm text-indigo-600':'text-gray-500 hover:text-gray-700'}`}><LuClock size={11}/> Hourly</button>
+                            <button onClick={() => setMode('roll')} className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-md transition ${mode==='roll'?'bg-white shadow-sm text-indigo-600':'text-gray-500 hover:text-gray-700'}`}><LuLayers size={11}/> Fabric Roll</button>
+                        </div>
+                        <button onClick={() => onExport(grouped, mode, modalDate)} disabled={!grouped.length}
+                            className="flex items-center gap-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-40">
+                            <LuDownload size={12}/> Export CSV
+                        </button>
+                        <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-full transition"><LuX size={16} className="text-gray-500"/></button>
+                    </div>
+                </div>
+                {!loading && top3Defects.length > 0 && (
+                    <div className="px-5 py-2 bg-amber-50 border-b border-amber-100 flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-bold text-amber-700 shrink-0">Top Rework:</span>
+                        {top3Defects.map((d, i) => (
+                            <div key={d.code} className="flex items-center gap-1.5 bg-white border border-amber-200 rounded-lg px-2 py-0.5 shadow-sm">
+                                <span className="text-sm">{['🥇','🥈','🥉'][i]}</span>
+                                <span className="text-xs font-black text-gray-700 font-mono">{d.code}</span>
+                                {d.description && <span className="text-xs text-gray-500 hidden sm:inline">— {d.description}</span>}
+                                <span className="ml-1 text-xs font-bold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">{d.count}×</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                <div className="overflow-auto flex-1 p-4">
+                    {loading ? (
+                        <div className="flex items-center justify-center py-20 text-gray-400 gap-2">
+                            <LuLoader size={18} className="animate-spin"/><span className="text-sm">Loading…</span>
+                        </div>
+                    ) : merged.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                            <LuCircleCheck size={36} className="mb-2 opacity-30"/>
+                            <p className="text-sm font-medium">No work logged for this date.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            {grouped.map(([groupKey, groupRows]) => {
+                                const approved = groupRows.filter(r => r.action==='APPROVED').length;
+                                const rework   = groupRows.filter(r => r.action==='NEEDS_REWORK').length;
+                                const repaired = groupRows.filter(r => r.action==='REPAIRED').length;
+                                const rejected = groupRows.filter(r => r.action==='QC_REJECTED').length;
+                                const isOpen   = openGroups.has(groupKey);
+                                return (
+                                    <div key={groupKey} className="border border-gray-200 rounded-xl overflow-hidden">
+                                        <button type="button" onClick={() => toggleGroup(groupKey)}
+                                            className="w-full bg-gray-50 hover:bg-gray-100 px-4 py-2 flex items-center justify-between transition text-left">
+                                            <div className="flex items-center gap-2">
+                                                <LuChevronRight size={14} className={`text-gray-400 transition-transform shrink-0 ${isOpen?'rotate-90':''}`}/>
+                                                <span className="font-black text-gray-700 text-sm">{groupKey}</span>
+                                            </div>
+                                            <div className="flex items-center gap-3 text-xs font-semibold">
+                                                {approved>0 && <span className="text-emerald-600">{approved} approved</span>}
+                                                {repaired>0 && <span className="text-teal-600">{repaired} repaired</span>}
+                                                {rework>0   && <span className="text-amber-600">{rework} rework</span>}
+                                                {rejected>0 && <span className="text-red-600">{rejected} rejected</span>}
+                                                <span className="text-gray-400 font-normal">{groupRows.length} total</span>
+                                            </div>
+                                        </button>
+                                        {isOpen && (
+                                            <table className="w-full text-xs border-t border-gray-100">
+                                                <tbody>
+                                                    {groupRows.map((r, i) => (
+                                                        <tr key={i} className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${r._type==='defect'?'bg-amber-50/40':''}`}>
+                                                            <td className="px-3 py-1.5 font-mono text-gray-400 whitespace-nowrap">{fmtTime(r.time)}</td>
+                                                            <td className="px-3 py-1.5 font-semibold text-gray-800 whitespace-nowrap">{r.batch_code}</td>
+                                                            <td className="px-3 py-1.5 text-gray-600 capitalize">{r.part_name}</td>
+                                                            <td className="px-3 py-1.5 text-gray-500">Sz {r.size}</td>
+                                                            {mode==='hourly' && <td className="px-3 py-1.5 text-gray-500 font-mono">Roll #{r.fabric_roll_id??'—'}</td>}
+                                                            <td className="px-3 py-1.5 text-gray-500 font-mono">#{r.piece_sequence}</td>
+                                                            <td className="px-3 py-1.5"><ActionBadge action={r.action}/></td>
+                                                            <td className="px-3 py-1.5">
+                                                                {r.defect_code && (
+                                                                    <div>
+                                                                        <span className="font-mono text-gray-600">{r.defect_code}</span>
+                                                                        {r.defect_description && <span className="block text-gray-400 text-[10px]">{r.defect_description}</span>}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            {r._type==='defect' && (
+                                                                <td className="px-3 py-1.5">
+                                                                    <span className={`font-semibold ${r.is_resolved?'text-emerald-500':'text-amber-500'}`}>
+                                                                        {r.is_resolved ? '✓ Resolved' : '⏳ Pending'}
+                                                                    </span>
+                                                                </td>
+                                                            )}
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ============================================================================
 // UI & LOGIC HELPERS
 // ============================================================================
@@ -635,7 +815,11 @@ const UniversalWorkstationDashboard = () => {
     const [headerInfo, setHeaderInfo] = useState({});
     const [selectedBatchId, setSelectedBatchId] = useState('ALL');
     const [openBatchId, setOpenBatchId] = useState(null);
-    const [showHeader, setShowHeader] = useState(false);
+    const [showNav,     setShowNav]     = useState(false);
+    const [stats,       setStats]       = useState(null);
+    const [showModal,   setShowModal]   = useState(false);
+    const [workData,    setWorkData]    = useState(null);
+    const [loadingWork, setLoadingWork] = useState(false);
     const [selectedParts, setSelectedParts] = useState(() => {
         try {
             const stored = localStorage.getItem(PART_FILTER_LS_KEY);
@@ -702,6 +886,56 @@ const UniversalWorkstationDashboard = () => {
     });
 
     const isPartVisible = (partName) => selectedParts.size === 0 || selectedParts.has(partName);
+
+    // ── Auth / navigation ─────────────────────────────────────────────────────
+    const { user, logout } = useAuth();
+    const navigate = useNavigate();
+    const handleLogout = () => { logout(); navigate('/login'); };
+
+    // ── Checker stats (auto-refresh) ──────────────────────────────────────────
+    const loadStats = useCallback(async () => {
+        try { const res = await universalApi.getCheckerStats(); setStats(res.data); } catch {}
+    }, []);
+    useEffect(() => {
+        loadStats();
+        const iv = setInterval(loadStats, STATS_REFRESH_MS);
+        return () => clearInterval(iv);
+    }, [loadStats]);
+
+    // ── Work log fetch ────────────────────────────────────────────────────────
+    const fetchWork = useCallback(async (date) => {
+        setLoadingWork(true);
+        try { const res = await universalApi.getTodayWork(date); setWorkData(res.data);console.log("Fetched dwork log:", res.data); }
+        catch { alert('Failed to load work log.'); }
+        finally { setLoadingWork(false); }
+    }, []);
+    const handleOpenModal = () => {
+        setShowModal(true);
+        if (workData === null) fetchWork(new Date().toISOString().split('T')[0]);
+    };
+    const handleModalDateChange = (date) => { setWorkData(null); fetchWork(date); };
+
+    // ── CSV export (summary per group) ───────────────────────────────────────
+    const downloadCSV = (grouped, mode, date) => {
+        if (!grouped?.length) return;
+        const modeLabel = mode === 'hourly' ? 'hour' : 'fabric_roll';
+        const header = `sr_no,${modeLabel},total,approved,repaired,needs_rework,qc_rejected`;
+        const lines  = grouped.map(([groupKey, rows], i) => [
+            i + 1, `"${groupKey}"`, rows.length,
+            rows.filter(r => r.action === 'APPROVED').length,
+            rows.filter(r => r.action === 'REPAIRED').length,
+            rows.filter(r => r.action === 'NEEDS_REWORK').length,
+            rows.filter(r => r.action === 'QC_REJECTED').length,
+        ].join(','));
+        const csv = [header, ...lines].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url;
+        a.download = `work-log-${mode}-${date ?? new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
 
     // 🚨 BUG FIX: Updates modal state instantly after API response
     const refreshLiveModalPieces = (newBatches) => {
@@ -786,28 +1020,28 @@ const UniversalWorkstationDashboard = () => {
     }, {});
 
     return (
-        <div className="p-4 sm:p-10 bg-slate-200 min-h-screen font-inter text-slate-800 relative">
-            
-            {/* 🚨 THE GLOBAL FULL-SCREEN LOCK: z-[9999] physically blocks the whole window */}
+        <div className="flex flex-col h-screen font-inter text-slate-800">
+
+            {/* 🚨 GLOBAL FULL-SCREEN LOCK */}
             {isProcessing && (
                 <div className="fixed inset-0 w-screen h-screen bg-black/90 backdrop-blur-sm z-[9999] flex flex-col items-center justify-center">
                     <Loader2 className="w-20 h-20 text-white animate-spin mb-8" />
-                    <h2 className="text-white text-4xl font-black tracking-widest uppercase shadow-sm">Syncing Database...</h2>
+                    <h2 className="text-white text-4xl font-black tracking-widest uppercase">Syncing Database...</h2>
                 </div>
             )}
 
-            <div className="max-w-[1400px] mx-auto">
+            {/* ── STICKY HEADER ── */}
+            <header className="bg-white shadow-sm sticky top-0 z-20 border-b border-gray-100 shrink-0">
 
-                {/* Compact always-visible strip */}
-                <div className="flex items-center justify-between bg-white rounded-xl shadow-sm border border-slate-200 px-4 py-2 mb-3">
-                    <div className="flex items-center gap-3">
-                        {/* Donut button — circle with menu icon */}
+                {/* Row 1: mode/nav controls + user/logout */}
+                <div className="px-4 py-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
                         <button
-                            onClick={() => setShowHeader(h => !h)}
-                            title={showHeader ? 'Hide details' : 'Show details'}
+                            onClick={() => setShowNav(n => !n)}
+                            title={showNav ? 'Hide menu' : 'Show menu'}
                             className="w-8 h-8 rounded-full border-2 border-slate-300 bg-white hover:bg-slate-50 flex items-center justify-center shadow-sm transition shrink-0"
                         >
-                            <Menu className="w-4 h-4 text-slate-600" />
+                            {showNav ? <X className="w-4 h-4 text-slate-600" /> : <Menu className="w-4 h-4 text-slate-600" />}
                         </button>
                         <span className="text-xs font-black uppercase tracking-widest bg-slate-900 text-white px-3 py-1.5 rounded-lg">
                             {headerInfo.processing_mode || '…'}
@@ -818,18 +1052,90 @@ const UniversalWorkstationDashboard = () => {
                             </span>
                         )}
                     </div>
-                    {/* Workstation name + line — top right */}
                     <div className="flex items-center gap-2">
-                        {/* Part filter dropdown */}
+                        {/* Batch filter — Row 1 */}
+                        {batches.length > 1 && (
+                            <select
+                                value={selectedBatchId}
+                                onChange={e => setSelectedBatchId(e.target.value)}
+                                className="bg-slate-900 text-white font-black text-xs px-3 py-1.5 rounded-xl border border-slate-700 hover:border-indigo-500 focus:outline-none cursor-pointer uppercase tracking-widest"
+                            >
+                                <option value="ALL">ALL BATCHES</option>
+                                {batches.map(b => (
+                                    <option key={b.batch_id} value={String(b.batch_id)}>BATCH #{b.batch_id} ({b.batch_code})</option>
+                                ))}
+                            </select>
+                        )}
+                        {headerInfo.workstation_name && (
+                            <span className="text-sm font-black text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-100">{headerInfo.workstation_name}</span>
+                        )}
+                        {headerInfo.line_name && (
+                            <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg">{headerInfo.line_name}</span>
+                        )}
+                        <span className="text-xs text-slate-500 hidden sm:block">{user?.name}</span>
+                        <button onClick={handleLogout} className="flex items-center text-xs font-semibold text-slate-600 hover:text-red-600 transition">
+                            <LogOut className="w-3.5 h-3.5 mr-1" /> Logout
+                        </button>
+                    </div>
+                </div>
+
+                {/* Row 2: summary bar */}
+                <div className="px-4 py-1.5 bg-gray-50 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-4 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                            <Hammer size={13} className="text-amber-500 shrink-0" />
+                            <span className="text-xs text-gray-500">Pending Rework</span>
+                            <span className={`text-sm font-black tabular-nums ${stats == null ? 'text-gray-400' : stats.pending_rework > 0 ? 'text-amber-500' : 'text-emerald-600'}`}>
+                                {stats == null ? '—' : (stats.pending_rework ?? 0)}
+                            </span>
+                        </div>
+                        <span className="text-gray-200 hidden sm:inline">│</span>
+                        <div className="flex items-center gap-1.5">
+                            <Hammer size={13} className="text-indigo-400 shrink-0" />
+                            <span className="text-xs text-gray-500">Today's Rework</span>
+                            <span className="text-sm font-black tabular-nums text-indigo-600">{stats == null ? '—' : (stats.today_rework ?? 0)}</span>
+                        </div>
+                        <span className="text-gray-200 hidden sm:inline">│</span>
+                        <div className="flex items-center gap-1.5">
+                            <ThumbsUp size={13} className="text-emerald-500 shrink-0" />
+                            <span className="text-xs text-gray-500">Today's Approved</span>
+                            <span className="text-sm font-black tabular-nums text-emerald-600">{stats == null ? '—' : (stats.today_approved ?? 0)}</span>
+                        </div>
+                    </div>
+                    <button
+                        onClick={handleOpenModal}
+                        disabled={loadingWork && !showModal}
+                        className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 hover:text-indigo-600 border border-gray-200 hover:border-indigo-300 px-3 py-1.5 rounded-lg transition disabled:opacity-50 bg-white shadow-sm"
+                    >
+                        {loadingWork && !showModal ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+                        Today's Work
+                    </button>
+                </div>
+
+                {/* Row 3: collapsible nav + batch filter */}
+                {showNav && (
+                    <nav className="border-t border-gray-100 px-4 py-2 flex flex-wrap items-center gap-4">
+                        <NavLink to="/numbering-portal/dashboard"
+                            onClick={() => setShowNav(false)}
+                            className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                            <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" /> My Queue
+                        </NavLink>
+                        <NavLink to="/numbering-portal/summary"
+                            onClick={() => setShowNav(false)}
+                            className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                            <FileText className="w-3.5 h-3.5 mr-1.5" /> Batch QC Summary
+                        </NavLink>
+                        <NavLink to="/numbering-portal/sewing-machine-complaints"
+                            onClick={() => setShowNav(false)}
+                            className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                            <LayoutGrid className="w-3.5 h-3.5 mr-1.5" /> SM Complaints
+                        </NavLink>
+                        {/* Part filter — Row 3 */}
                         {uniquePartNames.length > 0 && (
-                            <div className="relative" ref={partFilterRef}>
+                            <div className="relative ml-auto" ref={partFilterRef}>
                                 <button
                                     onClick={() => setShowPartFilter(v => !v)}
-                                    className={`flex items-center gap-1.5 text-xs font-black uppercase tracking-widest px-3 py-1.5 rounded-lg border transition ${
-                                        selectedParts.size > 0
-                                            ? 'bg-indigo-600 text-white border-indigo-600'
-                                            : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400'
-                                    }`}
+                                    className={`flex items-center gap-1.5 text-xs font-black uppercase tracking-widest px-3 py-1.5 rounded-lg border transition ${selectedParts.size > 0 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400'}`}
                                 >
                                     <Component className="w-3 h-3" />
                                     {selectedParts.size === 0 ? 'All Parts' : `${selectedParts.size} Part${selectedParts.size > 1 ? 's' : ''}`}
@@ -839,18 +1145,11 @@ const UniversalWorkstationDashboard = () => {
                                     <div className="absolute right-0 top-full mt-1.5 z-50 bg-white rounded-xl shadow-xl border border-slate-200 min-w-[200px] py-1.5">
                                         <div className="px-3 py-1.5 flex justify-between items-center border-b border-slate-100 mb-1">
                                             <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Filter Parts</span>
-                                            {selectedParts.size > 0 && (
-                                                <button onClick={() => setSelectedParts(new Set())} className="text-xs text-rose-500 font-bold hover:text-rose-700">Clear</button>
-                                            )}
+                                            {selectedParts.size > 0 && <button onClick={() => setSelectedParts(new Set())} className="text-xs text-rose-500 font-bold hover:text-rose-700">Clear</button>}
                                         </div>
                                         {uniquePartNames.map(name => (
                                             <label key={name} className="flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedParts.has(name)}
-                                                    onChange={() => togglePart(name)}
-                                                    className="w-3.5 h-3.5 accent-indigo-600 cursor-pointer"
-                                                />
+                                                <input type="checkbox" checked={selectedParts.has(name)} onChange={() => togglePart(name)} className="w-3.5 h-3.5 accent-indigo-600 cursor-pointer" />
                                                 <span className="text-xs font-bold text-slate-700 capitalize">{name}</span>
                                             </label>
                                         ))}
@@ -858,63 +1157,22 @@ const UniversalWorkstationDashboard = () => {
                                 )}
                             </div>
                         )}
-                        {headerInfo.workstation_name && (
-                            <span className="text-sm font-black text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-100">
-                                {headerInfo.workstation_name}
-                            </span>
-                        )}
-                        {headerInfo.line_name && (
-                            <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg">
-                                {headerInfo.line_name}
-                            </span>
-                        )}
-                    </div>
-                </div>
-
-                {/* Collapsible full header — toggled by donut button */}
-                {showHeader && (
-                    <header className="mb-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-                        <div className="flex items-center gap-3">
-                            <ClipboardCheck className="w-8 h-8 text-indigo-600 shrink-0" />
-                            <div>
-                                <h1 className="text-lg font-black text-slate-900 tracking-tight">
-                                    {headerInfo.line_name || 'Workstation Terminal'}
-                                </h1>
-                                {headerInfo.workstation_name && (
-                                    <p className="text-xs text-slate-500 font-bold">{headerInfo.workstation_name}</p>
-                                )}
-                            </div>
-                        </div>
-                        {batches.length > 1 && (
-                            <div className="flex flex-col gap-1">
-                                <span className="text-xs font-black uppercase tracking-widest text-slate-500">Filter Batch</span>
-                                <select
-                                    value={selectedBatchId}
-                                    onChange={e => setSelectedBatchId(e.target.value)}
-                                    className="bg-slate-900 text-white font-black text-xs px-3 py-2 rounded-xl shadow-md border border-slate-700 hover:border-indigo-500 focus:outline-none cursor-pointer uppercase tracking-widest"
-                                >
-                                    <option value="ALL">ALL BATCHES</option>
-                                    {batches.map(b => (
-                                        <option key={b.batch_id} value={String(b.batch_id)}>BATCH #{b.batch_id} ({b.batch_code})</option>
-                                    ))}
-                                </select>
-                            </div>
-                        )}
-                    </header>
+                    </nav>
                 )}
+            </header>
 
-                <div className="space-y-12">
+            {/* ── SCROLLABLE CONTENT ── */}
+            <div className="flex-1 overflow-y-auto bg-slate-200 p-4">
+                <div className="max-w-[1400px] mx-auto space-y-8">
                     {Object.keys(groupedBatches).length === 0 && (
                         <div className="text-center py-24 bg-white rounded-[3rem] border-4 border-dashed border-slate-300 shadow-sm">
                             <p className="text-slate-400 font-black text-2xl uppercase tracking-widest">No active batches assigned.</p>
                         </div>
                     )}
-
                     {Object.entries(groupedBatches).map(([lineName, lineBatches]) => (
                         <div key={lineName} className="space-y-8">
                             {lineBatches.map(batch => {
                                 const isBundleMode = headerInfo.processing_mode === 'BUNDLE';
-                                
                                 return (
                                     <div key={batch.batch_id} className="bg-white rounded-[2rem] shadow-xl border-2 border-slate-300 overflow-hidden">
                                         <div
@@ -922,9 +1180,7 @@ const UniversalWorkstationDashboard = () => {
                                             onClick={() => setOpenBatchId(prev => prev === batch.batch_id ? null : batch.batch_id)}
                                         >
                                             <div className="flex items-center gap-3 flex-wrap">
-                                                {openBatchId === batch.batch_id
-                                                    ? <ChevronDown className="w-5 h-5 text-slate-500 shrink-0" />
-                                                    : <ChevronRight className="w-5 h-5 text-slate-500 shrink-0" />}
+                                                {openBatchId === batch.batch_id ? <ChevronDown className="w-5 h-5 text-slate-500 shrink-0" /> : <ChevronRight className="w-5 h-5 text-slate-500 shrink-0" />}
                                                 <Shirt className="w-5 h-5 text-indigo-400 shrink-0" />
                                                 <h2 className="text-lg font-black text-white tracking-tight uppercase">
                                                     BATCH #{batch.batch_id} <span className="text-sm font-bold text-slate-500 font-mono">({batch.batch_code})</span>
@@ -947,91 +1203,86 @@ const UniversalWorkstationDashboard = () => {
                                             </div>
                                         </div>
 
-                                        {openBatchId === batch.batch_id && <div className="p-6 md:p-10 bg-slate-100">
-                                            {isBundleMode && batch.bundles && batch.bundles.length > 0 ? (() => {
-                                                const groupedBundles = batch.bundles.reduce((acc, bundle) => {
-                                                    const rId = bundle.roll_id || 'Unknown';
-                                                    const pName = bundle.part_name || 'Mixed';
-                                                    if (!acc[rId]) acc[rId] = {};
-                                                    if (!acc[rId][pName]) acc[rId][pName] = [];
-                                                    acc[rId][pName].push(bundle);
-                                                    return acc;
-                                                }, {});
-
-                                                return Object.entries(groupedBundles).map(([rollId, parts]) => {
-                                                    const allRollPieces = Object.entries(parts).flatMap(([partName, bundles]) =>
-                                                        bundles.flatMap(b => b.pieces.map(p => ({ 
-                                                            ...p, 
-                                                            bundle_id: b.bundle_id, part_id: b.part_id, size: b.size, 
-                                                            _displayGroup: `${partName} | Size ${b.size}` 
-                                                        })))
-                                                    );
-                                                    const rollStatus = checkEntityStatus({ pieces: allRollPieces });
-
-                                                    return (
-                                                        <div key={rollId} className="mb-12 last:mb-0 border-l-[8px] border-indigo-500 bg-white rounded-r-[2rem] p-8 md:p-10 shadow-sm border-y-2 border-r-2 border-slate-200">
-                                                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 pb-6 border-b-4 border-slate-200 gap-6">
-                                                                <h3 className="font-black text-black flex items-center text-3xl uppercase tracking-widest bg-slate-100 px-8 py-4 rounded-2xl w-max border-2 border-slate-300">
-                                                                    <Layers className="w-10 h-10 mr-5 text-indigo-600"/> ROLL #{rollId}
-                                                                </h3>
-                                                                <div className="flex items-center gap-4">
-                                                                    {allowRoll && !rollStatus.isComplete && (
-                                                                        <button onClick={() => setModalState({ type: 'validate', isBundle: true, isRollInspect: true, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: rollId, partName: 'ALL PARTS', pieces: allRollPieces, titleOverride: `Bulk Inspect: Roll #${rollId}`, allowMultiple })} className="px-10 py-5 bg-black hover:bg-slate-800 text-white text-xl font-black rounded-2xl shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
-                                                                            <CheckCircle2 className="w-8 h-8 mr-4 text-amber-400"/> INSPECT WHOLE ROLL
-                                                                        </button>
-                                                                    )}
-                                                                    <RollHandoffButton batchId={batch.batch_id} lineId={headerInfo.line_id} rollId={rollId} onComplete={() => fetchQueue()} />
-                                                                </div>
-                                                            </div>
-                                                            
-                                                            {Object.entries(parts).filter(([partName]) => isPartVisible(partName)).map(([partName, bundles]) => (
-                                                                <div key={partName} className="mb-10 last:mb-0">
-                                                                    <h4 className="font-black text-slate-800 text-2xl tracking-tight uppercase mb-6 flex items-center pl-2 border-l-4 border-slate-300 ml-2">
-                                                                        <Component className="w-8 h-8 mr-4 text-indigo-500 ml-4" /> {partName}
-                                                                    </h4>
-                                                                    <div className="space-y-4 pl-4">
-                                                                        {bundles.map(bundle => (
-                                                                            <ValidationProgressRow key={bundle.bundle_id} label={`Size ${bundle.size}`} subLabel={`Bundle ${bundle.bundle_code}`} icon={Package} entity={bundle}
-                                                                                canApproveBundle={allowBundle}
-                                                                                onQuickApprove={(entity) => handleQuickBulkApprove(entity, batch.batch_id, rollId)}
-                                                                                onInspect={() => setModalState({ type: 'validate', isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, allowMultiple, ...bundle, pieces: bundle.pieces.map(p => ({...p, _displayGroup: `${partName} | Size ${bundle.size}`})) })}
-                                                                                onRepair={() => setModalState({ type: 'alter', isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, ...bundle })}
-                                                                            />
-                                                                        ))}
+                                        {openBatchId === batch.batch_id && (
+                                            <div className="p-6 md:p-10 bg-slate-100">
+                                                {isBundleMode && batch.bundles && batch.bundles.length > 0 ? (() => {
+                                                    const groupedBundles = batch.bundles.reduce((acc, bundle) => {
+                                                        const rId = bundle.roll_id || 'Unknown';
+                                                        const pName = bundle.part_name || 'Mixed';
+                                                        if (!acc[rId]) acc[rId] = {};
+                                                        if (!acc[rId][pName]) acc[rId][pName] = [];
+                                                        acc[rId][pName].push(bundle);
+                                                        return acc;
+                                                    }, {});
+                                                    return Object.entries(groupedBundles).map(([rollId, parts]) => {
+                                                        const allRollPieces = Object.entries(parts).flatMap(([partName, bundles]) =>
+                                                            bundles.flatMap(b => b.pieces.map(p => ({ ...p, bundle_id: b.bundle_id, part_id: b.part_id, size: b.size, _displayGroup: `${partName} | Size ${b.size}` })))
+                                                        );
+                                                        const rollStatus = checkEntityStatus({ pieces: allRollPieces });
+                                                        return (
+                                                            <div key={rollId} className="mb-12 last:mb-0 border-l-[8px] border-indigo-500 bg-white rounded-r-[2rem] p-8 md:p-10 shadow-sm border-y-2 border-r-2 border-slate-200">
+                                                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 pb-6 border-b-4 border-slate-200 gap-6">
+                                                                    <h3 className="font-black text-black flex items-center text-3xl uppercase tracking-widest bg-slate-100 px-8 py-4 rounded-2xl w-max border-2 border-slate-300">
+                                                                        <Layers className="w-10 h-10 mr-5 text-indigo-600" /> ROLL #{rollId}
+                                                                    </h3>
+                                                                    <div className="flex items-center gap-4">
+                                                                        {allowRoll && !rollStatus.isComplete && (
+                                                                            <button onClick={() => setModalState({ type: 'validate', isBundle: true, isRollInspect: true, batchId: batch.batch_id, batchCode: batch.batch_code, rollId, partName: 'ALL PARTS', pieces: allRollPieces, titleOverride: `Bulk Inspect: Roll #${rollId}`, allowMultiple })} className="px-10 py-5 bg-black hover:bg-slate-800 text-white text-xl font-black rounded-2xl shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
+                                                                                <CheckCircle2 className="w-8 h-8 mr-4 text-amber-400" /> INSPECT WHOLE ROLL
+                                                                            </button>
+                                                                        )}
+                                                                        <RollHandoffButton batchId={batch.batch_id} lineId={headerInfo.line_id} rollId={rollId} onComplete={() => fetchQueue()} />
                                                                     </div>
                                                                 </div>
+                                                                {Object.entries(parts).filter(([partName]) => isPartVisible(partName)).map(([partName, bundles]) => (
+                                                                    <div key={partName} className="mb-10 last:mb-0">
+                                                                        <h4 className="font-black text-slate-800 text-2xl tracking-tight uppercase mb-6 flex items-center pl-2 border-l-4 border-slate-300 ml-2">
+                                                                            <Component className="w-8 h-8 mr-4 text-indigo-500 ml-4" /> {partName}
+                                                                        </h4>
+                                                                        <div className="space-y-4 pl-4">
+                                                                            {bundles.map(bundle => (
+                                                                                <ValidationProgressRow key={bundle.bundle_id} label={`Size ${bundle.size}`} subLabel={`Bundle ${bundle.bundle_code}`} icon={Package} entity={bundle}
+                                                                                    canApproveBundle={allowBundle}
+                                                                                    onQuickApprove={(entity) => handleQuickBulkApprove(entity, batch.batch_id, rollId)}
+                                                                                    onInspect={() => setModalState({ type: 'validate', isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, allowMultiple, ...bundle, pieces: bundle.pieces.map(p => ({ ...p, _displayGroup: `${partName} | Size ${bundle.size}` })) })}
+                                                                                    onRepair={() => setModalState({ type: 'alter', isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, ...bundle })}
+                                                                                />
+                                                                            ))}
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        );
+                                                    });
+                                                })() : null}
+
+                                                {!isBundleMode && batch.rolls && batch.rolls.length > 0 ? (
+                                                    batch.rolls.map(roll => (
+                                                        <div key={roll.roll_id} className="mb-12 last:mb-0 border-l-[8px] border-indigo-500 bg-white rounded-r-[2rem] p-8 md:p-10 shadow-sm border-y-2 border-r-2 border-slate-200">
+                                                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 pb-6 border-b-4 border-slate-200 gap-6">
+                                                                <h3 className="font-black text-black flex items-center text-3xl uppercase tracking-widest bg-slate-100 px-8 py-4 rounded-2xl w-max border-2 border-slate-300">
+                                                                    <Layers className="w-10 h-10 mr-5 text-indigo-600" /> ROLL #{roll.roll_id}
+                                                                </h3>
+                                                                <div className="flex items-center gap-4">
+                                                                    {allowRoll && (
+                                                                        <button onClick={() => {
+                                                                            const allRollPieces = roll.parts_details.flatMap(pt => pt.size_details.flatMap(sz => sz.pieces.map(p => ({ ...p, part_id: pt.part_id, size: sz.size, _displayGroup: `${pt.part_name} | Size ${sz.size}` }))));
+                                                                            setModalState({ type: 'validate', isBundle: false, isRollInspect: true, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: roll.roll_id, partName: 'ALL PARTS', pieces: allRollPieces, titleOverride: `Bulk Inspect: Roll #${roll.roll_id}`, allowMultiple });
+                                                                        }} className="px-10 py-5 bg-black hover:bg-slate-800 text-white text-xl font-black rounded-2xl shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
+                                                                            <CheckCircle2 className="w-8 h-8 mr-4 text-amber-400" /> INSPECT WHOLE ROLL
+                                                                        </button>
+                                                                    )}
+                                                                    <RollHandoffButton batchId={batch.batch_id} lineId={headerInfo.line_id} rollId={roll.roll_id} onComplete={() => fetchQueue()} />
+                                                                </div>
+                                                            </div>
+                                                            {roll.parts_details.filter(p => isPartVisible(p.part_name)).map(part => (
+                                                                <PartAccordion key={part.part_id} batch={batch} roll={roll} part={part} setModalState={setModalState} allowMultiple={allowMultiple} />
                                                             ))}
                                                         </div>
-                                                    );
-                                                });
-                                            })() : null}
-
-                                            {!isBundleMode && batch.rolls && batch.rolls.length > 0 ? (
-                                                batch.rolls.map(roll => (
-                                                    <div key={roll.roll_id} className="mb-12 last:mb-0 border-l-[8px] border-indigo-500 bg-white rounded-r-[2rem] p-8 md:p-10 shadow-sm border-y-2 border-r-2 border-slate-200">
-                                                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 pb-6 border-b-4 border-slate-200 gap-6">
-                                                            <h3 className="font-black text-black flex items-center text-3xl uppercase tracking-widest bg-slate-100 px-8 py-4 rounded-2xl w-max border-2 border-slate-300">
-                                                                <Layers className="w-10 h-10 mr-5 text-indigo-600"/> ROLL #{roll.roll_id}
-                                                            </h3>
-                                                            <div className="flex items-center gap-4">
-                                                                {allowRoll && (
-                                                                    <button onClick={() => {
-                                                                        const allRollPieces = roll.parts_details.flatMap(pt => pt.size_details.flatMap(sz => sz.pieces.map(p => ({ ...p, part_id: pt.part_id, size: sz.size, _displayGroup: `${pt.part_name} | Size ${sz.size}` }))));
-                                                                        setModalState({ type: 'validate', isBundle: false, isRollInspect: true, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: roll.roll_id, partName: 'ALL PARTS', pieces: allRollPieces, titleOverride: `Bulk Inspect: Roll #${roll.roll_id}`, allowMultiple });
-                                                                    }} className="px-10 py-5 bg-black hover:bg-slate-800 text-white text-xl font-black rounded-2xl shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
-                                                                        <CheckCircle2 className="w-8 h-8 mr-4 text-amber-400"/> INSPECT WHOLE ROLL
-                                                                    </button>
-                                                                )}
-                                                                <RollHandoffButton batchId={batch.batch_id} lineId={headerInfo.line_id} rollId={roll.roll_id} onComplete={() => fetchQueue()} />
-                                                            </div>
-                                                        </div>
-                                                        {roll.parts_details.filter(p => isPartVisible(p.part_name)).map(part => (
-                                                            <PartAccordion key={part.part_id} batch={batch} roll={roll} part={part} setModalState={setModalState} allowMultiple={allowMultiple} />
-                                                        ))}
-                                                    </div>
-                                                ))
-                                            ) : null}
-                                        </div>}
+                                                    ))
+                                                ) : null}
+                                            </div>
+                                        )}
                                     </div>
                                 );
                             })}
@@ -1040,6 +1291,16 @@ const UniversalWorkstationDashboard = () => {
                 </div>
             </div>
 
+            {/* ── MODALS ── */}
+            {showModal && (
+                <WorkLogModal
+                    workData={workData}
+                    loading={loadingWork}
+                    onClose={() => setShowModal(false)}
+                    onDateChange={handleModalDateChange}
+                    onExport={downloadCSV}
+                />
+            )}
             {modalState && modalState.type === 'validate' && <UniversalValidationModal itemInfo={modalState} defectCodes={defectCodes} onClose={() => setModalState(null)} onValidationSubmit={handleValidationSubmit} />}
             {modalState && modalState.type === 'alter' && <ApproveAlteredModal itemInfo={modalState} defectCodes={defectCodes} onClose={() => setModalState(null)} onSave={handleApproveAlterSubmit} />}
         </div>

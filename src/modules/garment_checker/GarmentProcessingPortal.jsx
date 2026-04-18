@@ -1,10 +1,191 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
     QrCode, ShieldCheck, ShieldAlert, Check, X,
     Hammer, AlertCircle, ArrowLeft, Package, CheckCircle2,
-    RefreshCw, Maximize, HardDrive, List, Barcode, Clock, Layers
+    RefreshCw, Maximize, HardDrive, List, Barcode, Clock, Layers,
+    ThumbsUp, FileText, Download, ChevronRight, Loader2,
 } from 'lucide-react';
 import { assemblyApi } from '../../api/assemblyApi';
+
+// ── Work Log helpers ──────────────────────────────────────────────────────────
+const STATS_REFRESH_MS = 60_000;
+
+const ACTION_STYLE = {
+    APPROVED:     'bg-emerald-100 text-emerald-700',
+    NEEDS_REWORK: 'bg-amber-100  text-amber-700',
+    QC_REJECTED:  'bg-red-100    text-red-700',
+    REPAIRED:     'bg-teal-100   text-teal-700',
+};
+const ActionBadge = ({ action }) => (
+    <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wide whitespace-nowrap ${ACTION_STYLE[action] ?? 'bg-gray-100 text-gray-600'}`}>
+        {action?.replace(/_/g, ' ') ?? '—'}
+    </span>
+);
+const fmtTime = (iso) => {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+    catch { return iso; }
+};
+function mergeWorkData(data) {
+    if (!data) return [];
+    const scans = (data.rows || []).filter(r => r.action !== 'NEEDS_REWORK').map(r => ({ ...r, _type: 'scan' }));
+    const defects = (data.defect_logs || []).map(d => ({
+        time: d.time, batch_id: d.batch_id, batch_code: d.batch_code,
+        part_name: d.part_name, size: d.size, fabric_roll_id: d.fabric_roll_id,
+        piece_sequence: d.piece_sequence, action: d.severity,
+        defect_code: d.defect_code, defect_description: d.defect_description,
+        is_resolved: d.is_resolved, _type: 'defect',
+    }));
+    return [...scans, ...defects].sort((a, b) => new Date(a.time) - new Date(b.time));
+}
+
+const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) => {
+    const [mode,       setMode]       = useState('hourly');
+    const [openGroups, setOpenGroups] = useState(new Set());
+    const [modalDate,  setModalDate]  = useState(
+        workData?.date ?? new Date().toISOString().split('T')[0]
+    );
+    const merged = useMemo(() => mergeWorkData(workData), [workData]);
+    const top3Defects = useMemo(() => {
+        const freq = {};
+        (workData?.defect_logs ?? []).forEach(d => {
+            const k = d.defect_code ?? '—';
+            if (!freq[k]) freq[k] = { code: d.defect_code, description: d.defect_description, count: 0 };
+            freq[k].count += 1;
+        });
+        return Object.values(freq).sort((a, b) => b.count - a.count).slice(0, 3);
+    }, [workData]);
+    const grouped = useMemo(() => {
+        const groups = {};
+        merged.forEach(row => {
+            const key = mode === 'hourly'
+                ? (() => { const h = new Date(row.time).getHours(); return `${String(h).padStart(2,'0')}:00 – ${String(h+1).padStart(2,'0')}:00`; })()
+                : `Roll #${row.fabric_roll_id ?? 'Unknown'}`;
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(row);
+        });
+        return Object.entries(groups).sort(([a],[b]) => a.localeCompare(b));
+    }, [merged, mode]);
+    useEffect(() => { setOpenGroups(new Set()); }, [mode, workData]);
+    const toggleGroup = (key) => setOpenGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+    const handleDateChange = (e) => { const d = e.target.value; setModalDate(d); onDateChange(d); };
+
+    return (
+        <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                {/* Header */}
+                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-gray-100">
+                    <div className="flex items-center gap-3">
+                        <div>
+                            <h2 className="text-base font-black text-gray-900">Work Log</h2>
+                            <p className="text-xs text-gray-400">{merged.length} entries · {grouped.length} groups</p>
+                        </div>
+                        <input type="date" value={modalDate} onChange={handleDateChange}
+                            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-400 bg-gray-50" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="flex bg-gray-100 rounded-lg p-0.5">
+                            <button onClick={() => setMode('hourly')} className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-md transition ${mode==='hourly'?'bg-white shadow-sm text-indigo-600':'text-gray-500 hover:text-gray-700'}`}><Clock size={11}/> Hourly</button>
+                            <button onClick={() => setMode('roll')} className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-md transition ${mode==='roll'?'bg-white shadow-sm text-indigo-600':'text-gray-500 hover:text-gray-700'}`}><Layers size={11}/> Fabric Roll</button>
+                        </div>
+                        <button onClick={() => onExport(grouped, mode, modalDate)} disabled={!grouped.length}
+                            className="flex items-center gap-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-40">
+                            <Download size={12}/> Export CSV
+                        </button>
+                        <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-full transition"><X size={16} className="text-gray-500"/></button>
+                    </div>
+                </div>
+                {/* Top rework reasons */}
+                {!loading && top3Defects.length > 0 && (
+                    <div className="px-5 py-2 bg-amber-50 border-b border-amber-100 flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-bold text-amber-700 shrink-0">Top Rework:</span>
+                        {top3Defects.map((d, i) => (
+                            <div key={d.code} className="flex items-center gap-1.5 bg-white border border-amber-200 rounded-lg px-2 py-0.5 shadow-sm">
+                                <span className="text-sm">{['🥇','🥈','🥉'][i]}</span>
+                                <span className="text-xs font-black text-gray-700 font-mono">{d.code}</span>
+                                {d.description && <span className="text-xs text-gray-500 hidden sm:inline">— {d.description}</span>}
+                                <span className="ml-1 text-xs font-bold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">{d.count}×</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                {/* Body */}
+                <div className="overflow-auto flex-1 p-4">
+                    {loading ? (
+                        <div className="flex items-center justify-center py-20 text-gray-400 gap-2">
+                            <Loader2 size={18} className="animate-spin"/><span className="text-sm">Loading…</span>
+                        </div>
+                    ) : merged.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                            <CheckCircle2 size={36} className="mb-2 opacity-30"/>
+                            <p className="text-sm font-medium">No work logged for this date.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            {grouped.map(([groupKey, groupRows]) => {
+                                const approved = groupRows.filter(r => r.action==='APPROVED').length;
+                                const rework   = groupRows.filter(r => r.action==='NEEDS_REWORK').length;
+                                const repaired = groupRows.filter(r => r.action==='REPAIRED').length;
+                                const rejected = groupRows.filter(r => r.action==='QC_REJECTED').length;
+                                const isOpen   = openGroups.has(groupKey);
+                                return (
+                                    <div key={groupKey} className="border border-gray-200 rounded-xl overflow-hidden">
+                                        <button type="button" onClick={() => toggleGroup(groupKey)}
+                                            className="w-full bg-gray-50 hover:bg-gray-100 px-4 py-2 flex items-center justify-between transition text-left">
+                                            <div className="flex items-center gap-2">
+                                                <ChevronRight size={14} className={`text-gray-400 transition-transform shrink-0 ${isOpen?'rotate-90':''}`}/>
+                                                <span className="font-black text-gray-700 text-sm">{groupKey}</span>
+                                            </div>
+                                            <div className="flex items-center gap-3 text-xs font-semibold">
+                                                {approved>0 && <span className="text-emerald-600">{approved} approved</span>}
+                                                {repaired>0 && <span className="text-teal-600">{repaired} repaired</span>}
+                                                {rework>0   && <span className="text-amber-600">{rework} rework</span>}
+                                                {rejected>0 && <span className="text-red-600">{rejected} rejected</span>}
+                                                <span className="text-gray-400 font-normal">{groupRows.length} total</span>
+                                            </div>
+                                        </button>
+                                        {isOpen && (
+                                            <table className="w-full text-xs border-t border-gray-100">
+                                                <tbody>
+                                                    {groupRows.map((r, i) => (
+                                                        <tr key={i} className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${r._type==='defect'?'bg-amber-50/40':''}`}>
+                                                            <td className="px-3 py-1.5 font-mono text-gray-400 whitespace-nowrap">{fmtTime(r.time)}</td>
+                                                            <td className="px-3 py-1.5 font-semibold text-gray-800 whitespace-nowrap">{r.batch_code}</td>
+                                                            <td className="px-3 py-1.5 text-gray-600 capitalize">{r.part_name}</td>
+                                                            <td className="px-3 py-1.5 text-gray-500">Sz {r.size}</td>
+                                                            {mode==='hourly' && <td className="px-3 py-1.5 text-gray-500 font-mono">Roll #{r.fabric_roll_id??'—'}</td>}
+                                                            <td className="px-3 py-1.5 text-gray-500 font-mono">#{r.piece_sequence}</td>
+                                                            <td className="px-3 py-1.5"><ActionBadge action={r.action}/></td>
+                                                            <td className="px-3 py-1.5">
+                                                                {r.defect_code && (
+                                                                    <div>
+                                                                        <span className="font-mono text-gray-600">{r.defect_code}</span>
+                                                                        {r.defect_description && <span className="block text-gray-400 text-[10px]">{r.defect_description}</span>}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            {r._type==='defect' && (
+                                                                <td className="px-3 py-1.5">
+                                                                    <span className={`font-semibold ${r.is_resolved?'text-emerald-500':'text-amber-500'}`}>
+                                                                        {r.is_resolved ? '✓ Resolved' : '⏳ Pending'}
+                                                                    </span>
+                                                                </td>
+                                                            )}
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
 
 // Standard Enterprise Status Enums
 const STATUS = {
@@ -20,12 +201,14 @@ const AssemblyProcessingPortal = () => {
     // Core Scan State
     const [garment, setGarment] = useState(null);
     const [mismatch, setMismatch] = useState(null);
+    const [dnaDefect, setDnaDefect] = useState(null);
     const [defectCodes, setDefectCodes] = useState([]);
     const [showDefectModal, setShowDefectModal] = useState(null); 
     const [isLoading, setIsLoading] = useState(false);
     const [isProcessingAction, setIsProcessingAction] = useState(false);
     const [error, setError] = useState(null);
     const [lastAction, setLastAction] = useState(null);
+    const [defectSearch, setDefectSearch] = useState('');
     
     // Batch Mode State
     const [activeBatches, setActiveBatches] = useState([]);
@@ -44,6 +227,19 @@ const AssemblyProcessingPortal = () => {
     const [manualInput, setManualInput] = useState('');
     const [showManualBox, setShowManualBox] = useState(false);
     const manualInputRef = useRef(null);
+
+    // Stats + Work Log
+    const [stats,       setStats]       = useState(null);
+    const [showModal,   setShowModal]   = useState(false);
+    const [workData,    setWorkData]    = useState(null);
+    const [loadingWork, setLoadingWork] = useState(false);
+    const [apiError,    setApiError]    = useState(null);
+    const apiErrTimer = useRef(null);
+    const popApiError = (msg) => {
+        setApiError(msg);
+        clearTimeout(apiErrTimer.current);
+        apiErrTimer.current = setTimeout(() => setApiError(null), 6000);
+    };
 
     // --- AUDIO FEEDBACK ENGINE ---
     const playFeedback = (type) => {
@@ -82,12 +278,51 @@ const AssemblyProcessingPortal = () => {
             ]);
             setDefectCodes(defectsRes.data);
             setActiveBatches(monitorRes.data.activeBatches || []);
+
+            console.log("Defedsddct Codes:", defectsRes.data);
+            console.log("Monitocvs Data:", monitorRes.data);
         } catch (e) {
             console.error("Failed to load portal data.", e);
         }
     }, []);
 
     useEffect(() => { loadRequiredData(); }, [loadRequiredData]);
+
+    const loadStats = useCallback(async () => {
+        try { const res = await assemblyApi.getCheckerStats(); setStats(res.data); }
+        catch (err) { popApiError(err.response?.data?.error || err.message || 'Failed to load stats'); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    useEffect(() => {
+        loadStats();
+        const iv = setInterval(loadStats, STATS_REFRESH_MS);
+        return () => clearInterval(iv);
+    }, [loadStats]);
+
+    const fetchWork = useCallback(async (date) => {
+        setLoadingWork(true);
+        try { const res = await assemblyApi.getTodayWork(date); setWorkData(res.data); }
+        catch (err) { setWorkData(null); popApiError(err.response?.data?.error || err.message || 'Failed to load work log'); }
+        finally { setLoadingWork(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    const handleOpenModal = () => { setShowModal(true); fetchWork(new Date().toISOString().split('T')[0]); };
+    const handleModalDateChange = (date) => { fetchWork(date); };
+    const downloadCSV = (grouped, mode, date) => {
+        const header = mode === 'hourly'
+            ? 'sr_no,hour,total,approved,repaired,needs_rework,qc_rejected'
+            : 'sr_no,fabric_roll,total,approved,repaired,needs_rework,qc_rejected';
+        const rows = grouped.map(([key, group], i) => {
+            const approved     = group.filter(r => r.action === 'APPROVED').length;
+            const repaired     = group.filter(r => r.action === 'REPAIRED').length;
+            const needs_rework = group.filter(r => r.action === 'NEEDS_REWORK').length;
+            const qc_rejected  = group.filter(r => r.action === 'QC_REJECTED').length;
+            return [i + 1, `"${key}"`, group.length, approved, repaired, needs_rework, qc_rejected].join(',');
+        });
+        const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
+        const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `work-log-${date}.csv` });
+        a.click(); URL.revokeObjectURL(a.href);
+    };
 
     // --- NEW: BATCH MODE FETCHING ---
     const handleBatchClick = async (batch) => {
@@ -115,8 +350,13 @@ const AssemblyProcessingPortal = () => {
             playFeedback('success');
         } catch (err) {
             playFeedback('error');
+            const status = err.response?.status;
             const errData = err.response?.data;
-            setError(errData?.message || errData?.error || "Failed to load piece.");
+            if (status === 400 && errData?.error === "DNA Defect") {
+                setDnaDefect(errData);
+            } else {
+                setError(errData?.message || errData?.error || "Failed to load piece.");
+            }
             setSelectedPiece(null);
         } finally {
             setIsPieceLoading(false);
@@ -134,6 +374,7 @@ const AssemblyProcessingPortal = () => {
         setIsLoading(true);
         setError(null);
         setMismatch(null);
+        setDnaDefect(null);
         setGarment(null);
         setScannedTextVisual(cleanUid);
 
@@ -148,6 +389,8 @@ const AssemblyProcessingPortal = () => {
             playFeedback('error');
             if (status === 403 && errData?.error === "Batch Mismatch") {
                 setMismatch(errData);
+            } else if (status === 400 && errData?.error === "DNA Defect") {
+                setDnaDefect(errData);
             } else {
                 setError(errData?.message || errData?.error || "Invalid Scan: Check Barcode Integrity.");
             }
@@ -243,6 +486,43 @@ const AssemblyProcessingPortal = () => {
 
             <div className="max-w-6xl mx-auto">
                 
+                {/* API ERROR BANNER */}
+                {apiError && (
+                    <div className="mb-4 flex items-center justify-between gap-3 bg-rose-50 border border-rose-200 text-rose-700 px-4 py-2.5 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+                        <div className="flex items-center gap-2 text-sm font-bold">
+                            <ShieldAlert size={16} className="shrink-0" />
+                            <span>{apiError}</span>
+                        </div>
+                        <button onClick={() => setApiError(null)} className="p-1 hover:bg-rose-100 rounded-full transition-colors shrink-0">
+                            <X size={14} />
+                        </button>
+                    </div>
+                )}
+
+                {/* STATS BAR */}
+                <div className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-amber-500 mb-0.5">Pending Rework</p>
+                        <p className="text-2xl font-black text-amber-700">{stats?.pending_rework ?? '—'}</p>
+                    </div>
+                    <div className="bg-indigo-50 border border-indigo-200 rounded-2xl px-4 py-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-0.5">Today's Rework</p>
+                        <p className="text-2xl font-black text-indigo-700">{stats?.today_rework ?? '—'}</p>
+                    </div>
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500 mb-0.5">Today's Approved</p>
+                        <p className="text-2xl font-black text-emerald-700">{stats?.today_approved ?? '—'}</p>
+                    </div>
+                    <button onClick={handleOpenModal}
+                        className="bg-white border border-slate-200 rounded-2xl px-4 py-3 hover:border-indigo-400 hover:bg-indigo-50 transition-all text-left flex items-center gap-3">
+                        <FileText size={20} className="text-indigo-500 shrink-0" />
+                        <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Work Log</p>
+                            <p className="text-sm font-black text-slate-700">Today's Work</p>
+                        </div>
+                    </button>
+                </div>
+
                 {/* STATION HEADER WITH NEW TOGGLE */}
                 <header className="mb-10 flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-6 rounded-[2rem] shadow-sm border border-slate-200">
                     <div className="flex items-center gap-4">
@@ -294,7 +574,7 @@ const AssemblyProcessingPortal = () => {
                     <div className="animate-in fade-in zoom-in-95 duration-200">
                         
                         {/* IDLE SCAN STATE WITH SCANNED TEXT VISUAL */}
-                        {!garment && !mismatch && (
+                        {!garment && !mismatch && !dnaDefect && (
                             <div className="text-center py-32 bg-white rounded-[3rem] border-4 border-dashed border-slate-200 shadow-inner">
                                 <div className="relative inline-block mb-8">
                                     <QrCode size={140} className="text-slate-100" />
@@ -327,6 +607,39 @@ const AssemblyProcessingPortal = () => {
                                         <ShieldAlert className="mr-3 shrink-0" /> {error}
                                     </div>
                                 )}
+                            </div>
+                        )}
+
+                        {/* DNA DEFECT BLOCK */}
+                        {dnaDefect && (
+                            <div className="bg-white border-[8px] border-rose-400 rounded-[4rem] p-12 shadow-2xl animate-in zoom-in-95">
+                                <div className="flex flex-col items-center text-center mb-8">
+                                    <div className="w-24 h-24 bg-rose-100 rounded-full flex items-center justify-center mb-6">
+                                        <ShieldAlert className="w-14 h-14 text-rose-500" />
+                                    </div>
+                                    <h2 className="text-5xl font-black text-slate-900 tracking-tight mb-3">DNA DEFECT</h2>
+                                    <p className="text-slate-500 text-xl font-bold max-w-xl">{dnaDefect.message}</p>
+                                    {dnaDefect.garment && (
+                                        <p className="mt-2 font-mono font-black text-indigo-500 text-lg">{dnaDefect.garment.garment_uid}</p>
+                                    )}
+                                </div>
+                                {dnaDefect.garment?.components?.length > 0 && (
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-xl mx-auto mb-10">
+                                        {dnaDefect.garment.components.map((comp, i) => (
+                                            <div key={i} className={`px-4 py-3 rounded-2xl border-2 flex items-center gap-3 ${comp.has_active_defect ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-100'}`}>
+                                                <div className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${comp.has_active_defect ? 'bg-rose-500 text-white' : 'bg-white text-slate-700 border border-slate-200'}`}>
+                                                    {comp.has_active_defect ? <X size={14} strokeWidth={3}/> : <Check size={14} strokeWidth={3}/>}
+                                                </div>
+                                                <span className={`font-bold text-sm ${comp.has_active_defect ? 'text-rose-700' : 'text-slate-600'}`}>{comp.part_name}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                <div className="flex justify-center">
+                                    <button onClick={() => setDnaDefect(null)} className="px-14 py-6 bg-slate-900 text-white font-black rounded-3xl hover:bg-black active:scale-95 transition-all shadow-xl">
+                                        RETURN TO SCANNER
+                                    </button>
+                                </div>
                             </div>
                         )}
 
@@ -577,6 +890,43 @@ const AssemblyProcessingPortal = () => {
                 )}
             </div>
 
+            {/* DNA DEFECT DRAWER — batch mode */}
+            {viewMode === 'BATCH' && dnaDefect && (
+                <div className="fixed bottom-0 left-0 right-0 z-[200] animate-in slide-in-from-bottom-4 duration-200">
+                    <div className="max-w-6xl mx-auto px-4 pb-4">
+                        <div className="bg-white rounded-[2rem] shadow-2xl border-2 border-rose-300 overflow-hidden">
+                            <div className="p-5">
+                                <div className="flex items-start justify-between mb-3">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 bg-rose-100 rounded-xl flex items-center justify-center shrink-0">
+                                            <ShieldAlert size={20} className="text-rose-500" />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-rose-500">DNA Defect</p>
+                                            <p className="font-black text-slate-900 text-sm leading-snug">{dnaDefect.message}</p>
+                                            {dnaDefect.garment && <p className="font-mono text-xs text-indigo-400 mt-0.5">{dnaDefect.garment.garment_uid}</p>}
+                                        </div>
+                                    </div>
+                                    <button onClick={() => setDnaDefect(null)} className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 transition-all ml-4 shrink-0">
+                                        <X size={16} className="text-slate-600" />
+                                    </button>
+                                </div>
+                                {dnaDefect.garment?.components?.length > 0 && (
+                                    <div className="flex flex-wrap gap-2 mt-2">
+                                        {dnaDefect.garment.components.map((comp, i) => (
+                                            <div key={i} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold ${comp.has_active_defect ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                                                {comp.has_active_defect ? <X size={10} strokeWidth={3}/> : <Check size={10} strokeWidth={3}/>}
+                                                {comp.part_name}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* FIXED BOTTOM DRAWER — piece action panel (BATCH mode) */}
             {viewMode === 'BATCH' && (garment || isPieceLoading) && (
                 <div className="fixed bottom-0 left-0 right-0 z-[200] animate-in slide-in-from-bottom-4 duration-200">
@@ -658,32 +1008,77 @@ const AssemblyProcessingPortal = () => {
                 </div>
             )}
 
-            {/* DEFECT DICTIONARY MODAL (Preserved) */}
-            {showDefectModal && (
-                <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl z-[300] flex items-center justify-center p-6 animate-in fade-in">
-                    {/* ... Existing Defect Modal Logic ... */}
-                     <div className="bg-white w-full max-w-3xl rounded-[4rem] overflow-hidden shadow-2xl border border-white/20">
-                        <div className={`p-10 ${showDefectModal === 'REWORK' ? 'bg-amber-500' : 'bg-rose-600'} text-white flex justify-between items-center`}>
-                            <div>
-                                <h2 className="text-3xl font-black tracking-tighter">SELECT REASON</h2>
-                                <p className="text-[10px] font-bold uppercase opacity-60 tracking-widest mt-1">Classification: {showDefectModal}</p>
+            {/* DEFECT DICTIONARY MODAL */}
+            {showDefectModal && (() => {
+                const q = defectSearch.trim().toLowerCase();
+                const filtered = defectCodes.filter(c =>
+                    !q ||
+                    c.code?.toLowerCase().includes(q) ||
+                    c.description?.toLowerCase().includes(q) ||
+                    c.category?.toLowerCase().includes(q)
+                );
+                return (
+                    <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl z-[300] flex items-center justify-center p-6 animate-in fade-in">
+                        <div className="bg-white w-full max-w-3xl rounded-[4rem] overflow-hidden shadow-2xl border border-white/20">
+                            {/* Header */}
+                            <div className={`px-10 pt-10 pb-6 ${showDefectModal === 'REWORK' ? 'bg-amber-500' : 'bg-rose-600'} text-white`}>
+                                <div className="flex justify-between items-start mb-4">
+                                    <div>
+                                        <h2 className="text-3xl font-black tracking-tighter">SELECT REASON</h2>
+                                        <p className="text-[10px] font-bold uppercase opacity-60 tracking-widest mt-1">Classification: {showDefectModal}</p>
+                                    </div>
+                                    <button onClick={() => { setShowDefectModal(null); setDefectSearch(''); }} className="p-3 bg-white/20 rounded-full hover:bg-white/30 transition-colors"><X /></button>
+                                </div>
+                                {/* Garment UID */}
+                                {garment && (
+                                    <div className="bg-white/15 rounded-2xl px-4 py-2 mb-4 inline-flex items-center gap-2">
+                                        <Barcode size={14} className="opacity-70" />
+                                        <span className="font-mono font-black text-sm tracking-wide">{garment.garment_uid}</span>
+                                        <span className="opacity-60 text-xs font-bold">· Sz {garment.size}</span>
+                                    </div>
+                                )}
+                                {/* Search */}
+                                <input
+                                    type="text"
+                                    value={defectSearch}
+                                    onChange={e => setDefectSearch(e.target.value)}
+                                    placeholder="Search by code or description…"
+                                    autoFocus
+                                    className="w-full bg-white/20 placeholder-white/50 text-white font-bold text-sm px-4 py-2.5 rounded-2xl outline-none border border-white/20 focus:border-white/60 transition-colors"
+                                />
                             </div>
-                            <button onClick={() => setShowDefectModal(null)} className="p-3 bg-white/20 rounded-full hover:bg-white/30 transition-colors"><X /></button>
-                        </div>
-                        <div className="p-10 grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto pr-6 custom-scrollbar">
-                            {defectCodes.map(code => (
-                                <button
-                                    key={code.id}
-                                    onClick={() => handleAction(STATUS[showDefectModal === 'REWORK' ? 'REWORK' : 'REJECT'], code.id)}
-                                    className="p-6 text-left border-2 border-slate-50 bg-slate-50/30 rounded-3xl hover:border-indigo-500 hover:bg-indigo-50 transition-all group active:scale-95"
-                                >
-                                    <span className="block text-[10px] font-black text-slate-400 mb-1 uppercase tracking-widest">{code.category}</span>
-                                    <span className="font-bold text-slate-800 text-lg leading-tight group-hover:text-indigo-900">{code.description}</span>
-                                </button>
-                            ))}
+                            {/* Codes grid */}
+                            <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[50vh] overflow-y-auto custom-scrollbar">
+                                {filtered.length === 0 ? (
+                                    <div className="col-span-full py-10 text-center text-slate-400 font-bold">No matching defect codes.</div>
+                                ) : filtered.map(code => (
+                                    <button
+                                        key={code.id}
+                                        onClick={() => { handleAction(STATUS[showDefectModal === 'REWORK' ? 'REWORK' : 'REJECT'], code.id); setDefectSearch(''); }}
+                                        className="p-6 text-left border-2 border-slate-50 bg-slate-50/30 rounded-3xl hover:border-indigo-500 hover:bg-indigo-50 transition-all group active:scale-95"
+                                    >
+                                        <div className="flex items-center gap-2 mb-1">
+                                            {code.code && <span className="font-mono text-xs font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-lg">{code.code}</span>}
+                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{code.category}</span>
+                                        </div>
+                                        <span className="font-bold text-slate-800 text-base leading-tight group-hover:text-indigo-900">{code.description}</span>
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
-                </div>
+                );
+            })()}
+
+            {/* WORK LOG MODAL */}
+            {showModal && (
+                <WorkLogModal
+                    workData={workData}
+                    loading={loadingWork}
+                    onClose={() => setShowModal(false)}
+                    onDateChange={handleModalDateChange}
+                    onExport={downloadCSV}
+                />
             )}
 
             {/* MANUAL OVERRIDE (Preserved, only shows in SCANNER mode) */}

@@ -294,7 +294,7 @@ function App() {
           <Route path="batch-details/:batchId" element={<BatchCuttingDetailsPage />} />
       </Route>
 
-      <Route path="/universal-checker" element={<UniversalCheckerLayout />}>
+      <Route path="/universal-checker" >
           <Route index element={<UniversalWorkstationDashboard />} />
           <Route path="dashboard" element={<UniversalWorkstationDashboard />} />
           

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Calendar, Truck, X, Loader2, Package, Download } from 'lucide-react';
+import { FileText, Calendar, Truck, X, Loader2, Package, Download, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { dispatchManagerApi } from '../../api/dispatchManagerApi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -8,7 +8,8 @@ const BatchReceiptsModal = ({ batchId, realBatchId, onClose }) => {
     const [receipts, setReceipts] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [downloadingId, setDownloadingId] = useState(null); // Tracks which receipt is generating a PDF
+    const [downloadingId, setDownloadingId] = useState(null);
+    const [closeState, setCloseState] = useState('idle'); // 'idle' | 'confirm' | 'closing' | 'done'
 
     useEffect(() => {
         const fetchBatchReceipts = async () => {
@@ -166,6 +167,17 @@ const BatchReceiptsModal = ({ batchId, realBatchId, onClose }) => {
         }
     };
 
+    const handleCloseBatch = async () => {
+        setCloseState('closing');
+        try {
+            await dispatchManagerApi.closeBatch(realBatchId);
+            setCloseState('done');
+        } catch (err) {
+            alert(err.response?.data?.error || 'Failed to close batch.');
+            setCloseState('confirm');
+        }
+    };
+
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
@@ -241,10 +253,58 @@ const BatchReceiptsModal = ({ batchId, realBatchId, onClose }) => {
                 </div>
 
                 {/* Modal Footer */}
-                <div className="p-4 border-t border-slate-100 bg-white flex justify-end">
-                    <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors text-sm">
-                        Close
-                    </button>
+                <div className="p-4 border-t border-slate-100 bg-white">
+                    {closeState === 'done' ? (
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-emerald-600 font-bold text-sm">
+                                <CheckCircle2 size={18} /> Batch closed successfully.
+                            </div>
+                            <button onClick={onClose} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors">
+                                Done
+                            </button>
+                        </div>
+                    ) : closeState === 'confirm' ? (
+                        <div className="space-y-3">
+                            <div className="flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-xl p-3">
+                                <ShieldAlert size={18} className="text-red-500 shrink-0 mt-0.5" />
+                                <div>
+                                    <p className="text-sm font-black text-red-700">Confirm Batch Closure</p>
+                                    <p className="text-xs text-red-600 mt-0.5">
+                                        This will permanently close batch <span className="font-black">{batchId}</span> and lock all dispatch records. This cannot be undone.
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-2">
+                                <button
+                                    onClick={() => setCloseState('idle')}
+                                    className="px-4 py-2 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleCloseBatch}
+                                    disabled={closeState === 'closing'}
+                                    className="px-5 py-2 text-sm font-black text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors flex items-center gap-1.5 disabled:opacity-60"
+                                >
+                                    {closeState === 'closing'
+                                        ? <><Loader2 size={14} className="animate-spin" /> Closing…</>
+                                        : 'Yes, Close Batch'}
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex justify-between items-center">
+                            <button
+                                onClick={() => setCloseState('confirm')}
+                                className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl transition-colors"
+                            >
+                                <ShieldAlert size={15} /> Close Batch
+                            </button>
+                            <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors text-sm">
+                                Dismiss
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

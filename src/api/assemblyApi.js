@@ -56,4 +56,7 @@ export const assemblyApi = {
 
     getBatchGarments: (batchId) => api.get(`/assembly-portal/batch-garments/${batchId}`),
     getHistoricScans: () => api.get(`/assembly-portal/historic-scans`),
+
+    getCheckerStats: () => api.get('/assembly-portal/checker-stats'),
+    getTodayWork: (date) => api.get('/assembly-portal/today-work', { params: date ? { date } : {} }),
 };
