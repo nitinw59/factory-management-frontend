@@ -894,7 +894,7 @@ const UniversalWorkstationDashboard = () => {
 
     // ── Checker stats (auto-refresh) ──────────────────────────────────────────
     const loadStats = useCallback(async () => {
-        try { const res = await universalApi.getCheckerStats(); setStats(res.data); } catch {}
+        try { const res = await universalApi.getCheckerStats(); setStats(res.data); console.log("Fetched checker stats:", res.data); } catch { console.error("Failed to fetch checker stats."); }
     }, []);
     useEffect(() => {
         loadStats();
