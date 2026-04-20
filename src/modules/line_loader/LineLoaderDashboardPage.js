@@ -466,10 +466,10 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
         setModalData(null);
     };
 
-    const handleCheckComplete = async (cycleFlowId) => {
-        setCheckingStageId(cycleFlowId);
+    const handleCheckComplete = async (stageId, productionLineId) => {
+        setCheckingStageId(stageId);
         try {
-            await lineLoaderApi.checkAndCompleteStage(batch.batch_id, cycleFlowId);
+            await lineLoaderApi.checkAndCompleteStage(batch.batch_id, productionLineId);
             await onRefresh();
         } catch (err) {
             alert(err.response?.data?.error || `Failed to check stage completion.`);
@@ -541,7 +541,7 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                                         wipMap={wipMap}
                                         isFirst={i === 0}
                                         onActivate={() => handleOpenDetail(i)}
-                                        onCheckComplete={() => handleCheckComplete(stage.id)}
+                                        onCheckComplete={() => handleCheckComplete(stage.id, progressMap[stage.id]?.line_id)}
                                         isCheckingComplete={checkingStageId === stage.id}
                                     />
                                 </React.Fragment>
