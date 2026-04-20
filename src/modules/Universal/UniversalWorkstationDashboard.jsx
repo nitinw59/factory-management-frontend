@@ -7,7 +7,8 @@ import {
     Shirt, Layers, ClipboardCheck, Component, Check, X,
     Hammer, Loader2, Menu, ChevronDown, ChevronRight, CheckCircle2,
     Square, CheckSquare, XCircle, ArrowLeft, Package, Send, AlertCircle, Zap,
-    LogOut, FileText, ThumbsUp, LayoutGrid,
+    LogOut, FileText, ThumbsUp, LayoutGrid, History, ChevronLeft, BarChart2,
+    ShieldAlert, ShieldCheck, RefreshCw,
 } from 'lucide-react';
 
 const PART_FILTER_LS_KEY = 'ws-part-filter';
@@ -680,14 +681,12 @@ const RollHandoffButton = ({ batchId, lineId, rollId, onComplete }) => {
             const data = response.data;
             if (data.isComplete) {
                 setResult({ ok: true, msg: data.message || `Roll #${rollId} marked complete.` });
-                clearTimeout(timerRef.current);
-                timerRef.current = setTimeout(() => setResult(null), 5000);
-                if (onComplete) onComplete();
             } else {
                 setResult({ ok: false, msg: data.message || 'Pieces still pending on this roll.' });
-                clearTimeout(timerRef.current);
-                timerRef.current = setTimeout(() => setResult(null), 6000);
             }
+            clearTimeout(timerRef.current);
+            timerRef.current = setTimeout(() => setResult(null), 6000);
+            if (onComplete) onComplete();
         } catch (error) {
             setResult({ ok: false, msg: error.response?.data?.error || 'System error. Check connection.' });
             clearTimeout(timerRef.current);
@@ -823,6 +822,370 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
 };
 
 // ============================================================================
+// BATCH HISTORY PANEL
+// ============================================================================
+const SEVERITY_STYLE = {
+    NEEDS_REWORK: 'bg-amber-100 text-amber-700',
+    QC_REJECTED:  'bg-red-100 text-red-700',
+};
+
+const fmtDate = (iso) => {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
+    catch { return iso; }
+};
+
+const BatchHistoryPanel = ({ onClose }) => {
+    const [page, setPage]           = useState(1);
+    const [listData, setListData]   = useState(null);   // { batches, total_pages, total }
+    const [listError, setListError] = useState(null);
+    const [listLoading, setListLoading] = useState(false);
+
+    const [detail, setDetail]           = useState(null);   // full detail response
+    const [detailError, setDetailError] = useState(null);
+    const [detailLoading, setDetailLoading] = useState(false);
+    const [openRolls, setOpenRolls] = useState(new Set());
+
+    // ── fetch list ────────────────────────────────────────────────────────────
+    const fetchList = useCallback(async (p) => {
+        setListLoading(true);
+        setListError(null);
+        try {
+            const res = await universalApi.getBatchHistory(p, 20);
+            setListData(res.data);
+        } catch (err) {
+            setListError(err.response?.data?.error || err.message || 'Failed to load history.');
+        } finally {
+            setListLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { fetchList(page); }, [fetchList, page]);
+
+    // ── fetch detail ──────────────────────────────────────────────────────────
+    const openDetail = async (batchId) => {
+        setDetail(null);
+        setDetailError(null);
+        setDetailLoading(true);
+        setOpenRolls(new Set());
+        try {
+            const res = await universalApi.getBatchHistoryDetail(batchId);
+            setDetail(res.data);
+        } catch (err) {
+            const status = err.response?.status;
+            if (status === 404) setDetailError('Batch not found or not completed on this line.');
+            else setDetailError(err.response?.data?.error || err.message || 'Failed to load batch detail.');
+        } finally {
+            setDetailLoading(false);
+        }
+    };
+
+    const toggleRoll = (rollId) => setOpenRolls(prev => {
+        const n = new Set(prev); n.has(rollId) ? n.delete(rollId) : n.add(rollId); return n;
+    });
+
+    const isDetailView = detail || detailLoading || detailError;
+
+    return (
+        <div className="fixed inset-0 z-[300] flex justify-end" onClick={onClose}>
+            <div
+                className="relative bg-white w-full max-w-2xl h-full flex flex-col shadow-2xl border-l border-slate-200 animate-in slide-in-from-right-8 duration-200"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* ── Panel header ── */}
+                <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 shrink-0">
+                    <div className="flex items-center gap-2">
+                        {isDetailView && (
+                            <button onClick={() => { setDetail(null); setDetailError(null); }} className="p-1.5 rounded-lg hover:bg-slate-100 transition mr-1">
+                                <ChevronLeft size={16} className="text-slate-500" />
+                            </button>
+                        )}
+                        <History size={16} className="text-indigo-500 shrink-0" />
+                        <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest">
+                            {isDetailView ? (detail?.batch?.batch_code || 'Batch Detail') : 'Batch History'}
+                        </h2>
+                        {!isDetailView && listData && (
+                            <span className="text-xs font-bold text-slate-400">{listData.total} completed</span>
+                        )}
+                    </div>
+                    <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 transition">
+                        <X size={16} className="text-slate-500" />
+                    </button>
+                </div>
+
+                {/* ── Body ── */}
+                <div className="flex-1 overflow-y-auto">
+
+                    {/* LIST VIEW */}
+                    {!isDetailView && (
+                        <>
+                            {listLoading && (
+                                <div className="flex items-center justify-center py-24 gap-2 text-slate-400">
+                                    <Loader2 size={18} className="animate-spin" /><span className="text-sm">Loading…</span>
+                                </div>
+                            )}
+                            {listError && (
+                                <div className="m-4 p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3">
+                                    <ShieldAlert size={16} className="text-rose-500 shrink-0 mt-0.5" />
+                                    <div>
+                                        <p className="text-sm font-black text-rose-700">Failed to load history</p>
+                                        <p className="text-xs text-rose-600 mt-0.5">{listError}</p>
+                                        <button onClick={() => fetchList(page)} className="mt-2 text-xs font-bold text-rose-600 hover:text-rose-800 flex items-center gap-1">
+                                            <RefreshCw size={11} /> Retry
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                            {!listLoading && !listError && listData && (
+                                <div className="divide-y divide-slate-100">
+                                    {listData.batches.length === 0 && (
+                                        <div className="py-20 text-center text-slate-400 text-sm font-bold">No completed batches found.</div>
+                                    )}
+                                    {listData.batches.map(b => {
+                                        const pct = b.total_pieces > 0 ? Math.round((b.completed_rolls / b.total_rolls) * 100) : 0;
+                                        return (
+                                            <button key={b.batch_id} onClick={() => openDetail(b.batch_id)}
+                                                className="w-full text-left px-5 py-4 hover:bg-slate-50 transition group">
+                                                <div className="flex items-start justify-between gap-3 mb-2">
+                                                    <div>
+                                                        <div className="flex items-center gap-2 mb-0.5">
+                                                            <span className="font-mono font-black text-sm text-indigo-600">{b.batch_code}</span>
+                                                            <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg uppercase">{b.product_sku}</span>
+                                                        </div>
+                                                        <p className="text-sm font-bold text-slate-700">{b.product_name}</p>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 shrink-0">
+                                                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg">DONE</span>
+                                                        <ChevronRight size={14} className="text-slate-300 group-hover:text-indigo-400 transition" />
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-4 text-xs text-slate-500 mb-2.5">
+                                                    <span>{b.total_pieces.toLocaleString()} pcs</span>
+                                                    <span>{b.total_rolls} rolls</span>
+                                                    <span>Completed {fmtDate(b.completed_at)}</span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                        <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${pct}%` }} />
+                                                    </div>
+                                                    <span className="text-[10px] font-black text-slate-400">{b.completed_rolls}/{b.total_rolls} rolls</span>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {/* DETAIL VIEW */}
+                    {isDetailView && (
+                        <div className="p-5">
+                            {detailLoading && (
+                                <div className="flex items-center justify-center py-24 gap-2 text-slate-400">
+                                    <Loader2 size={18} className="animate-spin" /><span className="text-sm">Loading batch…</span>
+                                </div>
+                            )}
+                            {detailError && (
+                                <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3">
+                                    <ShieldAlert size={16} className="text-rose-500 shrink-0 mt-0.5" />
+                                    <div>
+                                        <p className="text-sm font-black text-rose-700">Could not load batch</p>
+                                        <p className="text-xs text-rose-600 mt-0.5">{detailError}</p>
+                                    </div>
+                                </div>
+                            )}
+                            {detail && (() => {
+                                const b = detail.batch;
+                                const st = b.processing_stats || {};
+                                const dhu = st.total_processed > 0 ? ((st.needs_rework + st.qc_rejected) / st.total_processed * 100).toFixed(1) : '—';
+                                return (
+                                    <>
+                                        {/* Batch header */}
+                                        <div className="mb-5 pb-4 border-b border-slate-100">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <span className="font-mono font-black text-lg text-indigo-600">{b.batch_code}</span>
+                                                {b.product_sku && <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg">{b.product_sku}</span>}
+                                            </div>
+                                            <p className="font-bold text-slate-700 text-sm mb-2">{b.product_name}</p>
+                                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                                                <span>{b.total_pieces?.toLocaleString()} pcs · {b.total_rolls} rolls</span>
+                                                <span>Completed {fmtDate(b.completed_at)}</span>
+                                            </div>
+                                            {b.notes && (
+                                                <div className="mt-2 text-xs text-slate-500 italic bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">{b.notes}</div>
+                                            )}
+                                        </div>
+
+                                        {/* Processing stats */}
+                                        <div className="mb-5">
+                                            <div className="flex items-center gap-2 mb-3">
+                                                <BarChart2 size={13} className="text-slate-400" />
+                                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Processing Stats</span>
+                                                <span className="ml-auto text-xs font-black text-rose-600">DHU {dhu}%</span>
+                                            </div>
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+                                                {[
+                                                    { label: 'Processed',  val: st.total_processed, cls: 'bg-slate-50 text-slate-700' },
+                                                    { label: 'Approved',   val: st.approved,         cls: 'bg-emerald-50 text-emerald-700' },
+                                                    { label: 'Repaired',   val: st.repaired,         cls: 'bg-teal-50 text-teal-700' },
+                                                    { label: 'Rework',     val: st.needs_rework,     cls: 'bg-amber-50 text-amber-700' },
+                                                    { label: 'Rejected',   val: st.qc_rejected,      cls: 'bg-rose-50 text-rose-700' },
+                                                ].map(({ label, val, cls }) => (
+                                                    <div key={label} className={`${cls} rounded-xl px-3 py-2`}>
+                                                        <p className="text-[10px] font-black uppercase tracking-widest opacity-60">{label}</p>
+                                                        <p className="text-xl font-black">{val?.toLocaleString() ?? '—'}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {/* Progress bar */}
+                                            {st.total_processed > 0 && (
+                                                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden flex">
+                                                    <div className="bg-emerald-500 h-full" style={{ width: `${(st.approved / st.total_processed) * 100}%` }} />
+                                                    <div className="bg-teal-400 h-full"   style={{ width: `${(st.repaired / st.total_processed) * 100}%` }} />
+                                                    <div className="bg-amber-400 h-full"  style={{ width: `${(st.needs_rework / st.total_processed) * 100}%` }} />
+                                                    <div className="bg-rose-500 h-full"   style={{ width: `${(st.qc_rejected / st.total_processed) * 100}%` }} />
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Defect summary */}
+                                        {b.defect_summary?.length > 0 && (
+                                            <div className="mb-5">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <ShieldAlert size={13} className="text-amber-500" />
+                                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Defect Summary</span>
+                                                </div>
+                                                <div className="border border-slate-100 rounded-xl overflow-hidden">
+                                                    <table className="w-full text-xs">
+                                                        <thead>
+                                                            <tr className="bg-slate-50 border-b border-slate-100">
+                                                                <th className="text-left px-3 py-2 font-black text-slate-500 uppercase tracking-wider">Code</th>
+                                                                <th className="text-left px-3 py-2 font-black text-slate-500 uppercase tracking-wider">Description</th>
+                                                                <th className="text-left px-3 py-2 font-black text-slate-500 uppercase tracking-wider">Severity</th>
+                                                                <th className="text-right px-3 py-2 font-black text-slate-500 uppercase tracking-wider">Count</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {b.defect_summary.map((d, i) => (
+                                                                <tr key={i} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                                                                    <td className="px-3 py-2 font-mono font-black text-indigo-600">{d.code}</td>
+                                                                    <td className="px-3 py-2 text-slate-600">{d.description}</td>
+                                                                    <td className="px-3 py-2">
+                                                                        <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase ${SEVERITY_STYLE[d.severity] ?? 'bg-slate-100 text-slate-600'}`}>
+                                                                            {d.severity?.replace(/_/g,' ')}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-3 py-2 text-right font-black text-slate-700">{d.count}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Rolls accordion */}
+                                        {detail.rolls?.length > 0 && (
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <Layers size={13} className="text-slate-400" />
+                                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Rolls ({detail.rolls.length})</span>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    {detail.rolls.map(roll => {
+                                                        const isOpen = openRolls.has(roll.roll_id);
+                                                        // Count pieces across parts
+                                                        let totalPcs = 0, approvedPcs = 0;
+                                                        (roll.parts_details || []).forEach(part => {
+                                                            (part.size_details || part.bundles || []).forEach(s => {
+                                                                const pcs = s.pieces || [];
+                                                                totalPcs += pcs.length;
+                                                                approvedPcs += pcs.filter(p => p.qc_status === 'APPROVED' || p.status === 'APPROVED').length;
+                                                            });
+                                                        });
+                                                        return (
+                                                            <div key={roll.roll_id} className="border border-slate-200 rounded-xl overflow-hidden">
+                                                                <button type="button" onClick={() => toggleRoll(roll.roll_id)}
+                                                                    className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition text-left">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <ChevronRight size={13} className={`text-slate-400 transition-transform shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
+                                                                        <Layers size={13} className="text-indigo-400 shrink-0" />
+                                                                        <span className="font-black text-sm text-slate-700">Roll #{roll.roll_id}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-3 text-xs">
+                                                                        <span className={`font-black px-2 py-0.5 rounded text-[10px] uppercase ${roll.roll_status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                                            {roll.roll_status}
+                                                                        </span>
+                                                                        {totalPcs > 0 && <span className="text-slate-400 font-mono">{approvedPcs}/{totalPcs}</span>}
+                                                                        <span className="text-slate-300 text-[10px]">{fmtDate(roll.roll_completed_at)}</span>
+                                                                    </div>
+                                                                </button>
+                                                                {isOpen && roll.parts_details?.length > 0 && (
+                                                                    <div className="px-4 py-3 space-y-2 bg-white border-t border-slate-100">
+                                                                        {roll.parts_details.map((part, pi) => (
+                                                                            <div key={pi} className="text-xs">
+                                                                                <div className="font-black text-slate-600 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                                                                                    <Component size={11} className="text-indigo-400" />
+                                                                                    {part.part_name || `Part ${pi + 1}`}
+                                                                                </div>
+                                                                                <div className="flex flex-wrap gap-1.5 pl-4">
+                                                                                    {(part.size_details || part.bundles || []).map((s, si) => {
+                                                                                        const pcs = s.pieces || [];
+                                                                                        const appr = pcs.filter(p => p.qc_status === 'APPROVED' || p.status === 'APPROVED').length;
+                                                                                        return (
+                                                                                            <span key={si} className="inline-flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-600">
+                                                                                                Sz {s.size}
+                                                                                                <span className="text-emerald-600 font-black">{appr}/{pcs.length}</span>
+                                                                                            </span>
+                                                                                        );
+                                                                                    })}
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    )}
+                </div>
+
+                {/* ── Pagination (list view only) ── */}
+                {!isDetailView && listData && listData.total_pages > 1 && (
+                    <div className="shrink-0 px-5 py-3 border-t border-slate-100 flex items-center justify-between bg-white">
+                        <button
+                            onClick={() => setPage(p => Math.max(1, p - 1))}
+                            disabled={page <= 1 || listLoading}
+                            className="flex items-center gap-1 text-xs font-black text-slate-600 hover:text-indigo-600 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        >
+                            <ChevronLeft size={14} /> Prev
+                        </button>
+                        <span className="text-xs font-bold text-slate-400">
+                            Page {page} of {listData.total_pages} · {listData.total} batches
+                        </span>
+                        <button
+                            onClick={() => setPage(p => Math.min(listData.total_pages, p + 1))}
+                            disabled={page >= listData.total_pages || listLoading}
+                            className="flex items-center gap-1 text-xs font-black text-slate-600 hover:text-indigo-600 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        >
+                            Next <ChevronRight size={14} />
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// ============================================================================
 // MAIN PAGE DASHBOARD
 // ============================================================================
 const UniversalWorkstationDashboard = () => {
@@ -836,6 +1199,7 @@ const UniversalWorkstationDashboard = () => {
     const [selectedBatchId, setSelectedBatchId] = useState('ALL');
     const [openBatchId, setOpenBatchId] = useState(null);
     const [showNav,     setShowNav]     = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
     const [stats,       setStats]       = useState(null);
     const [showModal,   setShowModal]   = useState(false);
     const [workData,    setWorkData]    = useState(null);
@@ -1103,6 +1467,12 @@ const UniversalWorkstationDashboard = () => {
                             <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg">{headerInfo.line_name}</span>
                         )}
                         <span className="text-xs text-slate-500 hidden sm:block">{user?.name}</span>
+                        <button
+                            onClick={() => setShowHistory(true)}
+                            className="flex items-center text-xs font-semibold text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-300 px-2.5 py-1.5 rounded-lg transition bg-white shadow-sm"
+                        >
+                            <History className="w-3.5 h-3.5 mr-1" /> History
+                        </button>
                         <button onClick={handleLogout} className="flex items-center text-xs font-semibold text-slate-600 hover:text-red-600 transition">
                             <LogOut className="w-3.5 h-3.5 mr-1" /> Logout
                         </button>
@@ -1333,6 +1703,7 @@ const UniversalWorkstationDashboard = () => {
             )}
             {modalState && modalState.type === 'validate' && <UniversalValidationModal itemInfo={modalState} defectCodes={defectCodes} onClose={() => setModalState(null)} onValidationSubmit={handleValidationSubmit} />}
             {modalState && modalState.type === 'alter' && <ApproveAlteredModal itemInfo={modalState} defectCodes={defectCodes} onClose={() => setModalState(null)} onSave={handleApproveAlterSubmit} />}
+            {showHistory && <BatchHistoryPanel onClose={() => setShowHistory(false)} />}
         </div>
     );
 };

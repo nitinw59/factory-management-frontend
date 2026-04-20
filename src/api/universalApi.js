@@ -28,4 +28,8 @@ export const universalApi = {
     getCheckerStats: () => api.get('/workstation-universal/checker-stats'),
     // Today's work log for export (scans done by logged-in user today)
     getTodayWork: (date) => api.get('/workstation-universal/today-work', { params: date ? { date } : {} }),
+
+    // Batch history
+    getBatchHistory: (page = 1, limit = 20) => api.get('/workstation-universal/batch-history', { params: { page, limit } }),
+    getBatchHistoryDetail: (batchId) => api.get(`/workstation-universal/batch-history/${batchId}`),
 };
