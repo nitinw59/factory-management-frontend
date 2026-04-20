@@ -386,6 +386,8 @@ const AssemblyProcessingPortal = () => {
                 assemblyApi.getDefectCodes(),
                 assemblyApi.getMonitorData()
             ]);
+            console.log("Defect Codes:", defectsRes.data);
+            console.log("Monitor Data:", monitorRes.data);
             setDefectCodes(defectsRes.data);
             setActiveBatches(monitorRes.data.active_batches || []);
             setWorkstationInfo(monitorRes.data.workstation || null);
