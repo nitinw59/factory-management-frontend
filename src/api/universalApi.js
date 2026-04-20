@@ -11,6 +11,7 @@ export const universalApi = {
 
     // 3. Manual Overrides / Reconciliations
     checkAndCompleteStages: (data) => api.post('/workstation-universal/check-roll-completion', data),
+    checkStageCompletion: (data) => api.post('/workstation-universal/check-stage-completion', data),
 
     // ------------------------------------------------------------------------
     // Optional / Future Expansion Routes (Generalized for any department)

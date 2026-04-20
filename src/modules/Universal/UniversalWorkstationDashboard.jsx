@@ -240,16 +240,15 @@ const StageCompletionHandoff = ({ batchId, lineId, onBatchComplete }) => {
     const handleHandoff = async () => {
         setIsLoading(true);
         try {
-            const response = await universalApi.checkCompletion({ batchId, lineId });
+            const response = await universalApi.checkStageCompletion({ batchId, lineId });
             const data = response.data;
             if (data.isComplete) {
-                alert(`SUCCESS: ${data.message}`);
                 if (onBatchComplete) onBatchComplete();
             } else {
                 setWipReport(data);
             }
         } catch (error) {
-            alert(error.response?.data?.error || 'SYSTEM ERROR: Check connection.');
+            setWipReport({ message: error.response?.data?.error || 'System error. Check connection.' });
         } finally {
             setIsLoading(false);
         }
@@ -257,9 +256,14 @@ const StageCompletionHandoff = ({ batchId, lineId, onBatchComplete }) => {
 
     return (
         <>
-            {/* <button onClick={handleHandoff} disabled={isLoading || !lineId} className="bg-black hover:bg-slate-800 text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all flex items-center disabled:opacity-50">
-                {isLoading ? <Loader2 className="w-6 h-6 animate-spin mr-3" /> : <Send className="w-6 h-6 mr-3" />} HAND OFF
-            </button> */}
+            <button
+                onClick={handleHandoff}
+                disabled={isLoading || !lineId}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-black text-sm uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center disabled:opacity-50"
+            >
+                {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
+                CHECK STAGE
+            </button>
 
             {wipReport && (
                 <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[200] p-4" onClick={() => setWipReport(null)}>
@@ -268,7 +272,7 @@ const StageCompletionHandoff = ({ batchId, lineId, onBatchComplete }) => {
                             <div className="flex items-center text-black">
                                 <AlertCircle className="w-10 h-10 mr-4 shrink-0" />
                                 <div>
-                                    <h3 className="font-black text-2xl uppercase tracking-widest">HANDOFF REJECTED</h3>
+                                    <h3 className="font-black text-2xl uppercase tracking-widest">NOT READY</h3>
                                     <p className="text-sm font-bold mt-1 text-amber-900">{wipReport.message}</p>
                                 </div>
                             </div>
@@ -665,34 +669,50 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
 // ============================================================================
 const RollHandoffButton = ({ batchId, lineId, rollId, onComplete }) => {
     const [isLoading, setIsLoading] = useState(false);
+    const [result, setResult]       = useState(null); // { ok: bool, msg: string }
+    const timerRef = useRef(null);
 
     const handleHandoff = async () => {
         setIsLoading(true);
+        setResult(null);
         try {
-            const response = await universalApi.checkCompletion({ batchId, lineId, rollId });
+            const response = await universalApi.checkAndCompleteStages({ batchId, lineId, rollId });
             const data = response.data;
             if (data.isComplete) {
-                alert(`ROLL #${rollId} COMPLETE: ${data.message}`);
+                setResult({ ok: true, msg: data.message || `Roll #${rollId} marked complete.` });
+                clearTimeout(timerRef.current);
+                timerRef.current = setTimeout(() => setResult(null), 5000);
                 if (onComplete) onComplete();
             } else {
-                alert(`NOT READY: ${data.message || 'Pieces still pending on this roll.'}`);
+                setResult({ ok: false, msg: data.message || 'Pieces still pending on this roll.' });
+                clearTimeout(timerRef.current);
+                timerRef.current = setTimeout(() => setResult(null), 6000);
             }
         } catch (error) {
-            alert(error.response?.data?.error || 'SYSTEM ERROR: Check connection.');
+            setResult({ ok: false, msg: error.response?.data?.error || 'System error. Check connection.' });
+            clearTimeout(timerRef.current);
+            timerRef.current = setTimeout(() => setResult(null), 6000);
         } finally {
             setIsLoading(false);
         }
     };
 
     return (
-        <button
-            onClick={handleHandoff}
-            disabled={isLoading || !lineId}
-            className="px-6 py-3 bg-slate-700 hover:bg-slate-900 text-white text-sm font-black rounded-xl shadow-lg active:scale-95 transition-all flex items-center uppercase tracking-widest disabled:opacity-50 border-b-4 border-slate-900"
-        >
-            {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
-            COMPLETE ROLL
-        </button>
+        <div className="flex flex-col items-end gap-1.5">
+            <button
+                onClick={handleHandoff}
+                disabled={isLoading || !lineId}
+                className="px-6 py-3 bg-slate-700 hover:bg-slate-900 text-white text-sm font-black rounded-xl shadow-lg active:scale-95 transition-all flex items-center uppercase tracking-widest disabled:opacity-50 border-b-4 border-slate-900"
+            >
+                {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
+                CHECK ROLL
+            </button>
+            {result && (
+                <div className={`text-xs font-bold px-3 py-1.5 rounded-lg animate-in fade-in slide-in-from-top-1 ${result.ok ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>
+                    {result.ok ? '✓' : '⚠'} {result.msg}
+                </div>
+            )}
+        </div>
     );
 };
 
@@ -1088,19 +1108,6 @@ const UniversalWorkstationDashboard = () => {
                         </button>
                     </div>
                 </div>
-
-                {/* API error banner */}
-                {apiError && (
-                    <div className="px-4 py-2 bg-rose-50 border-t border-rose-200 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-1 duration-200">
-                        <div className="flex items-center gap-2 text-xs font-bold text-rose-700">
-                            <AlertCircle size={13} className="shrink-0" />
-                            <span>{apiError}</span>
-                        </div>
-                        <button onClick={() => setApiError(null)} className="p-0.5 hover:bg-rose-100 rounded transition-colors shrink-0">
-                            <X size={13} className="text-rose-500" />
-                        </button>
-                    </div>
-                )}
 
                 {/* Row 2: summary bar */}
                 <div className="px-4 py-1.5 bg-gray-50 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3">
