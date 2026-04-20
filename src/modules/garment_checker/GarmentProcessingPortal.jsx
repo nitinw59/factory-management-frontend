@@ -878,7 +878,7 @@ const AssemblyProcessingPortal = () => {
                                                 className="bg-slate-50 p-8 rounded-[2rem] text-left border-2 border-slate-100 hover:border-indigo-500 hover:shadow-lg transition-all group"
                                             >
                                                 <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-600 font-black text-[10px] uppercase rounded-lg mb-4">
-                                                    {batch.batch_code}
+                                                    {batch.batch_id}
                                                 </span>
                                                 <h3 className="text-2xl font-black text-slate-800 mb-5 group-hover:text-indigo-600 transition-colors">{batch.product_name}</h3>
 
