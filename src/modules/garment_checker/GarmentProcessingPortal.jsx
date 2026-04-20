@@ -30,7 +30,7 @@ function mergeWorkData(data) {
     if (!data) return [];
     const scans = (data.rows || []).filter(r => r.action !== 'NEEDS_REWORK').map(r => ({ ...r, _type: 'scan' }));
     const defects = (data.defect_logs || []).map(d => ({
-        time: d.time, batch_id: d.batch_id, batch_code: d.batch_code,
+        time: d.time, batch_id: d.batch_id, batch_id: d.batch_id,
         part_name: d.part_name, size: d.size, fabric_roll_id: d.fabric_roll_id,
         piece_sequence: d.piece_sequence, action: d.severity,
         defect_code: d.defect_code, defect_description: d.defect_description,
@@ -258,7 +258,7 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
                                                     {groupRows.map((r, i) => (
                                                         <tr key={i} className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${r._type==='defect'?'bg-amber-50/40':''}`}>
                                                             <td className="px-3 py-1.5 font-mono text-gray-400 whitespace-nowrap">{fmtTime(r.time)}</td>
-                                                            <td className="px-3 py-1.5 font-semibold text-gray-800 whitespace-nowrap">{r.batch_id}</td>
+                                                            <td className="px-3 py-1.5 font-semibold text-gray-800 whitespace-nowrap font-mono">{r.batch_id}</td>
                                                             <td className="px-3 py-1.5 text-gray-600 capitalize">{r.part_name}</td>
                                                             <td className="px-3 py-1.5 text-gray-500">Sz {r.size}</td>
                                                             <td className="px-3 py-1.5 text-gray-500 font-mono">Roll #{r.fabric_roll_id??'—'}</td>
@@ -322,6 +322,8 @@ const AssemblyProcessingPortal = () => {
     const [activeBatches, setActiveBatches] = useState([]);
     const [selectedBatch, setSelectedBatch] = useState(null);
     const [batchPieces, setBatchPieces] = useState([]);
+    const [workstationInfo, setWorkstationInfo] = useState(null);
+    const [recentScans, setRecentScans] = useState([]);
 
     // Batch Mode — selected piece for in-batch action
     const [selectedPiece, setSelectedPiece] = useState(null);
@@ -385,10 +387,9 @@ const AssemblyProcessingPortal = () => {
                 assemblyApi.getMonitorData()
             ]);
             setDefectCodes(defectsRes.data);
-            setActiveBatches(monitorRes.data.activeBatches || []);
-
-            console.log("Defedsddct Codes:", defectsRes.data);
-            console.log("Monitocvs Data:", monitorRes.data);
+            setActiveBatches(monitorRes.data.active_batches || []);
+            setWorkstationInfo(monitorRes.data.workstation || null);
+            setRecentScans(monitorRes.data.recent_scans || []);
         } catch (e) {
             console.error("Failed to load portal data.", e);
         }
@@ -638,7 +639,7 @@ const AssemblyProcessingPortal = () => {
                             <HardDrive size={28} />
                         </div>
                         <div>
-                            <h1 className="text-2xl font-black text-slate-900 tracking-tight">Assembly Station</h1>
+                            <h1 className="text-2xl font-black text-slate-900 tracking-tight">{workstationInfo?.line_name || 'Assembly Station'}</h1>
                             <div className="flex items-center gap-2">
                                 <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
                                 <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">Live Validations</p>
@@ -713,6 +714,33 @@ const AssemblyProcessingPortal = () => {
                                 {error && (
                                     <div className="mt-12 max-w-md mx-auto p-5 bg-rose-50 border-2 border-rose-100 rounded-3xl text-rose-700 font-black flex items-center justify-center shadow-sm animate-in shake">
                                         <ShieldAlert className="mr-3 shrink-0" /> {error}
+                                    </div>
+                                )}
+
+                                {/* Recent scans feed */}
+                                {!error && recentScans.length > 0 && (
+                                    <div className="mt-12 max-w-2xl mx-auto">
+                                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 mb-3">Recent Scans</p>
+                                        <div className="space-y-1.5">
+                                            {recentScans.map((s, i) => (
+                                                <div key={s.id ?? i} className="flex items-center gap-3 bg-white border border-slate-100 rounded-2xl px-4 py-2.5 shadow-sm text-left">
+                                                    <span className={`w-2 h-2 rounded-full shrink-0 ${
+                                                        s.status === 'APPROVED' ? 'bg-emerald-500' :
+                                                        s.status === 'NEEDS_REWORK' ? 'bg-amber-400' :
+                                                        s.status === 'QC_REJECTED' ? 'bg-rose-500' : 'bg-slate-300'
+                                                    }`} />
+                                                    <span className="font-mono font-black text-sm text-slate-700 flex-1">{s.garment_uid}</span>
+                                                    <span className="text-[10px] font-bold text-slate-400 font-mono">{s.batch_id}</span>
+                                                    <span className="text-[10px] font-bold text-slate-400">{s.size}</span>
+                                                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-lg ${
+                                                        s.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-700' :
+                                                        s.status === 'NEEDS_REWORK' ? 'bg-amber-50 text-amber-700' :
+                                                        s.status === 'QC_REJECTED' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-500'
+                                                    }`}>{s.status?.replace(/_/g, ' ')}</span>
+                                                    <span className="text-[10px] text-slate-300 font-mono whitespace-nowrap">{fmtTime(s.updated_at)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -867,35 +895,46 @@ const AssemblyProcessingPortal = () => {
                                 </h2>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                     {activeBatches.map(batch => {
-                                        const approved = batch.approved_units ?? batch.completed_units ?? 0;
-                                        const pending = (batch.total_units ?? 0) - (batch.completed_units ?? 0);
-                                        const rejected = batch.rejected_units ?? batch.qc_rejected_units ?? 0;
-                                        const total = batch.total_units ?? 0;
+                                        const approved = batch.approved_units ?? 0;
+                                        const pending  = batch.pending_units ?? 0;
+                                        const rework   = batch.rework_units ?? 0;
+                                        const rejected = batch.rejected_units ?? 0;
+                                        const total    = batch.total_units ?? 0;
+                                        const velocity = batch.hourly_velocity ?? null;
                                         return (
                                             <button
                                                 key={batch.batch_id}
                                                 onClick={() => handleBatchClick(batch)}
                                                 className="bg-slate-50 p-8 rounded-[2rem] text-left border-2 border-slate-100 hover:border-indigo-500 hover:shadow-lg transition-all group"
                                             >
-                                                <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-600 font-black text-[10px] uppercase rounded-lg mb-4">
-                                                    {batch.batch_id}
-                                                </span>
+                                                <div className="flex items-center justify-between mb-4">
+                                                    <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-600 font-black text-[10px] uppercase rounded-lg">
+                                                        {batch.batch_id}
+                                                    </span>
+                                                    {velocity != null && (
+                                                        <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-sky-100 text-sky-700">
+                                                            {velocity}/hr
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 <h3 className="text-2xl font-black text-slate-800 mb-5 group-hover:text-indigo-600 transition-colors">{batch.product_name}</h3>
 
                                                 {/* Summary chips */}
                                                 <div className="flex gap-2 flex-wrap mb-4">
                                                     <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-700">{approved} Approved</span>
                                                     <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-slate-200 text-slate-600">{pending} Pending</span>
+                                                    {rework > 0 && <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-amber-100 text-amber-700">{rework} Rework</span>}
                                                     {rejected > 0 && <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-rose-100 text-rose-700">{rejected} Rejected</span>}
                                                 </div>
 
                                                 <div className="space-y-1.5">
                                                     <div className="flex justify-between text-[10px] font-black uppercase text-slate-500">
                                                         <span>Completion</span>
-                                                        <span className="text-indigo-600">{batch.completed_units} / {total}</span>
+                                                        <span className="text-indigo-600">{approved} / {total}</span>
                                                     </div>
                                                     <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden flex">
                                                         <div className="bg-emerald-500 h-full" style={{ width: `${total > 0 ? (approved/total)*100 : 0}%` }} />
+                                                        <div className="bg-amber-400 h-full" style={{ width: `${total > 0 ? (rework/total)*100 : 0}%` }} />
                                                         <div className="bg-rose-400 h-full" style={{ width: `${total > 0 ? (rejected/total)*100 : 0}%` }} />
                                                     </div>
                                                 </div>
@@ -920,7 +959,7 @@ const AssemblyProcessingPortal = () => {
                                                 <ArrowLeft size={16} className="mr-2" /> Back to Batches
                                             </button>
                                             <h2 className="text-2xl font-black text-slate-900">{selectedBatch.product_name}</h2>
-                                            <p className="text-indigo-600 font-black text-sm uppercase tracking-widest mt-0.5">{selectedBatch.batch_code}</p>
+                                            <p className="text-indigo-600 font-black text-sm uppercase tracking-widest mt-0.5">{selectedBatch.batch_id}</p>
                                         </div>
                                         {/* Summary */}
                                         {(() => {
@@ -1096,8 +1135,8 @@ const AssemblyProcessingPortal = () => {
                                             className="flex-1 bg-emerald-600 text-white rounded-2xl py-3 font-black text-sm flex flex-col items-center justify-center gap-0.5 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                                         >
                                             <div className="flex items-center gap-2"><ShieldCheck size={16} /> APPROVE</div>
-                                            {selectedBatch?.batch_code && (
-                                                <span className="text-[10px] font-black opacity-75 tracking-widest font-mono">{selectedBatch.batch_code}</span>
+                                            {selectedBatch?.batch_id && (
+                                                <span className="text-[10px] font-black opacity-75 tracking-widest font-mono">{selectedBatch.batch_id}</span>
                                             )}
                                         </button>
                                         <button
