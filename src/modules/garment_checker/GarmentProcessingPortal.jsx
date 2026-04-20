@@ -66,6 +66,21 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
         });
         return Object.entries(groups).sort(([a],[b]) => a.localeCompare(b));
     }, [merged, mode]);
+    const groupedRoll = useMemo(() => {
+        if (mode !== 'roll') return [];
+        const batches = {};
+        merged.forEach(row => {
+            const bKey = row.batch_id ?? 'Unknown';
+            const rKey = `Roll #${row.fabric_roll_id ?? 'Unknown'}`;
+            if (!batches[bKey]) batches[bKey] = {};
+            if (!batches[bKey][rKey]) batches[bKey][rKey] = [];
+            batches[bKey][rKey].push(row);
+        });
+        return Object.entries(batches)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([bKey, rolls]) => [bKey, Object.entries(rolls).sort(([a], [b]) => a.localeCompare(b))]);
+    }, [merged, mode]);
+
     useEffect(() => { setOpenGroups(new Set()); }, [mode, workData]);
     const toggleGroup = (key) => setOpenGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
     const handleDateChange = (e) => { const d = e.target.value; setModalDate(d); onDateChange(d); };
@@ -120,7 +135,100 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
                             <CheckCircle2 size={36} className="mb-2 opacity-30"/>
                             <p className="text-sm font-medium">No work logged for this date.</p>
                         </div>
+                    ) : mode === 'roll' ? (
+                        /* ── Roll mode: batch → roll nested accordions ── */
+                        <div className="space-y-2">
+                            {groupedRoll.map(([batchCode, rolls]) => {
+                                const batchRows = rolls.flatMap(([, rows]) => rows);
+                                const bApproved = batchRows.filter(r => r.action==='APPROVED').length;
+                                const bRework   = batchRows.filter(r => r.action==='NEEDS_REWORK').length;
+                                const bRepaired = batchRows.filter(r => r.action==='REPAIRED').length;
+                                const bRejected = batchRows.filter(r => r.action==='QC_REJECTED').length;
+                                const bKey      = `batch::${batchCode}`;
+                                const isBatchOpen = openGroups.has(bKey);
+                                return (
+                                    <div key={batchCode} className="border border-indigo-200 rounded-xl overflow-hidden">
+                                        <button type="button" onClick={() => toggleGroup(bKey)}
+                                            className="w-full bg-indigo-50 hover:bg-indigo-100 px-4 py-2 flex items-center justify-between transition text-left">
+                                            <div className="flex items-center gap-2">
+                                                <ChevronRight size={14} className={`text-indigo-400 transition-transform shrink-0 ${isBatchOpen?'rotate-90':''}`}/>
+                                                <span className="font-black text-indigo-700 text-sm font-mono">{batchCode}</span>
+                                                <span className="text-[10px] font-bold text-indigo-400">{rolls.length} roll{rolls.length!==1?'s':''}</span>
+                                            </div>
+                                            <div className="flex items-center gap-3 text-xs font-semibold">
+                                                {bApproved>0 && <span className="text-emerald-600">{bApproved} approved</span>}
+                                                {bRepaired>0 && <span className="text-teal-600">{bRepaired} repaired</span>}
+                                                {bRework>0   && <span className="text-amber-600">{bRework} rework</span>}
+                                                {bRejected>0 && <span className="text-red-600">{bRejected} rejected</span>}
+                                                <span className="text-gray-400 font-normal">{batchRows.length} total</span>
+                                            </div>
+                                        </button>
+                                        {isBatchOpen && (
+                                            <div className="p-2 space-y-1.5 bg-white border-t border-indigo-100">
+                                                {rolls.map(([rollKey, rollRows]) => {
+                                                    const rApproved = rollRows.filter(r => r.action==='APPROVED').length;
+                                                    const rRework   = rollRows.filter(r => r.action==='NEEDS_REWORK').length;
+                                                    const rRepaired = rollRows.filter(r => r.action==='REPAIRED').length;
+                                                    const rRejected = rollRows.filter(r => r.action==='QC_REJECTED').length;
+                                                    const rKey      = `roll::${batchCode}::${rollKey}`;
+                                                    const isRollOpen = openGroups.has(rKey);
+                                                    return (
+                                                        <div key={rollKey} className="border border-gray-200 rounded-lg overflow-hidden">
+                                                            <button type="button" onClick={() => toggleGroup(rKey)}
+                                                                className="w-full bg-gray-50 hover:bg-gray-100 px-3 py-1.5 flex items-center justify-between transition text-left">
+                                                                <div className="flex items-center gap-2">
+                                                                    <ChevronRight size={12} className={`text-gray-400 transition-transform shrink-0 ${isRollOpen?'rotate-90':''}`}/>
+                                                                    <span className="font-black text-gray-700 text-xs">{rollKey}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-3 text-[11px] font-semibold">
+                                                                    {rApproved>0 && <span className="text-emerald-600">{rApproved} approved</span>}
+                                                                    {rRepaired>0 && <span className="text-teal-600">{rRepaired} repaired</span>}
+                                                                    {rRework>0   && <span className="text-amber-600">{rRework} rework</span>}
+                                                                    {rRejected>0 && <span className="text-red-600">{rRejected} rejected</span>}
+                                                                    <span className="text-gray-400 font-normal">{rollRows.length}</span>
+                                                                </div>
+                                                            </button>
+                                                            {isRollOpen && (
+                                                                <table className="w-full text-xs border-t border-gray-100">
+                                                                    <tbody>
+                                                                        {rollRows.map((r, i) => (
+                                                                            <tr key={i} className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${r._type==='defect'?'bg-amber-50/40':''}`}>
+                                                                                <td className="px-3 py-1.5 font-mono text-gray-400 whitespace-nowrap">{fmtTime(r.time)}</td>
+                                                                                <td className="px-3 py-1.5 text-gray-600 capitalize">{r.part_name}</td>
+                                                                                <td className="px-3 py-1.5 text-gray-500">Sz {r.size}</td>
+                                                                                <td className="px-3 py-1.5 text-gray-500 font-mono">#{r.piece_sequence}</td>
+                                                                                <td className="px-3 py-1.5"><ActionBadge action={r.action}/></td>
+                                                                                <td className="px-3 py-1.5">
+                                                                                    {r.defect_code && (
+                                                                                        <div>
+                                                                                            <span className="font-mono text-gray-600">{r.defect_code}</span>
+                                                                                            {r.defect_description && <span className="block text-gray-400 text-[10px]">{r.defect_description}</span>}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </td>
+                                                                                {r._type==='defect' && (
+                                                                                    <td className="px-3 py-1.5">
+                                                                                        <span className={`font-semibold ${r.is_resolved?'text-emerald-500':'text-amber-500'}`}>
+                                                                                            {r.is_resolved ? '✓ Resolved' : '⏳ Pending'}
+                                                                                        </span>
+                                                                                    </td>
+                                                                                )}
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
                     ) : (
+                        /* ── Hourly mode: flat accordions ── */
                         <div className="space-y-2">
                             {grouped.map(([groupKey, groupRows]) => {
                                 const approved = groupRows.filter(r => r.action==='APPROVED').length;
@@ -150,10 +258,10 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
                                                     {groupRows.map((r, i) => (
                                                         <tr key={i} className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${r._type==='defect'?'bg-amber-50/40':''}`}>
                                                             <td className="px-3 py-1.5 font-mono text-gray-400 whitespace-nowrap">{fmtTime(r.time)}</td>
-                                                            <td className="px-3 py-1.5 font-semibold text-gray-800 whitespace-nowrap">{r.batch_code}</td>
+                                                            <td className="px-3 py-1.5 font-semibold text-gray-800 whitespace-nowrap">{r.batch_id}</td>
                                                             <td className="px-3 py-1.5 text-gray-600 capitalize">{r.part_name}</td>
                                                             <td className="px-3 py-1.5 text-gray-500">Sz {r.size}</td>
-                                                            {mode==='hourly' && <td className="px-3 py-1.5 text-gray-500 font-mono">Roll #{r.fabric_roll_id??'—'}</td>}
+                                                            <td className="px-3 py-1.5 text-gray-500 font-mono">Roll #{r.fabric_roll_id??'—'}</td>
                                                             <td className="px-3 py-1.5 text-gray-500 font-mono">#{r.piece_sequence}</td>
                                                             <td className="px-3 py-1.5"><ActionBadge action={r.action}/></td>
                                                             <td className="px-3 py-1.5">
@@ -710,6 +818,9 @@ const AssemblyProcessingPortal = () => {
                                         className="flex-1 bg-emerald-600 text-white rounded-[3rem] shadow-2xl shadow-emerald-200/50 flex flex-col items-center justify-center p-10 hover:bg-emerald-700 transition-all active:scale-95 disabled:grayscale disabled:opacity-50 disabled:cursor-not-allowed group"
                                     >
                                         <ShieldCheck size={70} className="mb-4 group-hover:scale-110 transition-transform" />
+                                        {garment.batch_id && (
+                                            <span className="font-mono font-black text-8xl opacity-80 mb-1 tracking-wider">{garment.batch_id}</span>
+                                        )}
                                         <span className="text-3xl font-black">APPROVE</span>
                                         <span className="text-[11px] font-bold opacity-60 mt-2 uppercase tracking-widest">Pass to Quality</span>
                                     </button>
@@ -982,9 +1093,12 @@ const AssemblyProcessingPortal = () => {
                                         <button
                                             onClick={() => handleAction(STATUS.APPROVED)}
                                             disabled={isProcessingAction || garment.components?.some(c => c.has_active_defect)}
-                                            className="flex-1 bg-emerald-600 text-white rounded-2xl py-3.5 font-black text-sm flex items-center justify-center gap-2 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                                            className="flex-1 bg-emerald-600 text-white rounded-2xl py-3 font-black text-sm flex flex-col items-center justify-center gap-0.5 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                                         >
-                                            <ShieldCheck size={16} /> APPROVE
+                                            <div className="flex items-center gap-2"><ShieldCheck size={16} /> APPROVE</div>
+                                            {selectedBatch?.batch_code && (
+                                                <span className="text-[10px] font-black opacity-75 tracking-widest font-mono">{selectedBatch.batch_code}</span>
+                                            )}
                                         </button>
                                         <button
                                             onClick={() => setShowDefectModal('REWORK')}
