@@ -820,6 +820,13 @@ const UniversalWorkstationDashboard = () => {
     const [showModal,   setShowModal]   = useState(false);
     const [workData,    setWorkData]    = useState(null);
     const [loadingWork, setLoadingWork] = useState(false);
+    const [apiError,    setApiError]    = useState(null);
+    const apiErrTimer = useRef(null);
+    const popApiError = (msg) => {
+        setApiError(msg);
+        clearTimeout(apiErrTimer.current);
+        apiErrTimer.current = setTimeout(() => setApiError(null), 6000);
+    };
     const [selectedParts, setSelectedParts] = useState(() => {
         try {
             const stored = localStorage.getItem(PART_FILTER_LS_KEY);
@@ -894,7 +901,9 @@ const UniversalWorkstationDashboard = () => {
 
     // ── Checker stats (auto-refresh) ──────────────────────────────────────────
     const loadStats = useCallback(async () => {
-        try { const res = await universalApi.getCheckerStats(); setStats(res.data); console.log("Fetched checker stats:", res.data); } catch { console.error("Failed to fetch checker stats."); }
+        try { const res = await universalApi.getCheckerStats(); setStats(res.data); }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        catch (err) { popApiError(err.response?.data?.error || err.message || 'Failed to load stats'); }
     }, []);
     useEffect(() => {
         loadStats();
@@ -905,8 +914,9 @@ const UniversalWorkstationDashboard = () => {
     // ── Work log fetch ────────────────────────────────────────────────────────
     const fetchWork = useCallback(async (date) => {
         setLoadingWork(true);
-        try { const res = await universalApi.getTodayWork(date); setWorkData(res.data);console.log("Fetched dwork log:", res.data); }
-        catch { alert('Failed to load work log.'); }
+        try { const res = await universalApi.getTodayWork(date); setWorkData(res.data); }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        catch (err) { setWorkData(null); popApiError(err.response?.data?.error || err.message || 'Failed to load work log'); }
         finally { setLoadingWork(false); }
     }, []);
     const handleOpenModal = () => {
@@ -1078,6 +1088,19 @@ const UniversalWorkstationDashboard = () => {
                         </button>
                     </div>
                 </div>
+
+                {/* API error banner */}
+                {apiError && (
+                    <div className="px-4 py-2 bg-rose-50 border-t border-rose-200 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-1 duration-200">
+                        <div className="flex items-center gap-2 text-xs font-bold text-rose-700">
+                            <AlertCircle size={13} className="shrink-0" />
+                            <span>{apiError}</span>
+                        </div>
+                        <button onClick={() => setApiError(null)} className="p-0.5 hover:bg-rose-100 rounded transition-colors shrink-0">
+                            <X size={13} className="text-rose-500" />
+                        </button>
+                    </div>
+                )}
 
                 {/* Row 2: summary bar */}
                 <div className="px-4 py-1.5 bg-gray-50 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3">
