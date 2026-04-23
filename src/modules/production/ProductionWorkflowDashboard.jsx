@@ -1194,7 +1194,7 @@ const ProductionWorkflowDashboard = () => {
         } catch { alert('Failed to create Purchase Order.'); }
     };
 
-    const canManage     = user && ['accountant', 'sales_manager', 'admin', 'factory_admin'].includes(user.role);
+    const canManage     = user && ['accountant', 'sales_manager','production_manager', 'admin', 'factory_admin'].includes(user.role);
     const canProduction = user && ['cutting_manager', 'production_manager', 'admin', 'factory_admin'].includes(user.role);
     const canInward     = user?.role === 'accountant';
 

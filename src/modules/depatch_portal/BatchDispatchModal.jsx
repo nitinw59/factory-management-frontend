@@ -487,7 +487,7 @@ const BatchDispatchModal = ({ batchId, batchCode, onClose }) => {
                         {batch?.is_dispatch_closed && <StatusBadge status="CLOSED" />}
                     </div>
                     <div className="flex items-center gap-2">
-                        {batch?.can_close_batch && !batch.is_dispatch_closed && !closeResult && (
+                        {batch && !batch.is_dispatch_closed && !closeResult && (
                             confirmClose ? (
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs text-red-600 font-bold">Confirm close?</span>
