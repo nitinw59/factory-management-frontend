@@ -76,6 +76,8 @@ function ProgressBar({ actual, target, pct }) {
 // ── Line card ──────────────────────────────────────────────────────────────────
 
 function LineCard({ line }) {
+    const [showEmp, setShowEmp] = React.useState(false);
+
     const present  = line.manpower_present  ?? 0;
     const assigned = line.manpower_assigned ?? 0;
     const mpRatio  = assigned > 0 ? present / assigned : 0;
@@ -89,6 +91,10 @@ function LineCard({ line }) {
     const output    = line.total_output  ?? 0;
     const defects   = line.total_defects ?? 0;
     const dhu       = output > 0 ? (defects / output) * 100 : null;
+
+    const batches      = line.batches ?? [];
+    const employeesAll = line.employees_assigned ?? [];
+    const absentees        = employeesAll.filter(e => !e.is_present);
 
     // Achieved = every part with a target is at ≥100%
     const targetedParts = parts.filter(p => p.target_quantity > 0);
@@ -115,27 +121,72 @@ function LineCard({ line }) {
             )}
 
             {/* Card header */}
-            <div className="flex items-start justify-between px-5 py-4 border-b border-gray-800">
-                <div className={`flex flex-col gap-1.5 min-w-0 ${isAchieved ? 'pr-20' : ''}`}>
-                    <span className="font-black text-white text-2xl uppercase tracking-wide leading-tight truncate">
-                        {line.line_name}
-                    </span>
-                    <span className={`self-start text-sm px-2.5 py-0.5 rounded-md font-bold tracking-wide
-                        ${line.target_type === 'PIECE'   ? 'bg-blue-950 text-blue-400'
-                        : line.target_type === 'GARMENT' ? 'bg-purple-950 text-purple-400'
-                        : 'bg-gray-800 text-gray-500'}`}>
-                        {line.target_type ?? '—'}
-                    </span>
+            <div className={`px-5 py-4 border-b border-gray-800 ${isAchieved ? 'pr-20' : ''}`}>
+                <div className="flex items-start justify-between mb-2">
+                    <div className="flex flex-col gap-1 min-w-0">
+                        <span className="font-black text-white text-2xl uppercase tracking-wide leading-tight truncate">
+                            {line.line_name}
+                        </span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-xs px-2 py-0.5 rounded font-bold tracking-wide
+                                ${line.target_type === 'PIECE'   ? 'bg-blue-950 text-blue-400'
+                                : line.target_type === 'GARMENT' ? 'bg-purple-950 text-purple-400'
+                                : 'bg-gray-800 text-gray-500'}`}>
+                                {line.target_type ?? '—'}
+                            </span>
+                            {line.processing_mode && (
+                                <span className="text-xs text-gray-600 font-mono">{line.processing_mode}</span>
+                            )}
+                        </div>
+                    </div>
+                    {/* Manpower chip — clickable to toggle employee list */}
+                    <button
+                        onClick={() => setShowEmp(v => !v)}
+                        className="flex items-center gap-1.5 shrink-0 hover:opacity-80 transition-opacity"
+                    >
+                        <LuUsers size={16} style={{ color: mpClr }} />
+                        <span className="font-black text-2xl tabular-nums" style={{ color: mpClr }}>
+                            {present}
+                        </span>
+                        <span className="text-gray-600 text-base">/{assigned}</span>
+                    </button>
                 </div>
-                {/* Manpower chip */}
-                <div className="flex items-center gap-1.5 shrink-0">
-                    <LuUsers size={16} style={{ color: mpClr }} />
-                    <span className="font-black text-2xl tabular-nums" style={{ color: mpClr }}>
-                        {present}
-                    </span>
-                    <span className="text-gray-600 text-base">/{assigned}</span>
-                </div>
+
+                {/* Batch codes */}
+                {batches.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                        {batches.map(b => (
+                            <span key={b.batch_id}
+                                className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700">
+                                {b.batch_code}
+                            </span>
+                        ))}
+                    </div>
+                )}
             </div>
+
+            {/* Employee list (expandable) */}
+            {showEmp && employeesAll.length > 0 && (
+                <div className="px-4 py-3 border-b border-gray-800 bg-gray-950">
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 max-h-36 overflow-y-auto">
+                        {employeesAll.map(e => (
+                            <div key={e.emp_id} className="flex items-center justify-between gap-1">
+                                <span className={`text-xs truncate ${e.is_present ? 'text-gray-300' : 'text-red-500 line-through'}`}>
+                                    {e.name}
+                                </span>
+                                {e.is_present && e.punch_in && (
+                                    <span className="text-[10px] text-gray-600 font-mono shrink-0">{e.punch_in}</span>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                    {absentees.length > 0 && (
+                        <p className="text-[10px] text-red-500 font-bold mt-1.5 uppercase tracking-widest">
+                            {absentees.length} absent
+                        </p>
+                    )}
+                </div>
+            )}
 
             {/* Target progress rows */}
             <div className="flex-1 px-5 py-4 space-y-5">
@@ -165,26 +216,18 @@ function LineCard({ line }) {
             {/* Footer stats */}
             <div className="px-5 py-4 border-t border-gray-800 grid grid-cols-3 gap-2 text-center">
                 <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold mb-0.5">
-                        Output
-                    </p>
-                    <p className="text-xl font-black text-white tabular-nums">
-                        {output.toLocaleString()}
-                    </p>
+                    <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold mb-0.5">Output</p>
+                    <p className="text-xl font-black text-white tabular-nums">{output.toLocaleString()}</p>
                 </div>
                 <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold mb-0.5">
-                        Defects
-                    </p>
+                    <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold mb-0.5">Defects</p>
                     <p className="text-xl font-black tabular-nums"
                        style={{ color: defects > 0 ? '#f87171' : '#4b5563' }}>
                         {defects.toLocaleString()}
                     </p>
                 </div>
                 <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold mb-0.5">
-                        DHU
-                    </p>
+                    <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold mb-0.5">DHU</p>
                     <p className="text-xl font-black tabular-nums"
                        style={{ color: dhu != null ? dhuColor(dhu) : '#4b5563' }}>
                         {dhu != null ? fmt2(dhu) : '—'}
@@ -253,11 +296,41 @@ export default function ScoreboardPage() {
             const merged = formLines.map(line => {
                 const id  = String(line.line_id);
                 const out = outputByLine.get(id) ?? { total_output: 0, total_defects: 0 };
+
+                // Use summaryRes parts if available; otherwise build from formRes batch targets
+                let parts = summaryByLine.get(id) ?? [];
+                if (parts.length === 0) {
+                    const batches = line.batches ?? [];
+                    if (line.target_type === 'GARMENT') {
+                        const totalTarget = batches.reduce((s, b) =>
+                            s + (b.garment_target?.existing_quantity ?? 0), 0);
+                        if (totalTarget > 0) {
+                            parts = [{ part_id: 'garment', part_name: 'Garments', part_type: null,
+                                       target_quantity: totalTarget, actual: 0, achievement_pct: null }];
+                        }
+                    } else {
+                        const partMap = {};
+                        for (const batch of batches) {
+                            for (const pp of batch.piece_parts ?? []) {
+                                if (!partMap[pp.part_id]) {
+                                    partMap[pp.part_id] = { part_id: pp.part_id, part_name: pp.part_name,
+                                        part_type: pp.part_type, target_quantity: 0, actual: 0, achievement_pct: null };
+                                }
+                                partMap[pp.part_id].target_quantity += pp.existing_quantity ?? 0;
+                            }
+                        }
+                        parts = Object.values(partMap);
+                    }
+                }
+
                 return {
                     ...line,
-                    parts:         summaryByLine.get(id) ?? [],
-                    total_output:  out.total_output,
-                    total_defects: out.total_defects,
+                    parts,
+                    total_output:       out.total_output,
+                    total_defects:      out.total_defects,
+                    batches:            line.batches ?? [],
+                    employees_assigned: line.employees_assigned ?? [],
+                    employees_present:  line.employees_present  ?? [],
                 };
             });
 

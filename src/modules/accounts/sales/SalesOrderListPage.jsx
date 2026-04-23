@@ -9,6 +9,7 @@ import Modal from '../../../shared/Modal';
 import FabricIntakeForm from '../purchase/FabricIntakeForm'; 
 import EditFabricRollModal from '../purchase/EditFabricRollModal';
 
+
 // --- HELPER COMPONENT: Received Rolls List ---
 const ReceivedRollsList = ({ purchaseOrderId }) => {
     const [rolls, setRolls] = useState([]);
@@ -410,7 +411,8 @@ const SalesOrderListPage = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const res = await productionManagerApi.getWorkflowData();
+            const res = await accountingApi.getAllSalesOrders();
+            console.log("Fetched workflow data:", res.data);
             // Sort by order_date descending by default
             const sortedData = (res.data || []).sort((a, b) => new Date(b.order_date) - new Date(a.order_date));
             setWorkflowData(sortedData);
@@ -441,8 +443,8 @@ const SalesOrderListPage = () => {
         }
     }, [searchTerm, workflowData]);
 
-    const toggleSO = (id) => {
-        setExpandedSO(prev => ({ ...prev, [id]: !prev[id] }));
+    const toggleSO = (key) => {
+        setExpandedSO(prev => ({ ...prev, [key]: !prev[key] }));
     };
     
     const togglePO = (id) => {
@@ -494,15 +496,15 @@ const SalesOrderListPage = () => {
             </header>
 
             <div className="space-y-4">
-                {filteredData.map(so => (
-                    <div key={so.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden transition-shadow hover:shadow-md">
+                {filteredData.map((so, idx) => (
+                    <div key={so.sales_order_id ?? `unlinked-${idx}`} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden transition-shadow hover:shadow-md">
                         {/* Sales Order Header */}
-                        <div 
-                            onClick={() => toggleSO(so.id)}
-                            className={`flex items-center justify-between p-4 cursor-pointer transition-colors select-none ${expandedSO[so.id] ? 'bg-slate-50 border-b border-slate-100' : 'hover:bg-slate-50'}`}
+                        <div
+                            onClick={() => toggleSO(so.sales_order_id ?? `unlinked-${idx}`)}
+                            className={`flex items-center justify-between p-4 cursor-pointer transition-colors select-none ${expandedSO[so.sales_order_id ?? `unlinked-${idx}`] ? 'bg-slate-50 border-b border-slate-100' : 'hover:bg-slate-50'}`}
                         >
                             <div className="flex items-center gap-4">
-                                <button className={`p-1 rounded hover:bg-slate-200 text-slate-500 transition-transform duration-300 ${expandedSO[so.id] ? 'rotate-180' : ''}`}>
+                                <button className={`p-1 rounded hover:bg-slate-200 text-slate-500 transition-transform duration-300 ${expandedSO[so.sales_order_id] ? 'rotate-180' : ''}`}>
                                     <ChevronDown size={20}/>
                                 </button>
                                 <div>
@@ -530,11 +532,11 @@ const SalesOrderListPage = () => {
                         </div>
 
                         {/* Expanded Content */}
-                        {expandedSO[so.id] && (
+                        {expandedSO[so.sales_order_id] && (
                             <div className="bg-white p-4 space-y-4 animate-in slide-in-from-top-1 fade-in duration-200">
-                                
+
                                 {/* 1. Sales Order Details Summary */}
-                                <SalesOrderExpandedDetails orderId={so.id} />
+                                <SalesOrderExpandedDetails orderId={so.sales_order_id} />
 
                                 {/* 2. Linked Purchase Orders */}
                                 <div>

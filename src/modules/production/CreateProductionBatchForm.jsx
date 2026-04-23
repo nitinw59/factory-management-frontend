@@ -94,7 +94,8 @@ const CreateProductionBatchForm = () => {
     const location = useLocation(); 
     const { batchId } = useParams();
     const [searchParams] = useSearchParams();
-    const prefillPoId = searchParams.get('poId');
+    const prefillPoId       = searchParams.get('poId');
+    const prefillSupplierId = searchParams.get('supplierId');
     const isEditMode = Boolean(batchId);
 
     const isInitPortal = location.pathname.includes('/initialization-portal');
@@ -265,6 +266,13 @@ const CreateProductionBatchForm = () => {
     }, [purchaseOrderId, options.purchaseOrders, options.products, isEditMode, SIZES]);
 
     // --- 3. Shell Filter Logic ---
+    const selectedPO = useMemo(() =>
+        options.purchaseOrders.find(po => String(po.id) === String(purchaseOrderId)),
+    [options.purchaseOrders, purchaseOrderId]);
+
+    const supplierName = selectedPO?.supplier_name || null;
+    const supplierId   = selectedPO?.supplier_id   || prefillSupplierId || null;
+
     const filteredShellRolls = useMemo(() => {
          const selectedPO = options.purchaseOrders.find(po => String(po.id) === String(purchaseOrderId));
          const poIdentifier = selectedPO ? (selectedPO.po_code || selectedPO.po_number) : null;
@@ -467,6 +475,13 @@ const CreateProductionBatchForm = () => {
                                         </select>
                                     </div>
                                 </div>
+                                {(supplierName || supplierId) && (
+                                    <div className="mt-3 flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-md">
+                                        <User size={14} className="text-amber-600 shrink-0" />
+                                        <span className="text-xs font-semibold text-amber-700">Supplier:</span>
+                                        <span className="text-xs text-amber-800 font-medium">{supplierName || `ID: ${supplierId}`}</span>
+                                    </div>
+                                )}
                             </div>
                             <hr className="border-gray-200"/>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

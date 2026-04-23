@@ -253,9 +253,10 @@ function App() {
       <Route path="/accounts" element={<SalesAccessProtectedRoute><AccountsLayout /></SalesAccessProtectedRoute>}>
             {/* Redirect /accounts to the orders list */}
             <Route index element={<Navigate to="sales/orders" />} />
-            
+            <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
             {/* Sales Order Routes */}
             <Route path="sales/new" element={<CreateSalesOrder />} />
+            <Route path="sales/:orderId/edit" element={<CreateSalesOrder />} />
             <Route path="sales/orders" element={<SalesOrderListPage />} />
         </Route>
 

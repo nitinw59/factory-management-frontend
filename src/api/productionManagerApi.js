@@ -64,6 +64,8 @@ export const productionManagerApi = {
 
 // WORKFLOW FUNCTIONS
   getWorkflowData: () => api.get('/production-manager/production-workflow-data'),
+  getBatchDrilldown: (batchId, flowId) => api.get(`/production-manager/batch/${batchId}/drilldown`, { params: flowId != null ? { flowId } : {} }),
+  getBatchDrilldownFull: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/drilldown`),
 
   getCapacityDashboard: (date) => api.get(`/production-manager/capacity-dashboard?date=${date}`),
 

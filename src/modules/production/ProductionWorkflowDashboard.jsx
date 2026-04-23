@@ -1,668 +1,533 @@
+// src/modules/production/ProductionWorkflowDashboard.jsx
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-    Search, Filter, Plus, Box, FileText, ShoppingCart, 
-    Scissors, ChevronRight, ChevronDown, Clock, AlertCircle, 
-    Loader2, X, Truck, Layers, Package, Printer, LayoutList, ChevronUp, Edit3, Trash2, DollarSign, Palette
+import {
+    Search, Plus, Box, FileText, ShoppingCart,
+    Scissors, ChevronDown, Loader2, X,
+    LayoutList, ChevronUp, DollarSign, Palette,
+    Package, Truck, Layers, Trash2, Printer, Warehouse
 } from 'lucide-react';
 import { productionManagerApi } from '../../api/productionManagerApi';
-import { accountingApi } from '../../api/accountingApi'; 
-import { storeManagerApi } from '../../api/storeManagerApi'; 
-
+import { accountingApi } from '../../api/accountingApi';
+import { storeManagerApi } from '../../api/storeManagerApi';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
+import FabricIntakeForm from '../accounts/purchase/FabricIntakeForm';
+import BatchDrilldownModal from './BatchDrilldownModal';
+import BatchDispatchModal from '../depatch_portal/BatchDispatchModal';
 
-import BatchReceiptsModal from './BatchReceiptsModal';
-// ==========================================
-// STATEFUL MOCKS FOR CANVAS PREVIEW 
-// ==========================================
+// ─── SHARED UI ────────────────────────────────────────────────────────────────
 
-
-
-
-
-// const productionManagerApi = {
-//     getWorkflowData: async () => {
-//         await delay(600);
-//         // Deep copy to trigger standard React re-renders for the preview
-//         return { data: JSON.parse(JSON.stringify(mockWorkflowData)) };
-//     },
-//     getFabricTypes: async () => ({ data: [{id: 1, name: 'Cotton'}, {id: 2, name: 'Fleece'}, {id: 3, name: 'Denim'}] }),
-//     getFabricColors: async () => ({ data: [{id: 1, color_number: 'BLK', name: 'Black'}, {id: 2, color_number: 'NVY', name: 'Navy Blue'}] }),
-//     deleteBatch: async (id) => { await delay(400); return { success: true }; }
-// };
-
-// const accountingApi = {
-//     getSalesOrderDetails: async (id) => {
-//         await delay(400);
-//         return {
-//             data: {
-//                 order_number: `SO-2026-00${id}`, customer_name: 'OutdoorGear', buyer_po_number: 'PO-OUT-001',
-//                 status: 'IN_PRODUCTION', order_date: '2026-03-01', total_amount: '45,000.00', total_quantity: 800,
-//                 products: [{ product_name: 'Winter Fleece Zip', fabric_type: 'Fleece', size_breakdown: { S: 1, M: 2, L: 2, XL: 1 }, colors: [{ color_name: 'Black', color_number: 'BLK', quantity: 400, unit_price: '50.00' }] }]
-//             }
-//         };
-//     },
-//     getPurchaseOrderDetails: async (id) => {
-//         await delay(400);
-//         return {
-//             data: {
-//                 po_code: `PO-${id}`, supplier_name: 'Premium Fabrics Ltd', supplier_email: 'sales@premiumfabrics.com',
-//                 supplier_address: '123 Textile Way, Industrial Dist.', status: 'RECEIVED', expected_delivery_date: '2026-03-10',
-//                 items: [{ fabric_type: 'Fleece', fabric_color: 'Black', color_number: 'BLK', quantity: 1000, uom: 'meter', unit_price: '15.00', total_price: '15,000.00' }]
-//             }
-//         };
-//     },
-//     createPurchaseOrder: async (formData) => { 
-//         await delay(500); 
-//         // Intercept creation in mock data to render it instantly on the dashboard
-//         const soIndex = mockWorkflowData.findIndex(so => so.id === formData.sales_order_id);
-//         if (soIndex > -1) {
-//             const newTotalQty = formData.items.reduce((sum, item) => sum + item.quantity, 0);
-//             mockWorkflowData[soIndex].purchase_orders.push({
-//                 id: Math.floor(Math.random() * 10000),
-//                 po_code: `PO-NEW-${Math.floor(Math.random() * 1000)}`,
-//                 supplier_name: 'Supplier Partner',
-//                 expected_delivery_date: formData.expected_delivery_date,
-//                 status: 'DRAFT',
-//                 total_ordered_qty: newTotalQty,
-//                 total_received_qty: 0,
-//                 production_batches: []
-//             });
-//         }
-//         return { success: true }; 
-//     },
-//     deletePurchaseOrder: async (id) => { await delay(400); return { success: true }; }
-// };
-
-// const storeManagerApi = {
-//     getFabricIntakeFormData: async () => ({ data: { suppliers: [{id: 1, name: 'Premium Fabrics Ltd'}, {id: 2, name: 'Global Textiles'}] } }),
-//     getFabricRollsByPO: async (id) => ({ data: [{ id: '4001', fabric_type: 'Fleece - Black', meter: 500, status: 'IN_STOCK' }, { id: '4002', fabric_type: 'Fleece - Black', meter: 500, status: 'ASSIGNED_TO_PRODUCTION' }] })
-// };
-
-const Modal = ({ title, onClose, size = "max-w-2xl", children }) => (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm print:hidden">
-        <div className={`bg-white rounded-2xl shadow-2xl w-full ${size} max-h-[90vh] flex flex-col animate-in fade-in zoom-in duration-200`}>
-            <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50">
+const Modal = ({ title, onClose, size = 'max-w-2xl', children }) => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+        <div className={`bg-white rounded-2xl shadow-2xl w-full ${size} max-h-[90vh] flex flex-col`}>
+            <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50 rounded-t-2xl">
                 <h3 className="font-bold text-lg text-slate-800">{title}</h3>
                 <button onClick={onClose} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors">
                     <X size={20} />
                 </button>
             </div>
-            <div className="overflow-y-auto p-6">
-                {children}
-            </div>
+            <div className="overflow-y-auto p-6">{children}</div>
         </div>
     </div>
 );
 
+const Spinner = () => (
+    <div className="flex justify-center p-8">
+        <Loader2 className="animate-spin h-8 w-8 text-blue-600" />
+    </div>
+);
 
-const Spinner = () => <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-600" /></div>;
-
-// --- CONSTANTS & STYLES ---
-const NODE_WIDTH = 260;
-const NODE_HEIGHT = 300; 
-const GAP_X = 80;
-const GAP_Y = 20;
-
-// --- STATUS BADGE COMPONENT ---
 const StatusBadge = ({ status }) => {
     const colors = {
-        'CONFIRMED': 'bg-blue-100 text-blue-700 border-blue-200',
-        'RECEIVED': 'bg-green-100 text-green-700 border-green-200',
-        'COMPLETED': 'bg-emerald-100 text-emerald-700 border-emerald-200',
-        'IN_PROGRESS': 'bg-indigo-100 text-indigo-700 border-indigo-200',
-        'ISSUED': 'bg-amber-100 text-amber-700 border-amber-200',
-        'DRAFT': 'bg-gray-100 text-gray-600 border-gray-200',
-        'PENDING': 'bg-yellow-50 text-yellow-700 border-yellow-200',
-        'PREPARED': 'bg-orange-100 text-orange-700 border-orange-200',
-        'SHIPPED': 'bg-purple-100 text-purple-700 border-purple-200',
-        'DISPATCHED': 'bg-purple-100 text-purple-700 border-purple-200'
+        CONFIRMED:   'bg-blue-100 text-blue-700 border-blue-200',
+        RECEIVED:    'bg-green-100 text-green-700 border-green-200',
+        COMPLETED:   'bg-emerald-100 text-emerald-700 border-emerald-200',
+        IN_PROGRESS: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+        ISSUED:      'bg-amber-100 text-amber-700 border-amber-200',
+        DRAFT:       'bg-gray-100 text-gray-600 border-gray-200',
+        PENDING:     'bg-yellow-50 text-yellow-700 border-yellow-200',
+        PREPARED:    'bg-orange-100 text-orange-700 border-orange-200',
+        SHIPPED:     'bg-purple-100 text-purple-700 border-purple-200',
+        DISPATCHED:  'bg-purple-100 text-purple-700 border-purple-200',
+        NOT_STARTED: 'bg-gray-100 text-gray-400 border-gray-200',
+        READY:       'bg-teal-100 text-teal-700 border-teal-200',
     };
     return (
-        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${colors[status] || 'bg-gray-100 text-gray-500'}`}>
-            {status ? status.replace('_', ' ') : 'N/A'}
+        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${colors[status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+            {status ? status.replace(/_/g, ' ') : 'N/A'}
         </span>
     );
 };
 
-// --- CONNECTORS ---
 const Connector = ({ start, end }) => {
-    const p1 = { x: start.x, y: start.y };
-    const p2 = { x: end.x, y: end.y };
-    const dist = Math.abs(p2.x - p1.x);
-    const controlPointOffset = dist * 0.5;
-    const c1 = { x: p1.x + controlPointOffset, y: p1.y };
-    const c2 = { x: p2.x - controlPointOffset, y: p2.y };
-    const path = `M ${p1.x} ${p1.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${p2.x} ${p2.y}`;
-    return <path d={path} fill="none" stroke="#cbd5e1" strokeWidth="2" />;
+    const cp = Math.abs(end.x - start.x) * 0.5;
+    const d  = `M ${start.x} ${start.y} C ${start.x + cp} ${start.y}, ${end.x - cp} ${end.y}, ${end.x} ${end.y}`;
+    return <path d={d} fill="none" stroke="#cbd5e1" strokeWidth="1.5" />;
 };
 
-// --- NODE COMPONENTS ---
-const SalesOrderNode = ({ data, x, y, onDetails, onAddPO }) => (
-    <div 
-        className="absolute bg-white rounded-xl shadow-sm border border-l-4 border-l-blue-500 border-slate-200 p-3 hover:shadow-md transition-all cursor-pointer group"
-        style={{ width: NODE_WIDTH, height: NODE_HEIGHT, left: x, top: y }}
-        onClick={(e) => { e.stopPropagation(); onDetails(data.id); }} 
+// ─── GRAPH CONSTANTS ──────────────────────────────────────────────────────────
+
+const NODE_W_SO       = 155;
+const NODE_W_PO       = 145;
+const NODE_W_BATCH    = 215;
+const NODE_W_DISPATCH_WIDE = 295;
+const NODE_H_SO            = 160;
+const NODE_H_PO            = 120;
+const NODE_H_BATCH         = 160;
+const NODE_H_DISPATCH      = 170;
+const GAP_X           = 48;
+const GAP_Y           = 10;
+const PO_GAP_Y        = 18;
+const MARGIN          = 20;
+
+// ─── STAGE CHIP ───────────────────────────────────────────────────────────────
+
+const STAGE_STYLE = {
+    COMPLETED:   'bg-emerald-50 text-emerald-700 border-emerald-200',
+    IN_PROGRESS: 'bg-indigo-50  text-indigo-700  border-indigo-200',
+    NOT_STARTED: 'bg-gray-50    text-gray-400    border-gray-200',
+};
+
+const StagePipelineChip = ({ stage, onClick }) => {
+    const style = STAGE_STYLE[stage.status] || STAGE_STYLE.NOT_STARTED;
+    const short = (stage.line_type_name || '???').substring(0, 3).toUpperCase();
+    const rs    = stage.roll_summary;
+    const tip   = `${stage.line_type_name} — ${stage.status}${rs ? ` (${rs.completed}/${rs.total_on_line} rolls)` : ''}`;
+    return (
+        <button
+            onClick={(e) => { e.stopPropagation(); onClick(stage); }}
+            title={tip}
+            className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[9px] font-bold hover:opacity-75 transition-opacity ${style}`}
+        >
+            {stage.status === 'IN_PROGRESS' && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse shrink-0" />}
+            {stage.status === 'COMPLETED'   && <span className="leading-none">✓</span>}
+            {short}
+        </button>
+    );
+};
+
+// ─── NODE COMPONENTS ──────────────────────────────────────────────────────────
+
+const SalesOrderNode = ({ data, x, y, poCount, onAddPO, onEditSO }) => (
+    <div
+        className="absolute bg-white rounded-lg shadow-sm border border-l-4 border-l-blue-500 border-slate-200 p-2.5 flex flex-col"
+        style={{ width: NODE_W_SO, height: NODE_H_SO, left: x, top: y }}
     >
-        <div className="flex justify-between items-start mb-2">
-            <div className="flex items-center gap-2">
-                <div className="p-1 bg-blue-50 rounded-lg">
-                    <FileText className="text-blue-600" size={14} />
-                </div>
-                <span className="font-bold text-slate-700 text-sm">{data.order_number}</span>
-            </div>
-            <StatusBadge status={data.status} />
+        <div className="flex items-center gap-1.5 mb-1.5">
+            <FileText size={11} className="text-blue-500 shrink-0" />
+            <span className="font-bold text-slate-700 text-xs font-mono truncate">{data.order_number}</span>
         </div>
-        <p className="text-xs text-slate-800 font-semibold truncate" title={data.customer_name}>{data.customer_name}</p>
-        <p className="text-[10px] text-slate-400 mt-1">Date: {new Date(data.order_date).toLocaleDateString()}</p>
-        
-        <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button 
-                onClick={(e) => { e.stopPropagation(); onAddPO(data.id); }} 
-                className="flex items-center gap-1 text-[10px] bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 font-medium shadow-sm transition-colors"
+        <StatusBadge status={data.so_status} />
+        <p className="text-[10px] text-slate-700 font-semibold truncate mt-1.5" title={data.customer_name}>{data.customer_name}</p>
+        {data.buyer_po_number && (
+            <p className="text-[9px] text-slate-400 mt-0.5 truncate">PO: {data.buyer_po_number}</p>
+        )}
+        <p className="text-[9px] text-slate-400 mt-auto mb-1.5 pt-1.5 border-t border-slate-100">
+            {poCount} purchase order{poCount !== 1 ? 's' : ''}
+        </p>
+        {onAddPO && (
+            <button
+                onClick={(e) => { e.stopPropagation(); onAddPO(); }}
+                className="flex items-center justify-center gap-1 w-full py-1 px-2 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors mb-1"
             >
                 <Plus size={10} /> Add PO
             </button>
-        </div>
+        )}
+        {onEditSO && (
+            <button
+                onClick={(e) => { e.stopPropagation(); onEditSO(data.sales_order_id); }}
+                className="flex items-center justify-center gap-1 w-full py-1 px-2 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
+            >
+                <FileText size={10} /> Edit SO
+            </button>
+        )}
     </div>
 );
 
-const PurchaseOrderNode = ({ data, x, y, onDetails, onCreateBatch, onDeletePO }) => {
-    const { user } = useAuth();
-    console.log('Rendering PurchaseOrderNode - User Role:', user?.role, 'PO Data:', data);
-    
-    const ordered = parseFloat(data.total_ordered_qty || 0);
-    const received = parseFloat(data.total_received_qty || 0);
-    const percent = ordered > 0 ? Math.min(100, Math.round((received / ordered) * 100)) : 0;
-    
-    const canPlanBatch = user && ['factory_admin', 'cutting_manager', 'production_manager'].includes(user.role);
-    const canDeletePO = user && ['production_manager', 'factory_admin'].includes(user.role);
-    
-    let progressColor = 'bg-amber-500';
-    if (percent >= 100) progressColor = 'bg-green-500';
-    else if (percent > 0) progressColor = 'bg-blue-500';
-
-    return (
-        <div 
-            className="absolute bg-white rounded-xl shadow-sm border border-l-4 border-l-amber-500 border-slate-200 p-3 hover:shadow-md transition-all cursor-pointer group"
-            style={{ width: NODE_WIDTH, height: NODE_HEIGHT, left: x, top: y }}
-            onClick={(e) => { e.stopPropagation(); onDetails(data.id); }} 
+const PONode = ({ data, x, y, onCreateBatch, onViewDetails, onInward }) => (
+    <div
+        className="absolute bg-white rounded-lg shadow-sm border border-l-4 border-l-amber-500 border-slate-200 p-2.5 flex flex-col"
+        style={{ width: NODE_W_PO, height: NODE_H_PO, left: x, top: y }}
+    >
+        <div
+            className="flex items-center gap-1.5 mb-1.5 cursor-pointer hover:opacity-70"
+            onClick={(e) => { e.stopPropagation(); onViewDetails && onViewDetails(data.po_id); }}
+            title="View PO details"
         >
-            <div className="flex justify-between items-start mb-2">
-                <div className="flex items-center gap-2">
-                    <div className="p-1 bg-amber-50 rounded-lg">
-                        <ShoppingCart className="text-amber-600" size={14} />
-                    </div>
-                    <span className="font-bold text-slate-700 text-sm">{data.po_code || data.po_number}</span>
-                </div>
-                <StatusBadge status={data.status} />
-            </div>
-            <p className="text-xs text-slate-800 font-medium truncate">{data.supplier_name}</p>
-            <p className="text-[10px] text-slate-500 mt-0.5 truncate">Delivery: {data.expected_delivery_date ? new Date(data.expected_delivery_date).toLocaleDateString() : 'N/A'}</p>
-
-            <div className="mt-3">
-                <div className="flex justify-between text-[10px] text-slate-500 mb-1">
-                    <span>Recv: {received} / {ordered}</span>
-                    <span className="font-bold">{percent}%</span>
-                </div>
-                <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                    <div className={`h-full rounded-full transition-all duration-500 ${progressColor}`} style={{ width: `${percent}%` }}></div>
-                </div>
-            </div>
-
-            <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
-                {canDeletePO && (
-                    <button 
-                        onClick={(e) => { 
-                            e.stopPropagation(); 
-                            if(window.confirm(`Delete Purchase Order ${data.po_code}?`)) {
-                                onDeletePO(data.id);
-                            }
-                        }}
-                        className="p-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors"
-                        title="Delete Purchase Order"
-                    >
-                        <Trash2 size={12} />
-                    </button>
-                )}
-                {canPlanBatch && (
-                    <button 
-                        onClick={(e) => { e.stopPropagation(); onCreateBatch(data.id); }}
-                        className="flex items-center gap-1 text-[10px] bg-amber-600 text-white px-2 py-1 rounded hover:bg-amber-700 font-medium shadow-sm transition-colors"
-                    >
-                        <Plus size={10} /> Plan Batch
-                    </button>
-                )}
-            </div>
+            <Package size={11} className="text-amber-500 shrink-0" />
+            <span className="font-mono font-bold text-slate-800 text-xs truncate">{data.po_code}</span>
         </div>
-    );
-};
+        <StatusBadge status={data.po_status} />
+        <p className="text-[10px] text-slate-500 truncate mt-1.5 mb-auto" title={data.supplier_name}>{data.supplier_name}</p>
+        {data.expected_delivery_date && (
+            <p className="text-[9px] text-slate-400 mt-0.5">Del: {new Date(data.expected_delivery_date).toLocaleDateString()}</p>
+        )}
+        {onInward && (
+            <button
+                onClick={(e) => { e.stopPropagation(); onInward(data); }}
+                className="mt-1.5 flex items-center justify-center gap-1 w-full py-1 px-2 rounded text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-colors"
+            >
+                <Warehouse size={10} /> Inward
+            </button>
+        )}
+        {onCreateBatch && (
+            <button
+                onClick={(e) => { e.stopPropagation(); onCreateBatch(data); }}
+                className="mt-1.5 flex items-center justify-center gap-1 w-full py-1 px-2 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+            >
+                <Plus size={10} /> Create Batch
+            </button>
+        )}
+    </div>
+);
 
-const BatchNode = ({ data, x, y, onViewDetails, onEditBatch, onDeleteBatch }) => {
-    const { user } = useAuth();
-    console.log('Rendering BatchNode - User Role:', user?.role, 'Batch Data:', data);
-    const canManage = user && [ 'factory_admin'].includes(user.role);
-    const canManageBatch = user && ['production_manager', 'factory_admin'].includes(user.role);
-
-    const trimStatus = data.trim_status || 'PENDING';
-    const wip = data.wip || { cut_pct: 0, sew_pct: 0, assemble_pct: 0 };
-    
-    // BOTTLENECK DETECTOR: If production is running but trims are stuck
-    const hasBottleneck = data.overall_status === 'IN_PROGRESS' && trimStatus === 'PENDING';
-
+const BatchNode = ({ data, x, y, onStageClick, onDrilldown }) => {
+    const done  = data.stage_progress?.completed || 0;
+    const total = data.stage_progress?.total     || 0;
+    const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
     return (
-        <div 
-            className={`absolute bg-white rounded-xl shadow-sm border-l-4 ${hasBottleneck ? 'border-l-red-500 border-red-200 shadow-red-100' : 'border-l-emerald-500 border-slate-200'} p-3 hover:shadow-md transition-all cursor-default flex flex-col`}
-            style={{ width: NODE_WIDTH, height: NODE_HEIGHT, left: x, top: y }}
+        <div
+            className="absolute bg-white rounded-lg shadow-sm border border-l-4 border-l-emerald-500 border-slate-200 p-2.5 flex flex-col"
+            style={{ width: NODE_W_BATCH, height: NODE_H_BATCH, left: x, top: y }}
         >
-            <div className="flex justify-between items-start mb-2">
-                <div className="flex items-center gap-2">
-                    <div className={`p-1.5 rounded-lg ${hasBottleneck ? 'bg-red-50' : 'bg-emerald-50'}`}>
-                        {hasBottleneck ? <AlertCircle className="text-red-600 animate-pulse" size={14}/> : <Scissors className="text-emerald-600" size={14} />}
-                    </div>
-                    <span className="font-bold text-slate-800 text-sm">{data.batch_code}</span>
-                </div>
-                <div className="flex flex-col items-end">
-                    <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Trims</span>
-                    <StatusBadge status={trimStatus} />
-                </div>
-            </div>
-            
-            <div className="text-xs font-bold text-slate-700 truncate bg-slate-50 p-1.5 rounded mb-2" title={data.product_name}>
-                {data.product_name}
-            </div>
-            
-            {/* Real-Time WIP Tracking Bars */}
-            <div className="flex-1 bg-white border border-slate-100 rounded-lg p-2 space-y-2.5">
-                <div>
-                    <div className="flex justify-between text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                        <span className="flex items-center"><Scissors size={10} className="mr-1 text-blue-500"/> Cut</span>
-                        <span className={wip.cut_pct >= 100 ? 'text-blue-600' : ''}>{wip.cut_pct}%</span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                        <div className="bg-blue-500 h-full rounded-full transition-all duration-500" style={{ width: `${wip.cut_pct}%` }}></div>
-                    </div>
-                </div>
-                <div>
-                    <div className="flex justify-between text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                        <span className="flex items-center"><Layers size={10} className="mr-1 text-amber-500"/> Sew</span>
-                        <span className={wip.sew_pct >= 100 ? 'text-amber-600' : ''}>{wip.sew_pct}%</span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                        <div className="bg-amber-500 h-full rounded-full transition-all duration-500" style={{ width: `${wip.sew_pct}%` }}></div>
-                    </div>
-                </div>
-                <div>
-                    <div className="flex justify-between text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                        <span className="flex items-center"><Package size={10} className="mr-1 text-emerald-500"/> Finish</span>
-                        <span className={wip.assemble_pct >= 100 ? 'text-emerald-600' : ''}>{wip.assemble_pct}%</span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                        <div className="bg-emerald-500 h-full rounded-full transition-all duration-500" style={{ width: `${wip.assemble_pct}%` }}></div>
-                    </div>
-                </div>
-            </div>
-
-            <div className="mt-3 flex justify-between items-center pt-2 border-t border-slate-100">
-                <StatusBadge status={data.overall_status || 'PENDING'} />
-                <div className="flex gap-1.5">
-                    {console.log('Batch Node Render - canManage:', canManage, 'canManageBatch:', canManageBatch)}
-                    {canManageBatch && (
-                        <button 
-                            onClick={(e) => { 
-                                e.stopPropagation(); 
-                                if(window.confirm(`Are you sure you want to delete Batch ${data.batch_code}?`)) onDeleteBatch(data.id);
-                            }}
-                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                            title="Delete Batch"
-                        >
-                            <Trash2 size={12} />
-                        </button>
-                    )}
-                    
-                    {canManageBatch && (
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); onEditBatch(data.id); }}
-                            className="text-[10px] bg-slate-50 text-slate-600 hover:text-amber-600 hover:bg-amber-50 px-2 py-1 rounded border border-slate-200 flex items-center font-medium transition-colors"
-                            title="Edit Batch"
-                        >
-                            <Edit3 size={10} className="mr-1" /> Edit
-                        </button>
-                    )}
-                    
-                    <button 
-                        onClick={(e) => { e.stopPropagation(); onViewDetails(data.id); }}
-                        className="text-[10px] bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-2 py-1 rounded border border-indigo-100 flex items-center font-medium transition-colors"
-                    >
-                        Details <ChevronRight size={10} className="ml-0.5" />
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// --- TERMINAL DISPATCH NODE ---
-const DispatchReceiptNode = ({ data, x, y }) => {
-    const total = data?.totalPieces || 0;
-    const dispatched = data?.totalDispatched || 0;
-    const status = data?.dispatchStatus || 'READY'; 
-    const percentage = total > 0 ? Math.round((dispatched / total) * 100) : 0;
-    
-    const isFullyDispatched = status === 'DISPATCHED';
-    const isPartial = status === 'PARTIAL';
-    
-    const borderColor = isFullyDispatched ? 'border-l-emerald-500' : isPartial ? 'border-l-blue-500' : 'border-l-slate-300';
-    const iconBg = isFullyDispatched ? 'bg-emerald-50' : isPartial ? 'bg-blue-50' : 'bg-slate-50';
-    const iconColor = isFullyDispatched ? 'text-emerald-600' : isPartial ? 'text-blue-600' : 'text-slate-400';
-    
-    // Auto-adjust height if the button is present
-    const nodeHeight = dispatched > 0 ? 135 : 110;
-
-    return (
-        <div 
-            className={`absolute bg-white rounded-xl shadow-sm border-l-4 ${borderColor} border-slate-200 p-3 hover:shadow-md transition-all cursor-default group`}
-            style={{ width: 180, height: nodeHeight, left: x, top: y + (NODE_HEIGHT/2) - (nodeHeight/2) }}
-        >
-            <div className="flex justify-between items-start mb-1">
-                <div className="flex items-center gap-2">
-                    <div className={`p-1 rounded-lg ${iconBg}`}>
-                        <Truck className={iconColor} size={14} />
-                    </div>
-                    <span className="font-bold text-slate-800 text-sm">Dispatch</span>
-                </div>
-                {/* Reusing your StatusBadge */}
-                <StatusBadge status={isFullyDispatched ? 'COMPLETED' : isPartial ? 'PARTIAL' : 'PENDING'} />
-            </div>
-            
-            {/* Progress Metrics */}
-            <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1 mt-2">
-                <span>{dispatched} / {total} pcs</span>
-                <span className={isFullyDispatched ? 'text-emerald-600' : isPartial ? 'text-blue-600' : ''}>
-                    {percentage}%
-                </span>
-            </div>
-            
-            {/* Miniature Progress Bar */}
-            <div className="w-full bg-slate-100 rounded-full h-1.5 mb-2 overflow-hidden">
-                <div 
-                    className={`h-full rounded-full transition-all duration-500 ${isFullyDispatched ? 'bg-emerald-500' : 'bg-blue-500'}`} 
-                    style={{ width: `${Math.min(percentage, 100)}%` }}
-                ></div>
-            </div>
-            
-            {/* Interactive Button OR Contextual Subtext */}
-            {dispatched > 0 ? (
+            <div className="flex justify-between items-start mb-1.5">
                 <button
-                    onClick={(e) => {
-                        e.stopPropagation(); // Prevents dragging the node when clicking the button
-                        // Trigger the parent dashboard's modal
-                        if(data.onViewReceipts) data.onViewReceipts(data.realBatchId); 
-                    }}
-                    className="w-full mt-1 py-1.5 flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-blue-50 text-blue-600 border border-slate-200 hover:border-blue-200 rounded-lg text-[10px] font-bold transition-colors active:scale-95"
+                    onClick={(e) => { e.stopPropagation(); onDrilldown && onDrilldown(data.batch_id, data.batch_code); }}
+                    className="font-mono font-bold text-emerald-700 text-xs hover:underline truncate text-left"
+                    title="Open batch details"
                 >
-                    <FileText size={12} />
-                    <span>View Receipts</span>
+                      {/* {data.batch_code} || */}
+                   {data.batch_id ? `BATCH #${data.batch_id}` : '—'}
                 </button>
+                <StatusBadge status={data.overall_status || 'PENDING'} />
+            </div>
+            <p className="text-[10px] text-slate-600 font-semibold truncate mb-2" title={data.product_name}>{data.product_name || '—'}</p>
+            <div className="flex flex-wrap gap-1 mb-auto">
+                {(data.stage_pipeline || []).map(stage => (
+                    <StagePipelineChip
+                        key={stage.flow_id}
+                        stage={stage}
+                        onClick={(s) => onStageClick(s, data.batch_id)}
+                    />
+                ))}
+            </div>
+            <div className="mt-2">
+                <div className="flex justify-between text-[9px] text-slate-400 mb-0.5">
+                    <span>{done}/{total} stages</span>
+                    <span>{pct}%</span>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-1 overflow-hidden">
+                    <div className="bg-indigo-500 h-full rounded-full transition-all" style={{ width: `${pct}%` }} />
+                </div>
+            </div>
+            <div className="flex justify-between text-[9px] text-slate-400 mt-1.5 pt-1.5 border-t border-slate-100">
+                <span>{data.total_rolls} rolls</span>
+                <span>{data.total_primary_pieces || 0} pcs</span>
+            </div>
+        </div>
+    );
+};
+
+const DispatchNode = ({ x, y, batches, onDispatch }) => {
+    const [expanded, setExpanded] = useState(false);
+
+    const hasBatches = batches.length > 0;
+    const allDone    = hasBatches && batches.every(b => b.overall_status === 'COMPLETED');
+    const anyActive  = batches.some(b => ['IN_PROGRESS', 'COMPLETED'].includes(b.overall_status));
+    const borderCls  = allDone ? 'border-l-teal-500' : anyActive ? 'border-l-indigo-400' : hasBatches ? 'border-l-blue-400' : 'border-l-slate-200';
+    const truckCls   = allDone ? 'text-teal-500' : anyActive ? 'text-indigo-400' : hasBatches ? 'text-blue-400' : 'text-slate-300';
+
+    const visibleBatches = expanded ? batches : batches.slice(0, 4);
+    const width  = expanded ? NODE_W_DISPATCH_WIDE + 80 : NODE_W_DISPATCH_WIDE;
+
+    return (
+        <div
+            className={`absolute bg-white rounded-lg shadow-md border border-l-4 ${borderCls} border-slate-200 flex flex-col transition-all duration-200 z-10`}
+            style={{
+                width,
+                minHeight: NODE_H_DISPATCH,
+                height: expanded ? 'auto' : NODE_H_DISPATCH,
+                left: x,
+                top: y,
+            }}
+        >
+            {/* Header — click to expand/collapse */}
+            <button
+                onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
+                className="flex items-center justify-between px-2.5 pt-2.5 pb-1.5 w-full text-left hover:bg-slate-50/70 rounded-t-lg transition-colors shrink-0"
+            >
+                <div className="flex items-center gap-1.5">
+                    <Truck size={12} className={truckCls} />
+                    <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Dispatch</span>
+                    {hasBatches && (
+                        <span className="text-[9px] font-black bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full border border-slate-200">
+                            {batches.length}
+                        </span>
+                    )}
+                </div>
+                {hasBatches && (
+                    expanded
+                        ? <ChevronUp size={11} className="text-slate-400 shrink-0" />
+                        : <ChevronDown size={11} className="text-slate-400 shrink-0" />
+                )}
+            </button>
+
+            {/* Batch list */}
+            {!hasBatches ? (
+                <p className="text-[9px] text-slate-400 italic flex-1 flex items-center justify-center">No batches yet</p>
             ) : (
-                <p className="text-[9px] text-slate-400 font-medium truncate mt-1">
-                    Awaiting dispatch auth.
-                </p>
+                <div className={`px-2 space-y-1 ${expanded ? 'pb-2' : 'flex-1 min-h-0 overflow-y-auto'}`}>
+                    {visibleBatches.map(b => {
+                        const stDone  = b.stage_progress?.completed || 0;
+                        const stTotal = b.stage_progress?.total     || 1;
+                        const pct     = Math.round((stDone / stTotal) * 100);
+                        return (
+                            <button
+                                key={b.batch_id}
+                                onClick={(e) => { e.stopPropagation(); onDispatch && onDispatch(b.batch_id, b.batch_code); }}
+                                className={`w-full text-left rounded px-1.5 py-1.5 border transition-colors ${onDispatch ? 'hover:bg-indigo-50 hover:border-indigo-200 cursor-pointer' : 'cursor-default'} border-slate-100 bg-slate-50`}
+                            >
+                                <div className="flex items-center justify-between mb-0.5">
+                                    <span className="font-mono text-[9px] font-bold text-slate-700 truncate">BATCH #{b.batch_id}</span>
+                                    <span className="font-mono text-[9px] font-bold text-slate-700 truncate">{b.batch_code}</span>
+                                    <StatusBadge status={b.overall_status || 'PENDING'} />
+                                </div>
+                                {expanded && b.product_name && (
+                                    <p className="text-[9px] text-slate-500 truncate mb-1">{b.product_name}</p>
+                                )}
+                                <div className="w-full bg-slate-200 rounded-full h-0.5 overflow-hidden">
+                                    <div className={`h-full rounded-full ${pct === 100 ? 'bg-emerald-500' : 'bg-indigo-400'}`} style={{ width: `${pct}%` }} />
+                                </div>
+                                {expanded && (
+                                    <div className="flex justify-between mt-1 text-[8px] text-slate-400">
+                                        <span>{stDone}/{stTotal} stages</span>
+                                        <span>{b.total_rolls || 0} rolls · {b.total_primary_pieces || 0} pcs</span>
+                                    </div>
+                                )}
+                            </button>
+                        );
+                    })}
+                    {!expanded && batches.length > 4 && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
+                            className="text-[9px] text-indigo-500 font-bold text-center w-full pt-0.5 hover:underline"
+                        >
+                            +{batches.length - 4} more — expand
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* Footer action */}
+            {hasBatches && onDispatch && (
+                <div className="px-2 pb-2 pt-1 shrink-0">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onDispatch(batches[0].batch_id, batches[0].batch_code); }}
+                        className="flex items-center justify-center gap-1 w-full py-1 px-2 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-colors"
+                    >
+                        <Truck size={9} /> Dispatch
+                    </button>
+                </div>
             )}
         </div>
     );
 };
 
-// --- GRAPH COMPONENT FOR SINGLE SALES ORDER ---
-const WorkflowGraph = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO , onViewReceipts}) => {
-    const { nodes, connectors, height } = useMemo(() => {
-        const nodesList = [];
-        const connList = [];
-        const startX = 20;
-        let currentY = 20;
-        
-        const soX = startX;
-        const poX = soX + NODE_WIDTH + GAP_X;
-        const batchX = poX + NODE_WIDTH + GAP_X;
-        const dispatchX = batchX + NODE_WIDTH + GAP_X; 
+const AddPOPlaceholder = ({ x, y, onAddPO }) => (
+    <div
+        className="absolute rounded-lg border-2 border-dashed border-amber-200 bg-amber-50/40 p-2.5 flex flex-col items-center justify-center gap-2"
+        style={{ width: NODE_W_PO, height: NODE_H_PO, left: x, top: y }}
+    >
+        <Package size={18} className="text-amber-300" />
+        <p className="text-[10px] text-amber-400 italic">No POs yet</p>
+        {onAddPO && (
+            <button
+                onClick={(e) => { e.stopPropagation(); onAddPO(); }}
+                className="flex items-center gap-1 py-1 px-2 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
+            >
+                <Plus size={10} /> Add PO
+            </button>
+        )}
+    </div>
+);
 
-        const purchaseOrders = so.purchase_orders || [];
-        
-        let soCenterY = currentY;
+// ─── WORKFLOW GRAPH ───────────────────────────────────────────────────────────
 
-        if (purchaseOrders.length === 0) {
-            nodesList.push({ type: 'SALES_ORDER', data: so, x: soX, y: currentY });
-            return { nodes: nodesList, connectors: connList, height: NODE_HEIGHT + 40 };
+const WorkflowGraph = ({ so, onStageClick, onAddPO, onCreateBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch }) => {
+    const { nodes, connectors, height, totalWidth } = useMemo(() => {
+        const nodesList  = [];
+        const connList   = [];
+        const hasSO      = !!so.sales_order_id;
+        const pos        = so.purchase_orders || [];
+        const allBatches = [];
+
+        const soX       = MARGIN;
+        const poX       = hasSO ? soX + NODE_W_SO + GAP_X : soX;
+        const batchX    = poX + NODE_W_PO + GAP_X;
+        const dispatchX = batchX + NODE_W_BATCH + GAP_X;
+
+        // No POs
+        if (pos.length === 0) {
+            if (hasSO) nodesList.push({ type: 'SO', data: so, x: soX, y: MARGIN });
+            nodesList.push({ type: 'ADD_PO', x: poX, y: MARGIN });
+            nodesList.push({ type: 'DISPATCH', x: dispatchX, y: MARGIN, batches: [] });
+            if (hasSO) connList.push({ start: { x: soX + NODE_W_SO, y: MARGIN + NODE_H_SO / 2 }, end: { x: poX, y: MARGIN + NODE_H_PO / 2 } });
+            return { nodes: nodesList, connectors: connList, height: MARGIN + NODE_H_PO + MARGIN, totalWidth: dispatchX + NODE_W_DISPATCH_WIDE + MARGIN };
         }
 
-        const poYPositions = [];
+        // Compute layout for each PO and its batches
+        let currentY = MARGIN;
+        const poLayouts = [];
 
-        purchaseOrders.forEach(po => {
-            const batches = po.production_batches || [];
-            let poY = currentY;
-            
-            if (batches.length > 0) {
-                const batchYPositions = [];
-                batches.forEach(batch => {
-                    nodesList.push({ type: 'BATCH', data: batch, x: batchX, y: currentY });
-                    
-                    // --- UPDATED DISPATCH NODE LOGIC HERE ---
-                    if (batch.overall_status === 'SHIPPED' || batch.overall_status === 'DISPATCHED' || batch.is_dispatched || batch.dispatch_receipt || batch.total_dispatched > 0) {
-                        
-                        const dispatchNodeData = {
-                            totalPieces: batch.total_pieces, // Ensure your backend sends this
-                            totalDispatched: batch.total_dispatched, // Ensure your backend sends this
-                            dispatchStatus: batch.dispatch_status || (batch.is_dispatched ? 'DISPATCHED' : 'PARTIAL'),
-                            realBatchId: batch.id,
-                            batchCode: batch.batch_code,
-                            // Pass the function through so the node can call it
-                            onViewReceipts: onViewReceipts 
-                        };
-
-                        nodesList.push({ type: 'DISPATCH', data: dispatchNodeData, x: dispatchX, y: currentY });
-                        
-                        connList.push({
-                            start: { x: batchX + NODE_WIDTH, y: currentY + (NODE_HEIGHT / 2) },
-                            end: { x: dispatchX, y: currentY + (NODE_HEIGHT / 2) }
-                        });
-                    }
-
-                    batchYPositions.push(currentY);
-                    currentY += NODE_HEIGHT + GAP_Y;
-                });
-                poY = (batchYPositions[0] + batchYPositions[batchYPositions.length - 1]) / 2;
-                
-                batchYPositions.forEach(bY => {
-                    connList.push({
-                        start: { x: poX + NODE_WIDTH, y: poY + (NODE_HEIGHT / 2) },
-                        end: { x: batchX, y: bY + (NODE_HEIGHT / 2) }
-                    });
-                });
+        pos.forEach(po => {
+            const batches = po.batches || [];
+            if (batches.length === 0) {
+                poLayouts.push({ po, poY: currentY, batchYs: [], groupMid: currentY + NODE_H_PO / 2 });
+                currentY += NODE_H_PO + PO_GAP_Y;
             } else {
-                currentY += NODE_HEIGHT + GAP_Y;
+                const batchYs = batches.map((_, bi) => currentY + bi * (NODE_H_BATCH + GAP_Y));
+                const groupBottom = batchYs[batchYs.length - 1] + NODE_H_BATCH;
+                const groupMid    = (currentY + groupBottom) / 2;
+                const poY         = Math.max(currentY, groupMid - NODE_H_PO / 2);
+                poLayouts.push({ po, poY, batchYs, groupMid });
+                currentY = groupBottom + PO_GAP_Y;
             }
-
-            nodesList.push({ type: 'PURCHASE_ORDER', data: po, x: poX, y: poY });
-            poYPositions.push(poY);
         });
 
-        const firstPOY = poYPositions[0];
-        const lastPOY = poYPositions[poYPositions.length - 1];
-        soCenterY = (firstPOY + lastPOY) / 2;
+        const contentEnd = currentY - PO_GAP_Y;
+        const contentMid = (MARGIN + contentEnd) / 2;
 
-        nodesList.push({ type: 'SALES_ORDER', data: so, x: soX, y: soCenterY });
+        // SO node
+        if (hasSO) {
+            const soY = Math.max(MARGIN, contentMid - NODE_H_SO / 2);
+            nodesList.push({ type: 'SO', data: so, x: soX, y: soY });
+        }
 
-        poYPositions.forEach(pY => {
-            connList.push({
-                start: { x: soX + NODE_WIDTH, y: soCenterY + (NODE_HEIGHT / 2) },
-                end: { x: poX, y: pY + (NODE_HEIGHT / 2) }
+        // Dispatch node
+        const dispatchY = Math.max(MARGIN, contentMid - NODE_H_DISPATCH / 2);
+
+        // PO + Batch nodes + connectors
+        poLayouts.forEach(({ po, poY, batchYs, groupMid }) => {
+            nodesList.push({ type: 'PO', data: po, x: poX, y: poY });
+
+            if (hasSO) {
+                connList.push({
+                    start: { x: soX + NODE_W_SO, y: contentMid },
+                    end:   { x: poX,             y: poY + NODE_H_PO / 2 },
+                });
+            }
+
+            batchYs.forEach((bY, bi) => {
+                const batch = po.batches[bi];
+                nodesList.push({ type: 'BATCH', data: batch, x: batchX, y: bY });
+                allBatches.push(batch);
+
+                connList.push({
+                    start: { x: poX + NODE_W_PO,      y: groupMid },
+                    end:   { x: batchX,               y: bY + NODE_H_BATCH / 2 },
+                });
+                connList.push({
+                    start: { x: batchX + NODE_W_BATCH, y: bY + NODE_H_BATCH / 2 },
+                    end:   { x: dispatchX,             y: dispatchY + NODE_H_DISPATCH / 2 },
+                });
             });
         });
 
-        return { nodes: nodesList, connectors: connList, height: currentY + 20 };
+        nodesList.push({ type: 'DISPATCH', x: dispatchX, y: dispatchY, batches: allBatches });
 
-    }, [so, onViewReceipts]);
+        return {
+            nodes: nodesList, connectors: connList,
+            height: contentEnd + MARGIN,
+            totalWidth: dispatchX + NODE_W_DISPATCH_WIDE + MARGIN,
+        };
+    }, [so]);
 
     return (
-        <div style={{ position: 'relative', height: height, minWidth: '1200px' }} className="bg-slate-50/50 rounded-lg border border-slate-100">
-            <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{zIndex: 0}}>
-                <defs>
-                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                        <polygon points="0 0, 10 3.5, 0 7" fill="#cbd5e1" />
-                    </marker>
-                </defs>
-                {connectors.map((conn, i) => (
-                    <Connector key={i} start={conn.start} end={conn.end} />
-                ))}
+        <div style={{ position: 'relative', height, minWidth: totalWidth }} className="bg-slate-50/50 rounded-lg border border-slate-100">
+            <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
+                {connectors.map((c, i) => <Connector key={i} start={c.start} end={c.end} />)}
             </svg>
             {nodes.map((node, i) => {
-                if (node.type === 'SALES_ORDER') return <SalesOrderNode key={i} {...node} onDetails={onDetails} onAddPO={onAddPO} />;
-                if (node.type === 'PURCHASE_ORDER') return <PurchaseOrderNode key={i} {...node} onDetails={onPODetails} onCreateBatch={onCreateBatch} onDeletePO={onDeletePO} />; 
-                if (node.type === 'BATCH') return <BatchNode key={i} {...node} onViewDetails={onViewBatchDetails} onEditBatch={onEditBatch} onDeleteBatch={onDeleteBatch} />;
-                if (node.type === 'DISPATCH') return <DispatchReceiptNode key={i} {...node} />;
+                if (node.type === 'SO')       return <SalesOrderNode key={i} {...node} poCount={so.purchase_orders?.length || 0} onAddPO={onAddPO} onEditSO={onEditSO} />;
+                if (node.type === 'PO')       return <PONode         key={i} {...node} onCreateBatch={onCreateBatch} onViewDetails={onViewPODetails} onInward={onInward} />;
+                if (node.type === 'BATCH')    return <BatchNode      key={i} {...node} onStageClick={onStageClick} onDrilldown={onDrilldown} />;
+                if (node.type === 'DISPATCH') return <DispatchNode   key={i} {...node} onDispatch={onDispatch} />;
+                if (node.type === 'ADD_PO')   return <AddPOPlaceholder key={i} {...node} onAddPO={onAddPO} />;
                 return null;
             })}
         </div>
     );
 };
 
-// --- TABLE ROW COMPONENT ---
-// --- TABLE ROW COMPONENT ---
-const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch, onViewBatchDetails, onEditBatch, onDeleteBatch, onDeletePO, onViewReceipts }) => {
+// ─── TABLE ROW ────────────────────────────────────────────────────────────────
+
+const SalesOrderTableRow = ({ so, onSODetails, onStageClick, onAddPO, onCreateBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch }) => {
     const [expanded, setExpanded] = useState(false);
-    
-    const poCount = so.purchase_orders?.length || 0;
-    const batchCount = so.purchase_orders?.reduce((acc, po) => acc + (po.production_batches?.length || 0), 0) || 0;
 
-    // --- CALCULATE TOTAL DISPATCH PROGRESS ---
-    let totalDispatched = 0;
-    let totalCut = 0;
-
-    if (so.purchase_orders) {
-        so.purchase_orders.forEach(po => {
-            if (po.production_batches) {
-                po.production_batches.forEach(batch => {
-                    totalDispatched += (parseInt(batch.total_dispatched, 10) || 0);
-                    totalCut += (parseInt(batch.total_pieces, 10) || 0);
-                });
-            }
-        });
-    }
-
-    // --- CALCULATE DERIVED WORKFLOW STATUS ---
-    let displayStatus = 'UNKNOWN';
-    let statusClasses = 'bg-slate-100 text-slate-600 border-slate-200';
-
-    // Check if ANY purchase order has received its goods/rolls
-    // (Adjust 'RECEIVED' or 'DELIVERED' to match your exact DB status for a fulfilled PO)
-    const goodsArrived = so.purchase_orders?.some(po => 
-        po.status === 'RECEIVED' || po.status === 'DELIVERED' || po.status === 'COMPLETED'
-    );
-
-    if (poCount === 0) {
-        // 1. SO exists, but no POs created
-        displayStatus = "SO Received";
-        statusClasses = "bg-purple-100 text-purple-800 border-purple-200";
-    } else if (batchCount > 0) {
-        // 4. Batches have been created
-        displayStatus = "In Production";
-        statusClasses = "bg-blue-100 text-blue-800 border-blue-200";
-    } else if (goodsArrived) {
-        // 3. POs exist, Goods arrived, but NO batches created yet
-        displayStatus = "Awaiting Batch";
-        statusClasses = "bg-amber-100 text-amber-800 border-amber-200";
-    } else {
-        // 2. POs exist, but Goods have NOT arrived
-        displayStatus = "Awaiting Goods";
-        statusClasses = "bg-orange-100 text-orange-800 border-orange-200";
-    }
-
-    // Dispatch logic takes priority if shipping has started
-    const isDispatching = totalDispatched > 0 || so.status === 'SHIPPED';
-    const dispatchPercent = totalCut > 0 ? Math.min(100, Math.round((totalDispatched / totalCut) * 100)) : 0;
+    const pos         = so.purchase_orders || [];
+    const allBatches  = pos.flatMap(po => po.batches || []);
+    const poCount     = pos.length;
+    const batchCount  = allBatches.length;
+    const stagesDone  = allBatches.reduce((s, b) => s + (b.stage_progress?.completed || 0), 0);
+    const stagesTotal = allBatches.reduce((s, b) => s + (b.stage_progress?.total     || 0), 0);
 
     return (
         <React.Fragment>
-            <tr 
-                onClick={() => setExpanded(!expanded)}
-                className={`border-b border-slate-100 transition-colors cursor-pointer group ${expanded ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`}
+            <tr
+                onClick={() => setExpanded(e => !e)}
+                className={`border-b border-slate-100 cursor-pointer group transition-colors ${expanded ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`}
             >
                 <td className="px-6 py-4 w-12 text-center">
-                     {expanded ? <ChevronUp size={16} className="text-blue-600"/> : <ChevronDown size={16} className="text-slate-400 group-hover:text-slate-600"/>}
+                    {expanded
+                        ? <ChevronUp size={16} className="text-blue-600" />
+                        : <ChevronDown size={16} className="text-slate-400 group-hover:text-slate-600" />
+                    }
                 </td>
                 <td className="px-6 py-4">
-                    <div className="font-bold text-slate-800 text-sm">{so.order_number}</div>
-                    <div className="text-xs text-slate-500">{new Date(so.order_date).toLocaleDateString()}</div>
+                    <div className="font-bold text-slate-800 text-sm">{so.order_number || <span className="italic text-slate-400">No SO</span>}</div>
+                    {so.buyer_po_number && <div className="text-xs text-slate-500 mt-0.5">PO: {so.buyer_po_number}</div>}
                 </td>
                 <td className="px-6 py-4 text-sm text-slate-700 font-medium">
-                    {so.customer_name}
+                    {so.customer_name || <span className="text-slate-400 italic">—</span>}
                 </td>
-                <td className="px-6 py-4">
-                    {/* DYNAMIC DISPATCH PROGRESS BAR OR DERIVED WORKFLOW STATUS */}
-                    {isDispatching ? (
-                        <div className="w-full max-w-[140px]">
-                            <div className="flex justify-between text-[10px] font-bold mb-1 uppercase tracking-wider">
-                                <span className={dispatchPercent >= 100 ? "text-emerald-600" : "text-blue-600"}>
-                                    {dispatchPercent >= 100 ? 'Shipped' : 'Shipping'}
-                                </span>
-                                <span className={dispatchPercent >= 100 ? "text-emerald-600" : "text-blue-600"}>
-                                    {dispatchPercent}%
-                                </span>
-                            </div>
-                            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                                <div 
-                                    className={`${dispatchPercent >= 100 ? 'bg-emerald-500' : 'bg-blue-500'} h-full rounded-full transition-all duration-500`} 
-                                    style={{ width: `${dispatchPercent}%` }}
-                                ></div>
-                            </div>
-                            <div className="text-[9px] text-slate-500 font-medium mt-1 text-right">
-                                {totalDispatched} / {totalCut} pcs
-                            </div>
-                        </div>
-                    ) : (
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider border shadow-sm ${statusClasses}`}>
-                            {displayStatus}
-                        </span>
-                    )}
-                </td>
+                <td className="px-6 py-4"><StatusBadge status={so.so_status} /></td>
                 <td className="px-6 py-4 text-xs text-slate-500">
-                    <div className="flex gap-3">
-                        <span className="flex items-center"><ShoppingCart size={12} className="mr-1"/> {poCount} POs</span>
-                        <span className="flex items-center"><Scissors size={12} className="mr-1"/> {batchCount} Batches</span>
+                    <div className="flex gap-3 items-center flex-wrap">
+                        <span className="flex items-center"><Package size={12} className="mr-1" />{poCount} PO{poCount !== 1 ? 's' : ''}</span>
+                        <span className="flex items-center"><Scissors size={12} className="mr-1" />{batchCount} batch{batchCount !== 1 ? 'es' : ''}</span>
+                        {stagesTotal > 0 && (
+                            <span className="text-emerald-600 font-semibold">✓ {stagesDone}/{stagesTotal} stages</span>
+                        )}
                     </div>
                 </td>
                 <td className="px-6 py-4 text-right">
-                    <button 
-                        onClick={(e) => { 
-                            e.stopPropagation(); 
-                            setExpanded(true); 
-                            onAddPO(so.id); 
-                        }}
-                        className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-md transition-colors"
-                        title="Quick Add PO"
-                    >
-                        <Plus size={16}/>
-                    </button>
+                    {so.sales_order_id && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onSODetails(so.sales_order_id); }}
+                            className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-md transition-colors"
+                            title="View Sales Order Details"
+                        >
+                            <FileText size={16} />
+                        </button>
+                    )}
                 </td>
             </tr>
-            
             {expanded && (
                 <tr>
-                    <td colSpan="6" className="p-4 bg-slate-50 border-b border-slate-200 shadow-inner">
+                    <td colSpan="6" className="p-4 bg-slate-50 border-b border-slate-200">
                         <div className="overflow-x-auto">
-                            <WorkflowGraph 
-                                so={so} 
-                                onAddPO={(id) => { setExpanded(true); onAddPO(id); }} 
-                                onDetails={onDetails}
-                                onPODetails={onPODetails} 
+                            <WorkflowGraph
+                                so={so}
+                                onStageClick={onStageClick}
+                                onAddPO={onAddPO ? () => onAddPO(so.sales_order_id) : null}
                                 onCreateBatch={onCreateBatch}
-                                onViewBatchDetails={onViewBatchDetails}
-                                onEditBatch={onEditBatch}
-                                onDeleteBatch={onDeleteBatch}
-                                onDeletePO={onDeletePO}
-                                onViewReceipts={onViewReceipts} 
+                                onViewPODetails={onViewPODetails}
+                                onInward={onInward}
+                                onEditSO={onEditSO}
+                                onDrilldown={onDrilldown}
+                                onDispatch={onDispatch}
                             />
                         </div>
                     </td>
@@ -672,829 +537,451 @@ const SalesOrderTableRow = ({ so, onAddPO, onDetails, onPODetails, onCreateBatch
     );
 };
 
-// --- MODALS FOR DETAILED VIEW ---
+// ─── SALES ORDER DETAILS MODAL ────────────────────────────────────────────────
 
 const SalesOrderDetailsModal = ({ orderId, onClose }) => {
-    const [order, setOrder] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
+    const [order, setOrder]     = useState(null);
+    const [loading, setLoading] = useState(true);
 
-    useEffect(() => { 
+    useEffect(() => {
         accountingApi.getSalesOrderDetails(orderId)
             .then(res => setOrder(res.data))
             .catch(console.error)
-            .finally(() => setIsLoading(false)); 
+            .finally(() => setLoading(false));
     }, [orderId]);
 
-    if (isLoading) return <Modal title="Loading Sales Order..." onClose={onClose}><Spinner/></Modal>;
-    if (!order) return null;
+    if (loading) return <Modal title="Loading…" onClose={onClose}><Spinner /></Modal>;
+    if (!order)  return null;
 
     return (
         <Modal title={`Sales Order: ${order.order_number}`} onClose={onClose} size="max-w-4xl">
-             <div className="space-y-6">
-                
-                {/* Header Information Grid */}
+            <div className="space-y-6">
                 <div className="bg-blue-50/50 p-5 rounded-xl border border-blue-100 grid grid-cols-2 md:grid-cols-4 gap-6 text-sm">
                     <div>
                         <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Customer</span>
                         <p className="font-semibold text-gray-800 text-base">{order.customer_name}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">{order.customer_email || 'No email provided'}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{order.customer_email || 'No email'}</p>
                     </div>
                     <div>
                         <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Order Refs</span>
                         <p className="text-gray-700 flex items-center">
-                            <span className="text-gray-400 text-xs mr-2">Buyer PO:</span> 
-                            <span className="font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
-                                {order.buyer_po_number || 'N/A'}
-                            </span>
+                            <span className="text-gray-400 text-xs mr-2">Buyer PO:</span>
+                            <span className="font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">{order.buyer_po_number || 'N/A'}</span>
                         </p>
-                        <p className="text-gray-700 mt-1.5 flex items-center">
-                            <span className="text-gray-400 text-xs mr-2">Status:</span> 
+                        <p className="text-gray-700 mt-1.5 flex items-center gap-2">
+                            <span className="text-gray-400 text-xs">Status:</span>
                             <StatusBadge status={order.status} />
                         </p>
                     </div>
                     <div>
                         <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Key Dates</span>
-                        <p className="text-gray-700"><span className="text-gray-400 text-xs mr-1">Ordered:</span> {new Date(order.order_date).toLocaleDateString()}</p>
-                        <p className="text-gray-700 mt-1"><span className="text-gray-400 text-xs mr-1">Delivery:</span> {order.delivery_date ? new Date(order.delivery_date).toLocaleDateString() : 'TBD'}</p>
+                        <p className="text-gray-700"><span className="text-gray-400 text-xs mr-1">Ordered:</span>{order.order_date ? new Date(order.order_date).toLocaleDateString() : 'N/A'}</p>
+                        <p className="text-gray-700 mt-1"><span className="text-gray-400 text-xs mr-1">Delivery:</span>{order.delivery_date ? new Date(order.delivery_date).toLocaleDateString() : 'TBD'}</p>
                     </div>
                     <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-100 text-center flex flex-col justify-center">
                         <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Total Amount</span>
                         <p className="font-extrabold text-emerald-600 text-xl flex items-center justify-center">
-                            <DollarSign size={20} className="mr-0.5"/> {order.total_amount || '0.00'}
+                            <DollarSign size={20} className="mr-0.5" />{order.total_amount || '0.00'}
                         </p>
                     </div>
                 </div>
 
-                {/* Notes Section (if any) */}
                 {order.notes && (
                     <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Order Notes</span>
+                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Notes</span>
                         <p className="text-sm text-gray-700 whitespace-pre-wrap">{order.notes}</p>
                     </div>
                 )}
 
-                {/* Detailed Products Table */}
                 <div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center">
-                        <Box size={20} className="mr-2 text-indigo-500"/> Order Items & Configuration
+                    <h3 className="text-base font-bold text-gray-800 mb-3 flex items-center">
+                        <Box size={18} className="mr-2 text-indigo-500" /> Order Items
                     </h3>
                     <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm">
                         <table className="w-full text-sm text-left">
                             <thead className="bg-gray-100 text-gray-600 border-b border-gray-200">
                                 <tr>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider w-1/4">Product Style</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider w-1/6">Fabric Required</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider w-1/4">Size Breakdown</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Color Details & Qty</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right w-24">Item Total</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Product</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Fabric</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Sizes</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Colors & Qty</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right w-20">Total</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100 bg-white">
-                                {order.products.map((prod, idx) => {
-                                    const totalQty = prod.colors ? prod.colors.reduce((sum, c) => sum + parseInt(c.quantity || 0), 0) : 0;
+                                {(order.products || []).map((prod, idx) => {
+                                    const total = prod.colors?.reduce((s, c) => s + parseInt(c.quantity || 0), 0) || 0;
                                     return (
-                                        <tr key={idx} className="hover:bg-gray-50/50 align-top transition-colors">
-                                            <td className="px-4 py-4">
-                                                <p className="font-bold text-gray-900">{prod.product_name}</p>
-                                            </td>
-                                            <td className="px-4 py-4 text-gray-600 font-medium">{prod.fabric_type}</td>
+                                        <tr key={idx} className="align-top hover:bg-gray-50/50">
+                                            <td className="px-4 py-4 font-bold text-gray-900">{prod.product_name}</td>
+                                            <td className="px-4 py-4 text-gray-600">{prod.fabric_type}</td>
                                             <td className="px-4 py-4">
                                                 <div className="flex flex-wrap gap-1.5">
-                                                    {prod.size_breakdown && Object.entries(prod.size_breakdown).map(([size, ratio]) => (
-                                                        <span key={size} className="flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-md min-w-[2.5rem] overflow-hidden shadow-sm">
-                                                            <span className="w-full text-center bg-indigo-100 text-indigo-800 text-[9px] font-bold uppercase py-0.5">{size}</span>
-                                                            <span className="text-indigo-900 font-extrabold text-xs py-1">{ratio}</span>
+                                                    {prod.size_breakdown && Object.entries(prod.size_breakdown).map(([sz, r]) => (
+                                                        <span key={sz} className="flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-md min-w-[2.5rem] overflow-hidden">
+                                                            <span className="w-full text-center bg-indigo-100 text-indigo-800 text-[9px] font-bold uppercase py-0.5">{sz}</span>
+                                                            <span className="text-indigo-900 font-extrabold text-xs py-1">{r}</span>
                                                         </span>
                                                     ))}
                                                 </div>
                                             </td>
                                             <td className="px-4 py-4">
                                                 <div className="flex flex-col gap-2">
-                                                    {prod.colors && prod.colors.length > 0 ? prod.colors.map((c, i) => (
-                                                        <div key={i} className="flex justify-between items-center bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm">
+                                                    {prod.colors?.map((c, ci) => (
+                                                        <div key={ci} className="flex justify-between items-center bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm">
                                                             <span className="text-gray-700 font-medium flex items-center text-xs">
-                                                                <Palette size={14} className="text-gray-400 mr-2"/>
-                                                                {c.color_name} <span className="text-gray-400 font-normal ml-1">({c.color_number})</span>
+                                                                <Palette size={12} className="text-gray-400 mr-1.5" />
+                                                                {c.color_name} <span className="text-gray-400 ml-1">({c.color_number})</span>
                                                             </span>
-                                                            <div className="flex items-center gap-3">
-                                                                <span className="text-xs text-gray-500">${c.unit_price} /ea</span>
-                                                                <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs">{c.quantity} pcs</span>
-                                                            </div>
+                                                            <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs">{c.quantity} pcs</span>
                                                         </div>
-                                                    )) : <span className="text-xs text-gray-400 italic">No colors defined</span>}
+                                                    ))}
                                                 </div>
                                             </td>
-                                            <td className="px-4 py-4 text-right">
-                                                <span className="font-extrabold text-gray-800 text-lg">{totalQty}</span>
-                                                <span className="block text-[10px] text-gray-500 uppercase mt-0.5">Pieces</span>
-                                            </td>
+                                            <td className="px-4 py-4 text-right font-extrabold text-gray-800 text-lg">{total}</td>
                                         </tr>
                                     );
                                 })}
-                                {order.products.length === 0 && (
-                                    <tr><td colSpan="5" className="px-4 py-8 text-center text-gray-500 italic">No products configured for this order.</td></tr>
-                                )}
                             </tbody>
                         </table>
                     </div>
                 </div>
             </div>
             <div className="flex justify-end pt-5 border-t border-gray-100 mt-6">
-                <button onClick={onClose} className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-bold transition-colors">Close</button>
+                <button onClick={onClose} className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-bold">Close</button>
             </div>
         </Modal>
     );
 };
 
+// ─── PURCHASE ORDER DETAILS MODAL ─────────────────────────────────────────────
+
 const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
-    const [po, setPo] = useState(null);
+    const [po, setPo]       = useState(null);
     const [loading, setLoading] = useState(true);
     const [rolls, setRolls] = useState([]);
-    
-    useEffect(() => { 
+
+    useEffect(() => {
         accountingApi.getPurchaseOrderDetails(poId)
             .then(res => setPo(res.data))
             .catch(console.error)
-            .finally(() => setLoading(false)); 
+            .finally(() => setLoading(false));
     }, [poId]);
 
-    useEffect(() => { 
-        if (poId) {
-            storeManagerApi.getFabricRollsByPO(poId)
-                .then(res => setRolls(res.data))
-                .catch(console.error); 
-        }
+    useEffect(() => {
+        if (poId) storeManagerApi.getFabricRollsByPO(poId).then(res => setRolls(res.data)).catch(console.error);
     }, [poId]);
 
-    if (loading) return <Modal title="Loading PO..." onClose={onClose}><Spinner/></Modal>;
-    if (!po) return null;
-    
-    // --- BROWSER PRINT REPLACEMENT FOR JSPDF ---
-        const handlePrintPO = () => {
+    if (loading) return <Modal title="Loading PO…" onClose={onClose}><Spinner /></Modal>;
+    if (!po)     return null;
+
+    const handlePrintPO = () => {
         const doc = new jsPDF();
-        const pageWidth = doc.internal.pageSize.width;
-        
-        // --- LETTERHEAD ---
-        // Company Name
-        doc.setFontSize(22);
-        doc.setFont("helvetica", "bold");
-        doc.text("MATRIX OVERSEAS", pageWidth / 2, 20, { align: "center" });
-
-        // Address & Phone
+        const pw  = doc.internal.pageSize.width;
+        doc.setFontSize(22); doc.setFont('helvetica', 'bold');
+        doc.text('MATRIX OVERSEAS', pw / 2, 20, { align: 'center' });
+        doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+        doc.text(['PLOT NO. 24,26,27, K T STEEL PLOT PREMISSES,', 'R K CNG PUMP, WIMCO NAKA, AMBERNATH 421505.', 'Phone: +918591383476'], pw / 2, 28, { align: 'center', lineHeightFactor: 1.5 });
+        doc.setDrawColor(200, 200, 200); doc.line(14, 45, pw - 14, 45);
+        doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.text('PURCHASE ORDER', 14, 55);
         doc.setFontSize(10);
-        doc.setFont("helvetica", "normal");
-        const addressLines = [
-            "PLOT NO. 24,26,27, K T STEEL PLOT PREMISSES,",
-            "R K CNG PUMP, WIMCO NAKA, AMBERNATH 421505.",
-            "Phone: +918591383476"
-        ];
-        doc.text(addressLines, pageWidth / 2, 28, { align: "center", lineHeightFactor: 1.5 });
-
-        // Separator Line
-        doc.setDrawColor(200, 200, 200);
-        doc.setLineWidth(0.5);
-        doc.line(14, 45, pageWidth - 14, 45);
-
-        // --- PO HEADER INFO ---
-        doc.setFontSize(16);
-        doc.setFont("helvetica", "bold");
-        doc.text("PURCHASE ORDER", 14, 55);
-
-        // Left Side (PO Details)
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "bold");
-        doc.text("PO Number:", 14, 65);
-        doc.setFont("helvetica", "normal");
-        doc.text(`${po.po_code || po.po_number}`, 40, 65);
-
-        doc.setFont("helvetica", "bold");
-        doc.text("Date:", 14, 72);
-        doc.setFont("helvetica", "normal");
-        doc.text(`${new Date(po.created_at || Date.now()).toLocaleDateString()}`, 40, 72);
-        
-        doc.setFont("helvetica", "bold");
-        doc.text("Ref (SO):", 14, 79);
-        doc.setFont("helvetica", "normal");
-        doc.text(`${po.sales_order_number || 'N/A'}`, 40, 79);
-
-        // Right Side (Supplier Details)
-        doc.setFont("helvetica", "bold");
-        doc.text("To (Supplier):", 120, 55);
-        doc.setFont("helvetica", "normal");
-        doc.text(`${po.supplier_name}`, 120, 62);
-        
-        if (po.supplier_address) {
-            const splitAddress = doc.splitTextToSize(po.supplier_address, 75);
-            doc.text(splitAddress, 120, 69);
-        }
-
-        // --- ITEMS TABLE ---
-        autoTable(doc, { 
-            startY: 90, 
-            head: [['Fabric Type', 'Color Details', 'Quantity', 'UOM', 'Unit Price', 'Total']], 
-            body: po.items.map(i => [
-                i.fabric_type, 
-                `${i.fabric_color} (${i.color_number || ''})`, 
-                i.quantity, 
-                i.uom, 
-                `₹${i.unit_price}`, 
-                `₹${i.total_price}`
-            ]),
+        doc.setFont('helvetica', 'bold'); doc.text('PO Number:', 14, 65); doc.setFont('helvetica', 'normal'); doc.text(`${po.po_code || po.po_number}`, 40, 65);
+        doc.setFont('helvetica', 'bold'); doc.text('Supplier:', 120, 55); doc.setFont('helvetica', 'normal'); doc.text(`${po.supplier_name}`, 120, 62);
+        autoTable(doc, {
+            startY: 90,
+            head: [['Fabric Type', 'Color', 'Qty', 'UOM', 'Unit Price', 'Total']],
+            body: (po.items || []).map(i => [i.fabric_type, `${i.fabric_color} (${i.color_number || ''})`, i.quantity, i.uom, `₹${i.unit_price}`, `₹${i.total_price}`]),
             theme: 'grid',
             headStyles: { fillColor: [40, 40, 40], textColor: [255, 255, 255] },
             styles: { fontSize: 9, cellPadding: 3 },
-            columnStyles: {
-                2: { halign: 'right' },
-                3: { halign: 'center' },
-                4: { halign: 'right' },
-                5: { halign: 'right', fontStyle: 'bold' }
-            },
-            foot: [[
-                { content: 'Grand Total', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold' } },
-                { content: `₹${po.items.reduce((sum, item) => sum + parseFloat(item.total_price || 0), 0).toFixed(2)}`, styles: { fontStyle: 'bold' } }
-            ]]
+            foot: [[{ content: 'Grand Total', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold' } }, { content: `₹${(po.items || []).reduce((s, i) => s + parseFloat(i.total_price || 0), 0).toFixed(2)}`, styles: { fontStyle: 'bold' } }]]
         });
-
-        // --- FOOTER SIGNATURES ---
-        const finalY = doc.lastAutoTable.finalY + 30;
-        doc.setFont("helvetica", "bold");
-        doc.text("Authorized Signature", 14, finalY);
-        doc.line(14, finalY + 1, 60, finalY + 1);
-
         doc.save(`PO_${po.po_code}.pdf`);
     };
 
     return (
         <Modal title={`Purchase Order: ${po.po_code || po.po_number}`} onClose={onClose} size="max-w-4xl">
-             {/* Main PO Detail View */}
-             <div className="space-y-6 print:m-0 print:p-0 print:text-black">
-                
-                {/* Print Only Letterhead */}
-                <div className="hidden print:block text-center mb-8 pb-4 border-b-2 border-slate-800">
-                    <h1 className="text-3xl font-bold tracking-tight">MATRIX OVERSEAS</h1>
-                    <p className="text-sm mt-1">PLOT NO. 24,26,27, K T STEEL PLOT PREMISSES,</p>
-                    <p className="text-sm">R K CNG PUMP, WIMCO NAKA, AMBERNATH 421505.</p>
-                    <p className="text-sm mt-1 font-medium">Phone: +918591383476</p>
-                    <h2 className="text-xl font-bold mt-4">PURCHASE ORDER</h2>
-                </div>
-
-                {/* Header Actions & Info */}
-                <div className="flex flex-col md:flex-row justify-between items-start gap-4 bg-amber-50 p-5 rounded-xl border border-amber-100 print:bg-transparent print:border-none print:p-0">
+            <div className="space-y-5">
+                <div className="flex flex-col md:flex-row justify-between gap-4 bg-amber-50 p-5 rounded-xl border border-amber-100">
                     <div className="flex items-start gap-4">
-                        <div className="p-3 bg-white rounded-lg shadow-sm text-amber-600 print:hidden">
-                            <Truck size={24}/>
-                        </div>
+                        <div className="p-3 bg-white rounded-lg text-amber-600"><Truck size={22} /></div>
                         <div>
-                            <p className="text-xs text-amber-700 font-bold uppercase tracking-wider mb-1 print:text-slate-500">Supplier Info</p>
+                            <p className="text-xs text-amber-700 font-bold uppercase tracking-wider mb-1">Supplier</p>
                             <p className="font-extrabold text-gray-900 text-lg">{po.supplier_name}</p>
-                            <p className="text-sm text-gray-600">{po.supplier_email || 'No Email'} • {po.supplier_phone || 'No Phone'}</p>
-                            <p className="text-xs text-gray-500 mt-1">{po.supplier_address}</p>
+                            <p className="text-sm text-gray-600">{po.supplier_email || '—'} • {po.supplier_phone || '—'}</p>
                         </div>
                     </div>
-                    <div className="text-left md:text-right w-full md:w-auto bg-white p-4 rounded-lg shadow-sm border border-amber-100 flex flex-col justify-center print:bg-transparent print:shadow-none print:border-none print:p-0">
-                        <div className="flex justify-between md:justify-end items-center mb-2 print:hidden">
-                            <span className="text-xs text-gray-500 font-bold uppercase mr-3">Status:</span>
-                            <StatusBadge status={po.status} />
-                        </div>
-                        <p className="text-sm text-gray-700 font-medium hidden print:block mb-1">
-                            <span className="text-gray-400 text-xs mr-1 uppercase">PO Number:</span> 
-                            {po.po_code || po.po_number}
-                        </p>
-                        <p className="text-sm text-gray-700 font-medium">
-                            <span className="text-gray-400 text-xs mr-1 uppercase">Ref (SO):</span> 
-                            {po.sales_order_number || 'N/A'}
-                        </p>
-                        <p className="text-sm text-gray-700 font-medium mt-1">
-                            <span className="text-gray-400 text-xs mr-1 uppercase">Date:</span> 
-                            {new Date(po.created_at || Date.now()).toLocaleDateString()}
-                        </p>
-                        <p className="text-sm text-gray-700 font-medium mt-1">
-                            <span className="text-gray-400 text-xs mr-1 uppercase">Delivery:</span> 
-                            {po.expected_delivery_date ? new Date(po.expected_delivery_date).toLocaleDateString() : 'N/A'}
-                        </p>
-                        <button 
-                            onClick={handlePrintPO} 
-                            className="mt-3 w-full flex items-center justify-center text-sm bg-indigo-600 text-white font-bold px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm print:hidden"
-                        >
-                            <Printer size={16} className="mr-2"/> Print / Download PO
+                    <div className="bg-white p-4 rounded-lg border border-amber-100 flex flex-col justify-center gap-2">
+                        <div className="flex items-center gap-2"><span className="text-xs text-gray-500 font-bold uppercase">Status:</span><StatusBadge status={po.status} /></div>
+                        <p className="text-sm text-gray-600"><span className="text-gray-400 text-xs mr-1">Delivery:</span>{po.expected_delivery_date ? new Date(po.expected_delivery_date).toLocaleDateString() : 'N/A'}</p>
+                        <button onClick={handlePrintPO} className="flex items-center justify-center gap-2 text-sm bg-indigo-600 text-white font-bold px-4 py-2 rounded-lg hover:bg-indigo-700">
+                            <Printer size={14} /> Download PDF
                         </button>
                     </div>
                 </div>
 
-                {/* Items Table */}
                 <div>
-                    <h4 className="text-lg font-bold text-gray-800 mb-3 flex items-center print:text-black">
-                        <ShoppingCart size={20} className="mr-2 text-indigo-500 print:hidden"/> Order Requirements
-                    </h4>
-                    <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm print:rounded-none print:shadow-none print:border-slate-800">
-                        <table className="w-full text-sm text-left print:border-collapse">
-                            <thead className="bg-gray-100 text-gray-600 border-b border-gray-200 print:bg-slate-100 print:text-black print:border-slate-800">
+                    <h4 className="text-sm font-bold text-gray-800 mb-3 flex items-center"><ShoppingCart size={16} className="mr-2 text-indigo-500" />Ordered Items</h4>
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-gray-100 text-gray-600 border-b border-gray-200">
                                 <tr>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider print:border print:border-slate-300">Fabric Type</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider print:border print:border-slate-300">Color Details</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right print:border print:border-slate-300">Quantity</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right print:border print:border-slate-300">Unit Price</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right bg-gray-50 print:bg-transparent print:border print:border-slate-300">Total</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Fabric</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Color</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right">Qty</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right">Unit Price</th>
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right">Total</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100 bg-white print:divide-slate-300">
-                                {po.items.map((item, idx) => (
-                                    <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
-                                        <td className="px-4 py-3 font-bold text-gray-800 print:border print:border-slate-300">{item.fabric_type}</td>
-                                        <td className="px-4 py-3 print:border print:border-slate-300">
-                                            <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-slate-50 border border-slate-200 text-slate-700 font-medium text-xs print:bg-transparent print:border-none print:p-0">
-                                                {item.fabric_color} <span className="text-slate-400 font-normal ml-1">({item.color_number})</span>
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3 text-right print:border print:border-slate-300">
-                                            <span className="font-extrabold text-blue-700 text-base print:text-black">{item.quantity}</span> 
-                                            <span className="text-xs text-gray-500 ml-1">{item.uom}</span>
-                                        </td>
-                                        <td className="px-4 py-3 text-right text-gray-600 font-medium print:text-black print:border print:border-slate-300">₹{item.unit_price}</td>
-                                        <td className="px-4 py-3 text-right font-bold text-emerald-700 bg-emerald-50/30 print:bg-transparent print:text-black print:border print:border-slate-300">₹{item.total_price}</td>
+                            <tbody className="divide-y divide-gray-100 bg-white">
+                                {(po.items || []).map((item, idx) => (
+                                    <tr key={idx} className="hover:bg-gray-50/50">
+                                        <td className="px-4 py-3 font-bold text-gray-800">{item.fabric_type}</td>
+                                        <td className="px-4 py-3 text-gray-600 text-xs">{item.fabric_color} ({item.color_number})</td>
+                                        <td className="px-4 py-3 text-right font-extrabold text-blue-700">{item.quantity} <span className="text-xs text-gray-400">{item.uom}</span></td>
+                                        <td className="px-4 py-3 text-right text-gray-600">₹{item.unit_price}</td>
+                                        <td className="px-4 py-3 text-right font-bold text-emerald-700">₹{item.total_price}</td>
                                     </tr>
                                 ))}
-                                {po.items.length === 0 && (
-                                    <tr><td colSpan="5" className="px-4 py-8 text-center text-gray-500 italic print:border print:border-slate-300">No items listed for this Purchase Order.</td></tr>
-                                )}
                             </tbody>
-                            <tfoot className="bg-slate-50 border-t border-slate-200 print:border-slate-800">
-                                <tr>
-                                    <td colSpan="4" className="px-4 py-3 text-right font-bold text-slate-700 print:border print:border-slate-300">Grand Total</td>
-                                    <td className="px-4 py-3 text-right font-bold text-slate-900 text-lg print:border print:border-slate-300">
-                                        ₹{po.items.reduce((sum, item) => sum + parseFloat(item.total_price || 0), 0).toFixed(2)}
-                                    </td>
-                                </tr>
-                            </tfoot>
                         </table>
                     </div>
                 </div>
 
-                {/* Print Signatures */}
-                <div className="hidden print:flex justify-end mt-24 pt-8">
-                    <div className="text-center w-48 border-t border-slate-800 pt-2">
-                        <p className="font-bold text-sm">Authorized Signature</p>
-                    </div>
-                </div>
-
-                {/* Received Rolls Summary - HIDDEN ON PRINT */}
-                <div className="print:hidden">
-                    <h4 className="text-lg font-bold text-gray-800 mb-3 flex items-center">
-                        <Layers size={20} className="mr-2 text-indigo-500"/> Received Rolls Log
-                    </h4>
-                    <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-                        {rolls.length === 0 ? (
-                            <div className="text-center py-6">
-                                <Package className="mx-auto h-8 w-8 text-gray-300 mb-2"/>
-                                <p className="italic text-sm text-gray-500">No rolls have been received against this PO yet.</p>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-60 overflow-y-auto pr-2">
-                                {rolls.map(r => (
-                                    <div key={r.id} className="flex justify-between items-center p-3 border border-gray-100 rounded-lg bg-gray-50 hover:border-blue-200 hover:bg-blue-50/50 transition-colors">
-                                        <div>
-                                            <span className="font-mono font-bold text-indigo-700 text-sm block">R-{r.id}</span>
-                                            <span className="text-xs text-gray-600 truncate block max-w-[120px]" title={r.fabric_type}>{r.fabric_type}</span>
-                                        </div>
-                                        <div className="text-right">
-                                            <span className="font-extrabold text-gray-800 block">{r.meter}<span className="text-xs text-gray-400 font-normal ml-0.5">m</span></span>
-                                            <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${r.status === 'IN_STOCK' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                                                {r.status === 'IN_STOCK' ? 'Stock' : 'Prod'}
-                                            </span>
-                                        </div>
+                <div>
+                    <h4 className="text-sm font-bold text-gray-800 mb-3 flex items-center"><Layers size={16} className="mr-2 text-indigo-500" />Received Rolls</h4>
+                    {rolls.length === 0 ? (
+                        <div className="text-center py-6 border-2 border-dashed border-gray-100 rounded-xl">
+                            <Package className="mx-auto h-7 w-7 text-gray-300 mb-2" />
+                            <p className="text-sm text-gray-400 italic">No rolls received yet.</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-52 overflow-y-auto">
+                            {rolls.map(r => (
+                                <div key={r.id} className="flex justify-between items-center p-2.5 border border-gray-100 rounded-lg bg-gray-50">
+                                    <div>
+                                        <span className="font-mono font-bold text-indigo-700 text-xs block">R-{r.id}</span>
+                                        <span className="text-xs text-gray-500 truncate block max-w-[100px]">{r.fabric_type}</span>
                                     </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
+                                    <div className="text-right">
+                                        <span className="font-bold text-gray-800 text-xs block">{r.meter}m</span>
+                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${r.status === 'IN_STOCK' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                            {r.status === 'IN_STOCK' ? 'Stock' : 'Prod'}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
-             </div>
-             
-             <div className="flex justify-end pt-5 border-t border-gray-100 mt-6 print:hidden">
-                <button onClick={onClose} className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-bold transition-colors">Close Viewer</button>
             </div>
-            
-            <style dangerouslySetInnerHTML={{__html: `
-                @media print {
-                    body * { visibility: hidden; }
-                    .fixed.inset-0 { position: absolute; left: 0; top: 0; width: 100%; display: block; background: transparent; }
-                    .fixed.inset-0 > div { box-shadow: none; max-width: 100%; width: 100%; }
-                    .fixed.inset-0 .overflow-y-auto { overflow: visible !important; }
-                    .print\\:block { display: block !important; visibility: visible !important; }
-                    .print\\:flex { display: flex !important; visibility: visible !important; }
-                    .print\\:hidden { display: none !important; }
-                    .print\\:m-0 { margin: 0 !important; }
-                    .print\\:p-0 { padding: 0 !important; }
-                    .print\\:text-black { color: black !important; }
-                    .print\\:bg-transparent { background-color: transparent !important; }
-                    .print\\:border-none { border: none !important; }
-                    .print\\:shadow-none { box-shadow: none !important; }
-                    .print\\:rounded-none { border-radius: 0 !important; }
-                    .print\\:border-slate-800 { border-color: #1e293b !important; }
-                    .print\\:border-slate-300 { border-color: #cbd5e1 !important; }
-                    .print\\:border { border-width: 1px !important; }
-                    .print\\:border-collapse { border-collapse: collapse !important; }
-                    .print\\:bg-slate-100 { background-color: #f1f5f9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                    .print\\:divide-slate-300 > * + * { border-color: #cbd5e1 !important; }
-                    .fixed.inset-0 .overflow-y-auto * { visibility: visible; }
-                }
-            `}} />
+            <div className="flex justify-end pt-5 border-t border-gray-100 mt-6">
+                <button onClick={onClose} className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-bold">Close</button>
+            </div>
         </Modal>
     );
 };
 
-// --- REFACTORED CREATE PO MODAL (Grouped UI + Tabs + UOM) ---
+// ─── CREATE PO MODAL ──────────────────────────────────────────────────────────
+
 const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
-    const [activeTab, setActiveTab] = useState('form'); 
+    const [activeTab, setActiveTab] = useState('form');
     const [soDetails, setSoDetails] = useState(null);
     const [isLoadingDetails, setIsLoadingDetails] = useState(false);
-
     const [supplierId, setSupplierId] = useState('');
     const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
-    
     const [fabricGroups, setFabricGroups] = useState([
-        {
-            fabric_type_id: '',
-            uom: 'meter', 
-            unit_price: '',
-            colors: [{ fabric_color_id: '', quantity: '' }]
-        }
+        { fabric_type_id: '', uom: 'meter', unit_price: '', colors: [{ fabric_color_id: '', quantity: '' }] }
     ]);
-    
     const [suppliers, setSuppliers] = useState([]);
     const [fabricTypes, setFabricTypes] = useState([]);
     const [fabricColors, setFabricColors] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        const loadOptions = async () => {
-            try {
-                const [intakeData, typesRes, colorsRes] = await Promise.all([
-                    storeManagerApi.getFabricIntakeFormData(),
-                    productionManagerApi.getFabricTypes(),
-                    productionManagerApi.getFabricColors()
-                ]);
-                setSuppliers(intakeData.data?.suppliers || []);
-                setFabricTypes(typesRes.data || []);
-                setFabricColors(colorsRes.data || []);
-            } catch (error) {
-                console.error("Failed to load PO form options", error);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-        loadOptions();
+        Promise.all([
+            storeManagerApi.getFabricIntakeFormData(),
+            productionManagerApi.getFabricTypes(),
+            productionManagerApi.getFabricColors(),
+        ]).then(([intake, types, colors]) => {
+            setSuppliers(intake.data.suppliers || []);
+            setFabricTypes(types.data || []);
+            setFabricColors(colors.data || []);
+        }).catch(console.error).finally(() => setIsLoading(false));
     }, []);
 
     useEffect(() => {
-        const fetchSoDetails = async () => {
-            if (!salesOrderId) return;
-            setIsLoadingDetails(true);
-            try {
-                const res = await accountingApi.getSalesOrderDetails(salesOrderId);
-                setSoDetails(res.data);
-            } catch (error) {
-                console.error("Failed to load SO Details for PO modal", error);
-            } finally {
-                setIsLoadingDetails(false);
-            }
-        };
-        fetchSoDetails();
+        if (!salesOrderId) return;
+        setIsLoadingDetails(true);
+        accountingApi.getSalesOrderDetails(salesOrderId)
+            .then(res => setSoDetails(res.data))
+            .catch(console.error)
+            .finally(() => setIsLoadingDetails(false));
     }, [salesOrderId]);
 
-
-    const addFabricGroup = () => {
-        setFabricGroups([...fabricGroups, { fabric_type_id: '', uom: 'meter', unit_price: '', colors: [{ fabric_color_id: '', quantity: '' }] }]);
-    };
-
-    const removeFabricGroup = (index) => {
-        if (fabricGroups.length > 1) {
-            setFabricGroups(fabricGroups.filter((_, i) => i !== index));
-        }
-    };
-
-    const updateFabricGroup = (index, field, value) => {
-        const newGroups = [...fabricGroups];
-        newGroups[index][field] = value;
-        setFabricGroups(newGroups);
-    };
-
-    const addColorToGroup = (groupIndex) => {
-        const newGroups = [...fabricGroups];
-        newGroups[groupIndex].colors.push({ fabric_color_id: '', quantity: '' });
-        setFabricGroups(newGroups);
-    };
-
-    const removeColorFromGroup = (groupIndex, colorIndex) => {
-        const newGroups = [...fabricGroups];
-        if (newGroups[groupIndex].colors.length > 1) {
-            newGroups[groupIndex].colors = newGroups[groupIndex].colors.filter((_, i) => i !== colorIndex);
-            setFabricGroups(newGroups);
-        }
-    };
-
-    const updateColorInGroup = (groupIndex, colorIndex, field, value) => {
-        const newGroups = [...fabricGroups];
-        newGroups[groupIndex].colors[colorIndex][field] = value;
-        setFabricGroups(newGroups);
-    };
+    const addFabricGroup    = () => setFabricGroups(g => [...g, { fabric_type_id: '', uom: 'meter', unit_price: '', colors: [{ fabric_color_id: '', quantity: '' }] }]);
+    const removeFabricGroup = (i) => fabricGroups.length > 1 && setFabricGroups(g => g.filter((_, idx) => idx !== i));
+    const updateFabricGroup = (i, f, v) => setFabricGroups(g => { const n = [...g]; n[i][f] = v; return n; });
+    const addColor          = (gi) => setFabricGroups(g => { const n = [...g]; n[gi].colors.push({ fabric_color_id: '', quantity: '' }); return n; });
+    const removeColor       = (gi, ci) => setFabricGroups(g => { const n = [...g]; if (n[gi].colors.length > 1) n[gi].colors = n[gi].colors.filter((_, i) => i !== ci); return n; });
+    const updateColor       = (gi, ci, f, v) => setFabricGroups(g => { const n = [...g]; n[gi].colors[ci][f] = v; return n; });
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        
-        if (!supplierId) return alert("Please select a supplier.");
-        
-        const formattedItems = [];
-        
+        if (!supplierId) return alert('Please select a supplier.');
+        const items = [];
         fabricGroups.forEach(group => {
-            if (!group.fabric_type_id) return; 
-            
-            group.colors.forEach(color => {
-                if (color.fabric_color_id && color.quantity) {
-                    formattedItems.push({
-                        fabric_type_id: parseInt(group.fabric_type_id, 10),
-                        fabric_color_id: parseInt(color.fabric_color_id, 10),
-                        quantity: parseFloat(color.quantity),
-                        uom: group.uom, 
-                        unit_price: group.unit_price ? parseFloat(group.unit_price) : 0
-                    });
+            if (!group.fabric_type_id) return;
+            group.colors.forEach(c => {
+                if (c.fabric_color_id && c.quantity) {
+                    items.push({ fabric_type_id: parseInt(group.fabric_type_id), fabric_color_id: parseInt(c.fabric_color_id), quantity: parseFloat(c.quantity), uom: group.uom, unit_price: group.unit_price ? parseFloat(group.unit_price) : 0 });
                 }
             });
         });
-
-        if (formattedItems.length === 0) {
-            return alert("Please ensure you have selected at least one Fabric Type, Color, and Quantity.");
-        }
-
-        onSave({
-            sales_order_id: salesOrderId,
-            supplier_id: parseInt(supplierId, 10),
-            expected_delivery_date: expectedDeliveryDate || null,
-            items: formattedItems
-        });
+        if (!items.length) return alert('Add at least one fabric type with color and quantity.');
+        onSave({ sales_order_id: salesOrderId, supplier_id: parseInt(supplierId), expected_delivery_date: expectedDeliveryDate || null, items });
     };
 
-    if (isLoading) return <Modal title="Loading..." onClose={onClose}><Spinner/></Modal>;
+    if (isLoading) return <Modal title="Loading…" onClose={onClose}><Spinner /></Modal>;
 
     return (
         <Modal title="Create Purchase Order" onClose={onClose} size="max-w-5xl">
             <div className="flex border-b border-gray-200 mb-6">
-                <button
-                    className={`py-3 px-6 font-bold text-sm border-b-2 transition-colors ${activeTab === 'form' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                    onClick={() => setActiveTab('form')}
-                >
-                    Order Form
-                </button>
-                <button
-                    className={`py-3 px-6 font-bold text-sm border-b-2 transition-colors flex items-center ${activeTab === 'details' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                    onClick={() => setActiveTab('details')}
-                >
-                    Reference: Sales Order {soDetails?.order_number ? `(${soDetails.order_number})` : ''}
-                </button>
+                {[{ key: 'form', label: 'Order Form' }, { key: 'details', label: `Sales Order Ref${soDetails?.order_number ? ` (${soDetails.order_number})` : ''}` }].map(tab => (
+                    <button key={tab.key}
+                        className={`py-3 px-6 font-bold text-sm border-b-2 transition-colors ${activeTab === tab.key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                        onClick={() => setActiveTab(tab.key)}
+                    >{tab.label}</button>
+                ))}
             </div>
 
             {activeTab === 'form' && (
-                <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in duration-200">
-                    
-                    <div className="bg-gray-50 p-5 rounded-xl border border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-5 shadow-sm">
+                <form onSubmit={handleSubmit} className="space-y-6">
+                    <div className="bg-gray-50 p-5 rounded-xl border border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-5">
                         <div>
                             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Supplier *</label>
-                            <select 
-                                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white" 
-                                value={supplierId} 
-                                onChange={e => setSupplierId(e.target.value)} 
-                                required
-                            >
+                            <select className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white" value={supplierId} onChange={e => setSupplierId(e.target.value)} required>
                                 <option value="">Select a Supplier</option>
                                 {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Expected Delivery (Optional)</label>
-                            <input 
-                                type="date" 
-                                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white"
-                                value={expectedDeliveryDate}
-                                onChange={e => setExpectedDeliveryDate(e.target.value)}
-                            />
+                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Expected Delivery</label>
+                            <input type="date" className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white" value={expectedDeliveryDate} onChange={e => setExpectedDeliveryDate(e.target.value)} />
                         </div>
                     </div>
 
-                    <div className="max-h-[50vh] overflow-y-auto pr-2 space-y-6 pb-4">
-                        {fabricGroups.map((group, groupIdx) => (
-                            <div key={groupIdx} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
+                    <div className="max-h-[50vh] overflow-y-auto pr-2 space-y-5 pb-2">
+                        {fabricGroups.map((group, gi) => (
+                            <div key={gi} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                                 <div className="bg-slate-50 p-4 border-b border-slate-200 flex flex-col md:flex-row md:items-end gap-4">
                                     <div className="flex-1">
                                         <label className="block text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1.5">Fabric Type *</label>
-                                        <select 
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium"
-                                            value={group.fabric_type_id}
-                                            onChange={e => updateFabricGroup(groupIdx, 'fabric_type_id', e.target.value)}
-                                            required
-                                        >
+                                        <select className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={group.fabric_type_id} onChange={e => updateFabricGroup(gi, 'fabric_type_id', e.target.value)} required>
                                             <option value="">Select Fabric Type</option>
                                             {fabricTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                                         </select>
                                     </div>
-                                    <div className="w-full md:w-32">
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Unit (UOM)</label>
-                                        <select 
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
-                                            value={group.uom}
-                                            onChange={e => updateFabricGroup(groupIdx, 'uom', e.target.value)}
-                                            required
-                                        >
-                                            <option value="meter">Meter</option>
-                                            <option value="kg">Kg</option>
-                                            <option value="yard">Yard</option>
-                                            <option value="pcs">Pieces</option>
+                                    <div className="w-32">
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">UOM</label>
+                                        <select className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={group.uom} onChange={e => updateFabricGroup(gi, 'uom', e.target.value)}>
+                                            <option value="meter">Meter</option><option value="kg">Kg</option><option value="yard">Yard</option><option value="pcs">Pcs</option>
                                         </select>
                                     </div>
-                                    <div className="w-full md:w-40">
+                                    <div className="w-40">
                                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Unit Price (₹)</label>
                                         <div className="relative">
                                             <span className="absolute left-3 top-2.5 text-slate-400 text-sm">₹</span>
-                                            <input 
-                                                type="number" 
-                                                min="0" 
-                                                step="0.01"
-                                                placeholder="0.00"
-                                                className="w-full p-2.5 pl-7 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
-                                                value={group.unit_price}
-                                                onChange={e => updateFabricGroup(groupIdx, 'unit_price', e.target.value)}
-                                            />
+                                            <input type="number" min="0" step="0.01" placeholder="0.00" className="w-full p-2.5 pl-7 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={group.unit_price} onChange={e => updateFabricGroup(gi, 'unit_price', e.target.value)} />
                                         </div>
                                     </div>
-                                    <div className="md:self-center pt-2 md:pt-0">
-                                        {fabricGroups.length > 1 && (
-                                            <button 
-                                                type="button" 
-                                                onClick={() => removeFabricGroup(groupIdx)}
-                                                className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors flex items-center text-sm font-bold"
-                                                title="Remove Fabric Block"
-                                            >
-                                                <Trash2 size={16} className="md:mr-0 mr-2" /> <span className="md:hidden">Remove Block</span>
-                                            </button>
-                                        )}
-                                    </div>
+                                    {fabricGroups.length > 1 && (
+                                        <button type="button" onClick={() => removeFabricGroup(gi)} className="text-red-400 hover:text-red-600 p-2 rounded-lg hover:bg-red-50 transition-colors"><Trash2 size={16} /></button>
+                                    )}
                                 </div>
-
-                                <div className="p-4 bg-white">
-                                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center">
-                                        <Palette size={14} className="mr-2"/> Colors & Quantities
-                                    </h5>
-                                    <div className="space-y-3">
-                                        {group.colors.map((color, colorIdx) => (
-                                            <div key={colorIdx} className="flex flex-wrap md:flex-nowrap items-center gap-3">
-                                                <div className="flex-1 min-w-[200px]">
-                                                    <select 
-                                                        className="w-full p-2 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                                                        value={color.fabric_color_id}
-                                                        onChange={e => updateColorInGroup(groupIdx, colorIdx, 'fabric_color_id', e.target.value)}
-                                                        required
-                                                    >
+                                <div className="p-4">
+                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center"><Palette size={12} className="mr-2" />Colors & Quantities</p>
+                                    <div className="space-y-2.5">
+                                        {group.colors.map((color, ci) => (
+                                            <div key={ci} className="flex items-center gap-3">
+                                                <div className="flex-1">
+                                                    <select className="w-full p-2 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm" value={color.fabric_color_id} onChange={e => updateColor(gi, ci, 'fabric_color_id', e.target.value)} required>
                                                         <option value="" disabled>Select Color</option>
-                                                        {fabricColors.map(c => <option key={c.id} value={c.id}>{c.color_number} - {c.name}</option>)}
+                                                        {fabricColors.map(c => <option key={c.id} value={c.id}>{c.color_number} – {c.name}</option>)}
                                                     </select>
                                                 </div>
-                                                <div className="w-full md:w-48 relative">
-                                                    <span className="absolute right-3 top-2 text-slate-400 text-sm font-medium">{group.uom}</span>
-                                                    <input 
-                                                        type="number" 
-                                                        min="0.1" 
-                                                        step="0.1"
-                                                        placeholder="Qty Required"
-                                                        className="w-full p-2 pr-12 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                                                        value={color.quantity}
-                                                        onChange={e => updateColorInGroup(groupIdx, colorIdx, 'quantity', e.target.value)}
-                                                        required
-                                                    />
+                                                <div className="w-44 relative">
+                                                    <span className="absolute right-3 top-2 text-slate-400 text-xs font-medium">{group.uom}</span>
+                                                    <input type="number" min="0.1" step="0.1" placeholder="Qty" className="w-full p-2 pr-12 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm" value={color.quantity} onChange={e => updateColor(gi, ci, 'quantity', e.target.value)} required />
                                                 </div>
-                                                <div className="w-8 flex justify-center">
-                                                    {group.colors.length > 1 && (
-                                                        <button 
-                                                            type="button" 
-                                                            onClick={() => removeColorFromGroup(groupIdx, colorIdx)}
-                                                            className="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-md transition-colors"
-                                                            title="Remove Color"
-                                                        >
-                                                            <X size={16} />
-                                                        </button>
-                                                    )}
-                                                </div>
+                                                {group.colors.length > 1 && (
+                                                    <button type="button" onClick={() => removeColor(gi, ci)} className="text-slate-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50"><X size={14} /></button>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
-                                    <button 
-                                        type="button" 
-                                        onClick={() => addColorToGroup(groupIdx)}
-                                        className="mt-3 text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
-                                    >
-                                        <Plus size={14} className="mr-1" /> Add Color Variant
+                                    <button type="button" onClick={() => addColor(gi)} className="mt-3 text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 hover:bg-indigo-50 px-2 py-1 rounded">
+                                        <Plus size={12} /> Add Color
                                     </button>
                                 </div>
                             </div>
                         ))}
-
-                        <div className="pt-2">
-                            <button 
-                                type="button" 
-                                onClick={addFabricGroup}
-                                className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 font-bold hover:bg-slate-50 hover:text-slate-700 transition-colors flex items-center justify-center"
-                            >
-                                <Layers size={18} className="mr-2" /> Add Another Fabric Type
-                            </button>
-                        </div>
+                        <button type="button" onClick={addFabricGroup} className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 font-bold hover:bg-slate-50 flex items-center justify-center gap-2">
+                            <Layers size={16} /> Add Fabric Type
+                        </button>
                     </div>
 
-                    <div className="flex justify-end pt-4 border-t border-gray-100 gap-3">
-                        <button 
-                            type="button" 
-                            onClick={onClose} 
-                            className="px-5 py-2.5 text-sm font-bold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                        >
-                            Cancel
-                        </button>
-                        <button 
-                            type="submit" 
-                            className="px-6 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-md shadow-blue-600/20 transition-all flex items-center"
-                        >
-                            <ShoppingCart size={16} className="mr-2"/> Create Purchase Order
+                    <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                        <button type="button" onClick={onClose} className="px-5 py-2.5 text-sm font-bold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+                        <button type="submit" className="px-6 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center gap-2">
+                            <ShoppingCart size={15} /> Create Purchase Order
                         </button>
                     </div>
                 </form>
             )}
 
             {activeTab === 'details' && (
-                <div className="max-h-[60vh] overflow-y-auto animate-in fade-in duration-200 pr-2">
-                    {isLoadingDetails ? (
-                        <div className="flex justify-center p-12"><Loader2 className="animate-spin text-indigo-600" /></div>
-                    ) : !soDetails ? (
-                        <div className="text-center p-12 text-gray-500 italic border-2 border-dashed border-gray-200 rounded-xl">Failed to load Sales Order details.</div>
-                    ) : (
+                <div className="max-h-[60vh] overflow-y-auto pr-2">
+                    {isLoadingDetails ? <div className="flex justify-center p-12"><Loader2 className="animate-spin text-indigo-600" /></div>
+                    : !soDetails ? <div className="text-center p-12 text-gray-500 italic border-2 border-dashed rounded-xl">Failed to load SO details.</div>
+                    : (
                         <div className="space-y-4">
-                            <div className="bg-slate-50 p-4 border border-slate-200 rounded-xl grid grid-cols-2 md:grid-cols-4 gap-4 text-sm shadow-sm">
-                                <div>
-                                    <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Customer</span>
-                                    <p className="font-semibold text-gray-800">{soDetails.customer_name}</p>
-                                </div>
-                                <div>
-                                    <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Buyer PO</span>
-                                    <p className="font-bold text-indigo-700">{soDetails.buyer_po_number || 'N/A'}</p>
-                                </div>
-                                <div>
-                                    <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Date Ordered</span>
-                                    <p className="text-gray-700">{new Date(soDetails.order_date).toLocaleDateString()}</p>
-                                </div>
-                                <div>
-                                    <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Total Pieces</span>
-                                    <p className="font-bold text-emerald-700">{soDetails.total_quantity || 0} pcs</p>
-                                </div>
+                            <div className="bg-slate-50 p-4 border border-slate-200 rounded-xl grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                <div><span className="block text-xs font-bold text-gray-400 uppercase mb-1">Customer</span><p className="font-semibold">{soDetails.customer_name}</p></div>
+                                <div><span className="block text-xs font-bold text-gray-400 uppercase mb-1">Buyer PO</span><p className="font-bold text-indigo-700">{soDetails.buyer_po_number || 'N/A'}</p></div>
+                                <div><span className="block text-xs font-bold text-gray-400 uppercase mb-1">Date</span><p>{new Date(soDetails.order_date).toLocaleDateString()}</p></div>
+                                <div><span className="block text-xs font-bold text-gray-400 uppercase mb-1">Total Pcs</span><p className="font-bold text-emerald-700">{soDetails.total_quantity || 0}</p></div>
                             </div>
-
-                            <h4 className="text-sm font-bold text-gray-800 border-b border-gray-200 pb-2 flex items-center">
-                                <Box size={16} className="mr-2 text-indigo-500"/> Products in this Order
-                            </h4>
-                            <div className="space-y-4">
-                                {soDetails.products?.map((prod, idx) => {
-                                    const totalQty = prod.colors ? prod.colors.reduce((sum, c) => sum + parseInt(c.quantity || 0), 0) : 0;
-                                    return (
-                                        <div key={idx} className="border border-gray-200 rounded-lg overflow-hidden shadow-sm">
-                                            <div className="bg-gray-100 px-4 py-2 flex justify-between items-center border-b border-gray-200">
-                                                <div>
-                                                    <span className="font-bold text-gray-800 mr-3">{prod.product_name}</span>
-                                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-medium border border-indigo-200">Fabric: {prod.fabric_type}</span>
-                                                </div>
-                                                <span className="text-sm font-bold text-gray-700">{totalQty} pcs total</span>
-                                            </div>
-                                            <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6 bg-white">
-                                                <div>
-                                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Size Breakdown Ratio</p>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {prod.size_breakdown && Object.entries(prod.size_breakdown).map(([size, ratio]) => (
-                                                            <span key={size} className="text-[10px] bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded text-slate-700 flex flex-col items-center min-w-[2rem]">
-                                                                <span className="font-bold opacity-70 text-[8px] leading-tight">{size}</span>
-                                                                <span className="font-extrabold leading-tight">{ratio}</span>
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Ordered Colors</p>
-                                                    <div className="space-y-1.5">
-                                                        {prod.colors?.map((c, i) => (
-                                                            <div key={i} className="flex justify-between text-xs bg-slate-50 px-2 py-1 rounded border border-slate-100">
-                                                                <span className="font-medium text-gray-700">{c.color_name} ({c.color_number})</span>
-                                                                <span className="font-bold text-indigo-600">{c.quantity} pcs</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
+                            {soDetails.products?.map((prod, idx) => (
+                                <div key={idx} className="border border-gray-200 rounded-lg overflow-hidden">
+                                    <div className="bg-gray-100 px-4 py-2 flex justify-between items-center border-b">
+                                        <span className="font-bold text-gray-800">{prod.product_name}</span>
+                                        <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded border border-indigo-200">{prod.fabric_type}</span>
+                                    </div>
+                                    <div className="p-4 grid grid-cols-2 gap-4 bg-white text-xs">
+                                        <div>
+                                            <p className="font-bold text-gray-400 uppercase mb-2">Sizes</p>
+                                            <div className="flex flex-wrap gap-1">
+                                                {prod.size_breakdown && Object.entries(prod.size_breakdown).map(([sz, r]) => (
+                                                    <span key={sz} className="bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded flex flex-col items-center min-w-[2rem]">
+                                                        <span className="font-bold opacity-60 text-[8px]">{sz}</span>
+                                                        <span className="font-extrabold">{r}</span>
+                                                    </span>
+                                                ))}
                                             </div>
                                         </div>
-                                    );
-                                })}
-                            </div>
+                                        <div>
+                                            <p className="font-bold text-gray-400 uppercase mb-2">Colors</p>
+                                            {prod.colors?.map((c, ci) => (
+                                                <div key={ci} className="flex justify-between bg-slate-50 px-2 py-1 rounded border border-slate-100 mb-1">
+                                                    <span className="font-medium">{c.color_name} ({c.color_number})</span>
+                                                    <span className="font-bold text-indigo-600">{c.quantity} pcs</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     )}
                 </div>
@@ -1503,31 +990,164 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
     );
 };
 
-// --- MAIN DASHBOARD ---
+// ─── BATCH STAGE DRILLDOWN MODAL ──────────────────────────────────────────────
+
+const BatchStageDrilldownModal = ({ batchId, flowId, stageName, onClose }) => {
+    const [stageData, setStageData] = useState(null);
+    const [loading, setLoading]     = useState(true);
+    const [error, setError]         = useState(null);
+    const [openRolls, setOpenRolls] = useState(new Set());
+
+    useEffect(() => {
+        productionManagerApi.getBatchDrilldown(batchId, flowId)
+            .then(res => {
+                const stages = res.data?.stages || [];
+                setStageData(stages.find(s => s.flow_id === flowId) || stages[0] || null);
+            })
+            
+            .catch(err => setError(err?.response?.data?.error || err.message || 'Failed to load'))
+            .finally(() => setLoading(false));
+    }, [batchId, flowId]);
+
+    const toggleRoll = (id) => setOpenRolls(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+    const title = `${stageName} — Batch #${batchId}`;
+
+    if (loading) return <Modal title={title} onClose={onClose}><Spinner /></Modal>;
+    if (error || !stageData) return <Modal title={title} onClose={onClose}><p className="text-red-500 text-sm p-4">{error || 'No data.'}</p></Modal>;
+    console.log('Stage Data:', stageData);
+    const mode = stageData.processing_mode;
+    const totals = { APPROVED: 0, NEEDS_REWORK: 0, REPAIRED:0, REJECTED: 0, OTHER: 0 };
+    (stageData.rolls || []).forEach(roll => {
+        const items = mode === 'PIECE'
+            ? (roll.parts || []).flatMap(p => (p.sizes || []).flatMap(sz => sz.pieces || []))
+            : (roll.garments || []);
+        items.forEach(item => {
+            const k = ['APPROVED', 'NEEDS_REWORK', 'REJECTED','REPAIRED'].includes(item.status) ? item.status : 'OTHER';
+            totals[k]++;
+        });
+    });
+
+    return (
+        <Modal title={title} onClose={onClose} size="max-w-3xl">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                {[
+                    { label: 'Line',      val: stageData.line_name || '—' },
+                    { label: 'Mode',      val: mode },
+                    { label: 'Status',    val: <StatusBadge status={stageData.stage_status} /> },
+                    { label: 'Completed', val: stageData.completed_at ? new Date(stageData.completed_at).toLocaleDateString() : '—' },
+                ].map(({ label, val }) => (
+                    <div key={label}>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">{label}</span>
+                        {typeof val === 'string' ? <p className="font-semibold text-slate-700 text-xs">{val}</p> : val}
+                    </div>
+                ))}
+            </div>
+            <div className="grid grid-cols-4 gap-2 mb-5">
+                {[
+                    { key: 'APPROVED',     label: 'Approved', color: 'bg-emerald-50 text-emerald-700' },
+                    { key: 'NEEDS_REWORK', label: 'Rework',   color: 'bg-amber-50   text-amber-700'   },
+                    { key: 'REPAIRED',     label: 'Repaired', color: 'bg-emerald-50 text-emerald-700' },
+                    { key: 'REJECTED',     label: 'Rejected', color: 'bg-red-50     text-red-600'     },
+                    { key: 'OTHER',        label: 'Other',    color: 'bg-slate-50   text-slate-500'   },
+                ].map(({ key, label, color }) => (
+                    <div key={key} className={`${color} rounded-xl p-3 text-center border border-black/5`}>
+                        <div className="text-xl font-black">{totals[key]}</div>
+                        <div className="text-[9px] font-bold uppercase tracking-wider opacity-70 mt-0.5">{label}</div>
+                    </div>
+                ))}
+            </div>
+            <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+                {(stageData.rolls || []).map(roll => {
+                    const isOpen = openRolls.has(roll.roll_id);
+                    return (
+                        <div key={roll.roll_id} className="border border-slate-200 rounded-lg overflow-hidden">
+                            <button onClick={() => toggleRoll(roll.roll_id)} className="w-full flex justify-between items-center px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors">
+                                <span className="font-mono font-bold text-slate-700 text-sm">Roll #{roll.roll_id}</span>
+                                {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                            </button>
+                            {isOpen && (
+                                <div className="p-3 bg-white">
+                                    {mode === 'PIECE' ? (
+                                        <div className="space-y-3">
+                                            {(roll.parts || []).map((part, pi) => (
+                                                <div key={pi}>
+                                                    <p className="text-[10px] font-bold text-slate-500 mb-1.5">{part.part_name} <span className="font-normal text-slate-400">({part.part_type})</span></p>
+                                                    {(part.sizes || []).map((sz, si) => (
+                                                        <div key={si} className="mb-2">
+                                                            <p className="text-[9px] font-bold text-slate-400 mb-1">Size {sz.size}</p>
+                                                            <div className="flex flex-wrap gap-1">
+                                                                {(sz.pieces || []).map(piece => {
+                                                                    const pc = piece.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' : piece.status === 'NEEDS_REWORK' ? 'bg-amber-100 text-amber-700' : piece.status === 'REJECTED' ? 'bg-red-100 text-red-600' : piece.status === 'REPAIRED' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'; return <span key={piece.piece_id} title={`#${piece.piece_id} · ${piece.status}`} className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${pc}`}>{piece.piece_sequence}</span>;
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {Object.entries((roll.garments || []).reduce((acc, g) => { (acc[g.size] = acc[g.size] || []).push(g); return acc; }, {})).map(([size, garments]) => (
+                                                <div key={size}>
+                                                    <p className="text-[9px] font-bold text-slate-400 mb-1">Size {size}</p>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {garments.map(g => {
+                                                            const gc = g.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' : g.status === 'NEEDS_REWORK' ? 'bg-amber-100 text-amber-700' : g.status === 'ASSEMBLED' ? 'bg-blue-100 text-blue-700' : g.status === 'REJECTED' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500';
+                                                            return <span key={g.garment_id} title={`${g.garment_uid} · ${g.status}`} className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${gc}`}>{g.garment_uid.split('-').pop()}</span>;
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+            <div className="flex justify-end pt-4 border-t border-slate-100 mt-4">
+                <button onClick={onClose} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-sm">Close</button>
+            </div>
+        </Modal>
+    );
+};
+
+// ─── MAIN DASHBOARD ───────────────────────────────────────────────────────────
+
 const ProductionWorkflowDashboard = () => {
+    const { user }  = useAuth();
+    const navigate  = useNavigate();
+    const location  = useLocation();
 
-    const { user } = useAuth();
-    const navigate = useNavigate();
-    const [data, setData] = useState([]);
-    const [filteredData, setFilteredData] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [filterStatus, setFilterStatus] = useState('ALL');
-    const [searchText, setSearchText] = useState(''); 
-
-    const [selectedSOId, setSelectedSOId] = useState(null); 
-    const [poModalSOId, setPoModalSOId] = useState(null);  
-    const [selectedPOId, setSelectedPOId] = useState(null); 
-    const [viewingReceiptsForBatch, setViewingReceiptsForBatch] = useState(null); // Will hold an object: { batchId, realBatchId }
+    const [data, setData]                       = useState([]);
+    const [filteredData, setFilteredData]       = useState([]);
+    const [loading, setLoading]                 = useState(true);
+    const [filterStatus, setFilterStatus]       = useState('ALL');
+    const [searchText, setSearchText]           = useState('');
+    const [selectedSOId, setSelectedSOId]       = useState(null);
+    const [selectedPOId, setSelectedPOId]       = useState(null);
+    const [poModalSOId, setPoModalSOId]         = useState(null);
+    const [drilldownTarget, setDrilldownTarget] = useState(null);
+    const [batchDrilldown, setBatchDrilldown]   = useState(null);
+    const [dispatchBatch, setDispatchBatch]     = useState(null);
+    const [inwardPO, setInwardPO]               = useState(null);
 
     const fetchData = async () => {
         setLoading(true);
         try {
-            const res = await productionManagerApi.getWorkflowData(); 
-            const sorted = res.data.sort((a, b) => new Date(b.order_date) - new Date(a.order_date)); 
+            const res    = await productionManagerApi.getWorkflowData();
+            console.log('Fetched workflow data:', res.data);    
+            const rows   = res.data || [];
+            const sorted = [...rows].sort((a, b) => {
+                if (a.sales_order_id && !b.sales_order_id) return -1;
+                if (!a.sales_order_id && b.sales_order_id) return 1;
+                return new Date(b.order_date || 0) - new Date(a.order_date || 0);
+            });
             setData(sorted);
             setFilteredData(sorted);
         } catch (err) {
-            console.error("Failed to fetch workflow data", err);
+            console.error('Failed to fetch workflow data', err);
         } finally {
             setLoading(false);
         }
@@ -1537,137 +1157,98 @@ const ProductionWorkflowDashboard = () => {
 
     useEffect(() => {
         let result = data;
-        if (filterStatus !== 'ALL') {
-            result = result.filter(so => so.status === filterStatus);
-        }
+        if (filterStatus !== 'ALL') result = result.filter(so => so.so_status === filterStatus);
         if (searchText) {
-            const lowerText = searchText.toLowerCase();
-            result = result.filter(so => 
-                so.order_number.toLowerCase().includes(lowerText) ||
-                so.customer_name.toLowerCase().includes(lowerText)
+            const lower = searchText.toLowerCase();
+            result = result.filter(so =>
+                (so.order_number    || '').toLowerCase().includes(lower) ||
+                (so.customer_name   || '').toLowerCase().includes(lower) ||
+                (so.buyer_po_number || '').toLowerCase().includes(lower) ||
+                so.purchase_orders?.some(po =>
+                    (po.po_code || '').toLowerCase().includes(lower) ||
+                    po.batches?.some(b => (b.batch_code || '').toLowerCase().includes(lower))
+                )
             );
         }
         setFilteredData(result);
     }, [data, filterStatus, searchText]);
 
-    const handleAddPO = (salesOrderId) => setPoModalSOId(salesOrderId);
-    const handleViewPODetails = (poId) => setSelectedPOId(poId); 
-    
-    const handleCreatePOSubmit = async (formData) => {
+    const basePath = location.pathname.startsWith('/initialization-portal') ? '/initialization-portal' : '/production-manager';
+
+    const handleStageClick   = (stage, batchId) => setDrilldownTarget({ batchId, flowId: stage.flow_id, stageName: stage.line_type_name });
+    const handleAddPO        = (soId) => setPoModalSOId(soId);
+    const handleEditSO       = (soId) => navigate(`/accounts/sales/${soId}/edit`);
+    const handleBatchDrilldown = (batchId, batchCode) => setBatchDrilldown({ batchId, batchCode });
+    const handleDispatch       = (batchId, batchCode) => setDispatchBatch({ batchId, batchCode });
+    const handleCreateBatch = (poData) => {
+        const poId       = typeof poData === 'object' ? poData?.po_id       : poData;
+        const supplierId = typeof poData === 'object' ? poData?.supplier_id : null;
+        const params     = [poId && `poId=${poId}`, supplierId && `supplierId=${supplierId}`].filter(Boolean).join('&');
+        navigate(`${basePath}/batches/new${params ? `?${params}` : ''}`);
+    };
+    const handleCreatePOSave = async (formData) => {
         try {
             await accountingApi.createPurchaseOrder(formData);
             setPoModalSOId(null);
             fetchData();
-        } catch (err) { alert("Failed to create Purchase Order."); }
+        } catch { alert('Failed to create Purchase Order.'); }
     };
 
-    const handleCreateBatch = (purchaseOrderId) => {
-         navigate(`/initialization-portal/batches/new?poId=${purchaseOrderId}`);
-    };
-    
-    const handleEditBatch = (batchId) => {
-        navigate(`/initialization-portal/batches/edit/${batchId}`);
-    };
+    const canManage     = user && ['accountant', 'sales_manager', 'admin', 'factory_admin'].includes(user.role);
+    const canProduction = user && ['cutting_manager', 'production_manager', 'admin', 'factory_admin'].includes(user.role);
+    const canInward     = user?.role === 'accountant';
 
-    // 2. Role-based router that respects your App.jsx protected routes
-    const handleViewBatchDetails = (batchId) => {
-        const userRole = user?.role || 'default';
-
-        // Map the role to the specific portal route defined in your App.jsx
-        const roleBasedRoutes = {
-            // Send Admins and Production Managers to the Production Manager portal route
-            'factory_admin': `/production-manager/batch-details/${batchId}`, 
-            'production_manager': `/production-manager/batch-details/${batchId}`,
-            
-            // Send Cutting Operators to the Cutting Portal route
-            'cutting_operator': `/cutting-portal/batch-details/${batchId}`,
-            
-            // Send Checking Operators to the Checking Portal route
-            'checking_operator': `/checking-portal/batch-details/${batchId}`,
-            
-            // Send Initialization staff (like cutting_manager) to their portal
-            'cutting_manager': `/initialization-portal/batch-details/${batchId}`,
-            'initialization_user': `/initialization-portal/batch-details/${batchId}`
-        };
-
-        // Fallback to production manager route if the role isn't perfectly mapped
-        const targetRoute = roleBasedRoutes[userRole] || `/production-manager/batch-details/${batchId}`;
-        
-        navigate(targetRoute);
-    };
-
-    const handleDeleteBatch = async (batchId) => {
-        try {
-            if (productionManagerApi.deleteBatch) {
-                await productionManagerApi.deleteBatch(batchId);
-            } else {
-                const token = localStorage.getItem('factory_token');
-                await fetch(`http://localhost:5000/api/production-manager/batches/${batchId}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-            }
-            fetchData(); 
-        } catch (err) {
-            alert("Failed to delete batch. It may have progressed too far.");
-            console.error(err);
-        }
-    };
-
-    const handleDeletePO = async (poId) => {
-        try {
-            if (accountingApi.deletePurchaseOrder) {
-                await accountingApi.deletePurchaseOrder(poId);
-            } else {
-                const token = localStorage.getItem('factory_token');
-                const res = await fetch(`http://localhost:5000/api/accounts/purchase-orders/${poId}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (!res.ok) {
-                    const errorData = await res.json();
-                    throw new Error(errorData.error || "Failed to delete PO");
-                }
-            }
-            fetchData();
-        } catch (err) {
-            alert(err.message || "Failed to delete Purchase Order.");
-            console.error(err);
-        }
-    };
+    const handleInward = (po) => setInwardPO({ ...po, id: po.po_id });
 
     return (
-        <div className="flex h-screen bg-slate-50 font-inter overflow-hidden">
-            <div className="w-72 bg-white border-r border-slate-200 p-6 flex flex-col z-10 shadow-sm shrink-0 h-full overflow-y-auto print:hidden">
+        <div className="flex h-screen bg-slate-50 overflow-hidden">
+            {/* ── Sidebar ── */}
+            <div className="w-64 bg-white border-r border-slate-200 p-6 flex flex-col shrink-0 h-full overflow-y-auto print:hidden">
                 <h2 className="text-xl font-extrabold text-slate-800 mb-6 flex items-center">
-                    <LayoutList className="mr-2 text-indigo-600" size={24}/> Workflow View
+                    <LayoutList className="mr-2 text-indigo-600" size={22} /> Workflow
                 </h2>
-                
+
+                {canManage && (
+                    <button
+                        onClick={() => navigate('/accounts/sales/new')}
+                        className="w-full mb-3 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm px-4 py-3 rounded-xl shadow-sm transition-all active:scale-95"
+                    >
+                        <Plus size={16} /> Create Sales Order
+                    </button>
+                )}
+                {canProduction && (
+                    <button
+                        onClick={() => handleCreateBatch(null)}
+                        className="w-full mb-6 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm px-4 py-3 rounded-xl shadow-sm transition-all active:scale-95"
+                    >
+                        <Plus size={16} /> Create Batch
+                    </button>
+                )}
+
                 <div className="space-y-6">
                     <div>
-                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Search Order</label>
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Search</label>
                         <div className="relative">
                             <Search className="absolute left-3 top-2.5 text-slate-400 w-4 h-4" />
-                            <input 
+                            <input
                                 type="text"
-                                placeholder="SO Number or Customer..."
+                                placeholder="SO, PO, Customer, Batch…"
                                 value={searchText}
-                                onChange={(e) => setSearchText(e.target.value)}
+                                onChange={e => setSearchText(e.target.value)}
                                 className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                             />
                         </div>
                     </div>
-
                     <div>
                         <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 block">Order Status</label>
                         <div className="space-y-1">
-                            {['ALL', 'DRAFT', 'CONFIRMED', 'IN_PRODUCTION'].map(f => (
-                                <button 
-                                    key={f} 
+                            {['ALL', 'DRAFT', 'PENDING', 'IN_PROGRESS', 'COMPLETED'].map(f => (
+                                <button
+                                    key={f}
                                     onClick={() => setFilterStatus(f)}
                                     className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === f ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`}
                                 >
-                                    {f === 'ALL' ? 'All Orders' : f.replace('_', ' ')}
+                                    {f === 'ALL' ? 'All Orders' : f.replace(/_/g, ' ')}
                                 </button>
                             ))}
                         </div>
@@ -1675,10 +1256,15 @@ const ProductionWorkflowDashboard = () => {
                 </div>
             </div>
 
+            {/* ── Main ── */}
             <div className="flex-1 overflow-auto p-8 print:p-0">
-                {loading ? <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin text-indigo-600 w-10 h-10"/></div> : (
-                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden print:border-none print:shadow-none print:rounded-none">
-                        <table className="min-w-full text-left border-collapse print:hidden">
+                {loading ? (
+                    <div className="h-full flex items-center justify-center">
+                        <Loader2 className="animate-spin text-indigo-600 w-10 h-10" />
+                    </div>
+                ) : (
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                        <table className="min-w-full text-left border-collapse">
                             <thead className="bg-slate-50 text-slate-500 font-semibold text-xs uppercase tracking-wider border-b border-slate-200 sticky top-0 z-10">
                                 <tr>
                                     <th className="px-6 py-4 w-12"></th>
@@ -1686,55 +1272,56 @@ const ProductionWorkflowDashboard = () => {
                                     <th className="px-6 py-4">Customer</th>
                                     <th className="px-6 py-4">Status</th>
                                     <th className="px-6 py-4">Metrics</th>
-                                    <th className="px-6 py-4 text-right">Actions</th>
+                                    <th className="px-6 py-4 text-right">Details</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 bg-white">
-                                {filteredData.length > 0 ? (
-                                    filteredData.map(so => (
-                                        <SalesOrderTableRow 
-                                            key={so.id} 
-                                            so={so} 
-                                            onAddPO={handleAddPO}
-                                            onDetails={setSelectedSOId}
-                                            onPODetails={handleViewPODetails}
-                                            onCreateBatch={handleCreateBatch}
-                                            onViewBatchDetails={handleViewBatchDetails}
-                                            onEditBatch={handleEditBatch}
-                                            onDeleteBatch={handleDeleteBatch}
-                                            onDeletePO={handleDeletePO}
-                                            onViewReceipts={(realBatchId) => setViewingReceiptsForBatch({ batchId: `B-${realBatchId}`, realBatchId: realBatchId })}
-                                        />
-                                    ))
-                                ) : (
+                                {filteredData.length > 0 ? filteredData.map((so, idx) => (
+                                    <SalesOrderTableRow
+                                        key={so.sales_order_id ?? `unlinked-${idx}`}
+                                        so={so}
+                                        onSODetails={setSelectedSOId}
+                                        onStageClick={handleStageClick}
+                                        onAddPO={canManage ? handleAddPO : null}
+                                        onCreateBatch={canProduction ? handleCreateBatch : null}
+                                        onViewPODetails={setSelectedPOId}
+                                        onInward={canInward ? handleInward : null}
+                                        onEditSO={canManage ? handleEditSO : null}
+                                        onDrilldown={handleBatchDrilldown}
+                                        onDispatch={canInward ? handleDispatch : null}
+                                    />
+                                )) : (
                                     <tr>
-                                        <td colSpan="6" className="px-6 py-12 text-center text-slate-400 italic">
-                                            No sales orders found matching your criteria.
+                                        <td colSpan="6" className="px-6 py-16 text-center text-slate-400 italic">
+                                            No orders found.
                                         </td>
                                     </tr>
                                 )}
                             </tbody>
                         </table>
-                        <div className="hidden print:block p-8">
-                            <h1 className="text-2xl font-bold mb-4">Print View Active</h1>
-                            <p>To print Purchase Orders, please open the specific Purchase Order detail modal and use the print button located there.</p>
-                        </div>
                     </div>
                 )}
             </div>
 
-            {selectedSOId && <SalesOrderDetailsModal orderId={selectedSOId} onClose={() => setSelectedSOId(null)} />}
-            {selectedPOId && <PurchaseOrderDetailsModal poId={selectedPOId} onClose={() => setSelectedPOId(null)} />}
-            {poModalSOId && <CreatePOModal salesOrderId={poModalSOId} onClose={() => setPoModalSOId(null)} onSave={handleCreatePOSubmit} />}
-                {/* Render the modal if viewingReceiptsForBatch is not null */}
-                {viewingReceiptsForBatch && (
-                    <BatchReceiptsModal 
-                        batchId={viewingReceiptsForBatch.batchId} 
-                        realBatchId={viewingReceiptsForBatch.realBatchId}
-                        onClose={() => setViewingReceiptsForBatch(null)} 
+            {selectedSOId    && <SalesOrderDetailsModal   orderId={selectedSOId}                    onClose={() => setSelectedSOId(null)}    />}
+            {selectedPOId    && <PurchaseOrderDetailsModal poId={selectedPOId}                      onClose={() => setSelectedPOId(null)}    />}
+            {poModalSOId     && <CreatePOModal             salesOrderId={poModalSOId}               onClose={() => setPoModalSOId(null)}     onSave={handleCreatePOSave} />}
+            {drilldownTarget && <BatchStageDrilldownModal  batchId={drilldownTarget.batchId}        flowId={drilldownTarget.flowId}         stageName={drilldownTarget.stageName} onClose={() => setDrilldownTarget(null)} />}
+            {batchDrilldown  && <BatchDrilldownModal       batchId={batchDrilldown.batchId}         batchCode={batchDrilldown.batchCode}    onClose={() => setBatchDrilldown(null)} />}
+            {dispatchBatch   && <BatchDispatchModal        batchId={dispatchBatch.batchId}          batchCode={dispatchBatch.batchCode}     onClose={() => setDispatchBatch(null)} />}
+            {inwardPO && (
+                <Modal title={`Goods Inward — ${inwardPO.po_code}`} onClose={() => setInwardPO(null)} size="max-w-4xl">
+                    <FabricIntakeForm
+                        purchaseOrder={inwardPO}
+                        onClose={() => setInwardPO(null)}
+                        onSave={async (payload) => {
+                            await storeManagerApi.createFabricIntake(payload);
+                            setInwardPO(null);
+                            fetchData();
+                        }}
                     />
-                )}
-
+                </Modal>
+            )}
         </div>
     );
 };

@@ -390,6 +390,7 @@ const AssemblyProcessingPortal = () => {
             console.log("Monitor Data:", monitorRes.data);
             setDefectCodes(defectsRes.data);
             setActiveBatches(monitorRes.data.active_batches || []);
+            console.log("Active Batches:", monitorRes.data.active_batches);
             setWorkstationInfo(monitorRes.data.workstation || null);
             setRecentScans(monitorRes.data.recent_scans || []);
         } catch (e) {
@@ -441,6 +442,7 @@ const AssemblyProcessingPortal = () => {
         setSelectedBatch(batch);
         try {
             const res = await assemblyApi.getBatchGarments(batch.batch_id);
+
             setBatchPieces(res.data);
         } catch (e) {
             alert("Failed to load pieces for this batch.");
@@ -573,6 +575,7 @@ const AssemblyProcessingPortal = () => {
             // If in batch mode, refresh the batch pieces so status updates live
             if (viewMode === 'BATCH' && selectedBatch) {
                 const res = await assemblyApi.getBatchGarments(selectedBatch.batch_id);
+                console.log("Updated ba tch pieces after action:", res.data);
                 setBatchPieces(res.data);
             }
             loadRequiredData();

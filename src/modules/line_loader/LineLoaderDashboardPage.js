@@ -6,7 +6,8 @@ import {
     Loader, CheckCircle2, X,
     Package, FileText, ExternalLink,
     ArrowLeft, Layers,
-    AlertTriangle, ArrowRight, Zap
+    AlertTriangle, ArrowRight, Zap,
+    History, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 // ============================================================================
@@ -583,6 +584,223 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
 };
 
 // ============================================================================
+// HISTORY PANEL
+// ============================================================================
+const CompletedBatchCard = ({ batch }) => {
+    const [expanded, setExpanded] = useState(false);
+    const so = batch.sales_order || {};
+    const q  = batch.quantities  || {};
+
+    return (
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+            {/* Header row */}
+            <button
+                onClick={() => setExpanded(e => !e)}
+                className="w-full flex items-start justify-between px-4 py-3.5 hover:bg-slate-50 transition-colors text-left"
+            >
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-black text-slate-800 text-sm">{batch.batch_code}</span>
+                        {batch.is_dispatch_closed && (
+                            <span className="flex items-center gap-0.5 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border bg-emerald-100 text-emerald-700 border-emerald-200">
+                                <CheckCircle2 size={8} /> Dispatched
+                            </span>
+                        )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5 truncate">
+                        {batch.product?.name}
+                        {so.customer && <span className="text-slate-400"> · {so.customer}</span>}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                        {so.order_number}{so.buyer_po_number && ` · BPO: ${so.buyer_po_number}`}
+                        {batch.purchase_order?.po_code && ` · ${batch.purchase_order.po_code}`}
+                    </p>
+                </div>
+                <div className="flex items-center gap-3 ml-3 shrink-0">
+                    {/* Quantity chips */}
+                    <div className="hidden sm:flex gap-1.5 text-right">
+                        <div className="text-center bg-slate-100 rounded-lg px-2 py-1">
+                            <p className="font-black text-slate-800 text-xs leading-none">{q.total_cut ?? '—'}</p>
+                            <p className="text-[8px] font-bold uppercase text-slate-400">cut</p>
+                        </div>
+                        <div className="text-center bg-blue-50 rounded-lg px-2 py-1">
+                            <p className="font-black text-slate-800 text-xs leading-none">{q.total_dispatched ?? '—'}</p>
+                            <p className="text-[8px] font-bold uppercase text-slate-400">dispatched</p>
+                        </div>
+                        <div className="text-center bg-indigo-50 rounded-lg px-2 py-1">
+                            <p className="font-black text-slate-800 text-xs leading-none">{q.receipt_count ?? '—'}</p>
+                            <p className="text-[8px] font-bold uppercase text-slate-400">receipts</p>
+                        </div>
+                    </div>
+                    {expanded ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+                </div>
+            </button>
+
+            {/* Expanded detail */}
+            {expanded && (
+                <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-3">
+                    {/* Mobile quantities */}
+                    <div className="flex gap-2 sm:hidden">
+                        {[
+                            { label: 'Cut',        value: q.total_cut,        bg: 'bg-slate-100'  },
+                            { label: 'Dispatched', value: q.total_dispatched, bg: 'bg-blue-50'    },
+                            { label: 'Receipts',   value: q.receipt_count,    bg: 'bg-indigo-50'  },
+                        ].map(({ label, value, bg }) => (
+                            <div key={label} className={`${bg} rounded-lg px-2.5 py-1.5 text-center flex-1`}>
+                                <p className="font-black text-slate-800 text-sm">{value ?? '—'}</p>
+                                <p className="text-[8px] font-bold uppercase text-slate-400">{label}</p>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Size breakdown */}
+                    {batch.size_breakdown && Object.keys(batch.size_breakdown).length > 0 && (
+                        <div>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Size Breakdown</p>
+                            <div className="flex flex-wrap gap-1.5">
+                                {Object.entries(batch.size_breakdown).map(([size, qty]) => (
+                                    <div key={size} className="flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-lg overflow-hidden min-w-[2.5rem]">
+                                        <span className="w-full text-center bg-indigo-100 text-indigo-800 text-[8px] font-bold py-0.5">{size}</span>
+                                        <span className="text-indigo-900 font-black text-xs py-1">{qty}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Cycle stages pipeline */}
+                    {batch.cycle_stages?.length > 0 && (
+                        <div>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Production Pipeline</p>
+                            <div className="flex items-center gap-1 flex-wrap">
+                                {batch.cycle_stages.map((stage, i) => (
+                                    <React.Fragment key={i}>
+                                        <div
+                                            className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold bg-emerald-500 text-white"
+                                            title={stage.line_name || ''}
+                                        >
+                                            <CheckCircle2 size={9} />
+                                            {stage.line_type}
+                                        </div>
+                                        {i < batch.cycle_stages.length - 1 && (
+                                            <ArrowRight size={10} className="text-slate-300" />
+                                        )}
+                                    </React.Fragment>
+                                ))}
+                            </div>
+                            <div className="mt-2 space-y-1">
+                                {batch.cycle_stages.map((stage, i) => (
+                                    <div key={i} className="flex items-center justify-between text-[10px] bg-slate-50 rounded-lg px-2.5 py-1.5">
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="text-slate-400 font-bold">#{stage.sequence_no}</span>
+                                            <span className="font-semibold text-slate-700">{stage.line_type}</span>
+                                            {stage.line_name && <span className="text-slate-400">({stage.line_name})</span>}
+                                        </div>
+                                        {stage.completed_at && (
+                                            <span className="text-slate-400">{new Date(stage.completed_at).toLocaleDateString()}</span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Created at */}
+                    {batch.created_at && (
+                        <p className="text-[9px] text-slate-400">Created: {new Date(batch.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const HistoryPanel = ({ onClose }) => {
+    const [batches, setBatches]   = useState([]);
+    const [loading, setLoading]   = useState(true);
+    const [error, setError]       = useState(null);
+    const [search, setSearch]     = useState('');
+
+    useEffect(() => {
+        lineLoaderApi.getCompletedBatches()
+            .then(res => setBatches(res.data?.data || res.data || []))
+            .catch(() => setError('Failed to load history.'))
+            .finally(() => setLoading(false));
+    }, []);
+
+    const filtered = useMemo(() => {
+        if (!search.trim()) return batches;
+        const lower = search.toLowerCase();
+        return batches.filter(b =>
+            (b.batch_code                      || '').toLowerCase().includes(lower) ||
+            (b.product?.name                   || '').toLowerCase().includes(lower) ||
+            (b.sales_order?.order_number       || '').toLowerCase().includes(lower) ||
+            (b.sales_order?.customer           || '').toLowerCase().includes(lower) ||
+            (b.purchase_order?.po_code         || '').toLowerCase().includes(lower)
+        );
+    }, [batches, search]);
+
+    return (
+        <div className="fixed inset-0 z-50 flex justify-end">
+            {/* Backdrop */}
+            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
+
+            {/* Drawer */}
+            <div className="relative flex flex-col bg-white w-full max-w-xl h-full shadow-2xl">
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
+                    <div className="flex items-center gap-2">
+                        <History size={18} className="text-indigo-600" />
+                        <h2 className="font-black text-slate-800 text-base">Batch History</h2>
+                        {!loading && (
+                            <span className="text-[10px] font-black bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
+                                {filtered.length}
+                            </span>
+                        )}
+                    </div>
+                    <button onClick={onClose} className="p-1.5 rounded-full hover:bg-slate-200 transition-colors">
+                        <X size={18} className="text-slate-500" />
+                    </button>
+                </div>
+
+                {/* Search */}
+                <div className="px-5 py-3 border-b border-slate-100 shrink-0">
+                    <input
+                        type="text"
+                        placeholder="Search batch, SO, customer…"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 outline-none"
+                    />
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+                    {loading ? (
+                        <div className="flex justify-center items-center h-40">
+                            <Loader className="animate-spin h-7 w-7 text-indigo-500" />
+                        </div>
+                    ) : error ? (
+                        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-600 text-sm font-medium">
+                            <AlertTriangle size={15} /> {error}
+                        </div>
+                    ) : filtered.length === 0 ? (
+                        <div className="flex flex-col items-center py-16 gap-3 text-slate-400">
+                            <Package size={36} />
+                            <p className="font-bold">{search ? 'No matches.' : 'No completed batches yet.'}</p>
+                        </div>
+                    ) : (
+                        filtered.map(batch => (
+                            <CompletedBatchCard key={batch.batch_id} batch={batch} />
+                        ))
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// ============================================================================
 // MAIN PAGE
 // ============================================================================
 const LineLoaderDashboardPage = () => {
@@ -590,6 +808,7 @@ const LineLoaderDashboardPage = () => {
     const [wipMap, setWipMap] = useState({}); // { lineId: { currentWip, wipLimit, isAtCapacity } }
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [showHistory, setShowHistory] = useState(false);
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
@@ -600,7 +819,7 @@ const LineLoaderDashboardPage = () => {
                 lineLoaderApi.getAllActiveLineWip().catch(() => ({ data: {} })) // non-fatal
             ]);
 
-            console.log("Dashboard data:", dashRes.data);
+            console.log("Dashbocard data:", dashRes.data);
             setAllBatches(dashRes.data || []);
             // wipRes.data expected: { [lineId]: { currentWip, wipLimit, isAtCapacity } }
             setWipMap(wipRes.data || {});
@@ -630,9 +849,14 @@ const LineLoaderDashboardPage = () => {
                     <h1 className="text-3xl font-black text-slate-900 tracking-tight">Line Loader</h1>
                     <p className="text-slate-500 mt-1 font-medium text-sm">Track each batch through its production pipeline and assign lines per stage.</p>
                 </div>
-                <button onClick={fetchData} className="flex items-center gap-2 text-sm font-bold text-slate-600 bg-white border border-slate-200 px-4 py-2.5 rounded-xl hover:bg-slate-50 shadow-sm active:scale-95 transition-all">
-                    <Loader size={14} className={isLoading ? 'animate-spin' : ''} /> Refresh
-                </button>
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setShowHistory(true)} className="flex items-center gap-2 text-sm font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-4 py-2.5 rounded-xl hover:bg-indigo-100 shadow-sm active:scale-95 transition-all">
+                        <History size={14} /> History
+                    </button>
+                    <button onClick={fetchData} className="flex items-center gap-2 text-sm font-bold text-slate-600 bg-white border border-slate-200 px-4 py-2.5 rounded-xl hover:bg-slate-50 shadow-sm active:scale-95 transition-all">
+                        <Loader size={14} className={isLoading ? 'animate-spin' : ''} /> Refresh
+                    </button>
+                </div>
             </header>
 
             {isLoading ? <Spinner /> : error ? (
@@ -652,6 +876,7 @@ const LineLoaderDashboardPage = () => {
                     ))}
                 </div>
             )}
+            {showHistory && <HistoryPanel onClose={() => setShowHistory(false)} />}
         </div>
     );
 };

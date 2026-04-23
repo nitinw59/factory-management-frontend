@@ -71,10 +71,17 @@ const FabricIntakeForm = ({ onSave, onClose, purchaseOrder, intake }) => {
     // --- 2. Initialize from PO (create mode only) ---
     useEffect(() => {
         if (!isEditMode && purchaseOrder) {
-            setSupplierId(String(purchaseOrder.supplier_id || ''));
+            if (purchaseOrder.supplier_id) {
+                setSupplierId(String(purchaseOrder.supplier_id));
+            } else if (purchaseOrder.supplier_name && suppliers.length > 0) {
+                const match = suppliers.find(
+                    s => s.name.toLowerCase() === purchaseOrder.supplier_name.toLowerCase()
+                );
+                if (match) setSupplierId(String(match.id));
+            }
             setReferenceNumber(purchaseOrder.po_code || purchaseOrder.po_number || '');
         }
-    }, [purchaseOrder]);
+    }, [purchaseOrder, suppliers]);
 
     // --- Roll Handlers ---
     const handleRollChange = (index, field, value) => {
@@ -202,6 +209,7 @@ const FabricIntakeForm = ({ onSave, onClose, purchaseOrder, intake }) => {
                     onChange={e => setReferenceNumber(e.target.value)}
                     placeholder="Enter Bill No, Challan No, or PO Code"
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    disabled={true}
                 />
             </div>
 

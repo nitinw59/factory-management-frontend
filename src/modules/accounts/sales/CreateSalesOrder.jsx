@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2, Save, Layers, Palette, Loader2, AlertCircle, DollarSign } from 'lucide-react';
-import { accountingApi } from '../../../api/accountingApi'; // Corrected API import
+import { accountingApi } from '../../../api/accountingApi';
 
 const CreateSalesOrder = () => {
   const navigate = useNavigate();
+  const { orderId } = useParams();
+  const isEditMode = Boolean(orderId);
   const SIZES = ['S', 'M', 'L', 'XL', 'XXL', `XXXL`, '4XL', '5XL', '6XL'];  
 
   // --- State ---
@@ -33,13 +35,72 @@ const CreateSalesOrder = () => {
       setIsLoading(true);
       setError(null);
       try {
-        const res = await accountingApi.getSalesOrderFormData();
-        setOptions(res.data);
-        
-        // Auto-generate a default order number
-        const year = new Date().getFullYear();
-        const randomStr = Math.floor(1000 + Math.random() * 9000);
-        setHeader(prev => ({ ...prev, orderNumber: `SO-${year}-${randomStr}` }));
+        const promises = [accountingApi.getSalesOrderFormData()];
+        if (isEditMode) promises.push(accountingApi.getSalesOrderDetails(orderId));
+
+        const [formRes, soRes] = await Promise.all(promises);
+        const opts = formRes.data;
+        setOptions(opts);
+
+        if (isEditMode && soRes?.data) {
+          const so = soRes.data;
+
+          // Match customer by id if present, else by name
+          const matchedCustomer = opts.customers.find(c =>
+            (so.customer_id && String(c.id) === String(so.customer_id)) ||
+            c.name?.toLowerCase() === so.customer_name?.toLowerCase()
+          );
+
+          setHeader({
+            customerId:    matchedCustomer ? String(matchedCustomer.id) : '',
+            orderNumber:   so.order_number   || '',
+            buyerPoNumber: so.buyer_po_number || '',
+            deliveryDate:  so.delivery_date   ? so.delivery_date.split('T')[0] : '',
+            notes:         so.notes           || '',
+          });
+
+          const groups = (so.products || []).map(prod => {
+            const matchedProduct = opts.products.find(p =>
+              (prod.product_id && String(p.id) === String(prod.product_id)) ||
+              p.name?.toLowerCase() === prod.product_name?.toLowerCase()
+            );
+            const matchedFabric = opts.fabricTypes.find(f =>
+              (prod.fabric_type_id && String(f.id) === String(prod.fabric_type_id)) ||
+              f.name?.toLowerCase() === prod.fabric_type?.toLowerCase()
+            );
+
+            const EMPTY_RATIO = { S: 0, M: 0, L: 0, XL: 0, XXL: 0, XXXL: 0, '4XL': 0, '5XL': 0, '6XL': 0 };
+            const sizeRatio = prod.size_breakdown
+              ? { ...EMPTY_RATIO, ...prod.size_breakdown }
+              : EMPTY_RATIO;
+
+            const colors = (prod.colors || []).map(c => {
+              const matchedColor = opts.fabricColors.find(fc =>
+                (c.fabric_color_id && String(fc.id) === String(c.fabric_color_id)) ||
+                fc.name?.toLowerCase() === c.color_name?.toLowerCase() ||
+                fc.number === c.color_number
+              );
+              return {
+                colorId:  matchedColor ? String(matchedColor.id) : '',
+                quantity: String(c.quantity || ''),
+                price:    String(c.unit_price || ''),
+              };
+            });
+
+            return {
+              productId:    matchedProduct ? String(matchedProduct.id) : '',
+              fabricTypeId: matchedFabric  ? String(matchedFabric.id)  : '',
+              sizeRatio,
+              colors: colors.length > 0 ? colors : [{ colorId: '', quantity: '', price: '' }],
+            };
+          });
+
+          if (groups.length > 0) setProductGroups(groups);
+        } else {
+          const year = new Date().getFullYear();
+          const randomStr = Math.floor(1000 + Math.random() * 9000);
+          setHeader(prev => ({ ...prev, orderNumber: `SO-${year}-${randomStr}` }));
+        }
       } catch (err) {
         console.error("Failed to load form options:", err);
         setError("Could not load form options. Please check your connection.");
@@ -47,9 +108,9 @@ const CreateSalesOrder = () => {
         setIsLoading(false);
       }
     };
-    
+
     fetchFormData();
-  }, []);
+  }, [orderId, isEditMode]);
 
   // --- Handlers ---
   
@@ -131,11 +192,12 @@ const CreateSalesOrder = () => {
               }))
           }))
       };
-      console.log("Submitting payload:", payload);
-      await accountingApi.createSalesOrder(payload);
-      
-      // Assume routing to a generic sales order list or dashboard
-      navigate('/accounts/sales/orders'); 
+      if (isEditMode) {
+        await accountingApi.updateSalesOrder(orderId, payload);
+      } else {
+        await accountingApi.createSalesOrder(payload);
+      }
+      navigate('/accounts/sales/orders');
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.error || err.message || "Failed to create sales order.");
@@ -153,8 +215,8 @@ const CreateSalesOrder = () => {
   return (
     <div className="p-6 max-w-5xl mx-auto bg-gray-50 min-h-screen font-inter text-gray-800">
       <header className="mb-6">
-        <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">Create Sales Order</h1>
-        <p className="text-gray-500 mt-1">Fill in the required fields to map a new buyer order into production.</p>
+        <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">{isEditMode ? 'Edit Sales Order' : 'Create Sales Order'}</h1>
+        <p className="text-gray-500 mt-1">{isEditMode ? 'Update the sales order details below.' : 'Fill in the required fields to map a new buyer order into production.'}</p>
       </header>
 
       {error && (
