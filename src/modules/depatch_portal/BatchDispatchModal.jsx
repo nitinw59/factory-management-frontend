@@ -427,7 +427,7 @@ const ReceiptsTab = ({ receipts }) => {
 
 // ─── MAIN MODAL ───────────────────────────────────────────────────────────────
 
-const BatchDispatchModal = ({ batchId, batchCode, onClose }) => {
+const BatchDispatchModal = ({ batchId, batchCode, onClose, canCreateDispatch = false, canCloseBatch = false }) => {
     const [data, setData]               = useState(null);
     const [loading, setLoading]         = useState(true);
     const [error, setError]             = useState(null);
@@ -487,7 +487,7 @@ const BatchDispatchModal = ({ batchId, batchCode, onClose }) => {
                         {batch?.is_dispatch_closed && <StatusBadge status="CLOSED" />}
                     </div>
                     <div className="flex items-center gap-2">
-                        {batch && !batch.is_dispatch_closed && !closeResult && (
+                        {batch && !batch.is_dispatch_closed && !closeResult && canCloseBatch && (
                             confirmClose ? (
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs text-red-600 font-bold">Confirm close?</span>
@@ -526,7 +526,7 @@ const BatchDispatchModal = ({ batchId, batchCode, onClose }) => {
                 {/* Tabs */}
                 <div className="flex border-b border-slate-100 bg-white shrink-0 px-2 overflow-x-auto">
                     <TabBtn label="Overview"       icon={ClipboardList} active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} />
-                    {batch?.can_create_receipt && !batch.is_dispatch_closed && (
+                    {canCreateDispatch && batch?.can_create_receipt && !batch.is_dispatch_closed && (
                         <TabBtn label="Create Receipt" icon={FileText}     active={activeTab === 'receipt'}  onClick={() => setActiveTab('receipt')} />
                     )}
                     <TabBtn label={`Receipts (${receipts.length})`} icon={Package} active={activeTab === 'receipts'} onClick={() => setActiveTab('receipts')} />
