@@ -654,6 +654,158 @@ const SalesOrderDetailsModal = ({ orderId, onClose }) => {
     );
 };
 
+// ─── ROLLS ACCORDION ─────────────────────────────────────────────────────────
+
+const RollsAccordion = ({ rolls }) => {
+    const [openGroups, setOpenGroups] = useState(new Set());
+
+    const toggle = (key) => setOpenGroups(prev => {
+        const next = new Set(prev);
+        next.has(key) ? next.delete(key) : next.add(key);
+        return next;
+    });
+
+    // Group by fabric_color_id; fall back to color_name or 'unknown'
+    const groups = useMemo(() => {
+        const map = new Map();
+        rolls.forEach(r => {
+            const key  = r.fabric_color_id ?? r.color_name ?? 'unknown';
+            if (!map.has(key)) {
+                map.set(key, {
+                    key,
+                    fabric_color_id: r.fabric_color_id,
+                    color_name:      r.color_name  || r.fabric_color || '—',
+                    color_number:    r.color_number || '—',
+                    fabric_type:     r.fabric_type  || '—',
+                    rolls: [],
+                });
+            }
+            map.get(key).rolls.push(r);
+        });
+        return [...map.values()];
+    }, [rolls]);
+
+    if (!rolls.length) return (
+        <div className="text-center py-6 border-2 border-dashed border-gray-100 rounded-xl">
+            <Package className="mx-auto h-7 w-7 text-gray-300 mb-2" />
+            <p className="text-sm text-gray-400 italic">No rolls received yet.</p>
+        </div>
+    );
+
+    const grandTotal = rolls.reduce((s, r) => s + parseFloat(r.meter || 0), 0);
+
+    return (
+        <div>
+            <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-bold text-gray-800 flex items-center">
+                    <Layers size={16} className="mr-2 text-indigo-500" />Received Rolls
+                </h4>
+                <div className="flex items-center gap-3 text-xs text-gray-500">
+                    <span><span className="font-black text-gray-800">{rolls.length}</span> rolls</span>
+                    <span><span className="font-black text-gray-800">{grandTotal.toFixed(2)}</span> m total</span>
+                </div>
+            </div>
+
+            <div className="border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
+                {groups.map(group => {
+                    const isOpen    = openGroups.has(group.key);
+                    const totalM    = group.rolls.reduce((s, r) => s + parseFloat(r.meter || 0), 0);
+                    const inStock   = group.rolls.filter(r => r.status === 'IN_STOCK').length;
+                    const inProd    = group.rolls.length - inStock;
+
+                    return (
+                        <div key={group.key}>
+                            {/* Group header */}
+                            <button
+                                onClick={() => toggle(group.key)}
+                                className="w-full flex items-center gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+                            >
+                                {/* Color swatch placeholder */}
+                                <div className="w-3 h-3 rounded-full bg-indigo-400 shrink-0" />
+
+                                {/* Color identity */}
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-bold text-gray-800 text-sm">{group.color_name}</span>
+                                        <span className="text-[10px] font-mono text-gray-400 bg-white border border-gray-200 px-1.5 py-0.5 rounded">{group.color_number}</span>
+                                        <span className="text-[10px] text-gray-400">{group.fabric_type}</span>
+                                        {group.fabric_color_id && (
+                                            <span className="text-[9px] text-gray-300">ID:{group.fabric_color_id}</span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Summary chips */}
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-xs font-black text-gray-700">{totalM.toFixed(2)} m</span>
+                                    <span className="text-[9px] font-bold bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{group.rolls.length} rolls</span>
+                                    {inStock > 0 && <span className="text-[9px] font-bold bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">{inStock} stock</span>}
+                                    {inProd  > 0 && <span className="text-[9px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">{inProd} prod</span>}
+                                    {isOpen
+                                        ? <ChevronUp   size={13} className="text-gray-400" />
+                                        : <ChevronDown size={13} className="text-gray-400" />
+                                    }
+                                </div>
+                            </button>
+
+                            {/* Expanded roll rows */}
+                            {isOpen && (
+                                <div className="bg-white">
+                                    <table className="w-full text-xs text-left">
+                                        <thead className="bg-slate-50 border-b border-gray-100">
+                                            <tr>
+                                                <th className="px-4 py-2 font-bold text-gray-400 uppercase tracking-wider">Roll ID</th>
+                                                <th className="px-4 py-2 font-bold text-gray-400 uppercase tracking-wider">Color Name</th>
+                                                <th className="px-4 py-2 font-bold text-gray-400 uppercase tracking-wider">Color No.</th>
+                                                <th className="px-4 py-2 font-bold text-gray-400 uppercase tracking-wider">Fabric</th>
+                                                <th className="px-4 py-2 font-bold text-gray-400 uppercase tracking-wider text-right">Meters</th>
+                                                <th className="px-4 py-2 font-bold text-gray-400 uppercase tracking-wider text-center">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-50">
+                                            {group.rolls.map(r => (
+                                                <tr key={r.id} className="hover:bg-slate-50/60">
+                                                    <td className="px-4 py-2 font-mono font-bold text-indigo-600">R-{r.id}</td>
+                                                    <td className="px-4 py-2 text-gray-700">{r.color_name || r.fabric_color || '—'}</td>
+                                                    <td className="px-4 py-2 text-gray-500">{r.color_number || '—'}</td>
+                                                    <td className="px-4 py-2 text-gray-500">{r.fabric_type || '—'}</td>
+                                                    <td className="px-4 py-2 text-right font-bold text-gray-800">{parseFloat(r.meter || 0).toFixed(2)} m</td>
+                                                    <td className="px-4 py-2 text-center">
+                                                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${r.status === 'IN_STOCK' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                            {r.status === 'IN_STOCK' ? 'In Stock' : r.status || 'In Prod'}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {/* Group subtotal row */}
+                                            <tr className="bg-indigo-50/60 border-t border-indigo-100">
+                                                <td colSpan={4} className="px-4 py-2 text-[10px] font-bold text-indigo-600 uppercase tracking-wider">
+                                                    Subtotal — {group.color_name}
+                                                </td>
+                                                <td className="px-4 py-2 text-right font-black text-indigo-700">{totalM.toFixed(2)} m</td>
+                                                <td className="px-4 py-2 text-center text-[10px] text-indigo-500 font-bold">{group.rolls.length} rolls</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+
+                {/* Grand total footer */}
+                <div className="flex items-center justify-between px-4 py-2.5 bg-gray-900 text-white">
+                    <span className="text-xs font-bold uppercase tracking-wider">Grand Total</span>
+                    <div className="flex items-center gap-4 text-xs font-black">
+                        <span>{rolls.length} rolls</span>
+                        <span>{grandTotal.toFixed(2)} m</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ─── PURCHASE ORDER DETAILS MODAL ─────────────────────────────────────────────
 
 const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
@@ -748,32 +900,7 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
                     </div>
                 </div>
 
-                <div>
-                    <h4 className="text-sm font-bold text-gray-800 mb-3 flex items-center"><Layers size={16} className="mr-2 text-indigo-500" />Received Rolls</h4>
-                    {rolls.length === 0 ? (
-                        <div className="text-center py-6 border-2 border-dashed border-gray-100 rounded-xl">
-                            <Package className="mx-auto h-7 w-7 text-gray-300 mb-2" />
-                            <p className="text-sm text-gray-400 italic">No rolls received yet.</p>
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-52 overflow-y-auto">
-                            {rolls.map(r => (
-                                <div key={r.id} className="flex justify-between items-center p-2.5 border border-gray-100 rounded-lg bg-gray-50">
-                                    <div>
-                                        <span className="font-mono font-bold text-indigo-700 text-xs block">R-{r.id}</span>
-                                        <span className="text-xs text-gray-500 truncate block max-w-[100px]">{r.fabric_type}</span>
-                                    </div>
-                                    <div className="text-right">
-                                        <span className="font-bold text-gray-800 text-xs block">{r.meter}m</span>
-                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${r.status === 'IN_STOCK' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                                            {r.status === 'IN_STOCK' ? 'Stock' : 'Prod'}
-                                        </span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                <RollsAccordion rolls={rolls} />
             </div>
             <div className="flex justify-end pt-5 border-t border-gray-100 mt-6">
                 <button onClick={onClose} className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-bold">Close</button>
@@ -993,48 +1120,83 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
 // ─── BATCH STAGE DRILLDOWN MODAL ──────────────────────────────────────────────
 
 const BatchStageDrilldownModal = ({ batchId, flowId, stageName, onClose }) => {
-    const [stageData, setStageData] = useState(null);
+    const [drilldown, setDrilldown] = useState(null);
     const [loading, setLoading]     = useState(true);
     const [error, setError]         = useState(null);
     const [openRolls, setOpenRolls] = useState(new Set());
 
     useEffect(() => {
-        productionManagerApi.getBatchDrilldown(batchId, flowId)
+        productionManagerApi.getBatchDrilldownFull(batchId)
             .then(res => {
-                const stages = res.data?.stages || [];
-                setStageData(stages.find(s => s.flow_id === flowId) || stages[0] || null);
+                // handle both { data: {...} } and raw-body responses
+                setDrilldown(res.data?.data ?? res.data);
             })
-            
             .catch(err => setError(err?.response?.data?.error || err.message || 'Failed to load'))
             .finally(() => setLoading(false));
-    }, [batchId, flowId]);
+    }, [batchId]);
+
+    const stage = useMemo(() =>
+        // eslint-disable-next-line eqeqeq
+        (drilldown?.cycle_stages || []).find(s => s.flow_id == flowId) || null,
+        [drilldown, flowId]
+    );
+
+    // Build roll_id → breakdown rows map for PIECE mode
+    const breakdownByRoll = useMemo(() => {
+        const rows = stage?.tracking_data?.breakdown_by_roll_size || [];
+        const map = new Map();
+        rows.forEach(r => {
+            if (!map.has(r.roll_id)) map.set(r.roll_id, []);
+            map.get(r.roll_id).push(r);
+        });
+        return map;
+    }, [stage]);
 
     const toggleRoll = (id) => setOpenRolls(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
     const title = `${stageName} — Batch #${batchId}`;
 
     if (loading) return <Modal title={title} onClose={onClose}><Spinner /></Modal>;
-    if (error || !stageData) return <Modal title={title} onClose={onClose}><p className="text-red-500 text-sm p-4">{error || 'No data.'}</p></Modal>;
-    console.log('Stage Data:', stageData);
-    const mode = stageData.processing_mode;
-    const totals = { APPROVED: 0, NEEDS_REWORK: 0, REPAIRED:0, REJECTED: 0, OTHER: 0 };
-    (stageData.rolls || []).forEach(roll => {
-        const items = mode === 'PIECE'
-            ? (roll.parts || []).flatMap(p => (p.sizes || []).flatMap(sz => sz.pieces || []))
-            : (roll.garments || []);
-        items.forEach(item => {
-            const k = ['APPROVED', 'NEEDS_REWORK', 'REJECTED','REPAIRED'].includes(item.status) ? item.status : 'OTHER';
-            totals[k]++;
-        });
-    });
+    if (error || !drilldown || !stage) return <Modal title={title} onClose={onClose}><p className="text-red-500 text-sm p-4">{error || 'No data.'}</p></Modal>;
+
+    const topRolls   = drilldown.rolls || [];
+    const mode       = stage.processing_mode;
+    const isPiece    = mode === 'PIECE';
+    const isSerial   = mode === 'SERIALIZED';
+    const progress   = stage.progress;
+    const rawStats   = stage.tracking_data?.stats || {};
+
+    // Piece Production Info: aggregated from top-level rolls (all rolls in this batch)
+    const totalPrimCut   = topRolls.reduce((s, r) => s + (r.primary_pieces_cut || 0), 0);
+    const pieceTypeCount = topRolls[0]?.piece_type_count || 1;
+    const totalPieces    = totalPrimCut * pieceTypeCount;
+
+    // PIECE mode overall stats (values arrive as strings from backend)
+    const stats = {
+        approved:     parseInt(rawStats.approved     || 0),
+        needs_rework: parseInt(rawStats.needs_rework || 0),
+        qc_rejected:  parseInt(rawStats.qc_rejected  || 0),
+        repaired:     parseInt(rawStats.repaired      || 0),
+        pending:      parseInt(rawStats.pending       || 0),
+        total:        parseInt(rawStats.total         || 0),
+    };
+
+    // Rolls that appear in this stage's roll_log, enriched with top-level fabric info
+    const rollLogMap = new Map(topRolls.map(r => [r.roll_id, r]));
+    const rollsInStage = (stage.roll_log || []).map(logEntry => ({
+        ...logEntry,
+        ...(rollLogMap.get(logEntry.roll_id) || {}),
+        log_status: logEntry.status,
+    }));
 
     return (
         <Modal title={title} onClose={onClose} size="max-w-3xl">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5 p-4 bg-slate-50 rounded-xl border border-slate-200">
+            {/* Stage meta */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
                 {[
-                    { label: 'Line',      val: stageData.line_name || '—' },
+                    { label: 'Line',      val: progress?.production_line_name || '—' },
                     { label: 'Mode',      val: mode },
-                    { label: 'Status',    val: <StatusBadge status={stageData.stage_status} /> },
-                    { label: 'Completed', val: stageData.completed_at ? new Date(stageData.completed_at).toLocaleDateString() : '—' },
+                    { label: 'Status',    val: <StatusBadge status={progress?.status || 'NOT_STARTED'} /> },
+                    { label: 'Completed', val: progress?.completed_at ? new Date(progress.completed_at).toLocaleDateString() : '—' },
                 ].map(({ label, val }) => (
                     <div key={label}>
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">{label}</span>
@@ -1042,62 +1204,171 @@ const BatchStageDrilldownModal = ({ batchId, flowId, stageName, onClose }) => {
                     </div>
                 ))}
             </div>
-            <div className="grid grid-cols-4 gap-2 mb-5">
-                {[
-                    { key: 'APPROVED',     label: 'Approved', color: 'bg-emerald-50 text-emerald-700' },
-                    { key: 'NEEDS_REWORK', label: 'Rework',   color: 'bg-amber-50   text-amber-700'   },
-                    { key: 'REPAIRED',     label: 'Repaired', color: 'bg-emerald-50 text-emerald-700' },
-                    { key: 'REJECTED',     label: 'Rejected', color: 'bg-red-50     text-red-600'     },
-                    { key: 'OTHER',        label: 'Other',    color: 'bg-slate-50   text-slate-500'   },
-                ].map(({ key, label, color }) => (
-                    <div key={key} className={`${color} rounded-xl p-3 text-center border border-black/5`}>
-                        <div className="text-xl font-black">{totals[key]}</div>
-                        <div className="text-[9px] font-bold uppercase tracking-wider opacity-70 mt-0.5">{label}</div>
+
+            {/* Piece Production Info — PIECE mode only, once tracking has started */}
+            {isPiece && stage.tracking_data && (
+                <div className="mb-4 p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
+                    <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider mb-2">Piece Production Info</p>
+                    <div className="grid grid-cols-5 gap-2">
+                        {[
+                            { label: 'Piece Types',    val: pieceTypeCount,                        sub: 'parts per garment',           color: 'bg-white text-indigo-700'    },
+                            { label: 'Primary Cut',    val: totalPrimCut,                           sub: 'garments cut across all rolls', color: 'bg-white text-indigo-700'    },
+                            { label: 'Total Pieces',   val: totalPieces,                            sub: `${totalPrimCut} × ${pieceTypeCount}`, color: 'bg-indigo-100 text-indigo-800' },
+                            { label: 'In Tracking',    val: stats.total,                            sub: 'pieces logged',               color: 'bg-white text-slate-700'     },
+                            { label: 'Approved',       val: stats.approved,                         sub: 'approved pieces',             color: 'bg-emerald-50 text-emerald-700' },
+                        ].map(({ label, val, sub, color }) => (
+                            <div key={label} className={`${color} rounded-lg p-2.5 text-center border border-indigo-100`}>
+                                <p className="text-lg font-black leading-none">{val ?? '—'}</p>
+                                <p className="text-[9px] font-bold uppercase tracking-wider opacity-70 mt-1">{label}</p>
+                                <p className="text-[8px] text-current opacity-50 mt-0.5">{sub}</p>
+                            </div>
+                        ))}
                     </div>
-                ))}
-            </div>
-            <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
-                {(stageData.rolls || []).map(roll => {
-                    const isOpen = openRolls.has(roll.roll_id);
+                </div>
+            )}
+
+            {/* Status totals — PIECE mode */}
+            {isPiece && stage.tracking_data && (
+                <div className="grid grid-cols-6 gap-2 mb-4">
+                    {[
+                        { key: 'approved',     label: 'Approved', color: 'bg-emerald-50 text-emerald-700' },
+                        { key: 'needs_rework', label: 'Rework',   color: 'bg-amber-50   text-amber-700'   },
+                        { key: 'qc_rejected',  label: 'Rejected', color: 'bg-red-50     text-red-600'     },
+                        { key: 'repaired',     label: 'Repaired', color: 'bg-blue-50    text-blue-700'    },
+                        { key: 'pending',      label: 'Pending',  color: 'bg-slate-50   text-slate-400'   },
+                        { key: 'total',        label: 'Total',    color: 'bg-indigo-50  text-indigo-700'  },
+                    ].map(({ key, label, color }) => (
+                        <div key={key} className={`${color} rounded-xl p-3 text-center border border-black/5`}>
+                            <div className="text-xl font-black">{stats[key]}</div>
+                            <div className="text-[9px] font-bold uppercase tracking-wider opacity-70 mt-0.5 leading-tight">{label}</div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Roll accordion */}
+            <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
+                {rollsInStage.length === 0 && (
+                    <p className="text-slate-400 text-sm italic text-center py-6">No rolls logged for this stage yet.</p>
+                )}
+                {rollsInStage.map(roll => {
+                    const isOpen       = openRolls.has(roll.roll_id);
+                    const rollRows     = breakdownByRoll.get(roll.roll_id) || [];
+                    const rollTotal    = rollRows.reduce((s, e) => s + parseInt(e.count || 0), 0);
+                    const rollApproved = rollRows.filter(e => e.status === 'APPROVED').reduce((s, e) => s + parseInt(e.count || 0), 0);
+                    const rollPrimCut  = roll.primary_pieces_cut || 0;
+                    const rollPieceTyp = roll.piece_type_count || pieceTypeCount;
+
+                    // Group breakdown by size → { size: { STATUS: count } }
+                    const sizeMap = rollRows.reduce((acc, e) => {
+                        if (!acc[e.size]) acc[e.size] = {};
+                        acc[e.size][e.status] = parseInt(e.count || 0);
+                        return acc;
+                    }, {});
+
                     return (
                         <div key={roll.roll_id} className="border border-slate-200 rounded-lg overflow-hidden">
-                            <button onClick={() => toggleRoll(roll.roll_id)} className="w-full flex justify-between items-center px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors">
-                                <span className="font-mono font-bold text-slate-700 text-sm">Roll #{roll.roll_id}</span>
-                                {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                            {/* Roll header — always show fabric summary */}
+                            <button
+                                onClick={() => toggleRoll(roll.roll_id)}
+                                className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+                            >
+                                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                    <span className="font-mono font-bold text-slate-700 text-sm shrink-0">Roll #{roll.roll_id}</span>
+                                    {roll.color && (
+                                        <span className="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full truncate max-w-[120px]">{roll.color}</span>
+                                    )}
+                                    {roll.meters != null && (
+                                        <span className="text-[9px] text-slate-400 shrink-0">{roll.meters}m</span>
+                                    )}
+                                    {roll.lays != null && (
+                                        <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full shrink-0">{roll.lays} lays</span>
+                                    )}
+                                    {isPiece && rollPrimCut > 0 && (
+                                        <span className="text-[9px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full shrink-0">
+                                            {rollPrimCut} pcs cut
+                                        </span>
+                                    )}
+                                    {isPiece && rollTotal > 0 && (
+                                        <>
+                                            <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full shrink-0">{rollApproved} approved</span>
+                                            <span className="text-[9px] text-slate-400 shrink-0">{rollTotal} total</span>
+                                        </>
+                                    )}
+                                    <StatusBadge status={roll.log_status} />
+                                </div>
+                                {isOpen ? <ChevronUp size={14} className="shrink-0 ml-2" /> : <ChevronDown size={14} className="shrink-0 ml-2" />}
                             </button>
+
                             {isOpen && (
                                 <div className="p-3 bg-white">
-                                    {mode === 'PIECE' ? (
-                                        <div className="space-y-3">
-                                            {(roll.parts || []).map((part, pi) => (
-                                                <div key={pi}>
-                                                    <p className="text-[10px] font-bold text-slate-500 mb-1.5">{part.part_name} <span className="font-normal text-slate-400">({part.part_type})</span></p>
-                                                    {(part.sizes || []).map((sz, si) => (
-                                                        <div key={si} className="mb-2">
-                                                            <p className="text-[9px] font-bold text-slate-400 mb-1">Size {sz.size}</p>
-                                                            <div className="flex flex-wrap gap-1">
-                                                                {(sz.pieces || []).map(piece => {
-                                                                    const pc = piece.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' : piece.status === 'NEEDS_REWORK' ? 'bg-amber-100 text-amber-700' : piece.status === 'REJECTED' ? 'bg-red-100 text-red-600' : piece.status === 'REPAIRED' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'; return <span key={piece.piece_id} title={`#${piece.piece_id} · ${piece.status}`} className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${pc}`}>{piece.piece_sequence}</span>;
-                                                                })}
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            {Object.entries((roll.garments || []).reduce((acc, g) => { (acc[g.size] = acc[g.size] || []).push(g); return acc; }, {})).map(([size, garments]) => (
-                                                <div key={size}>
-                                                    <p className="text-[9px] font-bold text-slate-400 mb-1">Size {size}</p>
-                                                    <div className="flex flex-wrap gap-1">
-                                                        {garments.map(g => {
-                                                            const gc = g.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' : g.status === 'NEEDS_REWORK' ? 'bg-amber-100 text-amber-700' : g.status === 'ASSEMBLED' ? 'bg-blue-100 text-blue-700' : g.status === 'REJECTED' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500';
-                                                            return <span key={g.garment_id} title={`${g.garment_uid} · ${g.status}`} className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${gc}`}>{g.garment_uid.split('-').pop()}</span>;
+                                    {isPiece ? (
+                                        Object.keys(sizeMap).length > 0 ? (
+                                            <div>
+                                                {/* Size × status breakdown table — group by size (piece type) */}
+                                                <table className="w-full text-[10px] border-collapse">
+                                                    <thead>
+                                                        <tr className="bg-slate-50 text-slate-500 font-bold">
+                                                            <th className="text-left px-2 py-1.5 rounded-tl">Size</th>
+                                                            <th className="text-right px-2 py-1.5 text-emerald-600">Approved</th>
+                                                            <th className="text-right px-2 py-1.5 text-amber-600">Rework</th>
+                                                            <th className="text-right px-2 py-1.5 text-red-500">Rejected</th>
+                                                            <th className="text-right px-2 py-1.5 text-blue-600">Repaired</th>
+                                                            <th className="text-right px-2 py-1.5 text-slate-400">Pending</th>
+                                                            <th className="text-right px-2 py-1.5 rounded-tr">Total</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {Object.entries(sizeMap).map(([size, sm]) => {
+                                                            const rowTotal = Object.values(sm).reduce((s, v) => s + v, 0);
+                                                            return (
+                                                                <tr key={size} className="border-t border-slate-100 hover:bg-slate-50/50">
+                                                                    <td className="px-2 py-1.5 font-bold text-slate-700">{size}</td>
+                                                                    <td className="px-2 py-1.5 text-right font-bold text-emerald-700">{sm.APPROVED || 0}</td>
+                                                                    <td className="px-2 py-1.5 text-right text-amber-700">{sm.NEEDS_REWORK || 0}</td>
+                                                                    <td className="px-2 py-1.5 text-right text-red-600">{sm.QC_REJECTED || 0}</td>
+                                                                    <td className="px-2 py-1.5 text-right text-blue-700">{sm.REPAIRED || 0}</td>
+                                                                    <td className="px-2 py-1.5 text-right text-slate-400">{sm.PENDING || 0}</td>
+                                                                    <td className="px-2 py-1.5 text-right font-bold text-slate-700">{rowTotal}</td>
+                                                                </tr>
+                                                            );
                                                         })}
+                                                    </tbody>
+                                                    <tfoot>
+                                                        <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold">
+                                                            <td className="px-2 py-1.5 text-slate-500">Total</td>
+                                                            {['APPROVED','NEEDS_REWORK','QC_REJECTED','REPAIRED','PENDING'].map(st => (
+                                                                <td key={st} className="px-2 py-1.5 text-right">
+                                                                    {rollRows.filter(e => e.status === st).reduce((s, e) => s + parseInt(e.count || 0), 0)}
+                                                                </td>
+                                                            ))}
+                                                            <td className="px-2 py-1.5 text-right text-slate-700">{rollTotal}</td>
+                                                        </tr>
+                                                    </tfoot>
+                                                </table>
+                                                {/* Per-roll piece formula */}
+                                                {rollPrimCut > 0 && (
+                                                    <div className="mt-2 flex items-center gap-2 p-2 bg-indigo-50 rounded-lg text-[10px] font-bold text-indigo-700">
+                                                        <span>{rollPrimCut} primary cut</span>
+                                                        <span className="text-indigo-300">×</span>
+                                                        <span>{rollPieceTyp} piece types</span>
+                                                        <span className="text-indigo-300">=</span>
+                                                        <span className="text-indigo-900">{rollPrimCut * rollPieceTyp} total pieces</span>
                                                     </div>
-                                                </div>
-                                            ))}
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <p className="text-slate-400 text-xs italic">No size breakdown data yet.</p>
+                                        )
+                                    ) : isSerial ? (
+                                        <p className="text-slate-400 text-xs italic">Serial piece tracking — individual records available in tracking system.</p>
+                                    ) : (
+                                        /* ROLL mode — show log timing */
+                                        <div className="text-xs text-slate-600 space-y-1">
+                                            {roll.entered_at && <p><span className="text-slate-400">Started:</span> {new Date(roll.entered_at).toLocaleString()}</p>}
+                                            {roll.completed_at && <p><span className="text-slate-400">Completed:</span> {new Date(roll.completed_at).toLocaleString()}</p>}
+                                            {roll.duration_minutes != null && <p><span className="text-slate-400">Duration:</span> {Math.round(roll.duration_minutes / 60)} hrs</p>}
+                                            {roll.notes && <p className="italic text-slate-400">{roll.notes}</p>}
                                         </div>
                                     )}
                                 </div>
@@ -1106,6 +1377,7 @@ const BatchStageDrilldownModal = ({ batchId, flowId, stageName, onClose }) => {
                     );
                 })}
             </div>
+
             <div className="flex justify-end pt-4 border-t border-slate-100 mt-4">
                 <button onClick={onClose} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-sm">Close</button>
             </div>
