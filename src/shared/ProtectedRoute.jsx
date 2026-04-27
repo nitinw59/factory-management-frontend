@@ -36,7 +36,8 @@ const ProtectedRoute = () => {
                 'line_loader',
                 'cutting_manager',
                 'mechanic',
-                'dispatch_officer'
+                'dispatch_officer',
+                'merchandiser'
   ];
 
   if (!user.role || !allowedRoles.includes(user.role)) {

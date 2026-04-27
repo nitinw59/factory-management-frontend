@@ -116,6 +116,12 @@ import DispatchReceiptsPage from './modules/depatch_portal/DispatchReceiptsPage'
 
 import SparesIssuanceDashboard from './modules/store_manager/SparesIssuanceDashboard';
 
+import MerchandiserProtectedRoute from './shared/MerchandiserProtectedRoute';
+import MerchandiserLayout from './shared/MerchandiserLayout';
+import BomDashboardPage from './modules/merchandiser/BomDashboardPage';
+import BomFormPage from './modules/merchandiser/BomFormPage';
+import MerchandiserPlanningPage from './modules/merchandiser/MerchandiserPlanningPage';
+
 
 
 
@@ -391,6 +397,18 @@ function App() {
     </Route>
 
     <Route path="/maintenance/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+
+    {/* Merchandiser Portal */}
+    <Route path="/merchandiser" element={<MerchandiserProtectedRoute><MerchandiserLayout /></MerchandiserProtectedRoute>}>
+        <Route index element={<Navigate to="bom" replace />} />
+        <Route path="bom" element={<BomDashboardPage />} />
+        <Route path="bom/new" element={<BomFormPage />} />
+        <Route path="bom/:bomId/edit" element={<BomFormPage />} />
+        <Route path="planning" element={<MerchandiserPlanningPage />} />
+        <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
+        <Route path="trims" element={<TrimManagementPage />} />
+        <Route path="sales-orders" element={<SalesOrderListPage />} />
+    </Route>
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}
       <Route path="*" element={<Navigate to="/" />} />
