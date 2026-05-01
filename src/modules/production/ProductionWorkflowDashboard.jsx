@@ -69,18 +69,21 @@ const Connector = ({ start, end }) => {
 
 // ─── GRAPH CONSTANTS ──────────────────────────────────────────────────────────
 
-const NODE_W_SO       = 155;
-const NODE_W_PO       = 145;
-const NODE_W_BATCH    = 215;
+const NODE_W_SO            = 155;
+const NODE_W_SOP           = 165;
+const NODE_W_PO            = 145;
+const NODE_W_BATCH         = 215;
 const NODE_W_DISPATCH_WIDE = 295;
 const NODE_H_SO            = 160;
+const NODE_H_SOP           = 92;
 const NODE_H_PO            = 120;
 const NODE_H_BATCH         = 160;
 const NODE_H_DISPATCH      = 170;
-const GAP_X           = 48;
-const GAP_Y           = 10;
-const PO_GAP_Y        = 18;
-const MARGIN          = 20;
+const GAP_X                = 48;
+const GAP_Y                = 10;
+const PO_GAP_Y             = 18;
+const SOP_GAP_Y            = 8;
+const MARGIN               = 20;
 
 // ─── STAGE CHIP ───────────────────────────────────────────────────────────────
 
@@ -183,7 +186,7 @@ const PONode = ({ data, x, y, onCreateBatch, onViewDetails, onInward }) => (
     </div>
 );
 
-const BatchNode = ({ data, x, y, onStageClick, onDrilldown }) => {
+const BatchNode = ({ data, x, y, onStageClick, onDrilldown, onTrimOrders }) => {
     const done  = data.stage_progress?.completed || 0;
     const total = data.stage_progress?.total     || 0;
     const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -198,10 +201,20 @@ const BatchNode = ({ data, x, y, onStageClick, onDrilldown }) => {
                     className="font-mono font-bold text-emerald-700 text-xs hover:underline truncate text-left"
                     title="Open batch details"
                 >
-                      {/* {data.batch_code} || */}
                    {data.batch_id ? `BATCH #${data.batch_id}` : '—'}
                 </button>
-                <StatusBadge status={data.overall_status || 'PENDING'} />
+                <div className="flex items-center gap-1 shrink-0">
+                    {onTrimOrders && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onTrimOrders(data.batch_id); }}
+                            title="View Trim Orders"
+                            className="p-0.5 text-amber-400 hover:text-amber-700 hover:bg-amber-50 rounded transition-colors"
+                        >
+                            <Scissors size={11} />
+                        </button>
+                    )}
+                    <StatusBadge status={data.overall_status || 'PENDING'} />
+                </div>
             </div>
             <p className="text-[10px] text-slate-600 font-semibold truncate mb-2" title={data.product_name}>{data.product_name || '—'}</p>
             <div className="flex flex-wrap gap-1 mb-auto">
@@ -353,32 +366,118 @@ const AddPOPlaceholder = ({ x, y, onAddPO }) => (
     </div>
 );
 
+// ─── SOP NODE ─────────────────────────────────────────────────────────────────
+
+const SopNode = ({ data, x, y, onAddPO }) => {
+    const bomLinked   = data.bom_linked || !!data.bom_id;
+    const colorsCount = (data.colors || []).length;
+    const totalQty    = (data.colors || []).reduce((s, c) => s + (c.quantity || c.total_quantity || 0), 0);
+
+    return (
+        <div
+            className={`absolute bg-white rounded-lg shadow-sm border border-l-4 border-slate-200 p-2.5 flex flex-col
+                ${bomLinked ? 'border-l-violet-500' : 'border-l-amber-400'}`}
+            style={{ width: NODE_W_SOP, height: NODE_H_SOP, left: x, top: y }}
+        >
+            {/* Product name + BOM badge */}
+            <div className="flex items-start justify-between gap-1 mb-1">
+                <p className="font-bold text-slate-800 text-xs truncate flex-1" title={data.product_name}>
+                    {data.product_name}
+                </p>
+                {bomLinked
+                    ? <span className="text-[8px] bg-violet-50 text-violet-700 border border-violet-100 px-1 py-0.5 rounded font-bold shrink-0 leading-tight">BOM ✓</span>
+                    : <span className="text-[8px] bg-amber-50 text-amber-600 border border-amber-200 px-1 py-0.5 rounded font-bold shrink-0 leading-tight">No BOM</span>}
+            </div>
+
+            {/* BOM name */}
+            {data.bom_name
+                ? <p className="text-[9px] text-violet-600 truncate font-medium mb-auto" title={data.bom_name}>{data.bom_name}</p>
+                : <p className="text-[9px] text-slate-400 italic mb-auto">BOM not linked</p>}
+
+            {/* Footer: colors · total qty + Add PO button */}
+            <div className="flex items-center justify-between mt-auto pt-1.5 border-t border-slate-100 gap-1">
+                <span className="text-[9px] text-slate-400 truncate">
+                    {colorsCount} color{colorsCount !== 1 ? 's' : ''}
+                    {totalQty > 0 && ` · ${totalQty.toLocaleString()} pcs`}
+                </span>
+                {onAddPO && (
+                    <button
+                        onClick={e => { e.stopPropagation(); onAddPO(data); }}
+                        className="flex items-center gap-0.5 py-0.5 px-1.5 rounded text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors shrink-0"
+                    >
+                        <Plus size={8} /> PO
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+};
+
 // ─── WORKFLOW GRAPH ───────────────────────────────────────────────────────────
 
-const WorkflowGraph = ({ so, onStageClick, onAddPO, onCreateBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch }) => {
+const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders }) => {
     const { nodes, connectors, height, totalWidth } = useMemo(() => {
         const nodesList  = [];
         const connList   = [];
         const hasSO      = !!so.sales_order_id;
         const pos        = so.purchase_orders || [];
+        const sops       = so.products        || [];
+        const hasSops    = sops.length > 0;
         const allBatches = [];
 
         const soX       = MARGIN;
-        const poX       = hasSO ? soX + NODE_W_SO + GAP_X : soX;
-        const batchX    = poX + NODE_W_PO + GAP_X;
+        const sopX      = hasSO ? soX + NODE_W_SO + GAP_X : soX;
+        const poX       = hasSops
+            ? sopX + NODE_W_SOP + GAP_X
+            : hasSO ? soX + NODE_W_SO + GAP_X : soX;
+        const batchX    = poX  + NODE_W_PO    + GAP_X;
         const dispatchX = batchX + NODE_W_BATCH + GAP_X;
 
-        // No POs
+        // ── Layout SOPs (stacked vertically, centered later) ─────────────────
+        // We'll finalize their Y once we know contentMid from POs.
+        // For the "no POs" branch we center on SOP content.
+
+        // ── No POs branch ────────────────────────────────────────────────────
         if (pos.length === 0) {
-            if (hasSO) nodesList.push({ type: 'SO', data: so, x: soX, y: MARGIN });
-            nodesList.push({ type: 'ADD_PO', x: poX, y: MARGIN });
-            nodesList.push({ type: 'DISPATCH', x: dispatchX, y: MARGIN, batches: [] });
-            if (hasSO) connList.push({ start: { x: soX + NODE_W_SO, y: MARGIN + NODE_H_SO / 2 }, end: { x: poX, y: MARGIN + NODE_H_PO / 2 } });
-            return { nodes: nodesList, connectors: connList, height: MARGIN + NODE_H_PO + MARGIN, totalWidth: dispatchX + NODE_W_DISPATCH_WIDE + MARGIN };
+            // Lay out SOPs if present
+            const sopMidY = hasSops
+                ? MARGIN + (sops.length * (NODE_H_SOP + SOP_GAP_Y) - SOP_GAP_Y) / 2
+                : MARGIN + NODE_H_PO / 2;
+
+            const soNodeY  = hasSO ? Math.max(MARGIN, sopMidY - NODE_H_SO / 2) : MARGIN;
+            const addPoY   = Math.max(MARGIN, sopMidY - NODE_H_PO / 2);
+            const dispY    = Math.max(MARGIN, sopMidY - NODE_H_DISPATCH / 2);
+            const contentH = hasSops
+                ? MARGIN + sops.length * (NODE_H_SOP + SOP_GAP_Y) - SOP_GAP_Y + MARGIN
+                : MARGIN + NODE_H_PO + MARGIN;
+
+            if (hasSO) nodesList.push({ type: 'SO', data: so, x: soX, y: soNodeY });
+
+            if (hasSops) {
+                let sy = MARGIN;
+                sops.forEach(sop => {
+                    nodesList.push({ type: 'SOP', data: sop, x: sopX, y: sy });
+                    connList.push({
+                        start: { x: soX + NODE_W_SO, y: soNodeY + NODE_H_SO / 2 },
+                        end:   { x: sopX,            y: sy + NODE_H_SOP / 2 },
+                    });
+                    connList.push({
+                        start: { x: sopX + NODE_W_SOP, y: sy + NODE_H_SOP / 2 },
+                        end:   { x: poX,              y: addPoY + NODE_H_PO / 2 },
+                    });
+                    sy += NODE_H_SOP + SOP_GAP_Y;
+                });
+            } else if (hasSO) {
+                connList.push({ start: { x: soX + NODE_W_SO, y: soNodeY + NODE_H_SO / 2 }, end: { x: poX, y: addPoY + NODE_H_PO / 2 } });
+            }
+
+            nodesList.push({ type: 'ADD_PO', x: poX,       y: addPoY });
+            nodesList.push({ type: 'DISPATCH', x: dispatchX, y: dispY, batches: [] });
+            return { nodes: nodesList, connectors: connList, height: contentH, totalWidth: dispatchX + NODE_W_DISPATCH_WIDE + MARGIN };
         }
 
-        // Compute layout for each PO and its batches
-        let currentY = MARGIN;
+        // ── With POs: compute PO layout first ────────────────────────────────
+        let currentY    = MARGIN;
         const poLayouts = [];
 
         pos.forEach(po => {
@@ -387,7 +486,7 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onCreateBatch, onViewPODetai
                 poLayouts.push({ po, poY: currentY, batchYs: [], groupMid: currentY + NODE_H_PO / 2 });
                 currentY += NODE_H_PO + PO_GAP_Y;
             } else {
-                const batchYs = batches.map((_, bi) => currentY + bi * (NODE_H_BATCH + GAP_Y));
+                const batchYs     = batches.map((_, bi) => currentY + bi * (NODE_H_BATCH + GAP_Y));
                 const groupBottom = batchYs[batchYs.length - 1] + NODE_H_BATCH;
                 const groupMid    = (currentY + groupBottom) / 2;
                 const poY         = Math.max(currentY, groupMid - NODE_H_PO / 2);
@@ -398,21 +497,46 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onCreateBatch, onViewPODetai
 
         const contentEnd = currentY - PO_GAP_Y;
         const contentMid = (MARGIN + contentEnd) / 2;
+        const dispatchY  = Math.max(MARGIN, contentMid - NODE_H_DISPATCH / 2);
 
         // SO node
-        if (hasSO) {
-            const soY = Math.max(MARGIN, contentMid - NODE_H_SO / 2);
-            nodesList.push({ type: 'SO', data: so, x: soX, y: soY });
-        }
+        const soY = Math.max(MARGIN, contentMid - NODE_H_SO / 2);
+        if (hasSO) nodesList.push({ type: 'SO', data: so, x: soX, y: soY });
 
-        // Dispatch node
-        const dispatchY = Math.max(MARGIN, contentMid - NODE_H_DISPATCH / 2);
+        // SOP nodes — center the stack on contentMid
+        if (hasSops) {
+            const totalSopH = sops.length * NODE_H_SOP + (sops.length - 1) * SOP_GAP_Y;
+            const sopStartY = Math.max(MARGIN, contentMid - totalSopH / 2);
+            const sopMidY   = sopStartY + totalSopH / 2;
+
+            sops.forEach((sop, i) => {
+                const sy = sopStartY + i * (NODE_H_SOP + SOP_GAP_Y);
+                nodesList.push({ type: 'SOP', data: sop, x: sopX, y: sy });
+
+                // SO → each SOP
+                if (hasSO) {
+                    connList.push({
+                        start: { x: soX + NODE_W_SO, y: soY + NODE_H_SO / 2 },
+                        end:   { x: sopX,            y: sy + NODE_H_SOP / 2 },
+                    });
+                }
+            });
+
+            // Each SOP column midpoint → each PO
+            poLayouts.forEach(({ poY }) => {
+                connList.push({
+                    start: { x: sopX + NODE_W_SOP, y: sopMidY },
+                    end:   { x: poX,              y: poY + NODE_H_PO / 2 },
+                });
+            });
+        }
 
         // PO + Batch nodes + connectors
         poLayouts.forEach(({ po, poY, batchYs, groupMid }) => {
             nodesList.push({ type: 'PO', data: po, x: poX, y: poY });
 
-            if (hasSO) {
+            // SO → PO (only when no SOP column)
+            if (hasSO && !hasSops) {
                 connList.push({
                     start: { x: soX + NODE_W_SO, y: contentMid },
                     end:   { x: poX,             y: poY + NODE_H_PO / 2 },
@@ -425,12 +549,12 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onCreateBatch, onViewPODetai
                 allBatches.push(batch);
 
                 connList.push({
-                    start: { x: poX + NODE_W_PO,      y: groupMid },
-                    end:   { x: batchX,               y: bY + NODE_H_BATCH / 2 },
+                    start: { x: poX  + NODE_W_PO,   y: groupMid },
+                    end:   { x: batchX,             y: bY + NODE_H_BATCH / 2 },
                 });
                 connList.push({
                     start: { x: batchX + NODE_W_BATCH, y: bY + NODE_H_BATCH / 2 },
-                    end:   { x: dispatchX,             y: dispatchY + NODE_H_DISPATCH / 2 },
+                    end:   { x: dispatchX,            y: dispatchY + NODE_H_DISPATCH / 2 },
                 });
             });
         });
@@ -450,10 +574,11 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onCreateBatch, onViewPODetai
                 {connectors.map((c, i) => <Connector key={i} start={c.start} end={c.end} />)}
             </svg>
             {nodes.map((node, i) => {
-                if (node.type === 'SO')       return <SalesOrderNode key={i} {...node} poCount={so.purchase_orders?.length || 0} onAddPO={onAddPO} onEditSO={onEditSO} />;
-                if (node.type === 'PO')       return <PONode         key={i} {...node} onCreateBatch={onCreateBatch} onViewDetails={onViewPODetails} onInward={onInward} />;
-                if (node.type === 'BATCH')    return <BatchNode      key={i} {...node} onStageClick={onStageClick} onDrilldown={onDrilldown} />;
-                if (node.type === 'DISPATCH') return <DispatchNode   key={i} {...node} onDispatch={onDispatch} />;
+                if (node.type === 'SO')       return <SalesOrderNode  key={i} {...node} poCount={so.purchase_orders?.length || 0} onAddPO={onAddPO} onEditSO={onEditSO} />;
+                if (node.type === 'SOP')      return <SopNode         key={i} {...node} onAddPO={onAddSopPO} />;
+                if (node.type === 'PO')       return <PONode          key={i} {...node} onCreateBatch={onCreateBatch} onViewDetails={onViewPODetails} onInward={onInward} />;
+                if (node.type === 'BATCH')    return <BatchNode       key={i} {...node} onStageClick={onStageClick} onDrilldown={onDrilldown} onTrimOrders={onTrimOrders} />;
+                if (node.type === 'DISPATCH') return <DispatchNode    key={i} {...node} onDispatch={onDispatch} />;
                 if (node.type === 'ADD_PO')   return <AddPOPlaceholder key={i} {...node} onAddPO={onAddPO} />;
                 return null;
             })}
@@ -463,7 +588,7 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onCreateBatch, onViewPODetai
 
 // ─── TABLE ROW ────────────────────────────────────────────────────────────────
 
-const SalesOrderTableRow = ({ so, onSODetails, onStageClick, onAddPO, onCreateBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch }) => {
+const SalesOrderTableRow = ({ so, onSODetails, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders }) => {
     const [expanded, setExpanded] = useState(false);
 
     const pos         = so.purchase_orders || [];
@@ -522,12 +647,14 @@ const SalesOrderTableRow = ({ so, onSODetails, onStageClick, onAddPO, onCreateBa
                                 so={so}
                                 onStageClick={onStageClick}
                                 onAddPO={onAddPO ? () => onAddPO(so.sales_order_id) : null}
+                                onAddSopPO={onAddSopPO}
                                 onCreateBatch={onCreateBatch}
                                 onViewPODetails={onViewPODetails}
                                 onInward={onInward}
                                 onEditSO={onEditSO}
                                 onDrilldown={onDrilldown}
                                 onDispatch={onDispatch}
+                                onTrimOrders={onTrimOrders}
                             />
                         </div>
                     </td>
@@ -1385,6 +1512,318 @@ const BatchStageDrilldownModal = ({ batchId, flowId, stageName, onClose }) => {
     );
 };
 
+// ─── TRIM ORDER DETAIL MODAL ─────────────────────────────────────────────────
+
+const TRIM_ORDER_STATUSES = ['DRAFT', 'PENDING', 'PREPARED', 'ISSUED', 'COMPLETED'];
+
+const TrimOrderDetailModal = ({ orderId, onBack, onClose }) => {
+    const [order,   setOrder]   = useState(null);
+    const [refData, setRefData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [saving,  setSaving]  = useState(false);
+    const [autoFilling, setAutoFilling] = useState(false);
+    const [error,   setError]   = useState(null);
+
+    const [newStatus,     setNewStatus]     = useState('');
+    const [itemQtys,      setItemQtys]      = useState({});
+    const [removedIds,    setRemovedIds]    = useState(new Set());
+    const [dismissedIds,  setDismissedIds]  = useState(new Set());
+    const [pendingAdds,   setPendingAdds]   = useState([]);
+    const [addVariantId,  setAddVariantId]  = useState('');
+    const [addQty,        setAddQty]        = useState('');
+
+    const load = useCallback(() => {
+        setLoading(true);
+        setError(null);
+        Promise.all([
+            storeManagerApi.getTrimOrderDetails(orderId),
+            storeManagerApi.getOrderReferenceData(orderId).catch(() => ({ data: null })),
+        ]).then(([detRes, refRes]) => {
+            const ord = detRes.data?.data ?? detRes.data;
+            setOrder(ord);
+            setNewStatus(ord.status || '');
+            const qtys = {};
+            (ord.items || []).forEach(i => { qtys[i.id] = String(i.quantity_required ?? ''); });
+            setItemQtys(qtys);
+            setRefData(refRes.data?.data ?? refRes.data);
+        }).catch(e => setError(e.message || 'Failed to load order')).finally(() => setLoading(false));
+    }, [orderId]);
+
+    useEffect(() => { load(); }, [load]);
+
+    const handleSave = async () => {
+        setSaving(true);
+        setError(null);
+        try {
+            const update_items = (order.items || [])
+                .filter(i => !removedIds.has(i.id) && String(i.quantity_required) !== itemQtys[i.id])
+                .map(i => ({ id: i.id, quantity_required: parseFloat(itemQtys[i.id]) }));
+
+            const body = {};
+            if (newStatus !== order.status)  body.status           = newStatus;
+            if (update_items.length)         body.update_items     = update_items;
+            if (removedIds.size)             body.remove_item_ids  = [...removedIds];
+            if (dismissedIds.size)           body.dismiss_missing_ids = [...dismissedIds];
+            if (pendingAdds.length)          body.add_items        = pendingAdds.map(a => ({
+                trim_item_variant_id: parseInt(a.variant_id),
+                quantity_required:    parseFloat(a.qty),
+            }));
+
+            await storeManagerApi.updateTrimOrder(orderId, body);
+            onBack();
+        } catch (e) {
+            setError(e?.response?.data?.error || e.message || 'Save failed');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleAutoFill = async () => {
+        setAutoFilling(true);
+        setError(null);
+        try {
+            await storeManagerApi.autoFulfillOrder(orderId);
+            load();
+        } catch (e) {
+            setError(e?.response?.data?.error || e.message || 'Auto-fill failed');
+        } finally {
+            setAutoFilling(false);
+        }
+    };
+
+    if (loading) return <Modal title={`Trim Order #${orderId}`} onClose={onClose}><Spinner /></Modal>;
+    if (!order)  return <Modal title="Error" onClose={onClose}><p className="text-red-500 text-sm">{error || 'Failed to load'}</p></Modal>;
+
+    const visibleItems  = (order.items || []).filter(i => !removedIds.has(i.id));
+    const missingItems  = (order.missing_items || []).filter(m => !dismissedIds.has(m.id));
+    const availVariants = refData?.variants || [];
+
+    return (
+        <Modal title={`Trim Order #${orderId}`} onClose={onClose} size="max-w-3xl">
+            {/* Top bar: status selector + back + auto-fill */}
+            <div className="flex items-center gap-3 mb-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0">Status</span>
+                <select
+                    value={newStatus}
+                    onChange={e => setNewStatus(e.target.value)}
+                    className="border border-slate-200 rounded-lg text-xs px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                >
+                    {TRIM_ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <button
+                    onClick={handleAutoFill}
+                    disabled={autoFilling}
+                    className="ml-2 flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-50"
+                >
+                    {autoFilling ? <Loader2 size={11} className="animate-spin" /> : <Package size={11} />} Auto-Fill
+                </button>
+                <button onClick={onBack} className="ml-auto text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1 font-medium">
+                    ← Back to list
+                </button>
+            </div>
+
+            {/* Items table */}
+            <div className="mb-4">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Items</h4>
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <table className="w-full text-xs">
+                        <thead className="bg-slate-50 border-b border-slate-200">
+                            <tr>
+                                <th className="px-3 py-2 text-left font-bold text-slate-400 uppercase tracking-wider">Item</th>
+                                <th className="px-3 py-2 text-left font-bold text-slate-400 uppercase tracking-wider">Variant</th>
+                                <th className="px-3 py-2 text-right font-bold text-slate-400 uppercase tracking-wider">Req. Qty</th>
+                                <th className="px-3 py-2 text-right font-bold text-slate-400 uppercase tracking-wider">Fulfilled</th>
+                                <th className="px-3 py-2 text-center font-bold text-slate-400 uppercase tracking-wider">Status</th>
+                                <th className="px-3 py-2 w-8"></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                            {visibleItems.length === 0 && (
+                                <tr><td colSpan={6} className="text-center py-6 text-slate-400 italic">No items</td></tr>
+                            )}
+                            {visibleItems.map(item => (
+                                <tr key={item.id} className="hover:bg-slate-50/60">
+                                    <td className="px-3 py-2 font-semibold text-slate-700">{item.trim_item_name || '—'}</td>
+                                    <td className="px-3 py-2 text-slate-500">{item.variant_name || item.color_name || '—'}</td>
+                                    <td className="px-3 py-2 text-right">
+                                        <input
+                                            type="number" min="0" step="1"
+                                            value={itemQtys[item.id] ?? ''}
+                                            onChange={e => setItemQtys(q => ({ ...q, [item.id]: e.target.value }))}
+                                            className="w-20 border border-slate-200 rounded px-2 py-0.5 text-right focus:ring-1 focus:ring-indigo-400 outline-none text-xs"
+                                        />
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-semibold text-emerald-700">{item.quantity_fulfilled ?? 0}</td>
+                                    <td className="px-3 py-2 text-center"><StatusBadge status={item.status} /></td>
+                                    <td className="px-3 py-2 text-center">
+                                        <button
+                                            onClick={() => setRemovedIds(s => { const n = new Set(s); n.add(item.id); return n; })}
+                                            title="Remove item"
+                                            className="text-slate-300 hover:text-red-500 p-0.5 rounded transition-colors"
+                                        >
+                                            <Trash2 size={12} />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            {/* Missing items */}
+            {missingItems.length > 0 && (
+                <div className="mb-4">
+                    <h4 className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2">Missing Items</h4>
+                    <div className="space-y-1.5">
+                        {missingItems.map(m => (
+                            <div key={m.id} className="flex items-center gap-3 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-lg">
+                                <div className="flex-1 min-w-0">
+                                    <p className="font-semibold text-slate-700 text-xs truncate">{m.trim_item_name || m.description || `Missing item #${m.id}`}</p>
+                                    {m.quantity_required && <p className="text-[10px] text-slate-500 mt-0.5">Qty: {m.quantity_required}</p>}
+                                </div>
+                                <button
+                                    onClick={() => setDismissedIds(s => { const n = new Set(s); n.add(m.id); return n; })}
+                                    className="text-xs font-bold text-slate-500 hover:text-red-600 border border-slate-200 hover:border-red-200 px-2.5 py-1 rounded-lg transition-colors shrink-0"
+                                >
+                                    Dismiss
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Pending new items preview */}
+            {pendingAdds.length > 0 && (
+                <div className="mb-4">
+                    <h4 className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-2">To Add</h4>
+                    <div className="space-y-1.5">
+                        {pendingAdds.map((a, i) => (
+                            <div key={i} className="flex items-center gap-3 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+                                <p className="flex-1 text-xs font-semibold text-slate-700">{a.label}</p>
+                                <p className="text-xs font-bold text-indigo-700">{a.qty} pcs</p>
+                                <button onClick={() => setPendingAdds(p => p.filter((_, idx) => idx !== i))} className="text-slate-400 hover:text-red-500">
+                                    <X size={13} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Add item form */}
+            {availVariants.length > 0 && (
+                <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Add Item</h4>
+                    <div className="flex items-center gap-2">
+                        <select
+                            value={addVariantId}
+                            onChange={e => setAddVariantId(e.target.value)}
+                            className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                        >
+                            <option value="">Select variant…</option>
+                            {availVariants.map(v => <option key={v.id} value={v.id}>{v.label || v.name}</option>)}
+                        </select>
+                        <input
+                            type="number" min="1" placeholder="Qty"
+                            value={addQty}
+                            onChange={e => setAddQty(e.target.value)}
+                            className="w-20 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-indigo-400"
+                        />
+                        <button
+                            onClick={() => {
+                                if (!addVariantId || !addQty) return;
+                                const v = availVariants.find(v => String(v.id) === String(addVariantId));
+                                setPendingAdds(p => [...p, { variant_id: addVariantId, qty: addQty, label: v?.label || v?.name || `Variant #${addVariantId}` }]);
+                                setAddVariantId('');
+                                setAddQty('');
+                            }}
+                            className="px-3 py-1.5 text-xs font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-1 shrink-0"
+                        >
+                            <Plus size={11} /> Add
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {error && <p className="text-red-500 text-xs mb-3 bg-red-50 border border-red-200 px-3 py-2 rounded-lg">{error}</p>}
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                <button onClick={onBack} className="px-4 py-2 text-sm font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg">Back</button>
+                <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="px-5 py-2 text-sm font-bold bg-amber-600 text-white rounded-lg hover:bg-amber-700 flex items-center gap-2 disabled:opacity-50 transition-colors"
+                >
+                    {saving ? <Loader2 size={14} className="animate-spin" /> : <Scissors size={14} />} Save Changes
+                </button>
+            </div>
+        </Modal>
+    );
+};
+
+// ─── BATCH TRIM ORDERS MODAL ──────────────────────────────────────────────────
+
+const BatchTrimOrdersModal = ({ batchId, onClose }) => {
+    const [orders,     setOrders]     = useState([]);
+    const [loading,    setLoading]    = useState(true);
+    const [error,      setError]      = useState(null);
+    const [selectedId, setSelectedId] = useState(null);
+
+    useEffect(() => {
+        storeManagerApi.getAllTrimOrders({ batch_id: batchId })
+            .then(res => {
+                const raw = res.data;
+                setOrders(Array.isArray(raw) ? raw : raw?.orders ?? raw?.data ?? []);
+            })
+            .catch(e => setError(e.message || 'Failed to load trim orders'))
+            .finally(() => setLoading(false));
+    }, [batchId]);
+
+    if (selectedId !== null) {
+        return <TrimOrderDetailModal orderId={selectedId} onBack={() => setSelectedId(null)} onClose={onClose} />;
+    }
+
+    return (
+        <Modal title={`Trim Orders — Batch #${batchId}`} onClose={onClose} size="max-w-2xl">
+            {loading ? <Spinner /> : error ? (
+                <p className="text-red-500 text-sm">{error}</p>
+            ) : (
+                <div className="space-y-2">
+                    {orders.length === 0 ? (
+                        <div className="text-center py-12 border-2 border-dashed border-slate-100 rounded-xl">
+                            <Scissors className="mx-auto h-8 w-8 text-slate-300 mb-2" />
+                            <p className="text-sm text-slate-400 italic">No trim orders for this batch.</p>
+                        </div>
+                    ) : (
+                        orders.map(order => (
+                            <div key={order.id} className="flex items-center justify-between p-3.5 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
+                                <div>
+                                    <p className="font-mono font-bold text-slate-800 text-sm">Trim Order #{order.id}</p>
+                                    <p className="text-[10px] text-slate-500 mt-0.5">
+                                        {order.items?.length ?? order.item_count ?? 0} item{(order.items?.length ?? order.item_count ?? 0) !== 1 ? 's' : ''}
+                                        {order.created_at && ` · ${new Date(order.created_at).toLocaleDateString()}`}
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <StatusBadge status={order.status} />
+                                    <button
+                                        onClick={() => setSelectedId(order.id)}
+                                        className="px-3 py-1.5 text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors"
+                                    >
+                                        View / Edit
+                                    </button>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            )}
+        </Modal>
+    );
+};
+
 // ─── GLOBAL SEARCH ───────────────────────────────────────────────────────────
 
 const GlobalSearch = ({ data, onDispatch, onBatchDrilldown }) => {
@@ -1574,6 +2013,7 @@ const ProductionWorkflowDashboard = () => {
     const [batchDrilldown, setBatchDrilldown]   = useState(null);
     const [dispatchBatch, setDispatchBatch]     = useState(null);
     const [inwardPO, setInwardPO]               = useState(null);
+    const [trimOrdersBatch, setTrimOrdersBatch] = useState(null);
 
     const fetchData = async () => {
         setLoading(true);
@@ -1642,8 +2082,10 @@ const ProductionWorkflowDashboard = () => {
     const canManage     = user && ['accountant', 'sales_manager','production_manager', 'admin', 'factory_admin'].includes(user.role);
     const canProduction = user && ['cutting_manager', 'production_manager', 'admin', 'factory_admin'].includes(user.role);
     const canInward     = user?.role === 'accountant';
+    const canTrimOrders = user && ['production_manager', 'admin', 'factory_admin'].includes(user.role);
 
-    const handleInward = (po) => setInwardPO({ ...po, id: po.po_id });
+    const handleInward      = (po) => setInwardPO({ ...po, id: po.po_id });
+    const handleTrimOrders  = (batchId) => setTrimOrdersBatch(batchId);
 
     return (
         <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -1738,12 +2180,14 @@ const ProductionWorkflowDashboard = () => {
                                         onSODetails={setSelectedSOId}
                                         onStageClick={handleStageClick}
                                         onAddPO={canManage ? handleAddPO : null}
+                                        onAddSopPO={canManage ? (sop) => console.log('Add PO for SOP:', sop) : null}
                                         onCreateBatch={canProduction ? handleCreateBatch : null}
                                         onViewPODetails={setSelectedPOId}
                                         onInward={canInward ? handleInward : null}
                                         onEditSO={canManage ? handleEditSO : null}
                                         onDrilldown={handleBatchDrilldown}
                                         onDispatch={handleDispatch}
+                                        onTrimOrders={canTrimOrders ? handleTrimOrders : null}
                                     />
                                 )) : (
                                     <tr>
@@ -1764,6 +2208,7 @@ const ProductionWorkflowDashboard = () => {
             {drilldownTarget && <BatchStageDrilldownModal  batchId={drilldownTarget.batchId}        flowId={drilldownTarget.flowId}         stageName={drilldownTarget.stageName} onClose={() => setDrilldownTarget(null)} />}
             {batchDrilldown  && <BatchDrilldownModal       batchId={batchDrilldown.batchId}         batchCode={batchDrilldown.batchCode}    onClose={() => setBatchDrilldown(null)} />}
             {dispatchBatch   && <BatchDispatchModal        batchId={dispatchBatch.batchId}          batchCode={dispatchBatch.batchCode}     onClose={() => setDispatchBatch(null)} canCreateDispatch={canInward} canCloseBatch={canInward} />}
+            {trimOrdersBatch && <BatchTrimOrdersModal batchId={trimOrdersBatch} onClose={() => setTrimOrdersBatch(null)} />}
             {inwardPO && (
                 <Modal title={`Goods Inward — ${inwardPO.po_code}`} onClose={() => setInwardPO(null)} size="max-w-4xl">
                     <FabricIntakeForm

@@ -158,7 +158,7 @@ function LineCard({ line }) {
                         {batches.map(b => (
                             <span key={b.batch_id}
                                 className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700">
-                                {b.batch_code}
+                                {b.batch_id}
                             </span>
                         ))}
                     </div>
@@ -280,6 +280,7 @@ export default function ScoreboardPage() {
                     actual:          parseInt(row.actual)          || 0,
                     achievement_pct: row.achievement_pct != null
                         ? parseInt(row.achievement_pct) : null,
+                    processing_mode: row.processing_mode
                 });
             }
 
@@ -297,16 +298,24 @@ export default function ScoreboardPage() {
                 const id  = String(line.line_id);
                 const out = outputByLine.get(id) ?? { total_output: 0, total_defects: 0 };
 
-                // Use summaryRes parts if available; otherwise build from formRes batch targets
+                // Use summaryRes parts if available
                 let parts = summaryByLine.get(id) ?? [];
+                
+                // Fallback if summary API returned no target parts at all
                 if (parts.length === 0) {
                     const batches = line.batches ?? [];
-                    if (line.target_type === 'GARMENT') {
+                    if (line.target_type === 'GARMENT' || line.processing_mode === 'SERIALIZED') {
                         const totalTarget = batches.reduce((s, b) =>
                             s + (b.garment_target?.existing_quantity ?? 0), 0);
                         if (totalTarget > 0) {
-                            parts = [{ part_id: 'garment', part_name: 'Garments', part_type: null,
-                                       target_quantity: totalTarget, actual: 0, achievement_pct: null }];
+                            parts = [{ 
+                                part_id: 'garment', 
+                                part_name: 'Garments', 
+                                part_type: null,
+                                target_quantity: totalTarget, 
+                                actual: out.total_output,  
+                                achievement_pct: null 
+                            }];
                         }
                     } else {
                         const partMap = {};
@@ -322,6 +331,21 @@ export default function ScoreboardPage() {
                         parts = Object.values(partMap);
                     }
                 }
+
+
+
+                // THE OVERRIDE: Force real output for serialized lines/garments
+                    parts = parts.map(p => {
+                        // Check both the part and the line for SERIALIZED mode, or a null part_id (which means Garment)
+                        if (p.processing_mode === 'SERIALIZED' || line.processing_mode === 'SERIALIZED' || p.part_id == null) {
+                            return {
+                                ...p,
+                                actual: out.total_output, // Overrides the 0 from the summary API
+                                achievement_pct: null     // Clears it so ProgressBar recalculates the fill width
+                            };
+                        }
+                        return p;
+                    });
 
                 return {
                     ...line,

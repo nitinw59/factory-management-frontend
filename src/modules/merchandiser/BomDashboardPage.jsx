@@ -42,9 +42,15 @@ const BomDetailModal = ({ bomId, onClose }) => {
 
     useEffect(() => {
         bomApi.getById(bomId)
-            .then(res => setBom(res.data?.data ?? res.data))
+            .then(res => {
+                const data = res.data?.data ?? res.data;
+                console.log('BOM detail response:', data);
+                setBom(data);
+            })
             .catch(e => setErr(e?.response?.data?.error || e.message || 'Failed to load'))
             .finally(() => setLoading(false));
+
+            
     }, [bomId]);
 
     return (
@@ -61,12 +67,13 @@ const BomDetailModal = ({ bomId, onClose }) => {
                     {err && <p className="text-red-500 text-sm">{err}</p>}
                     {bom && (
                         <div className="space-y-5">
+                            {/* Metadata */}
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
                                 {[
-                                    { label: 'Product',  val: bom.product?.name || '—' },
-                                    { label: 'Status',   val: <StatusBadge status={bom.status} /> },
-                                    { label: 'Created',  val: new Date(bom.created_at).toLocaleDateString() },
-                                    { label: 'Approved', val: bom.approved_by ? bom.approved_by : '—' },
+                                    { label: 'Product',     val: bom.product?.name || '—' },
+                                    { label: 'Status',      val: <StatusBadge status={bom.status} /> },
+                                    { label: 'Created by',  val: bom.created_by?.name || '—' },
+                                    { label: 'Approved by', val: bom.approved_by?.name || '—' },
                                 ].map(({ label, val }) => (
                                     <div key={label}>
                                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">{label}</p>
@@ -75,80 +82,80 @@ const BomDetailModal = ({ bomId, onClose }) => {
                                 ))}
                             </div>
 
+                            {/* Ratio Groups */}
                             {(bom.ratio_groups || []).length > 0 && (
                                 <div>
                                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Ratio Groups</p>
                                     <div className="space-y-3">
                                         {bom.ratio_groups.map((rg, i) => (
                                             <div key={i} className="border border-slate-200 rounded-xl overflow-hidden">
-                                                <div className="flex items-center justify-between bg-slate-50 px-4 py-2">
-                                                    <p className="font-bold text-slate-700 text-sm">{rg.ratio_group_name}</p>
-                                                    {rg.marker_length_inches && (
-                                                        <span className="text-[10px] text-slate-400">{rg.marker_length_inches}" marker</span>
-                                                    )}
+                                                <div className="flex items-center justify-between bg-slate-50 px-4 py-2.5">
+                                                    <p className="font-bold text-slate-700 text-sm">
+                                                        {rg.ratio_group_name || `Group ${i + 1}`}
+                                                    </p>
+                                                    <div className="flex items-center gap-3">
+                                                        {rg.total_pieces_in_marker > 0 && (
+                                                            <span className="text-[10px] bg-violet-50 text-violet-600 border border-violet-100 px-1.5 py-0.5 rounded font-bold">
+                                                                {rg.total_pieces_in_marker} pcs total
+                                                            </span>
+                                                        )}
+                                                        {rg.marker_length_inches && (
+                                                            <span className="text-[10px] text-slate-400">{rg.marker_length_inches}" marker</span>
+                                                        )}
+                                                    </div>
                                                 </div>
                                                 <div className="flex flex-wrap gap-1.5 p-3">
-                                                    {(rg.items || []).map((it, j) => (
+                                                    {(rg.items || []).filter(it => it.size).map((it, j) => (
                                                         <span key={j} className="bg-violet-50 text-violet-700 border border-violet-100 rounded-lg px-2.5 py-1 text-xs font-bold">
                                                             {it.size}: {it.number_of_pieces} pcs
                                                         </span>
                                                     ))}
                                                 </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {(bom.fabric_consumptions || []).length > 0 && (
-                                <div>
-                                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Fabric Consumptions</p>
-                                    <div className="space-y-2">
-                                        {bom.fabric_consumptions.map((fc, i) => (
-                                            <div key={i} className="border border-slate-200 rounded-xl p-3">
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <p className="font-bold text-slate-700 text-sm">{fc.fabric_type?.name || `Fabric #${fc.fabric_type_id}`}</p>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">{fc.calculation_type}</span>
-                                                        {fc.wastage_percentage > 0 && (
-                                                            <span className="text-[10px] text-slate-400">{fc.wastage_percentage}% wastage</span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                {fc.calculation_type === 'AVERAGE'
-                                                    ? <p className="text-xs text-slate-600">{fc.average_consumption_inches}" avg per garment</p>
-                                                    : (
+                                                {(rg.fabric_consumptions || []).length > 0 && (
+                                                    <div className="border-t border-slate-100 px-3 py-2">
+                                                        <p className="text-[9px] font-bold text-slate-400 uppercase mb-1.5">Fabric Consumptions</p>
                                                         <div className="flex flex-wrap gap-1.5">
-                                                            {(fc.size_consumptions || []).map((sc, j) => (
-                                                                <span key={j} className="bg-indigo-50 text-indigo-700 border border-indigo-100 rounded px-2 py-0.5 text-[10px] font-bold">
-                                                                    {sc.size}: {sc.consumption_inches}"
+                                                            {rg.fabric_consumptions.map((fc, j) => (
+                                                                <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold">
+                                                                    {fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`}: {fc.consumption_inches}"
                                                                 </span>
                                                             ))}
                                                         </div>
-                                                    )
-                                                }
+                                                    </div>
+                                                )}
+                                                {rg.notes && (
+                                                    <p className="px-4 pb-3 text-[10px] text-slate-400">{rg.notes}</p>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
                                 </div>
                             )}
 
+                            {/* Material / Trim Consumptions */}
                             {(bom.material_consumptions || []).length > 0 && (
                                 <div>
                                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Material / Trim Consumptions</p>
                                     <div className="space-y-2">
                                         {bom.material_consumptions.map((mc, i) => (
                                             <div key={i} className="border border-slate-200 rounded-xl p-3">
-                                                <div className="flex items-center justify-between mb-1.5">
-                                                    <div className="flex items-center gap-1.5">
-                                                        <p className="font-bold text-slate-700 text-sm">{mc.trim_item?.name || `Trim #${mc.trim_item_id}`}</p>
-                                                        {mc.trim_item?.unit_of_measure && (
+                                                <div className="flex items-start justify-between gap-2 mb-1.5">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <p className="font-bold text-slate-700 text-sm">
+                                                            {mc.trim_item_name || `Trim #${mc.trim_item_id}`}
+                                                        </p>
+                                                        {mc.item_code && (
+                                                            <span className="text-[10px] text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded">
+                                                                {mc.item_code}
+                                                            </span>
+                                                        )}
+                                                        {mc.unit_of_measure && (
                                                             <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold">
-                                                                {mc.trim_item.unit_of_measure}
+                                                                {mc.unit_of_measure}
                                                             </span>
                                                         )}
                                                     </div>
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-2 shrink-0">
                                                         <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">{mc.calculation_type}</span>
                                                         {mc.wastage_percentage > 0 && (
                                                             <span className="text-[10px] text-slate-400">{mc.wastage_percentage}% wastage</span>
@@ -156,19 +163,20 @@ const BomDetailModal = ({ bomId, onClose }) => {
                                                     </div>
                                                 </div>
                                                 {mc.placement_description && (
-                                                    <p className="text-[10px] text-slate-400 mb-1.5">Placement: {mc.placement_description}</p>
+                                                    <p className="text-[10px] text-slate-400 mb-1.5">📍 {mc.placement_description}</p>
                                                 )}
                                                 {mc.calculation_type === 'FIXED' ? (
-                                                    <p className="text-xs text-slate-600 font-bold">
-                                                        {mc.fixed_quantity} <span className="font-normal text-slate-400">
-                                                            {mc.trim_item?.unit_of_measure ? `${mc.trim_item.unit_of_measure} per garment (fixed)` : 'per garment (fixed)'}
+                                                    <p className="text-xs text-slate-700 font-bold">
+                                                        {mc.fixed_quantity}{' '}
+                                                        <span className="font-normal text-slate-400">
+                                                            {mc.unit_of_measure ? `${mc.unit_of_measure} per garment (fixed)` : 'per garment (fixed)'}
                                                         </span>
                                                     </p>
                                                 ) : (
                                                     <div className="flex flex-wrap gap-1.5">
                                                         {(mc.size_consumptions || []).map((sc, j) => (
                                                             <span key={j} className="bg-violet-50 text-violet-700 border border-violet-100 rounded px-2 py-0.5 text-[10px] font-bold">
-                                                                {sc.size}: {sc.quantity}{mc.trim_item?.unit_of_measure ? ` ${mc.trim_item.unit_of_measure}` : ''}
+                                                                {sc.size || '—'}: {sc.quantity}{mc.unit_of_measure ? ` ${mc.unit_of_measure}` : ''}
                                                             </span>
                                                         ))}
                                                     </div>
@@ -206,7 +214,7 @@ const BomCard = ({ bom, onEdit, onView, onSubmit, onDelete }) => {
                 <div className="grid grid-cols-3 gap-1.5 my-3">
                     {[
                         { label: 'Ratio Groups', val: bom.ratio_groups_count ?? bom.ratio_groups?.length ?? 0 },
-                        { label: 'Fabrics',      val: bom.fabric_count      ?? bom.fabric_consumptions?.length ?? 0 },
+                        { label: 'Fabrics',      val: bom.fabric_count ?? 0 },
                         { label: 'Materials',    val: bom.material_count    ?? bom.material_consumptions?.length ?? 0 },
                     ].map(({ label, val }) => (
                         <div key={label} className="bg-slate-50 rounded-lg p-2 text-center border border-black/5">
@@ -224,11 +232,13 @@ const BomCard = ({ bom, onEdit, onView, onSubmit, onDelete }) => {
                 <button onClick={() => onView(bom.id)} className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded hover:bg-slate-200 transition-colors">
                     <Eye size={10} /> View
                 </button>
+                {(bom.status === 'DRAFT' || bom.status === 'APPROVED') && (
+                    <button onClick={() => onEdit(bom)} className={`flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded transition-colors ${bom.status === 'APPROVED' ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50' : 'text-violet-600 hover:text-violet-700 hover:bg-violet-50'}`}>
+                        <Edit2 size={10} /> Edit
+                    </button>
+                )}
                 {bom.status === 'DRAFT' && (
                     <>
-                        <button onClick={() => onEdit(bom)} className="flex items-center gap-1 text-[11px] font-bold text-violet-600 hover:text-violet-700 px-2 py-1 rounded hover:bg-violet-50 transition-colors">
-                            <Edit2 size={10} /> Edit
-                        </button>
                         <button onClick={() => onSubmit(bom)} className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 hover:text-emerald-700 px-2 py-1 rounded hover:bg-emerald-50 transition-colors">
                             <Send size={10} /> Submit
                         </button>
@@ -349,7 +359,7 @@ export default function BomDashboardPage() {
 
     const handleCreate = () => navigate('/merchandiser/bom/new');
     const handleEdit   = (bom) => navigate(`/merchandiser/bom/${bom.id}/edit`);
-    const handleView   = (id) => setViewBomId(id);
+    const handleView   = (id)  => setViewBomId(id);
     const handleSubmit = (bom) => setConfirmAction({ type: 'submit', bom });
     const handleDelete = (bom) => setConfirmAction({ type: 'delete', bom });
 

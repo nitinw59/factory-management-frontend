@@ -8,22 +8,15 @@ import { bomApi } from '../../api/bomApi';
 
 const genKey = () => `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
+const freshFabric = () => ({ _key: genKey(), fabric_type_id: '', consumption_inches: '' });
+
 const freshRatioGroup = () => ({
     _key: genKey(), ratio_group_name: '', marker_length_inches: '',
+    fabrics: [freshFabric()],
     items: [
         { _key: genKey(), size: 'S', number_of_pieces: 2 },
         { _key: genKey(), size: 'M', number_of_pieces: 3 },
         { _key: genKey(), size: 'L', number_of_pieces: 2 },
-    ],
-});
-
-const freshFabric = () => ({
-    _key: genKey(), fabric_type_id: '', calculation_type: 'AVERAGE',
-    average_consumption_inches: '', wastage_percentage: '',
-    size_consumptions: [
-        { _key: genKey(), size: 'S', consumption_inches: '' },
-        { _key: genKey(), size: 'M', consumption_inches: '' },
-        { _key: genKey(), size: 'L', consumption_inches: '' },
     ],
 });
 
@@ -59,7 +52,7 @@ const AddBtn = ({ onClick, label }) => (
 
 // ─── Ratio Group Accordion ────────────────────────────────────────────────────
 
-const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, canRemove }) => {
+const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, canRemove, fabricTypes }) => {
     const totalPieces = group.items.reduce((s, it) => s + (parseInt(it.number_of_pieces) || 0), 0);
     const sizeSummary = group.items.filter(it => it.size).map(it => `${it.size}×${it.number_of_pieces}`).join(' · ');
 
@@ -70,6 +63,16 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
         const items = [...group.items];
         items[sIdx] = { ...items[sIdx], [field]: val };
         updItems(items);
+    };
+
+    const fabrics = group.fabrics || [];
+    const updFabs = (fabs) => onUpdate(gIdx, 'fabrics', fabs);
+    const addFab = () => updFabs([...fabrics, freshFabric()]);
+    const removeFab = (fIdx) => updFabs(fabrics.filter((_, i) => i !== fIdx));
+    const updateFab = (fIdx, field, val) => {
+        const fabs = [...fabrics];
+        fabs[fIdx] = { ...fabs[fIdx], [field]: val };
+        updFabs(fabs);
     };
 
     return (
@@ -126,6 +129,8 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                             />
                         </div>
                     </div>
+
+                    {/* Size ratio table */}
                     <table className="w-full text-xs mb-2">
                         <thead>
                             <tr className="text-slate-400 font-bold border-b border-slate-100">
@@ -159,144 +164,45 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                             ))}
                         </tbody>
                     </table>
-                    <button onClick={addSize} className="text-[10px] font-bold text-violet-500 hover:text-violet-600 flex items-center gap-1">
+                    <button onClick={addSize} className="text-[10px] font-bold text-violet-500 hover:text-violet-600 flex items-center gap-1 mb-4">
                         <Plus size={10} /> Add size
                     </button>
-                </div>
-            )}
-        </div>
-    );
-};
 
-// ─── Fabric Accordion ─────────────────────────────────────────────────────────
-
-const FabricCard = ({ fc, fIdx, fabricTypes, expanded, onToggle, onUpdate, onRemove }) => {
-    const ftName = fabricTypes.find(ft => String(ft.id) === String(fc.fabric_type_id))?.name;
-    const upd = (field, val) => onUpdate(fIdx, field, val);
-
-    const addSize = () => upd('size_consumptions', [...fc.size_consumptions, { _key: genKey(), size: '', consumption_inches: '' }]);
-    const removeSize = (sIdx) => upd('size_consumptions', fc.size_consumptions.filter((_, i) => i !== sIdx));
-    const updateSize = (sIdx, field, val) => {
-        const sc = [...fc.size_consumptions];
-        sc[sIdx] = { ...sc[sIdx], [field]: val };
-        upd('size_consumptions', sc);
-    };
-
-    const sizeSummary = fc.calculation_type === 'AVERAGE'
-        ? (fc.average_consumption_inches ? `${fc.average_consumption_inches}"` : '')
-        : fc.size_consumptions.filter(sc => sc.size).map(sc => `${sc.size}: ${sc.consumption_inches}"`).join(' · ');
-
-    return (
-        <div className="border border-slate-200 rounded-xl overflow-hidden">
-            <button onClick={onToggle}
-                className="w-full flex items-center gap-2 px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left">
-                {expanded
-                    ? <ChevronDown size={13} className="text-slate-400 shrink-0" />
-                    : <ChevronRight size={13} className="text-slate-400 shrink-0" />}
-                <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-slate-700 text-sm">
-                        {ftName || <span className="text-slate-400 font-normal italic">No fabric selected</span>}
-                    </span>
-                    {!expanded && sizeSummary && (
-                        <span className="text-xs text-slate-400">{sizeSummary}</span>
-                    )}
-                </div>
-                <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full border shrink-0 ${
-                    fc.calculation_type === 'AVERAGE'
-                        ? 'bg-sky-50 text-sky-600 border-sky-100'
-                        : 'bg-indigo-50 text-indigo-600 border-indigo-100'
-                }`}>{fc.calculation_type}</span>
-                {!expanded && parseFloat(fc.wastage_percentage) > 0 && (
-                    <span className="text-[10px] text-slate-400 shrink-0">{fc.wastage_percentage}% wastage</span>
-                )}
-                <button onClick={e => { e.stopPropagation(); onRemove(fIdx); }}
-                    className="p-1 text-slate-300 hover:text-red-400 transition-colors shrink-0 ml-1">
-                    <X size={13} />
-                </button>
-            </button>
-
-            {expanded && (
-                <div className="px-4 pb-4 pt-3 border-t border-slate-100 bg-white space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Fabric Type</label>
-                            <select value={fc.fabric_type_id} onChange={e => upd('fabric_type_id', e.target.value)}
-                                className="w-full mt-0.5 border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 bg-white">
-                                <option value="">— Select —</option>
-                                {fabricTypes.map(ft => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Calculation</label>
-                            <select value={fc.calculation_type} onChange={e => upd('calculation_type', e.target.value)}
-                                className="w-full mt-0.5 border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 bg-white">
-                                <option value="AVERAGE">Average (single value)</option>
-                                <option value="PER_SIZE">Per Size</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div className="flex gap-3">
-                        {fc.calculation_type === 'AVERAGE' && (
-                            <div className="flex-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">Avg Consumption (inches)</label>
-                                <input type="number" value={fc.average_consumption_inches}
-                                    onChange={e => upd('average_consumption_inches', e.target.value)}
-                                    placeholder="85.5"
-                                    className="w-full mt-0.5 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300"
-                                />
-                            </div>
-                        )}
-                        <div className="w-28 shrink-0">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Wastage %</label>
-                            <input type="number" min="0" max="100" value={fc.wastage_percentage}
-                                onChange={e => upd('wastage_percentage', e.target.value)}
-                                placeholder="3.5"
-                                className="w-full mt-0.5 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300"
-                            />
-                        </div>
-                    </div>
-                    {fc.calculation_type === 'PER_SIZE' && (
-                        <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-1.5">Per-Size Consumption (inches)</p>
-                            <table className="w-full text-xs mb-2">
-                                <thead>
-                                    <tr className="text-slate-400 font-bold border-b border-slate-100">
-                                        <th className="text-left pb-1">Size</th>
-                                        <th className="text-right pb-1 pr-3">Inches</th>
-                                        <th className="w-6" />
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {fc.size_consumptions.map((sc, sIdx) => (
-                                        <tr key={sc._key} className="border-b border-slate-50">
-                                            <td className="py-1.5 pr-2">
-                                                <input type="text" value={sc.size}
-                                                    onChange={e => updateSize(sIdx, 'size', e.target.value)}
-                                                    placeholder="S"
-                                                    className="w-14 border border-slate-200 rounded px-2 py-0.5 text-xs outline-none text-center"
-                                                />
-                                            </td>
-                                            <td className="py-1.5 text-right pr-3">
-                                                <input type="number" value={sc.consumption_inches}
-                                                    onChange={e => updateSize(sIdx, 'consumption_inches', e.target.value)}
-                                                    placeholder="75"
-                                                    className="w-20 border border-slate-200 rounded px-2 py-0.5 text-xs outline-none text-right"
-                                                />
-                                            </td>
-                                            <td className="py-1.5 text-center">
-                                                <button onClick={() => removeSize(sIdx)} className="text-slate-300 hover:text-red-400">
-                                                    <X size={11} />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                            <button onClick={addSize} className="text-[10px] font-bold text-violet-500 hover:text-violet-600 flex items-center gap-1">
-                                <Plus size={10} /> Add size
+                    {/* Fabric consumptions */}
+                    <div className="border-t border-slate-100 pt-3">
+                        <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">Fabric Consumptions</p>
+                            <button onClick={addFab}
+                                className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 px-2 py-1 rounded-md transition-colors">
+                                <Plus size={9} /> Add Fabric
                             </button>
                         </div>
-                    )}
+                        {fabrics.length === 0 && (
+                            <p className="text-xs text-slate-400 italic text-center py-2">No fabrics. Add fabric consumption for this ratio group.</p>
+                        )}
+                        {fabrics.map((fc, fIdx) => {
+                            const ftName = fabricTypes.find(ft => String(ft.id) === String(fc.fabric_type_id))?.name;
+                            return (
+                                <div key={fc._key} className="flex items-center gap-2 mb-1.5">
+                                    <select value={fc.fabric_type_id}
+                                        onChange={e => updateFab(fIdx, 'fabric_type_id', e.target.value)}
+                                        className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 bg-white">
+                                        <option value="">— Fabric type —</option>
+                                        {fabricTypes.map(ft => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                                    </select>
+                                    <input type="number" min="0" step="0.01" value={fc.consumption_inches}
+                                        onChange={e => updateFab(fIdx, 'consumption_inches', e.target.value)}
+                                        placeholder="85.5"
+                                        className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 text-right"
+                                    />
+                                    <span className="text-[10px] text-slate-400 shrink-0">in</span>
+                                    <button onClick={() => removeFab(fIdx)} className="text-slate-300 hover:text-red-400 shrink-0">
+                                        <X size={12} />
+                                    </button>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             )}
         </div>
@@ -474,16 +380,13 @@ export default function BomFormPage() {
 
     const [initialData] = useState(() => {
         const rg = freshRatioGroup();
-        const fab = freshFabric();
         return {
             form: {
                 product_id: '', bom_name: '',
                 ratio_groups: [rg],
-                fabric_consumptions: [fab],
                 material_consumptions: [],
             },
             rgKey: rg._key,
-            fabKey: fab._key,
         };
     });
 
@@ -496,9 +399,6 @@ export default function BomFormPage() {
 
     const [expandedRatios, setExpandedRatios] = useState(
         isEdit ? new Set() : new Set([initialData.rgKey])
-    );
-    const [expandedFabrics, setExpandedFabrics] = useState(
-        isEdit ? new Set() : new Set([initialData.fabKey])
     );
     const [expandedMaterials, setExpandedMaterials] = useState(new Set());
 
@@ -532,15 +432,12 @@ export default function BomFormPage() {
                         _key: genKey(),
                         ratio_group_name: rg.ratio_group_name || '',
                         marker_length_inches: rg.marker_length_inches || '',
+                        fabrics: (rg.fabric_consumptions || []).map(fc => ({
+                            _key: genKey(),
+                            fabric_type_id: String(fc.fabric_type?.id || fc.fabric_type_id || ''),
+                            consumption_inches: fc.consumption_inches || '',
+                        })),
                         items: (rg.items || []).map(it => ({ _key: genKey(), size: it.size, number_of_pieces: it.number_of_pieces })),
-                    })),
-                    fabric_consumptions: (bom.fabric_consumptions || []).map(fc => ({
-                        _key: genKey(),
-                        fabric_type_id: String(fc.fabric_type?.id || fc.fabric_type_id || ''),
-                        calculation_type: fc.calculation_type || 'AVERAGE',
-                        average_consumption_inches: fc.average_consumption_inches || '',
-                        wastage_percentage: fc.wastage_percentage || '',
-                        size_consumptions: (fc.size_consumptions || []).map(sc => ({ _key: genKey(), size: sc.size, consumption_inches: sc.consumption_inches })),
                     })),
                     material_consumptions: (bom.material_consumptions || []).map(mc => ({
                         _key: genKey(),
@@ -574,23 +471,6 @@ export default function BomFormPage() {
         const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s;
     });
 
-    // ── Fabric handlers ──
-    const addFabric = () => {
-        const nf = freshFabric();
-        setForm(f => ({ ...f, fabric_consumptions: [...f.fabric_consumptions, nf] }));
-        setExpandedFabrics(prev => new Set([...prev, nf._key]));
-    };
-    const removeFabric = (idx) => {
-        const key = form.fabric_consumptions[idx]._key;
-        setForm(f => ({ ...f, fabric_consumptions: f.fabric_consumptions.filter((_, i) => i !== idx) }));
-        setExpandedFabrics(prev => { const s = new Set(prev); s.delete(key); return s; });
-    };
-    const updateFabric = (idx, field, val) =>
-        setForm(f => { const fc = [...f.fabric_consumptions]; fc[idx] = { ...fc[idx], [field]: val }; return { ...f, fabric_consumptions: fc }; });
-    const toggleFabric = (key) => setExpandedFabrics(prev => {
-        const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s;
-    });
-
     // ── Material handlers ──
     const addMaterial = () => {
         const nm = freshMaterial();
@@ -615,15 +495,10 @@ export default function BomFormPage() {
             ratio_group_name: rg.ratio_group_name.trim(),
             marker_length_inches: rg.marker_length_inches ? parseFloat(rg.marker_length_inches) : null,
             items: rg.items.map(it => ({ size: it.size, number_of_pieces: parseInt(it.number_of_pieces) || 1 })),
-        })),
-        fabric_consumptions: form.fabric_consumptions.map(fc => ({
-            fabric_type_id: parseInt(fc.fabric_type_id),
-            calculation_type: fc.calculation_type,
-            average_consumption_inches: fc.calculation_type === 'AVERAGE' ? parseFloat(fc.average_consumption_inches) : null,
-            wastage_percentage: parseFloat(fc.wastage_percentage) || 0,
-            size_consumptions: fc.calculation_type === 'PER_SIZE'
-                ? fc.size_consumptions.map(sc => ({ size: sc.size, consumption_inches: parseFloat(sc.consumption_inches) }))
-                : [],
+            fabric_consumptions: (rg.fabrics || []).map(fc => ({
+                fabric_type_id: parseInt(fc.fabric_type_id),
+                consumption_inches: parseFloat(fc.consumption_inches) || null,
+            })),
         })),
         material_consumptions: form.material_consumptions.map(mc => ({
             trim_item_id: parseInt(mc.trim_item_id),
@@ -644,11 +519,17 @@ export default function BomFormPage() {
         try {
             const payload = serialize();
             if (isEdit) {
-                await bomApi.update(bomId, payload);
+                const res = await bomApi.update(bomId, payload);
+                const newStatus = res.data?.new_status ?? res.data?.data?.new_status;
+                showToast(
+                    newStatus === 'PENDING_APPROVAL'
+                        ? 'BOM saved — sent back for approval.'
+                        : 'BOM updated.'
+                );
             } else {
                 await bomApi.create(payload);
+                showToast('BOM saved as Draft.');
             }
-            showToast(isEdit ? 'BOM updated.' : 'BOM saved as Draft.');
             setTimeout(() => navigate('/merchandiser/bom'), 800);
         } catch (e) {
             setErr(e?.response?.data?.error || e.message || 'Failed to save BOM.');
@@ -751,25 +632,7 @@ export default function BomFormPage() {
                                 onUpdate={updateRatioGroup}
                                 onRemove={removeRatioGroup}
                                 canRemove={form.ratio_groups.length > 1}
-                            />
-                        ))}
-                    </div>
-                </Section>
-
-                {/* Fabric Consumptions */}
-                <Section title="Fabric Consumptions" action={<AddBtn onClick={addFabric} label="Add Fabric" />}>
-                    <div className="space-y-2">
-                        {form.fabric_consumptions.length === 0 && (
-                            <p className="text-slate-400 text-sm italic text-center py-4">No fabrics added yet.</p>
-                        )}
-                        {form.fabric_consumptions.map((fc, fIdx) => (
-                            <FabricCard key={fc._key}
-                                fc={fc} fIdx={fIdx}
                                 fabricTypes={formMeta.fabricTypes}
-                                expanded={expandedFabrics.has(fc._key)}
-                                onToggle={() => toggleFabric(fc._key)}
-                                onUpdate={updateFabric}
-                                onRemove={removeFabric}
                             />
                         ))}
                     </div>

@@ -36,6 +36,7 @@ export const storeManagerApi = {
     getFabricColors: () => api.get('/shared/fabric_color'),
 
 
+    updateTrimOrder: (orderId, data) => api.put(`/store-manager/trim-orders/${orderId}`, data),
     recheckMissingItems: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/recheck`),
 
     autoFulfillOrder: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/auto-fulfill`),

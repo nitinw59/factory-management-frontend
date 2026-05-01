@@ -7,7 +7,7 @@ export const bomApi = {
     create:       (data)        => api.post('/bom', data),
     update:       (bomId, data) => api.put(`/bom/${bomId}`, data),
     remove:       (bomId)       => api.delete(`/bom/${bomId}`),
-    submit:       (bomId)       => api.post(`/bom/${bomId}/submit`),
-    approve:      (bomId)       => api.post(`/bom/${bomId}/approve`),
-    archive:      (bomId)       => api.post(`/bom/${bomId}/archive`),
+    submit:  (bomId) => api.post(`/bom/${bomId}/submit`),
+    approve: (bomId) => api.post(`/bom/${bomId}/approve`),
+    archive: (bomId) => api.post(`/bom/${bomId}/archive`),
 };

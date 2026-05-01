@@ -313,6 +313,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     const [intendedAction, setIntendedAction] = useState(null);
     const [selectedCategory, setSelectedCategory] = useState(null);
     const [defectSearch, setDefectSearch] = useState('');
+    const [selectedDefectIds, setSelectedDefectIds] = useState(new Set());
 
     const displayBatch = itemInfo.batchCode || itemInfo.batchId;
     const displayRoll = itemInfo.rollId ? `ROLL #${itemInfo.rollId}` : '';
@@ -334,11 +335,24 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
 
     const handleActionInitiation = (action) => {
         if (selectedIds.size === 0) return;
-        if (action === 'APPROVED') submitValidation('APPROVED', null);
-        else { setIntendedAction(action); setSelectedCategory(null); }
+        if (action === 'APPROVED') submitValidation('APPROVED', []);
+        else { setIntendedAction(action); setSelectedCategory(null); setSelectedDefectIds(new Set()); }
     };
 
-    const submitValidation = async (qcStatus, defectCodeId) => {
+    const toggleDefect = (defectId) => {
+        setSelectedDefectIds(prev => {
+            const n = new Set(prev);
+            if (n.has(defectId)) n.delete(defectId); else n.add(defectId);
+            return n;
+        });
+    };
+
+    const handleDefectSubmit = () => {
+        if (selectedDefectIds.size === 0) return;
+        submitValidation(intendedAction, Array.from(selectedDefectIds));
+    };
+
+    const submitValidation = async (qcStatus, defectCodeIds = []) => {
         const selectedPiecesList = pieces.filter(p => selectedIds.has(p.id));
         let payloads = [];
 
@@ -349,7 +363,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                 if (!acc[key]) {
                     acc[key] = {
                         batchId: itemInfo.batchId, rollId: itemInfo.rollId, partId: p.part_id || itemInfo.partId,
-                        size: p.size || itemInfo.size, pieceIds: [], qcStatus, defectCodeId: defectCodeId || null, bundleId: p.bundle_id || null
+                        size: p.size || itemInfo.size, pieceIds: [], qcStatus, defectCodeIds, bundleId: p.bundle_id || null
                     };
                 }
                 acc[key].pieceIds.push(p.id);
@@ -358,16 +372,16 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
             payloads = Object.values(grouped);
         } else {
             payloads = [{
-                batchId: itemInfo.batchId, rollId: itemInfo.rollId, partId: itemInfo.partId, 
-                size: itemInfo.size, pieceIds: Array.from(selectedIds), qcStatus, defectCodeId: defectCodeId || null, bundleId: itemInfo.bundle_id || null
+                batchId: itemInfo.batchId, rollId: itemInfo.rollId, partId: itemInfo.partId,
+                size: itemInfo.size, pieceIds: Array.from(selectedIds), qcStatus, defectCodeIds, bundleId: itemInfo.bundle_id || null
             }];
         }
 
         // Trigger Full Screen Lock via Parent
         await onValidationSubmit(payloads);
-        
+
         // After success, clear selections
-        setSelectedIds(new Set()); setIntendedAction(null); setSelectedCategory(null); setDefectSearch('');
+        setSelectedIds(new Set()); setIntendedAction(null); setSelectedCategory(null); setDefectSearch(''); setSelectedDefectIds(new Set());
     };
 
     const categories = Array.from(new Set(defectCodes.map(d => d.category)));
@@ -451,7 +465,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                 <h4 className="text-base font-black flex items-center uppercase tracking-tight text-black">
                                     <AlertCircle className={`w-5 h-5 mr-2 ${intendedAction === 'NEEDS_REWORK' ? 'text-amber-500' : 'text-rose-600'}`} /> Reason for {intendedAction.replace('_', ' ')}?
                                 </h4>
-                                <button onClick={() => { setIntendedAction(null); setSelectedCategory(null); setDefectSearch(''); }} className="bg-slate-200 px-4 py-2 rounded-lg font-black text-slate-700 text-sm uppercase tracking-widest active:scale-95">Cancel</button>
+                                <button onClick={() => { setIntendedAction(null); setSelectedCategory(null); setDefectSearch(''); setSelectedDefectIds(new Set()); }} className="bg-slate-200 px-4 py-2 rounded-lg font-black text-slate-700 text-sm uppercase tracking-widest active:scale-95">Cancel</button>
                             </div>
                             {/* Search box */}
                             <input
@@ -474,12 +488,16 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                         <p className="text-xs text-slate-400 text-center py-3">No matching defect codes.</p>
                                     ) : (
                                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-36 overflow-y-auto">
-                                            {results.map(defect => (
-                                                <button key={defect.id} onClick={() => submitValidation(intendedAction, defect.id)} className="bg-black text-white p-2.5 rounded-xl text-left shadow-xl hover:bg-indigo-600 active:scale-95 transition-all">
-                                                    <span className="block text-xs font-bold text-slate-400 uppercase tracking-widest">{defect.code}</span>
-                                                    <span className="text-sm font-black leading-tight">{defect.description}</span>
-                                                </button>
-                                            ))}
+                                            {results.map(defect => {
+                                                const isChosen = selectedDefectIds.has(defect.id);
+                                                return (
+                                                    <button key={defect.id} onClick={() => toggleDefect(defect.id)} className={`relative p-2.5 rounded-xl text-left shadow-xl active:scale-95 transition-all ${isChosen ? 'bg-indigo-600 ring-2 ring-indigo-300' : 'bg-black hover:bg-indigo-600'} text-white`}>
+                                                        {isChosen && <Check className="absolute top-2 right-2 w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                                                        <span className="block text-xs font-bold text-slate-400 uppercase tracking-widest">{defect.code}</span>
+                                                        <span className="text-sm font-black leading-tight">{defect.description}</span>
+                                                    </button>
+                                                );
+                                            })}
                                         </div>
                                     );
                                 })()
@@ -491,12 +509,33 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-36 overflow-y-auto">
-                                    {availableDefects.map(defect => (
-                                        <button key={defect.id} onClick={() => submitValidation(intendedAction, defect.id)} className="bg-black text-white p-2.5 rounded-xl text-left shadow-xl hover:bg-indigo-600 active:scale-95 transition-all">
-                                            <span className="block text-xs font-bold text-slate-400 uppercase tracking-widest">{defect.code}</span>
-                                            <span className="text-sm font-black leading-tight">{defect.description}</span>
-                                        </button>
-                                    ))}
+                                    {availableDefects.map(defect => {
+                                        const isChosen = selectedDefectIds.has(defect.id);
+                                        return (
+                                            <button key={defect.id} onClick={() => toggleDefect(defect.id)} className={`relative p-2.5 rounded-xl text-left shadow-xl active:scale-95 transition-all ${isChosen ? 'bg-indigo-600 ring-2 ring-indigo-300' : 'bg-black hover:bg-indigo-600'} text-white`}>
+                                                {isChosen && <Check className="absolute top-2 right-2 w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                                                <span className="block text-xs font-bold text-slate-400 uppercase tracking-widest">{defect.code}</span>
+                                                <span className="text-sm font-black leading-tight">{defect.description}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                            {selectedDefectIds.size > 0 && (
+                                <div className="mt-2 flex items-center gap-2 flex-wrap border-t border-slate-200 pt-2">
+                                    <span className="text-xs font-bold text-slate-500 shrink-0">{selectedDefectIds.size} selected:</span>
+                                    {Array.from(selectedDefectIds).map(id => {
+                                        const d = defectCodes.find(dc => dc.id === id);
+                                        return d ? (
+                                            <span key={id} className="flex items-center gap-1 bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">
+                                                {d.code}
+                                                <button onClick={() => toggleDefect(id)} className="ml-0.5 hover:text-indigo-900"><X className="w-3 h-3" /></button>
+                                            </span>
+                                        ) : null;
+                                    })}
+                                    <button onClick={handleDefectSubmit} className="ml-auto bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-black text-sm uppercase tracking-widest hover:bg-indigo-700 active:scale-95 flex items-center gap-1.5">
+                                        <Send className="w-3.5 h-3.5" /> Confirm ({selectedDefectIds.size})
+                                    </button>
                                 </div>
                             )}
                         </div>
@@ -527,6 +566,7 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
     const [intendedAction, setIntendedAction] = useState(null);
     const [selectedCategory, setSelectedCategory] = useState(null);
     const [defectSearch, setDefectSearch] = useState('');
+    const [selectedDefectIds, setSelectedDefectIds] = useState(new Set());
 
     const togglePiece = (id) => {
         if (intendedAction) return;
@@ -543,9 +583,22 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
         else setSelectedIds(new Set(actionableReworks.map(p => p.id)));
     };
 
-    const executeAction = async (status, defectCodeId = null) => {
-        await onSave({ pieceIds: Array.from(selectedIds), status, defectCodeId });
-        setSelectedIds(new Set()); setIntendedAction(null); setSelectedCategory(null); setDefectSearch('');
+    const toggleDefectAlter = (defectId) => {
+        setSelectedDefectIds(prev => {
+            const n = new Set(prev);
+            if (n.has(defectId)) n.delete(defectId); else n.add(defectId);
+            return n;
+        });
+    };
+
+    const executeAction = async (status, defectCodeIds = []) => {
+        await onSave({ pieceIds: Array.from(selectedIds), status, defectCodeIds });
+        setSelectedIds(new Set()); setIntendedAction(null); setSelectedCategory(null); setDefectSearch(''); setSelectedDefectIds(new Set());
+    };
+
+    const handleAlterDefectSubmit = () => {
+        if (selectedDefectIds.size === 0) return;
+        executeAction('QC_REJECTED', Array.from(selectedDefectIds));
     };
 
     const categories = Array.from(new Set(defectCodes.map(d => d.category)));
@@ -612,7 +665,7 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
                             <h4 className="text-base font-black flex items-center uppercase tracking-tight text-black">
                                 <AlertCircle className="w-5 h-5 mr-2 text-rose-600" /> Reason Repair Failed?
                             </h4>
-                            <button onClick={() => { setIntendedAction(null); setSelectedCategory(null); setDefectSearch(''); }} className="bg-slate-200 px-4 py-2 rounded-lg font-black text-slate-700 text-sm uppercase tracking-widest active:scale-95">Cancel</button>
+                            <button onClick={() => { setIntendedAction(null); setSelectedCategory(null); setDefectSearch(''); setSelectedDefectIds(new Set()); }} className="bg-slate-200 px-4 py-2 rounded-lg font-black text-slate-700 text-sm uppercase tracking-widest active:scale-95">Cancel</button>
                         </div>
                         <input
                             autoFocus
@@ -633,12 +686,16 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
                                     <p className="text-xs text-slate-400 text-center py-3">No matching defect codes.</p>
                                 ) : (
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-36 overflow-y-auto">
-                                        {results.map(defect => (
-                                            <button key={defect.id} onClick={() => executeAction('QC_REJECTED', defect.id)} className="bg-rose-600 text-white p-2.5 rounded-xl text-left shadow-xl hover:bg-rose-700 active:scale-95 transition-all">
-                                                <span className="block text-xs font-bold text-rose-200 uppercase tracking-widest">{defect.code}</span>
-                                                <span className="text-sm font-black leading-tight">{defect.description}</span>
-                                            </button>
-                                        ))}
+                                        {results.map(defect => {
+                                            const isChosen = selectedDefectIds.has(defect.id);
+                                            return (
+                                                <button key={defect.id} onClick={() => toggleDefectAlter(defect.id)} className={`relative p-2.5 rounded-xl text-left shadow-xl active:scale-95 transition-all ${isChosen ? 'bg-rose-700 ring-2 ring-rose-300' : 'bg-rose-600 hover:bg-rose-700'} text-white`}>
+                                                    {isChosen && <Check className="absolute top-2 right-2 w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                                                    <span className="block text-xs font-bold text-rose-200 uppercase tracking-widest">{defect.code}</span>
+                                                    <span className="text-sm font-black leading-tight">{defect.description}</span>
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 );
                             })()
@@ -650,12 +707,33 @@ const ApproveAlteredModal = ({ itemInfo, defectCodes, onClose, onSave }) => {
                             </div>
                         ) : (
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-36 overflow-y-auto">
-                                {availableDefects.map(defect => (
-                                    <button key={defect.id} onClick={() => executeAction('QC_REJECTED', defect.id)} className="bg-rose-600 text-white p-2.5 rounded-xl text-left shadow-xl hover:bg-rose-700 active:scale-95 transition-all">
-                                        <span className="block text-xs font-bold text-rose-200 uppercase tracking-widest">{defect.code}</span>
-                                        <span className="text-sm font-black leading-tight">{defect.description}</span>
-                                    </button>
-                                ))}
+                                {availableDefects.map(defect => {
+                                    const isChosen = selectedDefectIds.has(defect.id);
+                                    return (
+                                        <button key={defect.id} onClick={() => toggleDefectAlter(defect.id)} className={`relative p-2.5 rounded-xl text-left shadow-xl active:scale-95 transition-all ${isChosen ? 'bg-rose-700 ring-2 ring-rose-300' : 'bg-rose-600 hover:bg-rose-700'} text-white`}>
+                                            {isChosen && <Check className="absolute top-2 right-2 w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                                            <span className="block text-xs font-bold text-rose-200 uppercase tracking-widest">{defect.code}</span>
+                                            <span className="text-sm font-black leading-tight">{defect.description}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                        {selectedDefectIds.size > 0 && (
+                            <div className="mt-2 flex items-center gap-2 flex-wrap border-t border-slate-200 pt-2">
+                                <span className="text-xs font-bold text-slate-500 shrink-0">{selectedDefectIds.size} selected:</span>
+                                {Array.from(selectedDefectIds).map(id => {
+                                    const d = defectCodes.find(dc => dc.id === id);
+                                    return d ? (
+                                        <span key={id} className="flex items-center gap-1 bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full text-xs font-bold">
+                                            {d.code}
+                                            <button onClick={() => toggleDefectAlter(id)} className="ml-0.5 hover:text-rose-900"><X className="w-3 h-3" /></button>
+                                        </span>
+                                    ) : null;
+                                })}
+                                <button onClick={handleAlterDefectSubmit} className="ml-auto bg-rose-600 text-white px-4 py-1.5 rounded-lg font-black text-sm uppercase tracking-widest hover:bg-rose-700 active:scale-95 flex items-center gap-1.5">
+                                    <Send className="w-3.5 h-3.5" /> Confirm ({selectedDefectIds.size})
+                                </button>
                             </div>
                         )}
                     </div>
@@ -902,7 +980,7 @@ const BatchHistoryPanel = ({ onClose }) => {
                         )}
                         <History size={16} className="text-indigo-500 shrink-0" />
                         <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest">
-                            {isDetailView ? (detail?.batch?.batch_code || 'Batch Detail') : 'Batch History'}
+                            {isDetailView ? (detail?.batch?.batch_id || 'Batch Detail') : 'Batch History'}
                         </h2>
                         {!isDetailView && listData && (
                             <span className="text-xs font-bold text-slate-400">{listData.total} completed</span>
@@ -949,7 +1027,7 @@ const BatchHistoryPanel = ({ onClose }) => {
                                                 <div className="flex items-start justify-between gap-3 mb-2">
                                                     <div>
                                                         <div className="flex items-center gap-2 mb-0.5">
-                                                            <span className="font-mono font-black text-sm text-indigo-600">{b.batch_code}</span>
+                                                            <span className="font-mono font-black text-sm text-indigo-600">{b.batch_id}</span>
                                                             <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg uppercase">{b.product_sku}</span>
                                                         </div>
                                                         <p className="text-sm font-bold text-slate-700">{b.product_name}</p>
@@ -1004,7 +1082,7 @@ const BatchHistoryPanel = ({ onClose }) => {
                                         {/* Batch header */}
                                         <div className="mb-5 pb-4 border-b border-slate-100">
                                             <div className="flex items-center gap-2 mb-1">
-                                                <span className="font-mono font-black text-lg text-indigo-600">{b.batch_code}</span>
+                                                <span className="font-mono font-black text-lg text-indigo-600">{b.batch_id}</span>
                                                 {b.product_sku && <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg">{b.product_sku}</span>}
                                             </div>
                                             <p className="font-bold text-slate-700 text-sm mb-2">{b.product_name}</p>
@@ -1371,10 +1449,10 @@ const UniversalWorkstationDashboard = () => {
         }
     };
 
-    const handleApproveAlterSubmit = async ({ pieceIds, status, defectCodeId }) => {
+    const handleApproveAlterSubmit = async ({ pieceIds, status, defectCodeIds }) => {
         setIsProcessing(true); // 🚨 Global Full-Screen Lock ON
         try {
-            await universalApi.approveAlteredPieces({ batchId: modalState.batchId, pieceIds, status, defectCodeId });
+            await universalApi.approveAlteredPieces({ batchId: modalState.batchId, pieceIds, status, defectCodeIds });
             const newBatches = await fetchQueue();
             refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
         } catch (err) { 
