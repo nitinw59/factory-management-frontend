@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     Truck, Search, Loader2, AlertCircle,
-    CheckCircle2, Clock, Package, FileText,
-    ChevronDown, ChevronUp, RefreshCw
+    Package, RefreshCw, X,
+    ShoppingCart, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { dispatchManagerApi } from '../../api/dispatchManagerApi';
 import BatchDispatchModal from './BatchDispatchModal';
@@ -15,43 +15,45 @@ const Spinner = () => (
     </div>
 );
 
-const DispatchStatusBadge = ({ status }) => {
+const StatusBadge = ({ status }) => {
     const map = {
-        OPEN:    'bg-blue-100    text-blue-700    border-blue-200',
-        PARTIAL: 'bg-amber-100   text-amber-700   border-amber-200',
-        CLOSED:  'bg-emerald-100 text-emerald-700 border-emerald-200',
+        OPEN:        'bg-blue-100    text-blue-700    border-blue-200',
+        PARTIAL:     'bg-amber-100   text-amber-700   border-amber-200',
+        CLOSED:      'bg-emerald-100 text-emerald-700 border-emerald-200',
+        COMPLETED:   'bg-emerald-100 text-emerald-700 border-emerald-200',
+        IN_PROGRESS: 'bg-indigo-100  text-indigo-700  border-indigo-200',
+        NOT_STARTED: 'bg-gray-100    text-gray-500    border-gray-200',
+        PENDING:     'bg-yellow-50   text-yellow-700  border-yellow-200',
     };
     return (
         <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${map[status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
-            {status ?? 'N/A'}
+            {status?.replace(/_/g, ' ') ?? 'N/A'}
         </span>
     );
 };
 
-const PipelineProgress = ({ total, completed }) => {
-    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+// ─── MINI BARS ────────────────────────────────────────────────────────────────
+
+const MiniBar = ({ value, total, colorFull, colorPartial }) => {
+    const pct = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0;
     return (
-        <div className="flex items-center gap-2">
-            <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+        <div className="flex items-center gap-1.5">
+            <div className="flex-1 bg-slate-100 rounded-full h-1 overflow-hidden min-w-[48px]">
                 <div
-                    className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : 'bg-indigo-400'}`}
+                    className={`h-full rounded-full transition-all ${pct === 100 ? colorFull : colorPartial}`}
                     style={{ width: `${pct}%` }}
                 />
             </div>
-            <span className="text-[9px] font-bold text-slate-400 w-14 shrink-0">{completed}/{total} stages</span>
+            <span className="text-[9px] text-slate-400 font-bold whitespace-nowrap">{pct}%</span>
         </div>
     );
 };
 
-// ─── BATCH CARD ───────────────────────────────────────────────────────────────
+// ─── BATCH ROW ────────────────────────────────────────────────────────────────
 
-const BatchCard = ({ batch, onOpenDispatch }) => {
-    const q  = batch.quantities || {};
+const BatchRow = ({ batch, onOpenDispatch }) => {
+    const q  = batch.quantities   || {};
     const ss = batch.stage_summary || {};
-
-    const dispatchPct = q.total_cut > 0
-        ? Math.min(100, Math.round((q.total_dispatched / q.total_cut) * 100))
-        : 0;
 
     const borderColor =
         batch.dispatch_status === 'CLOSED'  ? 'border-l-emerald-400' :
@@ -59,108 +61,128 @@ const BatchCard = ({ batch, onOpenDispatch }) => {
                                               'border-l-blue-400';
 
     return (
-        <div className={`bg-white rounded-xl border border-slate-200 border-l-4 ${borderColor} shadow-sm hover:shadow-md transition-shadow`}>
-            <div className="p-4">
-                {/* Header */}
-                <div className="flex items-start justify-between mb-3">
-                    <div>
-                        <p className="font-mono font-black text-slate-800 text-sm">{batch.batch_code}</p>
-                        <p className="text-xs text-slate-500 mt-0.5">{batch.product?.name}</p>
-                    </div>
-                    <DispatchStatusBadge status={batch.dispatch_status} />
-                </div>
+        <div className={`flex items-center gap-4 bg-white border border-slate-200 border-l-4 ${borderColor} rounded-xl px-4 py-3 hover:shadow-sm transition-shadow`}>
 
-                {/* SO + Customer */}
-                <div className="text-xs text-slate-600 mb-3 space-y-0.5">
-                    <p><span className="text-slate-400">SO:</span> <span className="font-semibold">{batch.sales_order?.order_number}</span>
-                        {batch.sales_order?.buyer_po_number && <span className="text-slate-400 ml-1">· BPO: {batch.sales_order.buyer_po_number}</span>}
-                    </p>
-                    <p><span className="text-slate-400">Customer:</span> <span className="font-semibold">{batch.sales_order?.customer}</span></p>
+            {/* Identity */}
+            <div className="min-w-[170px]">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="font-mono font-black text-slate-800 text-xs">BATCH #{batch.id}</span>
+                    <StatusBadge status={batch.dispatch_status} />
                 </div>
-
-                {/* Quantities */}
-                <div className="grid grid-cols-4 gap-1.5 mb-3">
-                    {[
-                        { label: 'Cut',        value: q.total_cut,         color: 'bg-slate-50'    },
-                        { label: 'Approved',   value: q.approved_garments, color: 'bg-emerald-50'  },
-                        { label: 'Dispatched', value: q.total_dispatched,  color: 'bg-blue-50'     },
-                        { label: 'Remaining',  value: q.remaining,         color: 'bg-amber-50'    },
-                    ].map(({ label, value, color }) => (
-                        <div key={label} className={`${color} rounded-lg p-1.5 text-center border border-black/5`}>
-                            <p className="font-black text-slate-800 text-sm">{value ?? 0}</p>
-                            <p className="text-[8px] font-bold uppercase text-slate-400">{label}</p>
-                        </div>
-                    ))}
-                </div>
-
-                {/* Dispatch progress bar */}
-                <div className="mb-3">
-                    <div className="flex justify-between text-[9px] text-slate-400 mb-1">
-                        <span>Dispatch progress</span>
-                        <span>{dispatchPct}%</span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                        <div
-                            className={`h-full rounded-full transition-all ${dispatchPct === 100 ? 'bg-emerald-500' : 'bg-indigo-400'}`}
-                            style={{ width: `${dispatchPct}%` }}
-                        />
-                    </div>
-                </div>
-
-                {/* Pipeline */}
-                {ss.total > 0 && <PipelineProgress total={ss.total} completed={ss.completed} />}
+                <p className="text-[10px] text-slate-400 truncate max-w-[160px]">{batch.product?.name || '—'}</p>
             </div>
 
-            {/* Footer actions */}
-            <div className="border-t border-slate-100 px-4 py-2.5 flex items-center justify-between bg-slate-50 rounded-b-xl">
-                <span className="text-[10px] text-slate-400 font-medium">
-                    {batch.receipt_count} receipt{batch.receipt_count !== 1 ? 's' : ''}
-                    {batch.is_dispatch_closed && (
-                        <span className="ml-2 text-emerald-600 font-bold flex items-center gap-0.5 inline-flex">
-                            <CheckCircle2 size={10} /> Closed
-                        </span>
-                    )}
-                </span>
-                <button
-                    onClick={() => onOpenDispatch(batch.id, batch.batch_code)}
-                    className="flex items-center gap-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg transition-colors"
-                >
-                    <Truck size={11} /> Manage
-                </button>
+            {/* Pipeline stages */}
+            <div className="flex-1 min-w-[110px]">
+                <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Pipeline</p>
+                <MiniBar
+                    value={ss.completed || 0}
+                    total={ss.total || 1}
+                    colorFull="bg-emerald-500"
+                    colorPartial="bg-indigo-400"
+                />
+                <p className="text-[9px] text-slate-400 mt-0.5">{ss.completed || 0}/{ss.total || 0} stages</p>
             </div>
+
+            {/* Quantity grid */}
+            <div className="grid grid-cols-3 gap-3 min-w-[200px]">
+                {[
+                    { label: 'Cut',        value: q.total_cut        ?? 0 },
+                    { label: 'Dispatched', value: q.total_dispatched ?? 0 },
+                    { label: 'Remaining',  value: q.remaining        ?? 0 },
+                ].map(({ label, value }) => (
+                    <div key={label} className="text-center">
+                        <p className="font-black text-slate-800 text-sm leading-none">{value}</p>
+                        <p className="text-[8px] font-bold uppercase text-slate-400 mt-0.5">{label}</p>
+                    </div>
+                ))}
+            </div>
+
+            {/* Dispatch progress */}
+            <div className="flex-1 min-w-[90px]">
+                <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Dispatch</p>
+                <MiniBar
+                    value={q.total_dispatched || 0}
+                    total={q.total_cut || 0}
+                    colorFull="bg-emerald-500"
+                    colorPartial="bg-blue-400"
+                />
+            </div>
+
+            {/* Receipts */}
+            <div className="text-center min-w-[44px]">
+                <p className="font-black text-slate-700 text-sm leading-none">{batch.receipt_count || 0}</p>
+                <p className="text-[8px] font-bold uppercase text-slate-400 mt-0.5">Receipts</p>
+            </div>
+
+            {/* Action */}
+            <button
+                onClick={() => onOpenDispatch(batch.id, batch.batch_code)}
+                className="flex items-center gap-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg transition-colors shrink-0"
+            >
+                <Truck size={11} /> Manage
+            </button>
         </div>
     );
 };
 
-// ─── STATUS GROUP ─────────────────────────────────────────────────────────────
+// ─── SO GROUP ─────────────────────────────────────────────────────────────────
 
-const StatusGroup = ({ title, icon: Icon, colorClass, batches, onOpenDispatch, defaultOpen = true }) => {
+const SOGroup = ({ so, batches, onOpenDispatch, defaultOpen }) => {
     const [open, setOpen] = useState(defaultOpen);
 
-    if (!batches.length) return null;
+    const totalDispatched = batches.reduce((s, b) => s + (b.quantities?.total_dispatched || 0), 0);
+    const totalCut        = batches.reduce((s, b) => s + (b.quantities?.total_cut        || 0), 0);
+    const allClosed       = batches.every(b => b.dispatch_status === 'CLOSED');
+    const anyPartial      = batches.some(b  => b.dispatch_status === 'PARTIAL');
+    const aggPct          = totalCut > 0 ? Math.min(100, Math.round((totalDispatched / totalCut) * 100)) : 0;
+
+    const headerBg = allClosed ? 'bg-emerald-50/80' : anyPartial ? 'bg-amber-50/80' : 'bg-blue-50/80';
 
     return (
-        <div className="mb-6 rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+        <div className="mb-4 rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
             <button
                 onClick={() => setOpen(o => !o)}
-                className={`w-full flex items-center justify-between px-5 py-3.5 ${colorClass} border-b border-slate-100 transition-colors`}
+                className={`w-full flex items-center gap-3 px-5 py-3 ${headerBg} border-b border-slate-100 hover:brightness-95 transition-all text-left`}
             >
-                <div className="flex items-center gap-2">
-                    <Icon size={16} className="text-slate-600" />
-                    <span className="font-bold text-slate-700 text-sm">{title}</span>
-                    <span className="text-[10px] font-black bg-white/80 text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 shadow-sm">
-                        {batches.length}
-                    </span>
-                </div>
-                {open ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
-            </button>
-            {open && (
-                <div className="p-5 bg-slate-50/50 max-h-[70vh] overflow-y-auto">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {batches.map(batch => (
-                            <BatchCard key={batch.id} batch={batch} onOpenDispatch={onOpenDispatch} />
-                        ))}
+                <ShoppingCart size={14} className="text-slate-500 shrink-0" />
+
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-slate-800 text-sm">{so.order_number || 'Unknown SO'}</span>
+                        {so.buyer_po_number && (
+                            <span className="text-[10px] text-slate-400 font-mono bg-white/70 border border-slate-200 px-1.5 py-0.5 rounded">
+                                BPO: {so.buyer_po_number}
+                            </span>
+                        )}
                     </div>
+                    <p className="text-[10px] text-slate-500 truncate">{so.customer || '—'}</p>
+                </div>
+
+                <div className="flex items-center gap-4 shrink-0">
+                    {/* Aggregate dispatch */}
+                    <div className="text-right hidden sm:block">
+                        <p className="text-xs font-black text-slate-700">{totalDispatched} / {totalCut} pcs</p>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase">{aggPct}% dispatched</p>
+                    </div>
+
+                    {/* Batch count pill */}
+                    <span className="text-[10px] font-black bg-white/80 text-slate-600 px-2 py-0.5 rounded-full border border-slate-200">
+                        {batches.length} batch{batches.length !== 1 ? 'es' : ''}
+                    </span>
+
+                    {open
+                        ? <ChevronUp  size={14} className="text-slate-400" />
+                        : <ChevronDown size={14} className="text-slate-400" />
+                    }
+                </div>
+            </button>
+
+            {open && (
+                <div className="p-4 bg-slate-50/30 space-y-2">
+                    {batches.map(batch => (
+                        <BatchRow key={batch.id} batch={batch} onOpenDispatch={onOpenDispatch} />
+                    ))}
                 </div>
             )}
         </div>
@@ -169,12 +191,20 @@ const StatusGroup = ({ title, icon: Icon, colorClass, batches, onOpenDispatch, d
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
+const STATUS_FILTERS = [
+    { label: 'All',     value: 'ALL',     color: 'text-slate-700'   },
+    { label: 'Open',    value: 'OPEN',    color: 'text-blue-700'    },
+    { label: 'Partial', value: 'PARTIAL', color: 'text-amber-700'   },
+    { label: 'Closed',  value: 'CLOSED',  color: 'text-emerald-700' },
+];
+
 export default function DispatchDashboardPage() {
-    const [batches, setBatches]       = useState([]);
-    const [loading, setLoading]       = useState(true);
-    const [error, setError]           = useState(null);
-    const [search, setSearch]         = useState('');
-    const [activeBatch, setActiveBatch] = useState(null);
+    const [batches,      setBatches]      = useState([]);
+    const [loading,      setLoading]      = useState(true);
+    const [error,        setError]        = useState(null);
+    const [search,       setSearch]       = useState('');
+    const [statusFilter, setStatusFilter] = useState('ALL');
+    const [activeBatch,  setActiveBatch]  = useState(null);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -182,7 +212,7 @@ export default function DispatchDashboardPage() {
         try {
             const res = await dispatchManagerApi.getDashboardData();
             setBatches(res.data?.data || res.data || []);
-        } catch (err) {
+        } catch {
             setError('Failed to load dispatch data.');
         } finally {
             setLoading(false);
@@ -192,49 +222,73 @@ export default function DispatchDashboardPage() {
     useEffect(() => { fetchData(); }, [fetchData]);
 
     const filtered = useMemo(() => {
-        if (!search.trim()) return batches;
-        const lower = search.toLowerCase();
-        return batches.filter(b =>
-            (b.batch_code               || '').toLowerCase().includes(lower) ||
-            (b.product?.name            || '').toLowerCase().includes(lower) ||
-            (b.sales_order?.order_number|| '').toLowerCase().includes(lower) ||
-            (b.sales_order?.customer    || '').toLowerCase().includes(lower) ||
-            (b.purchase_order?.po_code  || '').toLowerCase().includes(lower)
-        );
-    }, [batches, search]);
+        let result = batches;
+        if (statusFilter !== 'ALL') {
+            result = result.filter(b => b.dispatch_status === statusFilter);
+        }
+        if (search.trim()) {
+            const q = search.toLowerCase();
+            result  = result.filter(b =>
+                String(b.id                  || '').includes(q)               ||
+                (b.product?.name             || '').toLowerCase().includes(q) ||
+                (b.sales_order?.order_number || '').toLowerCase().includes(q) ||
+                (b.sales_order?.customer     || '').toLowerCase().includes(q) ||
+                (b.purchase_order?.po_code   || '').toLowerCase().includes(q)
+            );
+        }
+        return result;
+    }, [batches, search, statusFilter]);
 
-    const open    = filtered.filter(b => b.dispatch_status === 'OPEN');
-    const partial = filtered.filter(b => b.dispatch_status === 'PARTIAL');
-    const closed  = filtered.filter(b => b.dispatch_status === 'CLOSED');
+    // Group by SO — split into active and fully-closed
+    const { activeGroups, closedGroups } = useMemo(() => {
+        const map = new Map();
+        filtered.forEach(b => {
+            const key = b.sales_order?.order_number || '__unknown__';
+            if (!map.has(key)) map.set(key, { so: b.sales_order || { order_number: key }, batches: [] });
+            map.get(key).batches.push(b);
+        });
+        const groups = [...map.values()];
+        return {
+            activeGroups: groups.filter(g => !g.batches.every(b => b.dispatch_status === 'CLOSED')),
+            closedGroups: groups.filter(g =>  g.batches.every(b => b.dispatch_status === 'CLOSED')),
+        };
+    }, [filtered]);
 
-    const stats = {
-        total:      batches.length,
-        open:       batches.filter(b => b.dispatch_status === 'OPEN').length,
-        partial:    batches.filter(b => b.dispatch_status === 'PARTIAL').length,
-        closed:     batches.filter(b => b.dispatch_status === 'CLOSED').length,
-    };
+    const counts = useMemo(() => ({
+        total:   batches.length,
+        open:    batches.filter(b => b.dispatch_status === 'OPEN').length,
+        partial: batches.filter(b => b.dispatch_status === 'PARTIAL').length,
+        closed:  batches.filter(b => b.dispatch_status === 'CLOSED').length,
+        pieces:  batches.reduce((s, b) => s + (b.quantities?.total_dispatched || 0), 0),
+    }), [batches]);
 
     return (
         <div className="min-h-screen bg-slate-50">
-            {/* Page header */}
+
+            {/* ── Header ── */}
             <div className="bg-white border-b border-slate-200 px-6 py-5">
                 <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                         <Truck className="text-indigo-600" size={22} />
                         <h1 className="text-xl font-extrabold text-slate-800">Dispatch Dashboard</h1>
                     </div>
-                    <button onClick={fetchData} disabled={loading} className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-50">
+                    <button
+                        onClick={fetchData}
+                        disabled={loading}
+                        className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-50"
+                    >
                         <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh
                     </button>
                 </div>
 
-                {/* Stats row */}
-                <div className="grid grid-cols-4 gap-3 mb-4">
+                {/* KPI strip */}
+                <div className="grid grid-cols-5 gap-3 mb-4">
                     {[
-                        { label: 'Total Batches', value: stats.total,   color: 'text-slate-800'   },
-                        { label: 'Open',          value: stats.open,    color: 'text-blue-700'    },
-                        { label: 'Partial',       value: stats.partial, color: 'text-amber-700'   },
-                        { label: 'Closed',        value: stats.closed,  color: 'text-emerald-700' },
+                        { label: 'Total Batches',     value: counts.total,   color: 'text-slate-800'   },
+                        { label: 'Open',              value: counts.open,    color: 'text-blue-700'    },
+                        { label: 'Partial',           value: counts.partial, color: 'text-amber-700'   },
+                        { label: 'Closed',            value: counts.closed,  color: 'text-emerald-700' },
+                        { label: 'Pieces Dispatched', value: counts.pieces,  color: 'text-indigo-700'  },
                     ].map(({ label, value, color }) => (
                         <div key={label} className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
                             <p className={`text-2xl font-black ${color}`}>{value}</p>
@@ -243,35 +297,96 @@ export default function DispatchDashboardPage() {
                     ))}
                 </div>
 
-                {/* Search */}
-                <div className="relative max-w-sm">
-                    <Search className="absolute left-3 top-2.5 text-slate-400 w-4 h-4" />
-                    <input
-                        type="text"
-                        placeholder="Search batch, SO, customer…"
-                        value={search}
-                        onChange={e => setSearch(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400 outline-none"
-                    />
+                {/* Search + status pills */}
+                <div className="flex items-center gap-3 flex-wrap">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-2.5 text-slate-400 w-4 h-4" />
+                        <input
+                            type="text"
+                            placeholder="Search batch, SO, customer…"
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            className="pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400 outline-none w-64"
+                        />
+                        {search && (
+                            <button
+                                onClick={() => setSearch('')}
+                                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
+                        {STATUS_FILTERS.map(f => {
+                            const count = f.value === 'ALL' ? counts.total : counts[f.value.toLowerCase()] ?? 0;
+                            return (
+                                <button
+                                    key={f.value}
+                                    onClick={() => setStatusFilter(f.value)}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-colors ${
+                                        statusFilter === f.value
+                                            ? 'bg-white shadow-sm text-slate-800 border border-slate-200'
+                                            : 'text-slate-500 hover:text-slate-700'
+                                    }`}
+                                >
+                                    {f.label}
+                                    <span className={`text-[9px] font-black ${statusFilter === f.value ? f.color : 'text-slate-400'}`}>
+                                        {count}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
             </div>
 
-            {/* Body */}
+            {/* ── Body ── */}
             <div className="p-6">
                 {loading ? <Spinner /> : error ? (
                     <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-600 text-sm font-medium">
                         <AlertCircle size={16} /> {error}
                     </div>
-                ) : filtered.length === 0 ? (
+                ) : (activeGroups.length + closedGroups.length) === 0 ? (
                     <div className="flex flex-col items-center py-20 gap-3 text-slate-400">
                         <Package size={40} />
-                        <p className="font-bold text-lg">{search ? 'No batches match your search.' : 'No batches yet.'}</p>
+                        <p className="font-bold text-lg">
+                            {search || statusFilter !== 'ALL' ? 'No batches match your filters.' : 'No batches yet.'}
+                        </p>
                     </div>
                 ) : (
                     <>
-                        <StatusGroup title="Open — Awaiting First Dispatch" icon={Clock}         colorClass="bg-blue-50/70    hover:bg-blue-50"    batches={open}    onOpenDispatch={(id, code) => setActiveBatch({ id, code })} defaultOpen />
-                        <StatusGroup title="Partial — In Progress"          icon={Truck}         colorClass="bg-amber-50/70   hover:bg-amber-50"   batches={partial} onOpenDispatch={(id, code) => setActiveBatch({ id, code })} defaultOpen />
-                        <StatusGroup title="Closed"                         icon={CheckCircle2}  colorClass="bg-emerald-50/70 hover:bg-emerald-50" batches={closed}  onOpenDispatch={(id, code) => setActiveBatch({ id, code })} defaultOpen={false} />
+                        {activeGroups.map(({ so, batches: soBatches }, i) => (
+                            <SOGroup
+                                key={so.order_number || i}
+                                so={so}
+                                batches={soBatches}
+                                onOpenDispatch={(id, code) => setActiveBatch({ id, code })}
+                                defaultOpen={i < 5}
+                            />
+                        ))}
+
+                        {closedGroups.length > 0 && (
+                            <>
+                                <div className="flex items-center gap-3 my-5">
+                                    <div className="flex-1 border-t border-slate-200" />
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                                        Closed Orders ({closedGroups.length})
+                                    </span>
+                                    <div className="flex-1 border-t border-slate-200" />
+                                </div>
+                                {closedGroups.map(({ so, batches: soBatches }, i) => (
+                                    <SOGroup
+                                        key={so.order_number || `closed-${i}`}
+                                        so={so}
+                                        batches={soBatches}
+                                        onOpenDispatch={(id, code) => setActiveBatch({ id, code })}
+                                        defaultOpen={false}
+                                    />
+                                ))}
+                            </>
+                        )}
                     </>
                 )}
             </div>
@@ -281,6 +396,8 @@ export default function DispatchDashboardPage() {
                     batchId={activeBatch.id}
                     batchCode={activeBatch.code}
                     onClose={() => { setActiveBatch(null); fetchData(); }}
+                    canCreateDispatch={true}
+                    canCloseBatch={true}
                 />
             )}
         </div>
