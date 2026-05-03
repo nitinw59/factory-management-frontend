@@ -37,6 +37,15 @@ const STATUS = {
         glow: 'ring-slate-200',
         dot: 'bg-slate-400',
     },
+    REJECTED: {
+        label: 'Rejected',
+        short: 'Rejected',
+        icon: XCircle,
+        pill: 'bg-red-100 text-red-700 border-red-200',
+        border: 'border-l-red-400',
+        glow: 'ring-red-200',
+        dot: 'bg-red-400',
+    },
     ARCHIVED: {
         label: 'Archived',
         short: 'Archived',
@@ -48,7 +57,7 @@ const STATUS = {
     },
 };
 
-const TABS = ['ALL', 'PENDING_APPROVAL', 'APPROVED', 'DRAFT', 'ARCHIVED'];
+const TABS = ['ALL', 'PENDING_APPROVAL', 'APPROVED', 'DRAFT', 'REJECTED', 'ARCHIVED'];
 
 // ─── small helpers ────────────────────────────────────────────────────────────
 
@@ -93,6 +102,36 @@ const ConfirmBar = ({ message, confirmLabel, confirmColor, onConfirm, onCancel, 
                 className={`flex items-center gap-1.5 text-xs font-bold text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 ${confirmColor}`}>
                 {busy && <Loader2 size={11} className="animate-spin" />}
                 {confirmLabel}
+            </button>
+        </div>
+    </div>
+);
+
+// ─── inline reject form ───────────────────────────────────────────────────────
+
+const RejectBar = ({ bomName, notes, onNotesChange, onConfirm, onCancel, busy }) => (
+    <div className="space-y-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+        <div className="flex items-center gap-1.5 text-sm font-bold text-red-700">
+            <AlertTriangle size={13} className="shrink-0" />
+            Reject &ldquo;{bomName}&rdquo; — reason required
+        </div>
+        <textarea
+            value={notes}
+            onChange={e => onNotesChange(e.target.value)}
+            placeholder="Explain what needs to be fixed…"
+            rows={2}
+            className="w-full border border-red-200 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-red-300 resize-none bg-white"
+            autoFocus
+        />
+        <div className="flex items-center justify-end gap-2">
+            <button onClick={onCancel} disabled={busy}
+                className="text-xs font-bold text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors">
+                Cancel
+            </button>
+            <button onClick={onConfirm} disabled={busy || !notes.trim()}
+                className="flex items-center gap-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                {busy && <Loader2 size={11} className="animate-spin" />}
+                <ThumbsDown size={11} /> Reject BOM
             </button>
         </div>
     </div>
@@ -148,9 +187,12 @@ const RatioGroupDetail = ({ rg, idx }) => (
 // ─── expanded BOM detail ──────────────────────────────────────────────────────
 
 const BomDetail = ({ bomId }) => {
-    const [bom, setBom] = useState(null);
+    const [bom, setBom]         = useState(null);
     const [loading, setLoading] = useState(true);
-    const [err, setErr] = useState(null);
+    const [err, setErr]         = useState(null);
+    const [history, setHistory]         = useState(null);
+    const [historyLoading, setHistLoading] = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
 
     useEffect(() => {
         setLoading(true);
@@ -160,12 +202,33 @@ const BomDetail = ({ bomId }) => {
             .finally(() => setLoading(false));
     }, [bomId]);
 
+    const loadHistory = () => {
+        if (history !== null) { setShowHistory(h => !h); return; }
+        setHistLoading(true);
+        setShowHistory(true);
+        bomApi.getHistory(bomId)
+            .then(res => setHistory(res.data?.data ?? res.data ?? []))
+            .catch(() => setHistory([]))
+            .finally(() => setHistLoading(false));
+    };
+
     if (loading) return <div className="flex justify-center py-6"><Spinner /></div>;
     if (err) return <p className="text-xs text-red-500 py-3">{err}</p>;
     if (!bom) return null;
 
     return (
         <div className="space-y-4">
+            {/* Rejection reason banner */}
+            {bom.status === 'REJECTED' && bom.rejection_notes && (
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
+                    <XCircle size={13} className="text-red-500 shrink-0 mt-0.5" />
+                    <div>
+                        <p className="text-[9px] font-bold text-red-500 uppercase tracking-wider mb-0.5">Rejection Reason</p>
+                        <p className="text-xs text-red-700">{bom.rejection_notes}</p>
+                    </div>
+                </div>
+            )}
+
             {/* Meta */}
             <div className="grid grid-cols-3 gap-3">
                 {[
@@ -226,16 +289,54 @@ const BomDetail = ({ bomId }) => {
                     </div>
                 </div>
             )}
+
+            {/* Status history */}
+            <div className="border-t border-slate-100 pt-2">
+                <button onClick={loadHistory}
+                    className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 hover:text-slate-600 transition-colors">
+                    <Eye size={10} />
+                    {showHistory ? 'Hide history' : 'Show status history'}
+                    {historyLoading && <Loader2 size={10} className="animate-spin ml-1" />}
+                </button>
+                {showHistory && !historyLoading && history !== null && (
+                    <div className="mt-2 space-y-1.5">
+                        {history.length === 0 ? (
+                            <p className="text-[10px] text-slate-400 italic">No history entries.</p>
+                        ) : (
+                            history.map((h, i) => (
+                                <div key={i} className="flex items-start gap-2 text-[10px]">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-slate-300 mt-1 shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                        <span className="font-bold text-slate-600">
+                                            {h.from_status ? `${h.from_status} → ` : ''}{h.to_status}
+                                        </span>
+                                        {h.changed_by_name && (
+                                            <span className="text-slate-400 ml-1">by {h.changed_by_name}</span>
+                                        )}
+                                        {h.notes && (
+                                            <p className="text-slate-500 mt-0.5 italic truncate">{h.notes}</p>
+                                        )}
+                                    </div>
+                                    <span className="text-slate-300 shrink-0">
+                                        {h.changed_at ? new Date(h.changed_at).toLocaleDateString() : ''}
+                                    </span>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                )}
+            </div>
         </div>
     );
 };
 
 // ─── BOM card ─────────────────────────────────────────────────────────────────
 
-const BomCard = ({ bom, onApproved, onArchived }) => {
+const BomCard = ({ bom, onApproved, onRejected, onArchived }) => {
     const cfg = STATUS[bom.status] || STATUS.DRAFT;
     const [expanded, setExpanded] = useState(false);
-    const [confirming, setConfirming] = useState(null); // 'approve' | 'archive'
+    const [confirming, setConfirming] = useState(null); // 'approve' | 'archive' | 'reject'
+    const [rejectNotes, setRejectNotes] = useState('');
     const [busy, setBusy] = useState(false);
     const [localStatus, setLocalStatus] = useState(bom.status);
 
@@ -247,6 +348,12 @@ const BomCard = ({ bom, onApproved, onArchived }) => {
                 setLocalStatus('APPROVED');
                 setConfirming(null);
                 onApproved?.(bom.id);
+            } else if (type === 'reject') {
+                await bomApi.reject(bom.id, rejectNotes);
+                setLocalStatus('REJECTED');
+                setConfirming(null);
+                setRejectNotes('');
+                onRejected?.(bom.id);
             } else {
                 await bomApi.archive(bom.id);
                 setLocalStatus('ARCHIVED');
@@ -301,7 +408,16 @@ const BomCard = ({ bom, onApproved, onArchived }) => {
                     <BomDetail bomId={bom.id} />
 
                     {/* Action area */}
-                    {confirming ? (
+                    {confirming === 'reject' ? (
+                        <RejectBar
+                            bomName={bom.bom_name}
+                            notes={rejectNotes}
+                            onNotesChange={setRejectNotes}
+                            onConfirm={() => act('reject')}
+                            onCancel={() => { setConfirming(null); setRejectNotes(''); }}
+                            busy={busy}
+                        />
+                    ) : confirming ? (
                         <ConfirmBar
                             message={confirming === 'approve'
                                 ? `Approve "${bom.bom_name}"? This will make it available for production planning.`
@@ -316,15 +432,27 @@ const BomCard = ({ bom, onApproved, onArchived }) => {
                         localStatus !== 'ARCHIVED' && (
                             <div className="flex items-center gap-2 pt-1">
                                 {localStatus === 'PENDING_APPROVAL' && (
-                                    <button onClick={() => setConfirming('approve')}
-                                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-sm">
-                                        <ThumbsUp size={14} /> Approve BOM
-                                    </button>
+                                    <>
+                                        <button onClick={() => setConfirming('approve')}
+                                            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-sm">
+                                            <ThumbsUp size={14} /> Approve
+                                        </button>
+                                        <button onClick={() => setConfirming('reject')}
+                                            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-xl transition-colors shadow-sm">
+                                            <ThumbsDown size={14} /> Reject
+                                        </button>
+                                    </>
                                 )}
                                 {localStatus === 'APPROVED' && (
                                     <div className="flex-1 flex items-center gap-2 py-2.5 px-3 bg-emerald-50 border border-emerald-200 rounded-xl">
                                         <Check size={14} className="text-emerald-600" />
                                         <span className="text-sm font-bold text-emerald-700">BOM Approved</span>
+                                    </div>
+                                )}
+                                {localStatus === 'REJECTED' && (
+                                    <div className="flex-1 flex items-center gap-2 py-2.5 px-3 bg-red-50 border border-red-200 rounded-xl">
+                                        <XCircle size={14} className="text-red-500" />
+                                        <span className="text-sm font-bold text-red-600">BOM Rejected — awaiting resubmission</span>
                                     </div>
                                 )}
                                 <button onClick={() => setConfirming('archive')}
@@ -349,7 +477,7 @@ const BomCard = ({ bom, onApproved, onArchived }) => {
 
 // ─── status group section ─────────────────────────────────────────────────────
 
-const StatusSection = ({ status, boms, defaultOpen, onApproved, onArchived }) => {
+const StatusSection = ({ status, boms, defaultOpen, onApproved, onRejected, onArchived }) => {
     const [open, setOpen] = useState(defaultOpen);
     const cfg = STATUS[status] || { label: status, pill: '', dot: 'bg-gray-400' };
 
@@ -373,7 +501,7 @@ const StatusSection = ({ status, boms, defaultOpen, onApproved, onArchived }) =>
                 <div className="p-4 bg-slate-50/40">
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                         {boms.map(b => (
-                            <BomCard key={b.id} bom={b} onApproved={onApproved} onArchived={onArchived} />
+                            <BomCard key={b.id} bom={b} onApproved={onApproved} onRejected={onRejected} onArchived={onArchived} />
                         ))}
                     </div>
                 </div>
@@ -413,6 +541,11 @@ export default function BomApprovalPage() {
         showToast('BOM approved successfully.');
     }, []);
 
+    const handleRejected = useCallback((id) => {
+        setBoms(prev => prev.map(b => b.id === id ? { ...b, status: 'REJECTED' } : b));
+        showToast('BOM rejected — editor will be notified.', false);
+    }, []);
+
     const handleArchived = useCallback((id) => {
         setBoms(prev => prev.map(b => b.id === id ? { ...b, status: 'ARCHIVED' } : b));
         showToast('BOM archived.');
@@ -421,6 +554,7 @@ export default function BomApprovalPage() {
     const stats = useMemo(() => ({
         pending:  boms.filter(b => b.status === 'PENDING_APPROVAL').length,
         approved: boms.filter(b => b.status === 'APPROVED').length,
+        rejected: boms.filter(b => b.status === 'REJECTED').length,
         draft:    boms.filter(b => b.status === 'DRAFT').length,
         archived: boms.filter(b => b.status === 'ARCHIVED').length,
         total:    boms.length,
@@ -442,6 +576,7 @@ export default function BomApprovalPage() {
     const grouped = useMemo(() => ({
         PENDING_APPROVAL: filtered.filter(b => b.status === 'PENDING_APPROVAL'),
         APPROVED:         filtered.filter(b => b.status === 'APPROVED'),
+        REJECTED:         filtered.filter(b => b.status === 'REJECTED'),
         DRAFT:            filtered.filter(b => b.status === 'DRAFT'),
         ARCHIVED:         filtered.filter(b => b.status === 'ARCHIVED'),
     }), [filtered]);
@@ -450,6 +585,7 @@ export default function BomApprovalPage() {
         ALL:              `All (${stats.total})`,
         PENDING_APPROVAL: `Pending (${stats.pending})`,
         APPROVED:         `Approved (${stats.approved})`,
+        REJECTED:         `Rejected (${stats.rejected})`,
         DRAFT:            `Draft (${stats.draft})`,
         ARCHIVED:         `Archived (${stats.archived})`,
     };
@@ -480,10 +616,11 @@ export default function BomApprovalPage() {
                 </div>
 
                 {/* Stat cards */}
-                <div className="grid grid-cols-4 gap-3 mb-5">
+                <div className="grid grid-cols-5 gap-3 mb-5">
                     {[
-                        { label: 'Pending Review', val: stats.pending, color: 'text-amber-600',   bg: 'bg-amber-50  border-amber-200',   urgent: stats.pending > 0 },
+                        { label: 'Pending Review', val: stats.pending,  color: 'text-amber-600',   bg: 'bg-amber-50  border-amber-200',   urgent: stats.pending > 0 },
                         { label: 'Approved',       val: stats.approved, color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200', urgent: false },
+                        { label: 'Rejected',       val: stats.rejected, color: 'text-red-600',     bg: 'bg-red-50    border-red-200',      urgent: false },
                         { label: 'Draft',          val: stats.draft,    color: 'text-slate-700',   bg: 'bg-slate-50  border-slate-200',    urgent: false },
                         { label: 'Total BOMs',     val: stats.total,    color: 'text-violet-700',  bg: 'bg-violet-50 border-violet-200',   urgent: false },
                     ].map(({ label, val, color, bg, urgent }) => (
@@ -549,15 +686,16 @@ export default function BomApprovalPage() {
                     </div>
                 ) : activeTab === 'ALL' ? (
                     <>
-                        <StatusSection status="PENDING_APPROVAL" boms={grouped.PENDING_APPROVAL} defaultOpen onApproved={handleApproved} onArchived={handleArchived} />
-                        <StatusSection status="APPROVED"         boms={grouped.APPROVED}         defaultOpen onApproved={handleApproved} onArchived={handleArchived} />
-                        <StatusSection status="DRAFT"            boms={grouped.DRAFT}            defaultOpen onApproved={handleApproved} onArchived={handleArchived} />
-                        <StatusSection status="ARCHIVED"         boms={grouped.ARCHIVED}         defaultOpen={false} onApproved={handleApproved} onArchived={handleArchived} />
+                        <StatusSection status="PENDING_APPROVAL" boms={grouped.PENDING_APPROVAL} defaultOpen onApproved={handleApproved} onRejected={handleRejected} onArchived={handleArchived} />
+                        <StatusSection status="REJECTED"         boms={grouped.REJECTED}         defaultOpen onApproved={handleApproved} onRejected={handleRejected} onArchived={handleArchived} />
+                        <StatusSection status="APPROVED"         boms={grouped.APPROVED}         defaultOpen onApproved={handleApproved} onRejected={handleRejected} onArchived={handleArchived} />
+                        <StatusSection status="DRAFT"            boms={grouped.DRAFT}            defaultOpen onApproved={handleApproved} onRejected={handleRejected} onArchived={handleArchived} />
+                        <StatusSection status="ARCHIVED"         boms={grouped.ARCHIVED}         defaultOpen={false} onApproved={handleApproved} onRejected={handleRejected} onArchived={handleArchived} />
                     </>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                         {filtered.map(b => (
-                            <BomCard key={b.id} bom={b} onApproved={handleApproved} onArchived={handleArchived} />
+                            <BomCard key={b.id} bom={b} onApproved={handleApproved} onRejected={handleRejected} onArchived={handleArchived} />
                         ))}
                     </div>
                 )}

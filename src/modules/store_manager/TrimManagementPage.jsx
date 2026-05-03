@@ -137,10 +137,10 @@ const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
 
 // --- VARIANT FORM ---
 const VariantFormModal = ({ onSave, onClose, initialData = {}, isColorAgnostic, colors, userRole }) => {
-    const [formData, setFormData] = useState({ 
-        fabric_color_id: '', main_store_stock: 0, low_stock_threshold: 10, 
+    const [formData, setFormData] = useState({
+        fabric_color_id: '', variant_size: '', main_store_stock: 0, low_stock_threshold: 10,
         cost_price: '', selling_price: '',
-        ...initialData 
+        ...initialData
     });
     
     const handleChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -168,6 +168,11 @@ const VariantFormModal = ({ onSave, onClose, initialData = {}, isColorAgnostic, 
                     {colors.map(c => <option key={c.id} value={c.id}>{c.color_number}-{c.name}</option>)}
                 </select>
                 {isDefinitionDisabled && <p className="text-xs text-gray-500 mt-1">Only admins can change the color of an existing variant.</p>}
+            </div>
+
+            <div>
+                <label className="text-sm font-medium text-gray-700">Size <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input name="variant_size" value={formData.variant_size || ''} onChange={handleChange} placeholder="e.g. S, M, L, XL, 38, 40" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -217,8 +222,8 @@ const SubstituteFormModal = ({ onSave, onClose, variants, currentVariantId, exis
                 <select value={substituteId} onChange={e => setSubstituteId(e.target.value)} required className="w-full p-2 border rounded">
                     <option value="">Choose a variant...</option>
                     {availableOptions.map(v => (
-                        <option key={v.id} value={v.id}> 
-                            {v.color_name || 'Generic (Color Agnostic)'} (Stock: {v.main_store_stock})
+                        <option key={v.id} value={v.id}>
+                            {v.color_name || 'Generic'}{v.variant_size ? ` — Sz: ${v.variant_size}` : ''} (Stock: {v.main_store_stock})
                         </option>
                     ))}
                 </select>
@@ -429,8 +434,9 @@ const TrimManagementPage = () => {
     );
 
     const filteredVariants = variants.filter(variant => {
-        const name = variant.color_name || 'Generic (Color Agnostic)';
-        return name.toLowerCase().includes(variantFilter.toLowerCase());
+        const q = variantFilter.toLowerCase();
+        return (variant.color_name || 'Generic').toLowerCase().includes(q)
+            || (variant.variant_size || '').toLowerCase().includes(q);
     });
 
     const filteredSubstitutes = substitutes.filter(sub => {
@@ -570,6 +576,9 @@ const TrimManagementPage = () => {
                                     <div>
                                         <p className={`text-sm font-semibold ${selectedVariant?.id === variant.id ? 'text-blue-900' : 'text-gray-700'}`}>
                                             {variant.color_name || 'Generic (Color Agnostic)'}
+                                            {variant.variant_size && (
+                                                <span className="ml-1.5 text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">Sz: {variant.variant_size}</span>
+                                            )}
                                         </p>
                                         <div className="flex items-center gap-2 mt-1">
                                             <span className="text-[10px] font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">Stock: {variant.main_store_stock}</span>
@@ -620,7 +629,14 @@ const TrimManagementPage = () => {
                             filteredSubstitutes.map(sub => (
                                 <div key={sub.id} className="group flex justify-between items-center p-3 rounded-lg border border-transparent hover:bg-gray-50 hover:border-gray-100 transition-all duration-200">
                                     <div>
-                                        <p className="text-sm font-semibold text-gray-700">{sub.substitute_item_name} <span className="text-gray-400 font-normal mx-1">/</span> {sub.substitute_color_name || 'Generic'}</p>
+                                        <p className="text-sm font-semibold text-gray-700">
+                                            {sub.substitute_item_name}
+                                            <span className="text-gray-400 font-normal mx-1">/</span>
+                                            {sub.substitute_color_name || 'Generic'}
+                                            {sub.variant_size && (
+                                                <span className="ml-1.5 text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">Sz: {sub.variant_size}</span>
+                                            )}
+                                        </p>
                                         <p className="text-xs text-gray-500 mt-0.5 font-mono bg-gray-100 inline-block px-1 rounded">Stock: {sub.substitute_stock}</p>
                                     </div>
                                     {user.role === 'factory_admin' && (

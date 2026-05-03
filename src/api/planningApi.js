@@ -21,4 +21,5 @@ export const planningApi = {
     deleteTrimReservation:    (reservationId)    => api.delete(`/planning/trim-requirements/reservations/${reservationId}`),
     createTrimPurchase:       (reqId, body)      => api.post(`/planning/trim-requirements/${reqId}/purchase`, body),
     deleteTrimPurchase:       (purchaseReqId)    => api.delete(`/planning/trim-purchase-requirements/${purchaseReqId}`),
+    updateProductionReadiness: (sopId, readiness) => api.patch(`/planning/sales-order-products/${sopId}/production-readiness`, { readiness }),
 };

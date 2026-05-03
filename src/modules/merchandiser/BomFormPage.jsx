@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     Plus, FileText, Loader2, X, ChevronDown, ChevronRight,
-    AlertCircle, Scissors, ArrowLeft, Check,
+    AlertCircle, Scissors, ArrowLeft, Check, XCircle,
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
 
@@ -25,9 +25,9 @@ const freshMaterial = () => ({
     calculation_type: 'FIXED', fixed_quantity: '',
     placement_description: '', wastage_percentage: '',
     size_consumptions: [
-        { _key: genKey(), size: 'S', quantity: '' },
-        { _key: genKey(), size: 'M', quantity: '' },
-        { _key: genKey(), size: 'L', quantity: '' },
+        { _key: genKey(), size: 'S', quantity: '', target_variant_size: '' },
+        { _key: genKey(), size: 'M', quantity: '', target_variant_size: '' },
+        { _key: genKey(), size: 'L', quantity: '', target_variant_size: '' },
     ],
 });
 
@@ -216,7 +216,15 @@ const MaterialCard = ({ mc, mIdx, trimItems, expanded, onToggle, onUpdate, onRem
     const uom = trimItem?.unit_of_measure;
     const upd = (field, val) => onUpdate(mIdx, field, val);
 
-    const addSize = () => upd('size_consumptions', [...mc.size_consumptions, { _key: genKey(), size: '', quantity: '' }]);
+    const [variantSizes, setVariantSizes] = useState([]);
+    useEffect(() => {
+        if (!mc.trim_item_id) { setVariantSizes([]); return; }
+        bomApi.getTrimVariantSizes(mc.trim_item_id)
+            .then(res => setVariantSizes(res.data?.data ?? res.data ?? []))
+            .catch(() => setVariantSizes([]));
+    }, [mc.trim_item_id]);
+
+    const addSize = () => upd('size_consumptions', [...mc.size_consumptions, { _key: genKey(), size: '', quantity: '', target_variant_size: '' }]);
     const removeSize = (sIdx) => upd('size_consumptions', mc.size_consumptions.filter((_, i) => i !== sIdx));
     const updateSize = (sIdx, field, val) => {
         const sc = [...mc.size_consumptions];
@@ -329,7 +337,8 @@ const MaterialCard = ({ mc, mIdx, trimItems, expanded, onToggle, onUpdate, onRem
                             <table className="w-full text-xs mb-2">
                                 <thead>
                                     <tr className="text-slate-400 font-bold border-b border-slate-100">
-                                        <th className="text-left pb-1">Size</th>
+                                        <th className="text-left pb-1">Product Size</th>
+                                        <th className="text-left pb-1 px-2">Trim Variant Size</th>
                                         <th className="text-right pb-1 pr-3">Qty{uom ? ` (${uom})` : ''}</th>
                                         <th className="w-6" />
                                     </tr>
@@ -343,6 +352,18 @@ const MaterialCard = ({ mc, mIdx, trimItems, expanded, onToggle, onUpdate, onRem
                                                     placeholder="S"
                                                     className="w-14 border border-slate-200 rounded px-2 py-0.5 text-xs outline-none text-center"
                                                 />
+                                            </td>
+                                            <td className="py-1.5 px-2">
+                                                <select
+                                                    value={sc.target_variant_size || ''}
+                                                    onChange={e => updateSize(sIdx, 'target_variant_size', e.target.value || null)}
+                                                    className="w-full border border-slate-200 rounded px-2 py-0.5 text-xs outline-none focus:ring-1 focus:ring-violet-300 bg-white"
+                                                >
+                                                    <option value="">— same as product —</option>
+                                                    {(variantSizes || []).map(vs => (
+                                                        <option key={vs} value={vs}>{vs}</option>
+                                                    ))}
+                                                </select>
                                             </td>
                                             <td className="py-1.5 text-right pr-3">
                                                 <input type="number" min="0" step="0.0001" value={sc.quantity}
@@ -396,6 +417,8 @@ export default function BomFormPage() {
     const [saving, setSaving] = useState(false);
     const [err, setErr] = useState(null);
     const [toast, setToast] = useState(null);
+    const [bomStatus, setBomStatus] = useState(null);
+    const [rejectionNotes, setRejectionNotes] = useState(null);
 
     const [expandedRatios, setExpandedRatios] = useState(
         isEdit ? new Set() : new Set([initialData.rgKey])
@@ -425,6 +448,8 @@ export default function BomFormPage() {
         bomApi.getById(bomId)
             .then(res => {
                 const bom = res.data?.data ?? res.data;
+                setBomStatus(bom.status || null);
+                setRejectionNotes(bom.rejection_notes || null);
                 setForm({
                     product_id: String(bom.product?.id || bom.product_id || ''),
                     bom_name: bom.bom_name || '',
@@ -446,7 +471,7 @@ export default function BomFormPage() {
                         fixed_quantity: mc.fixed_quantity || '',
                         placement_description: mc.placement_description || '',
                         wastage_percentage: mc.wastage_percentage || '',
-                        size_consumptions: (mc.size_consumptions || []).map(sc => ({ _key: genKey(), size: sc.size, quantity: sc.quantity || '' })),
+                        size_consumptions: (mc.size_consumptions || []).map(sc => ({ _key: genKey(), size: sc.size, quantity: sc.quantity || '', target_variant_size: sc.target_variant_size || '' })),
                     })),
                 });
             })
@@ -507,7 +532,11 @@ export default function BomFormPage() {
             placement_description: mc.placement_description.trim(),
             wastage_percentage: parseFloat(mc.wastage_percentage) || 0,
             size_consumptions: mc.calculation_type === 'PER_SIZE'
-                ? mc.size_consumptions.map(sc => ({ size: sc.size, quantity: parseFloat(sc.quantity) }))
+                ? mc.size_consumptions.map(sc => ({
+                    size: sc.size,
+                    quantity: parseFloat(sc.quantity),
+                    target_variant_size: sc.target_variant_size || null,
+                }))
                 : [],
         })),
     });
@@ -583,6 +612,15 @@ export default function BomFormPage() {
 
             {/* Body */}
             <div className="max-w-3xl mx-auto px-6 py-6 space-y-5">
+                {bomStatus === 'REJECTED' && rejectionNotes && (
+                    <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                        <XCircle size={14} className="text-red-500 shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-[10px] font-bold text-red-500 uppercase tracking-wider mb-0.5">Rejection Reason</p>
+                            <p className="text-sm text-red-700">{rejectionNotes}</p>
+                        </div>
+                    </div>
+                )}
                 {err && (
                     <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-600 text-sm font-medium">
                         <AlertCircle size={15} /> {err}

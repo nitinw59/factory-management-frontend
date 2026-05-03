@@ -3,6 +3,7 @@ import {
     Loader2, Link2, ChevronDown, ChevronRight,
     Package, AlertTriangle, CheckCircle2, RefreshCw,
     Calculator, ShoppingBag, ShoppingCart, X, Layers, Eye, Bookmark, Download, Printer,
+    ShieldCheck, ShieldOff,
 } from 'lucide-react';
 import { planningApi } from '../../api/planningApi';
 import { bomApi } from '../../api/bomApi';
@@ -882,6 +883,8 @@ const ReservationSummaryModal = ({ sopReqs, sop, orderInfo, onClose }) => {
 // ─── PURCHASE ORDER SUMMARY MODAL ─────────────────────────────────────────────
 
 const PurchaseSummaryModal = ({ sopReqs, sop, orderInfo, onClose }) => {
+
+    console.log('Fabric requirements:', sopReqs.fabric_requirements);
     const fabricRows = (sopReqs.fabric_requirements || []).flatMap(fr =>
         (fr.purchase_requirements || []).map(pr => ({
             fabricType: fr.fabric_type_name || '—',
@@ -892,9 +895,11 @@ const PurchaseSummaryModal = ({ sopReqs, sop, orderInfo, onClose }) => {
             qty:        pr.meters_required  != null ? parseFloat(pr.meters_required).toFixed(2)  : '—',
             notes:      pr.notes || '—',
             poId:       pr.id,
-            status:     fr.status || '—',
+            status:     pr.status || '—',
         }))
     );
+
+    console.log('Trim requirements:', sopReqs.trim_requirements);
     const trimRows = (sopReqs.trim_requirements || []).flatMap(tr =>
         (tr.purchase_requirements || []).map(pr => ({
             item:      tr.trim_item_name    || '—',
@@ -1126,11 +1131,18 @@ const PurchaseSummaryModal = ({ sopReqs, sop, orderInfo, onClose }) => {
 // gcd helper for ratio simplification
 const _gcd = (a, b) => (b === 0 ? a : _gcd(b, a % b));
 
-const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCalculate, calcKey = 0, orderInfo }) => {
-    const [showPicker,     setShowPicker]     = useState(false);
-    const [pickedBomId,    setPickedBomId]    = useState('');
-    const [selectedRgIdxs, setSelectedRgIdxs] = useState(new Set());
-    const [confirmUnlink,  setConfirmUnlink]  = useState(false);
+const READINESS_CFG = {
+    in_planning:          { label: 'In Planning',  cls: 'bg-amber-50  text-amber-600  border-amber-200',   icon: null },
+    ready_for_production: { label: 'Ready',        cls: 'bg-emerald-50 text-emerald-600 border-emerald-200', icon: CheckCircle2 },
+    force_ready:          { label: 'Force Ready',  cls: 'bg-violet-50 text-violet-700 border-violet-200',  icon: ShieldCheck },
+};
+
+const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCalculate, calcKey = 0, orderInfo, onReadinessChange }) => {
+    const [showPicker,       setShowPicker]       = useState(false);
+    const [pickedBomId,      setPickedBomId]      = useState('');
+    const [selectedRgIdxs,   setSelectedRgIdxs]   = useState(new Set());
+    const [confirmUnlink,    setConfirmUnlink]     = useState(false);
+    const [readinessLoading, setReadinessLoading] = useState(false);
     // Full BOM detail (with items + number_of_pieces) fetched on pick
     const [pickedBomDetail,   setPickedBomDetail]   = useState(null);
     const [loadingBomDetail,  setLoadingBomDetail]  = useState(false);
@@ -1261,6 +1273,24 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCa
         onUnlink(sop.id);
     };
 
+    const handleReadinessToggle = async () => {
+        const isForced     = sop.production_readiness === 'force_ready';
+        const newReadiness = isForced ? 'in_planning' : 'force_ready';
+        setReadinessLoading(true);
+        try {
+            await planningApi.updateProductionReadiness(sop.id, newReadiness);
+            onReadinessChange && onReadinessChange(sop.id);
+        } catch (e) {
+            console.error('Readiness update failed', e);
+        } finally {
+            setReadinessLoading(false);
+        }
+    };
+
+    const readinessCfg = READINESS_CFG[sop.production_readiness] || READINESS_CFG.in_planning;
+    const ReadinessIcon = readinessCfg.icon;
+    const isForceReady  = sop.production_readiness === 'force_ready';
+
     return (
         <div className={`border rounded-xl overflow-hidden transition-colors ${sop.bom_id ? 'border-emerald-200' : 'border-slate-200'}`}>
 
@@ -1285,15 +1315,43 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCa
                         </div>
                     )}
                 </div>
-                {sop.bom_id ? (
-                    <span className="text-[9px] bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-bold uppercase flex items-center gap-1 shrink-0">
-                        <CheckCircle2 size={9} /> BOM Linked
-                    </span>
-                ) : (
-                    <span className="text-[9px] bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded-full font-bold uppercase flex items-center gap-1 shrink-0">
-                        <AlertTriangle size={9} /> No BOM
-                    </span>
-                )}
+
+                {/* Right: BOM badge + readiness badge + toggle */}
+                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                    {sop.bom_id ? (
+                        <span className="text-[9px] bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-bold uppercase flex items-center gap-1">
+                            <CheckCircle2 size={9} /> BOM Linked
+                        </span>
+                    ) : (
+                        <span className="text-[9px] bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded-full font-bold uppercase flex items-center gap-1">
+                            <AlertTriangle size={9} /> No BOM
+                        </span>
+                    )}
+
+                    <div className="flex items-center gap-1.5">
+                        <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase border flex items-center gap-1 ${readinessCfg.cls}`}>
+                            {ReadinessIcon && <ReadinessIcon size={9} />}
+                            {readinessCfg.label}
+                        </span>
+                        <button
+                            onClick={handleReadinessToggle}
+                            disabled={readinessLoading}
+                            title={isForceReady ? 'Revert to auto readiness' : 'Force mark as ready'}
+                            className={`flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border transition-colors disabled:opacity-50 ${
+                                isForceReady
+                                    ? 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-red-50 hover:text-red-500 hover:border-red-200'
+                                    : 'bg-violet-50 text-violet-600 border-violet-200 hover:bg-violet-100'
+                            }`}
+                        >
+                            {readinessLoading
+                                ? <Loader2 size={9} className="animate-spin" />
+                                : isForceReady
+                                    ? <><ShieldOff size={9} /> Revert</>
+                                    : <><ShieldCheck size={9} /> Force Ready</>
+                            }
+                        </button>
+                    </div>
+                </div>
             </div>
 
             {(sop.colors || []).length > 0 && (
@@ -2448,6 +2506,10 @@ const ProductionPlanningPage = () => {
         }
     }, [selectedOrderId, refreshOrder]);
 
+    const handleReadiness = useCallback(async () => {
+        await refreshOrder(selectedOrderId);
+    }, [selectedOrderId, refreshOrder]);
+
     const handleSubstituteReserved = useCallback(async () => {
         setSubstituteTrim(null);
         try {
@@ -2596,6 +2658,7 @@ const ProductionPlanningPage = () => {
                                                 onCalculate={setCalcSopId}
                                                 calcKey={calcKeys[sop.id] || 0}
                                                 isLinking={!!linking[sop.id]}
+                                                onReadinessChange={handleReadiness}
                                                 orderInfo={orderDetail}
                                             />
                                         ))}

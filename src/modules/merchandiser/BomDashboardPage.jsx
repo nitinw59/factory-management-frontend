@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
     Plus, FileText, Edit2, Trash2, Send, Eye, Package,
     AlertCircle, Loader2, X, RefreshCw, Search, ChevronDown,
-    ChevronUp, Check, AlertTriangle,
+    ChevronUp, Check, AlertTriangle, XCircle,
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
 
@@ -13,6 +13,7 @@ const STATUS_CFG = {
     DRAFT:            { label: 'Draft',           cls: 'bg-slate-100  text-slate-600  border-slate-200',  border: 'border-l-slate-400'   },
     PENDING_APPROVAL: { label: 'Pending Approval', cls: 'bg-amber-100  text-amber-700  border-amber-200',  border: 'border-l-amber-400'   },
     APPROVED:         { label: 'Approved',         cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', border: 'border-l-emerald-400' },
+    REJECTED:         { label: 'Rejected',         cls: 'bg-red-100    text-red-700    border-red-200',    border: 'border-l-red-400'     },
     ARCHIVED:         { label: 'Archived',         cls: 'bg-gray-100   text-gray-500   border-gray-200',   border: 'border-l-gray-300'    },
 };
 
@@ -67,6 +68,17 @@ const BomDetailModal = ({ bomId, onClose }) => {
                     {err && <p className="text-red-500 text-sm">{err}</p>}
                     {bom && (
                         <div className="space-y-5">
+                            {/* Rejection banner */}
+                            {bom.status === 'REJECTED' && bom.rejection_notes && (
+                                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
+                                    <XCircle size={13} className="text-red-500 shrink-0 mt-0.5" />
+                                    <div>
+                                        <p className="text-[9px] font-bold text-red-500 uppercase tracking-wider mb-0.5">Rejection Reason</p>
+                                        <p className="text-xs text-red-700">{bom.rejection_notes}</p>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Metadata */}
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
                                 {[
@@ -232,19 +244,21 @@ const BomCard = ({ bom, onEdit, onView, onSubmit, onDelete }) => {
                 <button onClick={() => onView(bom.id)} className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded hover:bg-slate-200 transition-colors">
                     <Eye size={10} /> View
                 </button>
-                {(bom.status === 'DRAFT' || bom.status === 'APPROVED') && (
-                    <button onClick={() => onEdit(bom)} className={`flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded transition-colors ${bom.status === 'APPROVED' ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50' : 'text-violet-600 hover:text-violet-700 hover:bg-violet-50'}`}>
+                {(bom.status === 'DRAFT' || bom.status === 'APPROVED' || bom.status === 'REJECTED') && (
+                    <button onClick={() => onEdit(bom)} className={`flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded transition-colors ${bom.status === 'APPROVED' ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50' : bom.status === 'REJECTED' ? 'text-red-600 hover:text-red-700 hover:bg-red-50' : 'text-violet-600 hover:text-violet-700 hover:bg-violet-50'}`}>
                         <Edit2 size={10} /> Edit
                     </button>
                 )}
-                {bom.status === 'DRAFT' && (
+                {(bom.status === 'DRAFT' || bom.status === 'REJECTED') && (
                     <>
                         <button onClick={() => onSubmit(bom)} className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 hover:text-emerald-700 px-2 py-1 rounded hover:bg-emerald-50 transition-colors">
-                            <Send size={10} /> Submit
+                            <Send size={10} /> {bom.status === 'REJECTED' ? 'Resubmit' : 'Submit'}
                         </button>
-                        <button onClick={() => onDelete(bom)} className="ml-auto flex items-center gap-1 text-[11px] font-bold text-red-400 hover:text-red-500 px-2 py-1 rounded hover:bg-red-50 transition-colors">
-                            <Trash2 size={10} /> Delete
-                        </button>
+                        {bom.status === 'DRAFT' && (
+                            <button onClick={() => onDelete(bom)} className="ml-auto flex items-center gap-1 text-[11px] font-bold text-red-400 hover:text-red-500 px-2 py-1 rounded hover:bg-red-50 transition-colors">
+                                <Trash2 size={10} /> Delete
+                            </button>
+                        )}
                     </>
                 )}
             </div>
@@ -346,6 +360,7 @@ export default function BomDashboardPage() {
     const grouped = useMemo(() => ({
         draft:    filtered.filter(b => b.status === 'DRAFT'),
         pending:  filtered.filter(b => b.status === 'PENDING_APPROVAL'),
+        rejected: filtered.filter(b => b.status === 'REJECTED'),
         approved: filtered.filter(b => b.status === 'APPROVED'),
         archived: filtered.filter(b => b.status === 'ARCHIVED'),
     }), [filtered]);
@@ -354,6 +369,7 @@ export default function BomDashboardPage() {
         total:    boms.length,
         draft:    boms.filter(b => b.status === 'DRAFT').length,
         pending:  boms.filter(b => b.status === 'PENDING_APPROVAL').length,
+        rejected: boms.filter(b => b.status === 'REJECTED').length,
         approved: boms.filter(b => b.status === 'APPROVED').length,
     }), [boms]);
 
@@ -408,11 +424,12 @@ export default function BomDashboardPage() {
                     </div>
                 </div>
 
-                <div className="grid grid-cols-4 gap-3 mb-4">
+                <div className="grid grid-cols-5 gap-3 mb-4">
                     {[
                         { label: 'Total',    val: stats.total,    color: 'text-slate-800'   },
                         { label: 'Draft',    val: stats.draft,    color: 'text-slate-600'   },
                         { label: 'Pending',  val: stats.pending,  color: 'text-amber-700'   },
+                        { label: 'Rejected', val: stats.rejected, color: 'text-red-600'     },
                         { label: 'Approved', val: stats.approved, color: 'text-emerald-700' },
                     ].map(({ label, val, color }) => (
                         <div key={label} className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
@@ -454,6 +471,7 @@ export default function BomDashboardPage() {
                     </div>
                 ) : (
                     <>
+                        <BomGroup title="Rejected — Needs Revision"  boms={grouped.rejected} defaultOpen  onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} />
                         <BomGroup title="Draft — Work in Progress"   boms={grouped.draft}    defaultOpen  onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} />
                         <BomGroup title="Pending Approval"           boms={grouped.pending}  defaultOpen  onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} />
                         <BomGroup title="Approved"                   boms={grouped.approved} defaultOpen  onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} />
@@ -467,13 +485,17 @@ export default function BomDashboardPage() {
             )}
             {confirmAction && (
                 <ConfirmDialog
-                    title={confirmAction.type === 'submit' ? 'Submit for Approval?' : 'Delete BOM?'}
+                    title={confirmAction.type === 'submit'
+                        ? (confirmAction.bom.status === 'REJECTED' ? 'Resubmit for Approval?' : 'Submit for Approval?')
+                        : 'Delete BOM?'}
                     message={
                         confirmAction.type === 'submit'
-                            ? `"${confirmAction.bom.bom_name}" will be submitted for review. You won't be able to edit it after this.`
+                            ? `"${confirmAction.bom.bom_name}" will be ${confirmAction.bom.status === 'REJECTED' ? 'resubmitted' : 'submitted'} for review. You won't be able to edit it after this.`
                             : `"${confirmAction.bom.bom_name}" will be permanently deleted. This cannot be undone.`
                     }
-                    confirmLabel={confirmAction.type === 'submit' ? 'Submit' : 'Delete'}
+                    confirmLabel={confirmAction.type === 'submit'
+                        ? (confirmAction.bom.status === 'REJECTED' ? 'Resubmit' : 'Submit')
+                        : 'Delete'}
                     confirmColor={confirmAction.type === 'submit' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}
                     busy={actionBusy}
                     onConfirm={runAction}

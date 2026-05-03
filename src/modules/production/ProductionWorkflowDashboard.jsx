@@ -70,20 +70,26 @@ const Connector = ({ start, end }) => {
 // ─── GRAPH CONSTANTS ──────────────────────────────────────────────────────────
 
 const NODE_W_SO            = 155;
-const NODE_W_SOP           = 165;
-const NODE_W_PO            = 145;
+const NODE_W_SOP           = 205;   // wider — embeds PO mini-cards
 const NODE_W_BATCH         = 215;
 const NODE_W_DISPATCH_WIDE = 295;
 const NODE_H_SO            = 160;
-const NODE_H_SOP           = 92;
-const NODE_H_PO            = 120;
+const NODE_H_SOP_BASE      = 76;    // base height (no embedded POs)
+const NODE_H_SOP_PO_SEC    = 18;    // "Purchase Orders" header strip
+const NODE_H_PO_ROW        = 54;    // per embedded PO mini-row
 const NODE_H_BATCH         = 160;
 const NODE_H_DISPATCH      = 170;
+const NODE_W_CB            = 90;    // CreateBatch circle
+const NODE_H_CB            = 90;
 const GAP_X                = 48;
 const GAP_Y                = 10;
 const PO_GAP_Y             = 18;
 const SOP_GAP_Y            = 8;
 const MARGIN               = 20;
+
+// Dynamic SOP height: base + optional embedded-PO section
+const getSopH = (numPos) =>
+    numPos > 0 ? NODE_H_SOP_BASE + NODE_H_SOP_PO_SEC + numPos * NODE_H_PO_ROW + 8 : NODE_H_SOP_BASE;
 
 // ─── STAGE CHIP ───────────────────────────────────────────────────────────────
 
@@ -149,42 +155,6 @@ const SalesOrderNode = ({ data, x, y, poCount, onAddPO, onEditSO }) => (
     </div>
 );
 
-const PONode = ({ data, x, y, onCreateBatch, onViewDetails, onInward }) => (
-    <div
-        className="absolute bg-white rounded-lg shadow-sm border border-l-4 border-l-amber-500 border-slate-200 p-2.5 flex flex-col"
-        style={{ width: NODE_W_PO, height: NODE_H_PO, left: x, top: y }}
-    >
-        <div
-            className="flex items-center gap-1.5 mb-1.5 cursor-pointer hover:opacity-70"
-            onClick={(e) => { e.stopPropagation(); onViewDetails && onViewDetails(data.po_id); }}
-            title="View PO details"
-        >
-            <Package size={11} className="text-amber-500 shrink-0" />
-            <span className="font-mono font-bold text-slate-800 text-xs truncate">{data.po_code}</span>
-        </div>
-        <StatusBadge status={data.po_status} />
-        <p className="text-[10px] text-slate-500 truncate mt-1.5 mb-auto" title={data.supplier_name}>{data.supplier_name}</p>
-        {data.expected_delivery_date && (
-            <p className="text-[9px] text-slate-400 mt-0.5">Del: {new Date(data.expected_delivery_date).toLocaleDateString()}</p>
-        )}
-        {onInward && (
-            <button
-                onClick={(e) => { e.stopPropagation(); onInward(data); }}
-                className="mt-1.5 flex items-center justify-center gap-1 w-full py-1 px-2 rounded text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-colors"
-            >
-                <Warehouse size={10} /> Inward
-            </button>
-        )}
-        {onCreateBatch && (
-            <button
-                onClick={(e) => { e.stopPropagation(); onCreateBatch(data); }}
-                className="mt-1.5 flex items-center justify-center gap-1 w-full py-1 px-2 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
-            >
-                <Plus size={10} /> Create Batch
-            </button>
-        )}
-    </div>
-);
 
 const BatchNode = ({ data, x, y, onStageClick, onDrilldown, onTrimOrders }) => {
     const done  = data.stage_progress?.completed || 0;
@@ -348,36 +318,38 @@ const DispatchNode = ({ x, y, batches, onDispatch }) => {
     );
 };
 
-const AddPOPlaceholder = ({ x, y, onAddPO }) => (
-    <div
-        className="absolute rounded-lg border-2 border-dashed border-amber-200 bg-amber-50/40 p-2.5 flex flex-col items-center justify-center gap-2"
-        style={{ width: NODE_W_PO, height: NODE_H_PO, left: x, top: y }}
+
+// ─── CREATE BATCH CIRCLE NODE ─────────────────────────────────────────────────
+
+const CreateBatchCircleNode = ({ x, y, so, onCreateBatch }) => (
+    <button
+        className="absolute flex flex-col items-center justify-center gap-1
+                   bg-emerald-50 border-2 border-dashed border-emerald-300 rounded-full
+                   hover:bg-emerald-100 hover:border-emerald-400 transition-colors"
+        style={{ width: NODE_W_CB, height: NODE_H_CB, left: x, top: y }}
+        onClick={e => { e.stopPropagation(); onCreateBatch && onCreateBatch(so?.purchase_orders?.[0] ?? null); }}
+        title="Create a new production batch"
     >
-        <Package size={18} className="text-amber-300" />
-        <p className="text-[10px] text-amber-400 italic">No POs yet</p>
-        {onAddPO && (
-            <button
-                onClick={(e) => { e.stopPropagation(); onAddPO(); }}
-                className="flex items-center gap-1 py-1 px-2 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
-            >
-                <Plus size={10} /> Add PO
-            </button>
-        )}
-    </div>
+        <Plus size={16} className="text-emerald-600" />
+        <span className="text-[9px] font-bold text-emerald-700 text-center leading-tight">
+            Create<br />Batch
+        </span>
+    </button>
 );
 
 // ─── SOP NODE ─────────────────────────────────────────────────────────────────
 
-const SopNode = ({ data, x, y, onAddPO }) => {
+const SopNode = ({ data, x, y, pos = [], sopH, onAddPO, onInward }) => {
     const bomLinked   = data.bom_linked || !!data.bom_id;
     const colorsCount = (data.colors || []).length;
     const totalQty    = (data.colors || []).reduce((s, c) => s + (c.quantity || c.total_quantity || 0), 0);
+    const nodeH       = sopH ?? getSopH(pos.length);
 
     return (
         <div
             className={`absolute bg-white rounded-lg shadow-sm border border-l-4 border-slate-200 p-2.5 flex flex-col
                 ${bomLinked ? 'border-l-violet-500' : 'border-l-amber-400'}`}
-            style={{ width: NODE_W_SOP, height: NODE_H_SOP, left: x, top: y }}
+            style={{ width: NODE_W_SOP, height: nodeH, left: x, top: y }}
         >
             {/* Product name + BOM badge */}
             <div className="flex items-start justify-between gap-1 mb-1">
@@ -391,11 +363,11 @@ const SopNode = ({ data, x, y, onAddPO }) => {
 
             {/* BOM name */}
             {data.bom_name
-                ? <p className="text-[9px] text-violet-600 truncate font-medium mb-auto" title={data.bom_name}>{data.bom_name}</p>
-                : <p className="text-[9px] text-slate-400 italic mb-auto">BOM not linked</p>}
+                ? <p className="text-[9px] text-violet-600 truncate font-medium" title={data.bom_name}>{data.bom_name}</p>
+                : <p className="text-[9px] text-slate-400 italic">BOM not linked</p>}
 
-            {/* Footer: colors · total qty + Add PO button */}
-            <div className="flex items-center justify-between mt-auto pt-1.5 border-t border-slate-100 gap-1">
+            {/* Colors · qty + Add PO button */}
+            <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-slate-100 gap-1 shrink-0">
                 <span className="text-[9px] text-slate-400 truncate">
                     {colorsCount} color{colorsCount !== 1 ? 's' : ''}
                     {totalQty > 0 && ` · ${totalQty.toLocaleString()} pcs`}
@@ -409,13 +381,43 @@ const SopNode = ({ data, x, y, onAddPO }) => {
                     </button>
                 )}
             </div>
+
+            {/* Embedded PO mini-cards */}
+            {pos.length > 0 && (
+                <>
+                    <div className="mt-1.5 mb-1 flex items-center gap-1 shrink-0">
+                        <Package size={8} className="text-amber-500 shrink-0" />
+                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Purchase Orders</span>
+                        <span className="ml-auto text-[8px] font-black bg-amber-50 text-amber-600 border border-amber-100 px-1 rounded-full">{pos.length}</span>
+                    </div>
+                    <div className="space-y-1 overflow-y-auto flex-1 min-h-0">
+                        {pos.map(po => (
+                            <div key={po.po_id} className="rounded border border-amber-100 bg-amber-50/50 px-1.5 py-1 flex flex-col gap-0.5">
+                                <div className="flex items-center justify-between gap-1">
+                                    <span className="font-mono text-[9px] font-bold text-slate-700 truncate">{po.po_code}</span>
+                                    <StatusBadge status={po.po_status} />
+                                </div>
+                                <p className="text-[8px] text-slate-500 truncate">{po.supplier_name}</p>
+                                {onInward && (
+                                    <button
+                                        onClick={e => { e.stopPropagation(); onInward(po); }}
+                                        className="mt-0.5 self-start flex items-center gap-0.5 py-0.5 px-1 rounded text-[8px] font-bold bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-colors"
+                                    >
+                                        <Warehouse size={7} /> Inward
+                                    </button>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </>
+            )}
         </div>
     );
 };
 
 // ─── WORKFLOW GRAPH ───────────────────────────────────────────────────────────
 
-const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders }) => {
+const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders }) => {
     const { nodes, connectors, height, totalWidth } = useMemo(() => {
         const nodesList  = [];
         const connList   = [];
@@ -423,147 +425,105 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
         const pos        = so.purchase_orders || [];
         const sops       = so.products        || [];
         const hasSops    = sops.length > 0;
-        const allBatches = [];
+        const allBatches = pos.flatMap(po => po.batches || []);
 
+        // Column X positions — PO column removed; SOPs now embed POs
         const soX       = MARGIN;
         const sopX      = hasSO ? soX + NODE_W_SO + GAP_X : soX;
-        const poX       = hasSops
-            ? sopX + NODE_W_SOP + GAP_X
-            : hasSO ? soX + NODE_W_SO + GAP_X : soX;
-        const batchX    = poX  + NODE_W_PO    + GAP_X;
+        const batchX    = hasSops ? sopX + NODE_W_SOP + GAP_X : sopX + GAP_X;
         const dispatchX = batchX + NODE_W_BATCH + GAP_X;
 
-        // ── Layout SOPs (stacked vertically, centered later) ─────────────────
-        // We'll finalize their Y once we know contentMid from POs.
-        // For the "no POs" branch we center on SOP content.
+        // Column content heights (all start from MARGIN)
+        const anyReady  = sops.some(s => s.production_readiness && s.production_readiness !== 'in_planning');
+        const soColH    = NODE_H_SO + (hasSO && anyReady ? 12 + NODE_H_CB : 0);
+        const totalSopH = hasSops
+            ? sops.reduce((sum, _, i) => sum + getSopH(pos.length) + (i < sops.length - 1 ? SOP_GAP_Y : 0), 0)
+            : 0;
+        const batchColH = allBatches.length > 0
+            ? allBatches.length * NODE_H_BATCH + (allBatches.length - 1) * GAP_Y
+            : 0;
 
-        // ── No POs branch ────────────────────────────────────────────────────
-        if (pos.length === 0) {
-            // Lay out SOPs if present
-            const sopMidY = hasSops
-                ? MARGIN + (sops.length * (NODE_H_SOP + SOP_GAP_Y) - SOP_GAP_Y) / 2
-                : MARGIN + NODE_H_PO / 2;
+        const contentH  = Math.max(soColH, totalSopH, batchColH, NODE_H_DISPATCH);
+        const contentMid = contentH / 2;
 
-            const soNodeY  = hasSO ? Math.max(MARGIN, sopMidY - NODE_H_SO / 2) : MARGIN;
-            const addPoY   = Math.max(MARGIN, sopMidY - NODE_H_PO / 2);
-            const dispY    = Math.max(MARGIN, sopMidY - NODE_H_DISPATCH / 2);
-            const contentH = hasSops
-                ? MARGIN + sops.length * (NODE_H_SOP + SOP_GAP_Y) - SOP_GAP_Y + MARGIN
-                : MARGIN + NODE_H_PO + MARGIN;
-
-            if (hasSO) nodesList.push({ type: 'SO', data: so, x: soX, y: soNodeY });
-
-            if (hasSops) {
-                let sy = MARGIN;
-                sops.forEach(sop => {
-                    nodesList.push({ type: 'SOP', data: sop, x: sopX, y: sy });
-                    connList.push({
-                        start: { x: soX + NODE_W_SO, y: soNodeY + NODE_H_SO / 2 },
-                        end:   { x: sopX,            y: sy + NODE_H_SOP / 2 },
-                    });
-                    connList.push({
-                        start: { x: sopX + NODE_W_SOP, y: sy + NODE_H_SOP / 2 },
-                        end:   { x: poX,              y: addPoY + NODE_H_PO / 2 },
-                    });
-                    sy += NODE_H_SOP + SOP_GAP_Y;
-                });
-            } else if (hasSO) {
-                connList.push({ start: { x: soX + NODE_W_SO, y: soNodeY + NODE_H_SO / 2 }, end: { x: poX, y: addPoY + NODE_H_PO / 2 } });
-            }
-
-            nodesList.push({ type: 'ADD_PO', x: poX,       y: addPoY });
-            nodesList.push({ type: 'DISPATCH', x: dispatchX, y: dispY, batches: [] });
-            return { nodes: nodesList, connectors: connList, height: contentH, totalWidth: dispatchX + NODE_W_DISPATCH_WIDE + MARGIN };
-        }
-
-        // ── With POs: compute PO layout first ────────────────────────────────
-        let currentY    = MARGIN;
-        const poLayouts = [];
-
-        pos.forEach(po => {
-            const batches = po.batches || [];
-            if (batches.length === 0) {
-                poLayouts.push({ po, poY: currentY, batchYs: [], groupMid: currentY + NODE_H_PO / 2 });
-                currentY += NODE_H_PO + PO_GAP_Y;
-            } else {
-                const batchYs     = batches.map((_, bi) => currentY + bi * (NODE_H_BATCH + GAP_Y));
-                const groupBottom = batchYs[batchYs.length - 1] + NODE_H_BATCH;
-                const groupMid    = (currentY + groupBottom) / 2;
-                const poY         = Math.max(currentY, groupMid - NODE_H_PO / 2);
-                poLayouts.push({ po, poY, batchYs, groupMid });
-                currentY = groupBottom + PO_GAP_Y;
-            }
-        });
-
-        const contentEnd = currentY - PO_GAP_Y;
-        const contentMid = (MARGIN + contentEnd) / 2;
-        const dispatchY  = Math.max(MARGIN, contentMid - NODE_H_DISPATCH / 2);
-
-        // SO node
-        const soY = Math.max(MARGIN, contentMid - NODE_H_SO / 2);
+        // ── SO node ──────────────────────────────────────────────────────────
+        const soY = Math.max(MARGIN, MARGIN + contentMid - NODE_H_SO / 2);
         if (hasSO) nodesList.push({ type: 'SO', data: so, x: soX, y: soY });
 
-        // SOP nodes — center the stack on contentMid
+        // ── CreateBatch circle (below SO, only when any SOP is ready) ────────
+        if (hasSO && anyReady) {
+            const cbX = soX + (NODE_W_SO - NODE_W_CB) / 2;
+            const cbY = soY + NODE_H_SO + 12;
+            nodesList.push({ type: 'CREATE_BATCH_CIRCLE', x: cbX, y: cbY });
+            connList.push({
+                start: { x: soX + NODE_W_SO / 2, y: soY + NODE_H_SO },
+                end:   { x: soX + NODE_W_SO / 2, y: cbY },
+            });
+        }
+
+        // ── SOP nodes (embed all SO-level POs inside each card) ──────────────
+        const sopStartY = hasSops ? Math.max(MARGIN, MARGIN + contentMid - totalSopH / 2) : MARGIN;
+        const sopMidY   = sopStartY + totalSopH / 2;
+
         if (hasSops) {
-            const totalSopH = sops.length * NODE_H_SOP + (sops.length - 1) * SOP_GAP_Y;
-            const sopStartY = Math.max(MARGIN, contentMid - totalSopH / 2);
-            const sopMidY   = sopStartY + totalSopH / 2;
-
-            sops.forEach((sop, i) => {
-                const sy = sopStartY + i * (NODE_H_SOP + SOP_GAP_Y);
-                nodesList.push({ type: 'SOP', data: sop, x: sopX, y: sy });
-
-                // SO → each SOP
+            let sy = sopStartY;
+            sops.forEach(sop => {
+                const sopH = getSopH(pos.length);
+                nodesList.push({ type: 'SOP', data: sop, x: sopX, y: sy, pos, sopH });
                 if (hasSO) {
                     connList.push({
                         start: { x: soX + NODE_W_SO, y: soY + NODE_H_SO / 2 },
-                        end:   { x: sopX,            y: sy + NODE_H_SOP / 2 },
+                        end:   { x: sopX,            y: sy + sopH / 2 },
                     });
                 }
-            });
-
-            // Each SOP column midpoint → each PO
-            poLayouts.forEach(({ poY }) => {
-                connList.push({
-                    start: { x: sopX + NODE_W_SOP, y: sopMidY },
-                    end:   { x: poX,              y: poY + NODE_H_PO / 2 },
-                });
+                sy += sopH + SOP_GAP_Y;
             });
         }
 
-        // PO + Batch nodes + connectors
-        poLayouts.forEach(({ po, poY, batchYs, groupMid }) => {
-            nodesList.push({ type: 'PO', data: po, x: poX, y: poY });
+        // ── Batch nodes ───────────────────────────────────────────────────────
+        const batchStartY = allBatches.length > 0
+            ? Math.max(MARGIN, MARGIN + contentMid - batchColH / 2)
+            : MARGIN;
+        const dispatchY   = Math.max(MARGIN, MARGIN + contentMid - NODE_H_DISPATCH / 2);
 
-            // SO → PO (only when no SOP column)
-            if (hasSO && !hasSops) {
+        allBatches.forEach((batch, bi) => {
+            const bY = batchStartY + bi * (NODE_H_BATCH + GAP_Y);
+            nodesList.push({ type: 'BATCH', data: batch, x: batchX, y: bY });
+
+            // SOP column → Batch
+            if (hasSops) {
                 connList.push({
-                    start: { x: soX + NODE_W_SO, y: contentMid },
-                    end:   { x: poX,             y: poY + NODE_H_PO / 2 },
+                    start: { x: sopX + NODE_W_SOP, y: sopMidY },
+                    end:   { x: batchX,            y: bY + NODE_H_BATCH / 2 },
+                });
+            } else if (hasSO) {
+                connList.push({
+                    start: { x: soX + NODE_W_SO, y: soY + NODE_H_SO / 2 },
+                    end:   { x: batchX,          y: bY + NODE_H_BATCH / 2 },
                 });
             }
 
-            batchYs.forEach((bY, bi) => {
-                const batch = po.batches[bi];
-                nodesList.push({ type: 'BATCH', data: batch, x: batchX, y: bY });
-                allBatches.push(batch);
-
-                connList.push({
-                    start: { x: poX  + NODE_W_PO,   y: groupMid },
-                    end:   { x: batchX,             y: bY + NODE_H_BATCH / 2 },
-                });
-                connList.push({
-                    start: { x: batchX + NODE_W_BATCH, y: bY + NODE_H_BATCH / 2 },
-                    end:   { x: dispatchX,            y: dispatchY + NODE_H_DISPATCH / 2 },
-                });
+            // Batch → Dispatch
+            connList.push({
+                start: { x: batchX + NODE_W_BATCH, y: bY + NODE_H_BATCH / 2 },
+                end:   { x: dispatchX,             y: dispatchY + NODE_H_DISPATCH / 2 },
             });
         });
+
+        // When no batches exist, still connect SOP → Dispatch
+        if (allBatches.length === 0 && hasSops) {
+            connList.push({
+                start: { x: sopX + NODE_W_SOP, y: sopMidY },
+                end:   { x: dispatchX,         y: dispatchY + NODE_H_DISPATCH / 2 },
+            });
+        }
 
         nodesList.push({ type: 'DISPATCH', x: dispatchX, y: dispatchY, batches: allBatches });
 
         return {
-            nodes: nodesList, connectors: connList,
-            height: contentEnd + MARGIN,
+            nodes: nodesList,
+            connectors: connList,
+            height: contentH + 2 * MARGIN,
             totalWidth: dispatchX + NODE_W_DISPATCH_WIDE + MARGIN,
         };
     }, [so]);
@@ -574,12 +534,11 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
                 {connectors.map((c, i) => <Connector key={i} start={c.start} end={c.end} />)}
             </svg>
             {nodes.map((node, i) => {
-                if (node.type === 'SO')       return <SalesOrderNode  key={i} {...node} poCount={so.purchase_orders?.length || 0} onAddPO={onAddPO} onEditSO={onEditSO} />;
-                if (node.type === 'SOP')      return <SopNode         key={i} {...node} onAddPO={onAddSopPO} />;
-                if (node.type === 'PO')       return <PONode          key={i} {...node} onCreateBatch={onCreateBatch} onViewDetails={onViewPODetails} onInward={onInward} />;
-                if (node.type === 'BATCH')    return <BatchNode       key={i} {...node} onStageClick={onStageClick} onDrilldown={onDrilldown} onTrimOrders={onTrimOrders} />;
-                if (node.type === 'DISPATCH') return <DispatchNode    key={i} {...node} onDispatch={onDispatch} />;
-                if (node.type === 'ADD_PO')   return <AddPOPlaceholder key={i} {...node} onAddPO={onAddPO} />;
+                if (node.type === 'SO')                  return <SalesOrderNode       key={i} {...node} poCount={so.purchase_orders?.length || 0} onAddPO={onAddPO} onEditSO={onEditSO} />;
+                if (node.type === 'SOP')                 return <SopNode              key={i} {...node} onAddPO={onAddSopPO} onInward={onInward} />;
+                if (node.type === 'CREATE_BATCH_CIRCLE') return <CreateBatchCircleNode key={i} {...node} so={so} onCreateBatch={onCreateBatch} />;
+                if (node.type === 'BATCH')               return <BatchNode            key={i} {...node} onStageClick={onStageClick} onDrilldown={onDrilldown} onTrimOrders={onTrimOrders} />;
+                if (node.type === 'DISPATCH')            return <DispatchNode         key={i} {...node} onDispatch={onDispatch} />;
                 return null;
             })}
         </div>

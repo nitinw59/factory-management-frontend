@@ -51,4 +51,9 @@ export const accountingApi = {
   updatePurchaseOrder: (id, data) => {return api.put(`/accounting/purchase-orders/${id}`, data);},  
   getPurchaseOrderDetails: (id) => api.get(`/accounting/purchase-orders/${id}`),
   deletePurchaseOrder: (id) => api.delete(`/accounting/purchase-orders/${id}`),
+
+  // Plan purchase requirements (raised by merchandiser)
+  getPlanFabricRequirements: (params) => api.get('/accounting/plan-purchase-requirements/fabric', { params }),
+  getPlanTrimRequirements:   (params) => api.get('/accounting/plan-purchase-requirements/trim',   { params }),
+  createPOFromRequirements:  (data)   => api.post('/accounting/purchase-orders/from-requirements', data),
 };

@@ -98,6 +98,7 @@ import ProductionCapacityDashboard from './modules/production/ProductionCapacity
 import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
 import CuttingDailyReportPage from './modules/initialisation_portal/CuttingDailyReportPage';
 import InterliningManagerPage from './modules/initialisation_portal/InterliningManagerPage';
+import PlanPurchaseRequirementsPage from './modules/accounts/purchase/PlanPurchaseRequirementsPage';
 
 import MechanicsLayout from './shared/MechanicsLayout';
 import MechanicsProtectedRoute from './shared/MechanicsProtectedRoute';
@@ -266,6 +267,7 @@ function App() {
             <Route path="sales/new" element={<CreateSalesOrder />} />
             <Route path="sales/:orderId/edit" element={<CreateSalesOrder />} />
             <Route path="sales/orders" element={<SalesOrderListPage />} />
+            <Route path="purchase-requirements" element={<PlanPurchaseRequirementsPage />} />
         </Route>
 
       <Route path="/cutting-portal" element={<CuttingOperatorProtectedRoute><CuttingPortalLayout /></CuttingOperatorProtectedRoute>}>
