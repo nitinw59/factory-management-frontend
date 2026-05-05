@@ -327,7 +327,15 @@ const CreateBatchCircleNode = ({ x, y, so, onCreateBatch }) => (
                    bg-emerald-50 border-2 border-dashed border-emerald-300 rounded-full
                    hover:bg-emerald-100 hover:border-emerald-400 transition-colors"
         style={{ width: NODE_W_CB, height: NODE_H_CB, left: x, top: y }}
-        onClick={e => { e.stopPropagation(); onCreateBatch && onCreateBatch(so?.purchase_orders?.[0] ?? null); }}
+        onClick={e => {
+            e.stopPropagation();
+            const po = so?.purchase_orders?.[0] ?? null;
+            onCreateBatch && onCreateBatch({
+                ...(po ?? {}),
+                sales_order_id:         so?.sales_order_id       ?? null,
+                sales_order_product_id: so?.products?.[0]?.id   ?? null,
+            });
+        }}
         title="Create a new production batch"
     >
         <Plus size={16} className="text-emerald-600" />
@@ -428,14 +436,19 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
         const allBatches = pos.flatMap(po => po.batches || []);
 
         // Column X positions — PO column removed; SOPs now embed POs
-        const soX       = MARGIN;
-        const sopX      = hasSO ? soX + NODE_W_SO + GAP_X : soX;
-        const batchX    = hasSops ? sopX + NODE_W_SOP + GAP_X : sopX + GAP_X;
+        const soX    = MARGIN;
+        const sopX   = hasSO ? soX + NODE_W_SO + GAP_X : soX;
+        // Circle column sits between SOP and BATCH when any SOP is production-ready
+        const anyReady = sops.some(s => s.production_readiness && s.production_readiness !== 'in_planning');
+        const hasCB    = hasSops && anyReady;
+        const cbColX   = hasCB ? sopX + NODE_W_SOP + GAP_X : null;
+        const batchX   = hasSops
+            ? sopX + NODE_W_SOP + GAP_X + (hasCB ? NODE_W_CB + GAP_X : 0)
+            : (hasSO ? soX + NODE_W_SO + GAP_X : soX + GAP_X);
         const dispatchX = batchX + NODE_W_BATCH + GAP_X;
 
         // Column content heights (all start from MARGIN)
-        const anyReady  = sops.some(s => s.production_readiness && s.production_readiness !== 'in_planning');
-        const soColH    = NODE_H_SO + (hasSO && anyReady ? 12 + NODE_H_CB : 0);
+        const soColH    = NODE_H_SO;
         const totalSopH = hasSops
             ? sops.reduce((sum, _, i) => sum + getSopH(pos.length) + (i < sops.length - 1 ? SOP_GAP_Y : 0), 0)
             : 0;
@@ -449,17 +462,6 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
         // ── SO node ──────────────────────────────────────────────────────────
         const soY = Math.max(MARGIN, MARGIN + contentMid - NODE_H_SO / 2);
         if (hasSO) nodesList.push({ type: 'SO', data: so, x: soX, y: soY });
-
-        // ── CreateBatch circle (below SO, only when any SOP is ready) ────────
-        if (hasSO && anyReady) {
-            const cbX = soX + (NODE_W_SO - NODE_W_CB) / 2;
-            const cbY = soY + NODE_H_SO + 12;
-            nodesList.push({ type: 'CREATE_BATCH_CIRCLE', x: cbX, y: cbY });
-            connList.push({
-                start: { x: soX + NODE_W_SO / 2, y: soY + NODE_H_SO },
-                end:   { x: soX + NODE_W_SO / 2, y: cbY },
-            });
-        }
 
         // ── SOP nodes (embed all SO-level POs inside each card) ──────────────
         const sopStartY = hasSops ? Math.max(MARGIN, MARGIN + contentMid - totalSopH / 2) : MARGIN;
@@ -480,6 +482,16 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
             });
         }
 
+        // ── CreateBatch circle (after SOP column, linked to SOP) ─────────────
+        if (hasCB) {
+            const cbY = sopMidY - NODE_H_CB / 2;
+            nodesList.push({ type: 'CREATE_BATCH_CIRCLE', x: cbColX, y: cbY });
+            connList.push({
+                start: { x: sopX + NODE_W_SOP, y: sopMidY },
+                end:   { x: cbColX,            y: cbY + NODE_H_CB / 2 },
+            });
+        }
+
         // ── Batch nodes ───────────────────────────────────────────────────────
         const batchStartY = allBatches.length > 0
             ? Math.max(MARGIN, MARGIN + contentMid - batchColH / 2)
@@ -490,8 +502,13 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
             const bY = batchStartY + bi * (NODE_H_BATCH + GAP_Y);
             nodesList.push({ type: 'BATCH', data: batch, x: batchX, y: bY });
 
-            // SOP column → Batch
-            if (hasSops) {
+            // Circle → Batch (when circle exists), else SOP → Batch, else SO → Batch
+            if (hasCB) {
+                connList.push({
+                    start: { x: cbColX + NODE_W_CB, y: sopMidY },
+                    end:   { x: batchX,             y: bY + NODE_H_BATCH / 2 },
+                });
+            } else if (hasSops) {
                 connList.push({
                     start: { x: sopX + NODE_W_SOP, y: sopMidY },
                     end:   { x: batchX,            y: bY + NODE_H_BATCH / 2 },
@@ -510,11 +527,12 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
             });
         });
 
-        // When no batches exist, still connect SOP → Dispatch
+        // When no batches exist, connect rightmost node → Dispatch
         if (allBatches.length === 0 && hasSops) {
+            const fromX = hasCB ? cbColX + NODE_W_CB : sopX + NODE_W_SOP;
             connList.push({
-                start: { x: sopX + NODE_W_SOP, y: sopMidY },
-                end:   { x: dispatchX,         y: dispatchY + NODE_H_DISPATCH / 2 },
+                start: { x: fromX,     y: sopMidY },
+                end:   { x: dispatchX, y: dispatchY + NODE_H_DISPATCH / 2 },
             });
         }
 
@@ -2025,9 +2043,17 @@ const ProductionWorkflowDashboard = () => {
     const handleBatchDrilldown = (batchId, batchCode) => setBatchDrilldown({ batchId, batchCode });
     const handleDispatch       = (batchId, batchCode) => setDispatchBatch({ batchId, batchCode });
     const handleCreateBatch = (poData) => {
-        const poId       = typeof poData === 'object' ? poData?.po_id       : poData;
-        const supplierId = typeof poData === 'object' ? poData?.supplier_id : null;
-        const params     = [poId && `poId=${poId}`, supplierId && `supplierId=${supplierId}`].filter(Boolean).join('&');
+        const isObj             = typeof poData === 'object';
+        const poId              = isObj ? poData?.po_id                 : poData;
+        const supplierId        = isObj ? poData?.supplier_id           : null;
+        const salesOrderId      = isObj ? poData?.sales_order_id        : null;
+        const salesOrderProductId = isObj ? poData?.sales_order_product_id : null;
+        const params = [
+            poId                && `poId=${poId}`,
+            supplierId          && `supplierId=${supplierId}`,
+            salesOrderId        && `salesOrderId=${salesOrderId}`,
+            salesOrderProductId && `salesOrderProductId=${salesOrderProductId}`,
+        ].filter(Boolean).join('&');
         navigate(`${basePath}/batches/new${params ? `?${params}` : ''}`);
     };
     const handleCreatePOSave = async (formData) => {

@@ -4,7 +4,7 @@ export const productionManagerApi = {
   /**
    * Fetches all data needed for the 'Create Batch' form's dropdowns.
    */
-  getFormData: () => api.get('/production-batch-api/production-batches/form-data'),
+  getFormData: (params) => api.get('/production-batch-api/production-batches/form-data', { params }),
 
   /**
    * Creates a new production batch.
