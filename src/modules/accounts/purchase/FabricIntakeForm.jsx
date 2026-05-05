@@ -37,8 +37,8 @@ const ReqBadge = ({ status }) => {
 // ─── INTAKE MODAL ─────────────────────────────────────────────────────────────
 
 let _gk = 0, _rk = 0;
-const newGroup = () => ({ _k: ++_gk, fabric_type_id: '', uom: 'meter', rolls: [{ _k: ++_rk, fabric_color_id: '', meter: '' }] });
-const newRoll  = () => ({ _k: ++_rk, fabric_color_id: '', meter: '' });
+const newGroup = () => ({ _k: ++_gk, fabric_type_id: '', uom: 'meter', rolls: [{ _k: ++_rk, fabric_color_id: '', meter: '', bale_no: '' }] });
+const newRoll  = () => ({ _k: ++_rk, fabric_color_id: '', meter: '', bale_no: '' });
 
 const IntakeModal = ({ onClose, onSuccess }) => {
     const [formData,   setFormData]   = useState(null);
@@ -106,6 +106,7 @@ const IntakeModal = ({ onClose, onSuccess }) => {
                     fabric_color_id: parseInt(r.fabric_color_id),
                     meter:           parseFloat(r.meter),
                     uom:             g.uom,
+                    bale_no:         r.bale_no || null,
                 }))
             );
             await storeManagerApi.createFabricIntake({
@@ -213,7 +214,8 @@ const IntakeModal = ({ onClose, onSuccess }) => {
                                             {/* Column labels */}
                                             <div className="flex items-center gap-3 px-1">
                                                 <span className="text-[9px] font-bold text-slate-400 uppercase flex-1">Color</span>
-                                                <span className="text-[9px] font-bold text-slate-400 uppercase w-28 text-right">
+                                                <span className="text-[9px] font-bold text-slate-400 uppercase w-24">Bale No.</span>
+                                                <span className="text-[9px] font-bold text-slate-400 uppercase w-24 text-right">
                                                     Meters ({group.uom})
                                                 </span>
                                                 <span className="w-6" />
@@ -235,12 +237,19 @@ const IntakeModal = ({ onClose, onSuccess }) => {
                                                         ))}
                                                     </select>
                                                     <input
+                                                        type="text"
+                                                        placeholder="B-001"
+                                                        value={roll.bale_no}
+                                                        onChange={e => setRoll(gi, ri, 'bale_no', e.target.value)}
+                                                        className="w-24 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400 font-mono"
+                                                    />
+                                                    <input
                                                         type="number" step="0.01" min="0.01"
                                                         placeholder="0.00"
                                                         value={roll.meter}
                                                         onChange={e => setRoll(gi, ri, 'meter', e.target.value)}
                                                         required
-                                                        className="w-28 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400 text-right tabular-nums"
+                                                        className="w-24 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400 text-right tabular-nums"
                                                     />
                                                     <button
                                                         type="button"
@@ -313,6 +322,7 @@ const EditRollModal = ({ roll, colors, onSaved, onDeleted, onClose }) => {
     const [meter,   setMeter]   = useState(String(roll.meter || ''));
     const [uom,     setUom]     = useState(roll.uom || 'meter');
     const [colorId, setColorId] = useState(String(roll.fabric_color_id || ''));
+    const [baleNo,  setBaleNo]  = useState(roll.bale_no || '');
     const [saving,  setSaving]  = useState(false);
     const [deleting,setDeleting]= useState(false);
     const [confirm, setConfirm] = useState(false);
@@ -327,6 +337,7 @@ const EditRollModal = ({ roll, colors, onSaved, onDeleted, onClose }) => {
                 meter:           parseFloat(meter),
                 uom,
                 fabric_color_id: colorId ? parseInt(colorId) : undefined,
+                bale_no:         baleNo || null,
             });
             onSaved();
         } catch (e) {
@@ -371,6 +382,12 @@ const EditRollModal = ({ roll, colors, onSaved, onDeleted, onClose }) => {
                                 <option key={fc.id} value={fc.id}>{fc.color_number}{fc.name ? ` · ${fc.name}` : ''}</option>
                             ))}
                         </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Bale No.</label>
+                        <input type="text" placeholder="B-001" value={baleNo} onChange={e => setBaleNo(e.target.value)}
+                            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400 font-mono" />
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
@@ -442,6 +459,9 @@ const PoolRollDetailModal = ({ row, allRolls, colors, onClose, onRefresh }) => {
     const RollRow = ({ r }) => (
         <div className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 group transition-colors">
             <span className="font-mono font-bold text-indigo-600 text-xs w-14 shrink-0">R-{r.roll_id}</span>
+            {r.bale_no && (
+                <span className="font-mono text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">{r.bale_no}</span>
+            )}
             <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold text-slate-700">{fmt(r.meter)} {r.uom}</p>
                 <p className="text-[10px] text-slate-400 truncate">
@@ -728,6 +748,9 @@ const RequirementsTab = ({ requirements }) => {
                                     {req.reserved_rolls.map(rr => (
                                         <div key={rr.reservation_id} className="flex items-center gap-4 bg-white border border-slate-100 rounded-xl px-4 py-2.5 text-xs">
                                             <span className="font-mono font-bold text-indigo-600 w-14 shrink-0">R-{rr.roll_id}</span>
+                                            {rr.bale_no && (
+                                                <span className="font-mono text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">{rr.bale_no}</span>
+                                            )}
                                             <div className="flex-1 min-w-0">
                                                 <p className="font-bold text-slate-700">
                                                     {fmt(rr.meters_reserved)} m reserved
@@ -760,6 +783,7 @@ const RollsTable = ({ rolls, onEdit }) => (
             <thead className="bg-slate-50 border-b border-slate-100">
                 <tr>
                     <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Roll</th>
+                    <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Bale No.</th>
                     <th className="text-right px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Meters</th>
                     <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Challan</th>
                     <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Bill Date</th>
@@ -773,6 +797,7 @@ const RollsTable = ({ rolls, onEdit }) => (
                 {rolls.map(r => (
                     <tr key={r.roll_id} className="hover:bg-slate-50 transition-colors group">
                         <td className="px-4 py-2.5 font-mono font-bold text-indigo-600">R-{r.roll_id}</td>
+                        <td className="px-4 py-2.5 font-mono text-slate-600">{r.bale_no || '—'}</td>
                         <td className="px-4 py-2.5 text-right font-bold text-slate-800">
                             {fmt(r.meter)} <span className="font-normal text-slate-400">{r.uom}</span>
                         </td>
@@ -806,6 +831,7 @@ const exportToXlsx = (rolls) => {
     // ── Sheet 1: Detailed roll list ──────────────────────────────────────────
     const detailRows = rolls.map(r => ({
         'Roll ID':      `R-${r.roll_id}`,
+        'Bale No.':     r.bale_no         || '',
         'Fabric Type':  r.fabric_type     || '',
         'Color':        r.fabric_color    || '',
         'Color Code':   r.color_number    || '',
@@ -826,7 +852,7 @@ const exportToXlsx = (rolls) => {
 
     // Column widths for sheet 1
     wsDetail['!cols'] = [
-        { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 12 },
+        { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 12 },
         { wch: 10 }, { wch: 8  }, { wch: 12 }, { wch: 14 },
         { wch: 12 }, { wch: 20 }, { wch: 14 }, { wch: 12 },
         { wch: 14 }, { wch: 12 }, { wch: 14 },
@@ -907,6 +933,7 @@ const AllRollsTab = ({ rolls, colors, onRefresh }) => {
             r.fabric_type?.toLowerCase().includes(q) ||
             r.fabric_color?.toLowerCase().includes(q) ||
             r.color_number?.toLowerCase().includes(q) ||
+            r.bale_no?.toLowerCase().includes(q) ||
             r.challan_number?.toLowerCase().includes(q) ||
             r.supplier_name?.toLowerCase().includes(q) ||
             r.po_code?.toLowerCase().includes(q) ||
