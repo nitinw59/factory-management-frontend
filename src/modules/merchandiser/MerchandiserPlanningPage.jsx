@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-    Loader2, Link2, ChevronDown, ChevronRight,
-    Package, AlertTriangle, CheckCircle2, RefreshCw,
-    Calculator, ShoppingBag, ShoppingCart, X, Layers, Eye, Bookmark, Download, Printer,
+    Loader2, Link2, ChevronRight, ChevronLeft,
+    AlertTriangle, CheckCircle2, Search,
+    Calculator, ShoppingBag, X, Eye, Plus, Pencil,
     ShieldCheck, ShieldOff,
 } from 'lucide-react';
 import { planningApi } from '../../api/planningApi';
 import { bomApi } from '../../api/bomApi';
+import { taApi } from '../../api/taApi';
+import api from '../../utils/api';
 import { stdSize } from '../../utils/sizeUtils';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -27,6 +29,29 @@ const ORDER_STATUS_CFG = {
     IN_PRODUCTION:  { cls: 'bg-violet-100 text-violet-700' },
     COMPLETED:      { cls: 'bg-emerald-100 text-emerald-700'},
     CANCELLED:      { cls: 'bg-red-100 text-red-500'       },
+};
+
+// ─── T&A CONFIG ───────────────────────────────────────────────────────────────
+
+const CAT = {
+    production: { label: 'Production', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
+    fabric:     { label: 'Fabric',     cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+    trim:       { label: 'Trim',       cls: 'bg-amber-50  text-amber-700  border-amber-200'  },
+    delivery:   { label: 'Delivery',   cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    quality:    { label: 'Quality',    cls: 'bg-sky-50    text-sky-700    border-sky-200'    },
+    other:      { label: 'Other',      cls: 'bg-slate-50  text-slate-600  border-slate-200'  },
+};
+const TL_STATUS = {
+    pending:       { label: 'Pending',     cls: 'bg-amber-50  text-amber-700  border-amber-200'  },
+    'in-progress': { label: 'In Progress', cls: 'bg-blue-50   text-blue-700   border-blue-200'   },
+    completed:     { label: 'Completed',   cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    delayed:       { label: 'Delayed',     cls: 'bg-red-50    text-red-700    border-red-200'    },
+};
+const PRIORITY = {
+    low:      { label: 'Low',      dot: 'bg-slate-300'  },
+    medium:   { label: 'Medium',   dot: 'bg-amber-400'  },
+    high:     { label: 'High',     dot: 'bg-orange-500' },
+    critical: { label: 'Critical', dot: 'bg-red-600'    },
 };
 
 // ─── BOM PREVIEW MODAL ────────────────────────────────────────────────────────
@@ -196,932 +221,1142 @@ const OrderCard = ({ order, isSelected, onClick }) => {
     );
 };
 
-// ─── REQUIREMENT STATUS PILL ──────────────────────────────────────────────────
+// ─── T&A TIMELINE ITEM ROW (used in TAItemFormModal) ─────────────────────────
 
-const REQ_STATUS = {
-    PENDING:            { cls: 'bg-amber-50 text-amber-700 border-amber-200',        label: 'Pending'   },
-    PARTIALLY_RESERVED: { cls: 'bg-blue-50 text-blue-700 border-blue-200',           label: 'Partial'   },
-    RESERVED:           { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200',  label: 'Reserved'  },
-    PURCHASE_RAISED:    { cls: 'bg-violet-50 text-violet-700 border-violet-200',     label: 'PO Raised' },
-};
-const ReqStatusPill = ({ status }) => {
-    const cfg = REQ_STATUS[status] || { cls: 'bg-slate-50 text-slate-500 border-slate-200', label: status || '—' };
-    return (
-        <span className={`text-[8px] font-bold uppercase tracking-wider border px-1.5 py-0.5 rounded-full ${cfg.cls}`}>
-            {cfg.label}
-        </span>
-    );
-};
+const fmtD = (d) => d ? new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' }) : null;
 
-// ─── RESERVATION & PURCHASE MODAL ─────────────────────────────────────────────
+// ─── T&A ITEM FORM MODAL ──────────────────────────────────────────────────────
 
-const ReservationModal = ({ reqType, requirement, onClose, onUpdate }) => {
-    const isFabric = reqType === 'fabric';
-
-    // Trim: per-variant quantity inputs
-    const [inputs,        setInputs]        = useState({});
-    // Fabric: whole-roll checkbox selection
-    const [checkedRolls,  setCheckedRolls]  = useState(new Set());
-    const [rollSearch,    setRollSearch]    = useState('');
-    const [rollMinMeter,  setRollMinMeter]  = useState('');
-
-    const [purchaseAmt,   setPurchaseAmt]   = useState('');
-    const [purchaseNotes, setPurchaseNotes] = useState('');
-    const [busy,          setBusy]          = useState(null);
-    const [error,         setError]         = useState(null);
-
-    const unit      = isFabric ? 'm' : (requirement.unit_of_measure || 'pcs');
-    const name      = isFabric ? requirement.fabric_type_name : requirement.trim_item_name;
-    const required  = parseFloat(isFabric ? requirement.meters_required  : requirement.quantity_required)  || 0;
-    const reserved  = parseFloat(isFabric ? requirement.meters_reserved  : requirement.quantity_reserved)  || 0;
-    const remaining = Math.max(0, required - reserved);
-    const pct       = Math.min(100, (reserved / (required || 1)) * 100);
-
-    const reservations = requirement.reservations         || [];
-    const purchaseReqs = requirement.purchase_requirements || [];
-
-    // Set of roll IDs already reserved (to hide them from the available list)
-    const alreadyReservedRollIds = new Set(reservations.map(r => String(r.fabric_roll_id)));
-
-    const stockItems = isFabric
-        ? (requirement.stock_suggestion?.available_rolls || []).map(r => ({
-            ...r,
-            id:     r.roll_id,
-            _label: `Roll #${r.roll_id}`,
-            _stock: parseFloat(r.meter) || 0,
-            _color: r.color_number || '—',
-          }))
-        : [
-            ...(requirement.stock_suggestion?.exact_variant
-                ? [{
-                    ...requirement.stock_suggestion.exact_variant,
-                    _isExact: true,
-                    _label:  `${requirement.stock_suggestion.exact_variant.color_name || 'Exact'}${requirement.stock_suggestion.exact_variant.color_number ? ` · ${requirement.stock_suggestion.exact_variant.color_number}` : ''} (Exact)`,
-                    _stock:  parseFloat(requirement.stock_suggestion.exact_variant.in_stock) || 0,
-                  }]
-                : []),
-            ...(requirement.stock_suggestion?.substitutes || []).map(s => ({
-                ...s,
-                id:      s.substitute_variant_id,
-                _isExact: false,
-                _label:  `${s.color_name || s.item_name}${s.color_number ? ` · ${s.color_number}` : ''} (Sub)`,
-                _stock:  parseFloat(s.in_stock) || 0,
-            })),
-          ];
-
-    // Fabric: filter out already-reserved rolls, apply search + min-meter
-    const filteredRolls = !isFabric ? [] : stockItems.filter(roll => {
-        if (alreadyReservedRollIds.has(String(roll.id))) return false;
-        const searchOk = !rollSearch ||
-            String(roll.id).includes(rollSearch) ||
-            String(roll._stock).includes(rollSearch) ||
-            (roll._color || '').toLowerCase().includes(rollSearch.toLowerCase());
-        const minOk = !rollMinMeter || roll._stock >= parseFloat(rollMinMeter);
-        return searchOk && minOk;
+const TAItemFormModal = ({ sop, item, onClose, onSaved }) => {
+    const isEdit = !!item;
+    const [form, setForm] = useState({
+        title:           item?.title           || '',
+        category:        item?.category        || 'fabric',
+        status:          item?.status          || 'pending',
+        priority:        item?.priority        || 'medium',
+        start_date:      item?.start_date?.slice(0, 10) || '',
+        end_date:        item?.end_date?.slice(0, 10)   || '',
+        assignee:        item?.assignee        || '',
+        notes:           item?.notes           || '',
+        fabric_color_id: item?.fabric_color_id || '',
     });
+    const [busy, setBusy] = useState(false);
+    const [err,  setErr]  = useState(null);
 
-    // Fabric: running totals from checked selection
-    const checkedMeters  = [...checkedRolls].reduce((s, id) => s + (stockItems.find(r => String(r.id) === String(id))?._stock || 0), 0);
-    const totalProjected = reserved + checkedMeters;
-    const quotaMet       = totalProjected >= required;
+    const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
-    const toggleRoll = (rollId) => setCheckedRolls(prev => {
-        const next = new Set(prev);
-        next.has(rollId) ? next.delete(rollId) : next.add(rollId);
-        return next;
-    });
-
-    // Trim only: auto-fill inputs and purchase amount on open
-    useEffect(() => {
-        if (isFabric) {
-            if (remaining > 0) setPurchaseAmt(remaining.toFixed(2));
-            return;
+    const handleSave = async () => {
+        if (!form.title.trim()) { setErr('Title is required'); return; }
+        setBusy(true); setErr(null);
+        try {
+            const payload = {
+                ...form,
+                sales_order_product_id: sop.id,
+                start_date:      form.start_date      || null,
+                end_date:        form.end_date        || null,
+                assignee:        form.assignee        || null,
+                notes:           form.notes           || null,
+                fabric_color_id: form.fabric_color_id ? parseInt(form.fabric_color_id) : null,
+            };
+            console.log(payload);
+            if (isEdit) await taApi.updateTimelineItem(item.id, payload);
+            else        await taApi.createTimelineItem(payload);
+            onSaved();
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Save failed');
+            setBusy(false);
         }
-        const init = {};
-        stockItems.forEach(item => {
-            if (item._stock > 0) {
-                const fill = parseFloat(Math.min(item._stock, remaining).toFixed(2));
-                if (fill > 0) init[item.id] = String(fill);
-            }
-        });
-        setInputs(init);
-        if (remaining > 0) setPurchaseAmt(remaining.toFixed(2));
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-    const run = async (key, fn) => {
-        setBusy(key); setError(null);
-        try   { await fn(); onUpdate(); }
-        catch (e) { setError(e?.response?.data?.error || 'Action failed'); }
-        finally   { setBusy(null); }
     };
 
-    // Fabric: reserve all checked rolls at their full meter amount
-    const handleReserveFabricRolls = () => run('res_fabric', async () => {
-        if (checkedRolls.size === 0) throw new Error('Select at least one roll');
-        for (const rollId of checkedRolls) {
-            const roll = stockItems.find(r => String(r.id) === String(rollId));
-            await planningApi.reserveFabric(requirement.id, {
-                fabric_roll_id:  rollId,
-                meters_reserved: roll._stock,
-            });
-        }
-        setCheckedRolls(new Set());
-    });
-
-    // Trim: reserve a specific variant by quantity
-    const handleReserve = (stockId) => run(`res_${stockId}`, async () => {
-        const amt = parseFloat(inputs[stockId]);
-        if (!amt || amt <= 0) throw new Error('Enter a valid amount');
-        await planningApi.reserveTrim(requirement.id, { trim_item_variant_id: stockId, quantity_reserved: amt });
-        setInputs(p => ({ ...p, [stockId]: '' }));
-    });
-
-    const handleDeleteReservation = (resId) => run(`del_${resId}`,
-        () => isFabric ? planningApi.deleteFabricReservation(resId) : planningApi.deleteTrimReservation(resId)
-    );
-
-    const handlePurchase = () => run('purchase', async () => {
-        const amt = parseFloat(purchaseAmt);
-        if (!amt || amt <= 0) throw new Error('Enter a valid amount');
-        if (isFabric)
-            await planningApi.createFabricPurchase(requirement.id, { meters_required: amt, notes: purchaseNotes || undefined });
-        else
-            await planningApi.createTrimPurchase(requirement.id, { quantity_required: amt, notes: purchaseNotes || undefined });
-        setPurchaseAmt(''); setPurchaseNotes('');
-    });
-
-    const handleDeletePurchase = (purchaseId) => run(`delpurch_${purchaseId}`,
-        () => isFabric ? planningApi.deleteFabricPurchase(purchaseId) : planningApi.deleteTrimPurchase(purchaseId)
-    );
-
     return (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
-
-                {/* Header */}
-                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={!busy ? onClose : undefined}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
                     <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
-                            {isFabric ? 'Fabric' : 'Trim'} · Reservation & Purchase
-                        </p>
-                        <h2 className="font-extrabold text-slate-800 text-base leading-tight">{name}</h2>
-                        <p className="text-xs text-slate-400 mt-0.5">
-                            {requirement.color_name}{requirement.color_number ? ` · ${requirement.color_number}` : ''}
-                        </p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">T&A Timeline · {sop.product_name}</p>
+                        <h2 className="font-extrabold text-slate-800 text-base">{isEdit ? 'Edit Milestone' : 'Add Milestone'}</h2>
                     </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 mt-0.5"><X size={18} /></button>
+                    {!busy && <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><X size={18} /></button>}
                 </div>
 
-                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-                    {error && (
-                        <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>
-                    )}
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+                    {err && <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{err}</p>}
 
-                    {/* Progress bar */}
                     <div>
-                        <div className="flex items-center justify-between text-xs text-slate-600 mb-1.5">
-                            <span>Reserved: <b>{reserved.toFixed(2)} {unit}</b></span>
-                            <span>Required: <b>{required.toFixed(2)} {unit}</b></span>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Title *</label>
+                        <input type="text" value={form.title} onChange={e => set('title', e.target.value)}
+                            placeholder="e.g. Fabric arrival confirmation"
+                            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400" />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Category</label>
+                            <select value={form.category} onChange={e => set('category', e.target.value)}
+                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400">
+                                {Object.entries(CAT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                            </select>
                         </div>
-                        <div className="w-full bg-slate-100 rounded-full h-2.5">
-                            <div
-                                className={`h-2.5 rounded-full transition-all ${pct >= 100 ? 'bg-emerald-500' : pct > 0 ? 'bg-violet-500' : 'bg-slate-300'}`}
-                                style={{ width: `${pct}%` }}
-                            />
-                        </div>
-                        <div className="flex items-center justify-between mt-1.5">
-                            <ReqStatusPill status={requirement.status} />
-                            {remaining > 0 && (
-                                <span className="text-[10px] text-red-500 font-bold">−{remaining.toFixed(2)} {unit} unmet</span>
-                            )}
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Priority</label>
+                            <select value={form.priority} onChange={e => set('priority', e.target.value)}
+                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400">
+                                {Object.entries(PRIORITY).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                            </select>
                         </div>
                     </div>
 
-                    {/* Current reservations */}
-                    {reservations.length > 0 && (
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Status</label>
+                        <select value={form.status} onChange={e => set('status', e.target.value)}
+                            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400">
+                            {Object.entries(TL_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Current Reservations</p>
-                            <div className="space-y-1.5">
-                                {reservations.map(res => (
-                                    <div key={res.id} className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs">
-                                        <div>
-                                            <p className="font-bold text-slate-700">
-                                                {isFabric ? `Roll #${res.fabric_roll_id}` : `Variant #${res.trim_item_variant_id}`}
-                                            </p>
-                                            <p className="text-emerald-700 font-bold">
-                                                {(isFabric ? res.meters_reserved : res.quantity_reserved)?.toFixed?.(2) ?? '—'} {unit}
-                                            </p>
-                                        </div>
-                                        <button
-                                            onClick={() => handleDeleteReservation(res.id)}
-                                            disabled={busy === `del_${res.id}`}
-                                            className="text-red-400 hover:text-red-600 p-1 rounded disabled:opacity-40"
-                                        >
-                                            {busy === `del_${res.id}` ? <Loader2 size={11} className="animate-spin" /> : <X size={11} />}
-                                        </button>
-                                    </div>
-                                ))}
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Start Date</label>
+                            <input type="date" value={form.start_date} onChange={e => set('start_date', e.target.value)}
+                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400" />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">End Date</label>
+                            <input type="date" value={form.end_date} onChange={e => set('end_date', e.target.value)}
+                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400" />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Assignee</label>
+                            <input type="text" value={form.assignee} onChange={e => set('assignee', e.target.value)}
+                                placeholder="Name"
+                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400" />
+                        </div>
+                        {(sop.colors || []).length > 0 && (
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Color (optional)</label>
+                                <select value={form.fabric_color_id} onChange={e => set('fabric_color_id', e.target.value)}
+                                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400">
+                                    <option value="">All colors</option>
+                                    {sop.colors.map(c => (
+                                        <option key={c.fabric_color_id} value={c.fabric_color_id}>
+                                            {c.color_name || c.color_number}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+                    </div>
+
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Notes</label>
+                        <textarea value={form.notes} onChange={e => set('notes', e.target.value)}
+                            rows={2} placeholder="Optional notes…"
+                            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400 resize-none" />
+                    </div>
+                </div>
+
+                <div className="px-5 py-4 border-t border-slate-100 flex justify-end gap-3">
+                    <button onClick={onClose} disabled={busy}
+                        className="text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40">
+                        Cancel
+                    </button>
+                    <button onClick={handleSave} disabled={busy}
+                        className="flex items-center gap-2 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-5 py-2.5 rounded-xl transition-colors shadow-sm">
+                        {busy && <Loader2 size={14} className="animate-spin" />}
+                        {isEdit ? 'Save Changes' : 'Add Milestone'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// ─── RESERVE / FULFIL MODAL ─────────────────────────────────────────────────────
+
+const ReserveFulfillModal = ({ item, onClose, onDone }) => {
+    const [busy,     setBusy]     = useState(false);
+    const [err,      setErr]      = useState(null);
+
+    // ── Trim: 'exact' | substitute_variant_id string ────────────────────────
+    const [sourceId, setSourceId] = useState('exact');
+    const [trimQty,  setTrimQty]  = useState(() =>
+        String(Math.max(0, (item.quantity_required || 0) - (item.quantity_reserved || 0)))
+    );
+
+    // ── Fabric: per-roll selection map { [roll_id]: meters_string } ──────────
+    const [rollSel, setRollSel] = useState(() => {
+        if (item.type !== 'fabric') return {};
+        const needed = (item.meters_required || 0) - (item.meters_reserved || 0);
+        let left = needed;
+        const sel = {};
+        for (const roll of (item.available_rolls || [])) {
+            if (left <= 0) break;
+            const free = parseFloat(roll.free_meters ?? roll.meter ?? 0);
+            if (free <= 0) continue;
+            sel[roll.roll_id] = String(Math.min(free, left).toFixed(2));
+            left -= Math.min(free, left);
+        }
+        return sel;
+    });
+
+    const toggleRoll = (rollId, free) =>
+        setRollSel(prev =>
+            rollId in prev
+                ? (({ [rollId]: _, ...rest }) => rest)(prev)
+                : { ...prev, [rollId]: String(parseFloat(free || 0).toFixed(2)) }
+        );
+
+    const setRollMeters = (rollId, v) =>
+        setRollSel(prev => ({ ...prev, [rollId]: v }));
+
+    const totalSelected = Object.values(rollSel).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+    const needed        = (item.meters_required || 0) - (item.meters_reserved || 0);
+    const overReserving = totalSelected > item.meters_required + 0.001;
+
+    const handleConfirm = async () => {
+        setBusy(true); setErr(null);
+        try {
+            if (item.type === 'fabric') {
+                const entries = Object.entries(rollSel).filter(([, v]) => parseFloat(v) > 0);
+                if (entries.length === 0) { setErr('Select at least one roll and enter meters'); setBusy(false); return; }
+                for (const [rollId, v] of entries) {
+                    await planningApi.reserveFabric(item.req_id, {
+                        fabric_roll_id:  parseInt(rollId),
+                        meters_reserved: parseFloat(v),
+                    });
+                }
+            } else if (item.type === 'trim') {
+                const q = parseFloat(trimQty);
+                if (!q || q <= 0) { setErr('Enter a quantity greater than 0'); setBusy(false); return; }
+                const body = { quantity_reserved: q };
+                if (sourceId !== 'exact') body.trim_item_variant_id = parseInt(sourceId);
+                else if (item.exact_variant_id) body.trim_item_variant_id = parseInt(item.exact_variant_id);
+                await planningApi.reserveTrim(item.req_id, body);
+            }
+            await taApi.updateTimelineItem(item.id, { status: 'completed' });
+            onDone();
+        } catch(e) { setErr(e?.response?.data?.error || 'Failed to reserve'); }
+        finally { setBusy(false); }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                {/* Header */}
+                <div className="px-5 py-4 border-b border-slate-100 shrink-0">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        {item.type === 'fabric' ? 'Reserve Fabric Rolls' : 'Fulfil Trim Requirement'}
+                    </p>
+                    <p className="text-sm font-bold text-slate-800 mt-0.5">{item.title}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">{item.subtitle}</p>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-5 space-y-4">
+
+                    {/* ── FABRIC ────────────────────────────────────────────── */}
+                    {item.type === 'fabric' && (<>
+                        {/* Stock summary */}
+                        <div className="grid grid-cols-3 gap-2 text-center bg-slate-50 rounded-xl p-3">
+                            <div>
+                                <p className="text-[8px] font-bold text-slate-400 uppercase">Required</p>
+                                <p className="text-sm font-bold text-slate-700">{item.meters_required.toFixed(2)} m</p>
+                            </div>
+                            <div>
+                                <p className="text-[8px] font-bold text-slate-400 uppercase">Already Reserved</p>
+                                <p className="text-sm font-bold text-slate-700">{(item.meters_reserved || 0).toFixed(2)} m</p>
+                            </div>
+                            <div>
+                                <p className="text-[8px] font-bold text-slate-400 uppercase">{item.inStock ? 'Available' : 'Short'}</p>
+                                <p className={`text-sm font-bold ${item.inStock ? 'text-emerald-600' : 'text-red-500'}`}>
+                                    {item.meters_available.toFixed(2)} m
+                                </p>
                             </div>
                         </div>
-                    )}
 
-                    {/* Available stock → reserve */}
-                    {isFabric ? (
-                        /* ── FABRIC: whole-roll checkbox selection ── */
-                        <div>
-                            <div className="flex items-center justify-between mb-2">
-                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Available Rolls</p>
-                                <span className="text-[10px] text-slate-400">{filteredRolls.length} roll{filteredRolls.length !== 1 ? 's' : ''}</span>
-                            </div>
-
-                            {/* Search + min-meter filter */}
-                            <div className="flex gap-2 mb-2">
-                                <input
-                                    type="text"
-                                    value={rollSearch}
-                                    onChange={e => setRollSearch(e.target.value)}
-                                    placeholder="Search roll ID or color…"
-                                    className="flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400"
-                                />
-                                <input
-                                    type="number"
-                                    value={rollMinMeter}
-                                    onChange={e => setRollMinMeter(e.target.value)}
-                                    placeholder="Min m"
-                                    className="w-20 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400"
-                                />
-                            </div>
-
-                            {/* Running total banner */}
-                            {checkedRolls.size > 0 && (
-                                <div className={`flex items-center justify-between text-[10px] font-bold rounded-lg px-3 py-2 mb-2 border ${
-                                    quotaMet
-                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                        : 'bg-violet-50 text-violet-700 border-violet-200'
-                                }`}>
-                                    <span>{checkedRolls.size} roll{checkedRolls.size !== 1 ? 's' : ''} · {checkedMeters.toFixed(2)} m selected</span>
-                                    <span>{totalProjected.toFixed(2)} / {required.toFixed(2)} m {quotaMet ? '✓ Covered' : ''}</span>
-                                </div>
-                            )}
-
-                            {/* Roll list */}
-                            {filteredRolls.length === 0 ? (
-                                <div className="text-center py-4 text-[11px] text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-xl">
-                                    {stockItems.length === 0 ? 'No rolls available in stock' : 'No rolls match filter'}
-                                </div>
-                            ) : (
-                                <div className="space-y-1.5 max-h-52 overflow-y-auto pr-0.5">
-                                    {filteredRolls.map(roll => {
-                                        const isChecked   = checkedRolls.has(roll.id);
-                                        const wouldExceed = !isChecked && quotaMet;
+                        {/* Roll selection */}
+                        {item.available_rolls.length === 0 ? (
+                            <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                                No rolls in stock — record a fabric intake first.
+                            </p>
+                        ) : (
+                            <div>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                                    Select Rolls to Reserve
+                                </p>
+                                <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                                    {item.available_rolls.map(roll => {
+                                        const free     = parseFloat(roll.free_meters ?? roll.meter ?? 0);
+                                        const checked  = roll.roll_id in rollSel;
+                                        const metersV  = rollSel[roll.roll_id] ?? '';
                                         return (
-                                            <label
-                                                key={roll.id}
-                                                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-colors ${
-                                                    isChecked
-                                                        ? 'bg-violet-50 border-violet-300'
-                                                        : wouldExceed
-                                                            ? 'bg-slate-50 border-slate-200 opacity-40 cursor-not-allowed'
-                                                            : 'bg-white border-slate-200 hover:border-violet-200 hover:bg-violet-50/20'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={isChecked}
-                                                    disabled={wouldExceed}
-                                                    onChange={() => !wouldExceed && toggleRoll(roll.id)}
-                                                    className="accent-violet-600 shrink-0 w-4 h-4"
-                                                />
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-xs font-bold text-slate-700">{roll._label}</p>
-                                                    <p className="text-[10px] text-slate-500">Color: {roll._color}</p>
-                                                </div>
-                                                <span className={`text-sm font-bold shrink-0 ${isChecked ? 'text-violet-600' : 'text-slate-600'}`}>
-                                                    {roll._stock} m
-                                                </span>
-                                            </label>
+                                            <div key={roll.roll_id}
+                                                className={`rounded-xl border-2 transition-all ${checked ? 'border-violet-300 bg-violet-50' : 'border-slate-200 bg-slate-50'}`}>
+                                                {/* Roll header row */}
+                                                <button type="button"
+                                                    onClick={() => toggleRoll(roll.roll_id, free)}
+                                                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left">
+                                                    <span className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all ${checked ? 'border-violet-500 bg-violet-500' : 'border-slate-300 bg-white'}`}>
+                                                        {checked && <CheckCircle2 size={10} className="text-white" strokeWidth={3} />}
+                                                    </span>
+                                                    <span className="font-mono font-bold text-xs text-indigo-600">R-{roll.roll_id}</span>
+                                                    <div className="flex-1 min-w-0">
+                                                        {roll.challan_number && <span className="text-[10px] text-slate-400">{roll.challan_number}</span>}
+                                                        {roll.supplier_name  && <span className="text-[10px] text-slate-400 ml-1">· {roll.supplier_name}</span>}
+                                                    </div>
+                                                    <div className="text-right shrink-0">
+                                                        <p className="text-[10px] font-bold text-slate-500">
+                                                            {parseFloat(roll.meter ?? roll.total_meter ?? 0).toFixed(1)} m total
+                                                        </p>
+                                                        <p className="text-[10px] font-bold text-emerald-600">
+                                                            {free.toFixed(1)} m free
+                                                        </p>
+                                                    </div>
+                                                </button>
+
+                                                {/* Meters input — only when checked */}
+                                                {checked && (
+                                                    <div className="px-3 pb-2.5 flex items-center gap-2">
+                                                        <label className="text-[9px] font-bold text-slate-400 uppercase shrink-0">
+                                                            Meters to reserve
+                                                        </label>
+                                                        <input
+                                                            type="number" min="0.01" step="0.01"
+                                                            max={free}
+                                                            value={metersV}
+                                                            onChange={e => setRollMeters(roll.roll_id, e.target.value)}
+                                                            className="flex-1 text-xs border border-violet-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400 bg-white font-bold text-slate-800"
+                                                        />
+                                                        <span className="text-[10px] text-slate-400 shrink-0">m</span>
+                                                    </div>
+                                                )}
+                                            </div>
                                         );
                                     })}
                                 </div>
-                            )}
 
-                            {/* Reserve button */}
-                            {checkedRolls.size > 0 && (
-                                <button
-                                    onClick={handleReserveFabricRolls}
-                                    disabled={busy === 'res_fabric'}
-                                    className="w-full mt-3 flex items-center justify-center gap-1.5 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-4 py-2.5 rounded-lg transition-colors"
-                                >
-                                    {busy === 'res_fabric' ? <Loader2 size={12} className="animate-spin" /> : <Bookmark size={12} />}
-                                    Reserve {checkedRolls.size} Roll{checkedRolls.size !== 1 ? 's' : ''} ({checkedMeters.toFixed(2)} m)
-                                </button>
-                            )}
-                        </div>
-                    ) : stockItems.length > 0 ? (
-                        /* ── TRIM: per-variant quantity input ── */
-                        <div>
-                            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Available Stock</p>
-                            <div className="space-y-2">
-                                {stockItems.map(item => (
-                                    <div key={item.id} className={`border rounded-xl p-3 ${item._isExact ? 'border-violet-200 bg-violet-50/40' : 'border-slate-200 bg-slate-50'}`}>
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div>
-                                                <p className="text-xs font-bold text-slate-700">
-                                                    {item._label}
-                                                    {item._isExact && (
-                                                        <span className="ml-1.5 text-[9px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded border border-violet-200">Exact</span>
-                                                    )}
-                                                </p>
-                                                <p className="text-[10px] text-slate-500">{item._stock} {unit} available</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="number" min="0" max={item._stock} step="0.01"
-                                                value={inputs[item.id] || ''}
-                                                onChange={e => setInputs(p => ({ ...p, [item.id]: e.target.value }))}
-                                                placeholder={`Amount (${unit})`}
-                                                className="flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400"
-                                            />
-                                            <button
-                                                onClick={() => handleReserve(item.id)}
-                                                disabled={!inputs[item.id] || busy === `res_${item.id}`}
-                                                className="flex items-center gap-1 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors shrink-0"
-                                            >
-                                                {busy === `res_${item.id}` ? <Loader2 size={10} className="animate-spin" /> : <Bookmark size={10} />}
-                                                Reserve
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
+                                {/* Running total */}
+                                <div className={`mt-3 flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold ${
+                                    overReserving
+                                        ? 'bg-amber-50 border border-amber-200 text-amber-700'
+                                        : totalSelected >= needed - 0.001
+                                            ? 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                                            : 'bg-slate-50 border border-slate-200 text-slate-600'
+                                }`}>
+                                    <span>Selected total</span>
+                                    <span>{totalSelected.toFixed(2)} m
+                                        {overReserving
+                                            ? <span className="ml-1 font-normal text-amber-600">· exceeds requirement</span>
+                                            : needed > 0
+                                                ? <span className="ml-1 font-normal opacity-70">of {needed.toFixed(2)} m needed</span>
+                                                : null
+                                        }
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+                    </>)}
+
+                    {/* ── TRIM ──────────────────────────────────────────────── */}
+                    {item.type === 'trim' && (<>
+                        <div className="grid grid-cols-3 gap-2 text-center bg-slate-50 rounded-xl p-3">
+                            <div>
+                                <p className="text-[8px] font-bold text-slate-400 uppercase">Required</p>
+                                <p className="text-sm font-bold text-slate-700">{item.quantity_required.toLocaleString()} {item.unit}</p>
+                            </div>
+                            <div>
+                                <p className="text-[8px] font-bold text-slate-400 uppercase">Reserved</p>
+                                <p className="text-sm font-bold text-slate-700">{item.quantity_reserved.toLocaleString()} {item.unit}</p>
+                            </div>
+                            <div>
+                                <p className="text-[8px] font-bold text-slate-400 uppercase">Still Needed</p>
+                                <p className={`text-sm font-bold ${item.inStock ? 'text-emerald-600' : 'text-red-500'}`}>
+                                    {item.inStock
+                                        ? '✓ Fulfilled'
+                                        : `${(item.quantity_required - item.quantity_reserved).toLocaleString()} ${item.unit}`}
+                                </p>
                             </div>
                         </div>
-                    ) : (
-                        <div className="text-center py-4 text-[11px] text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-xl">
-                            No stock available to reserve
-                        </div>
-                    )}
 
-                    {/* Purchase order */}
-                    <div>
-                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Purchase Order</p>
-
-                        {purchaseReqs.length > 0 && (
-                            <div className="space-y-1.5 mb-3">
-                                {purchaseReqs.map(pr => (
-                                    <div key={pr.id} className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs">
-                                        <div>
-                                            <p className="font-bold text-slate-700">PO #{pr.id}</p>
-                                            <p className="text-amber-700 font-bold">
-                                                {(isFabric ? pr.meters_required : pr.quantity_required)} {unit}
+                        <div className="space-y-2">
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Reserve From</p>
+                            <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${sourceId === 'exact' ? 'border-violet-400 bg-violet-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                                <input type="radio" name="src" value="exact" checked={sourceId === 'exact'} onChange={() => setSourceId('exact')} className="sr-only" />
+                                <span className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${sourceId === 'exact' ? 'border-violet-500 bg-violet-500' : 'border-slate-300'}`}>
+                                    {sourceId === 'exact' && <span className="w-1.5 h-1.5 bg-white rounded-full" />}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-bold text-slate-700 truncate">{item.title}</p>
+                                    <p className="text-[10px] text-slate-400">Exact match</p>
+                                </div>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${(item.exact_variant_stock ?? 0) > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'}`}>
+                                    {item.exact_variant_stock != null ? `${item.exact_variant_stock.toLocaleString()} in stock` : 'Unknown'}
+                                </span>
+                            </label>
+                            {item.substitutes.length === 0 && (
+                                <p className="text-xs text-slate-400 italic px-1">No substitutes configured for this variant.</p>
+                            )}
+                            {item.substitutes.map(s => {
+                                const sid = String(s.substitute_variant_id);
+                                return (
+                                    <label key={sid} className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${sourceId === sid ? 'border-violet-400 bg-violet-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                                        <input type="radio" name="src" value={sid} checked={sourceId === sid} onChange={() => setSourceId(sid)} className="sr-only" />
+                                        <span className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${sourceId === sid ? 'border-violet-500 bg-violet-500' : 'border-slate-300'}`}>
+                                            {sourceId === sid && <span className="w-1.5 h-1.5 bg-white rounded-full" />}
+                                        </span>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-xs font-bold text-slate-700 truncate">
+                                                {s.item_name}{s.color_name ? ` – ${s.color_name}` : ''}{s.color_number ? ` (${s.color_number})` : ''}
                                             </p>
-                                            {pr.notes && <p className="text-slate-400 italic mt-0.5">{pr.notes}</p>}
+                                            <p className="text-[10px] text-slate-400">Substitute</p>
                                         </div>
-                                        <button
-                                            onClick={() => handleDeletePurchase(pr.id)}
-                                            disabled={busy === `delpurch_${pr.id}`}
-                                            className="text-red-400 hover:text-red-600 p-1 rounded disabled:opacity-40"
-                                        >
-                                            {busy === `delpurch_${pr.id}` ? <Loader2 size={11} className="animate-spin" /> : <X size={11} />}
-                                        </button>
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.in_stock > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                            {s.in_stock != null ? `${s.in_stock.toLocaleString()} in stock` : '—'}
+                                        </span>
+                                    </label>
+                                );
+                            })}
+                        </div>
+
+                        <div>
+                            <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">
+                                Quantity to Reserve ({item.unit})
+                            </label>
+                            <input
+                                type="number" min={0} step="any"
+                                value={trimQty} onChange={e => setTrimQty(e.target.value)}
+                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400"
+                            />
+                        </div>
+                    </>)}
+
+                    {err && <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{err}</p>}
+                </div>
+
+                <div className="px-5 py-3.5 border-t border-slate-100 flex justify-end gap-2 shrink-0">
+                    <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-4 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+                        Cancel
+                    </button>
+                    <button onClick={handleConfirm} disabled={busy}
+                        className="flex items-center gap-1.5 text-sm font-bold text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 px-5 py-1.5 rounded-lg transition-colors">
+                        {busy && <Loader2 size={13} className="animate-spin" />}
+                        Reserve & Mark Complete
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+// ─── PRODUCTION TRACKING MODAL ──────────────────────────────────────────────────
+
+const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
+    const DAYS = 60;
+    const [weekOf,     setWeekOf]     = useState(() => {
+        const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 7); return d;
+    });
+    const [selId,      setSelId]      = useState(null);
+    const [actionMode, setActionMode] = useState(null);  // null | 'po'
+    const [addModal,   setAddModal]   = useState(false);
+    const [editItem,   setEditItem]   = useState(null);
+    const [busy,       setBusy]       = useState(false);
+    const [err,        setErr]        = useState(null);
+    const [poForm,     setPoForm]     = useState({
+        turnaround: 7, order_date: new Date().toISOString().slice(0, 10),
+        quantity: '', unit: '', notes: '', supplier_id: '',
+    });
+    const [localReqs,    setLocalReqs]    = useState(sopReqs);
+    const [loadingLocal, setLoadingLocal] = useState(!sopReqs);
+    const [search,       setSearch]       = useState('');
+    const [reserveItem,  setReserveItem]  = useState(null);
+    const [suppliers,    setSuppliers]    = useState([]);
+
+    const refetchLocal = useCallback(() => {
+        planningApi.getRequirements(sop.id)
+            .then(r => setLocalReqs(r.data?.data ?? r.data))
+            .catch(() => {});
+    }, [sop.id]);
+
+    useEffect(() => {
+        setLoadingLocal(true);
+        planningApi.getRequirements(sop.id)
+            .then(r => setLocalReqs(r.data?.data ?? r.data))
+            .catch(() => {})
+            .finally(() => setLoadingLocal(false));
+    }, [sop.id]);
+
+    useEffect(() => {
+        api.get('/shared/factory_users')
+            .then(r => {
+                const users = r.data?.data ?? r.data ?? [];
+                setSuppliers(users.filter(u => u.role === 'supplier'));
+            })
+            .catch(() => {});
+    }, []);
+    console.log('Local reqs:', localReqs);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+
+    const days = Array.from({ length: DAYS }, (_, i) => {
+        const d = new Date(weekOf); d.setDate(d.getDate() + i); return d;
+    });
+
+    const fabReqs  = localReqs?.fabric_requirements || [];
+    const trimReqs = localReqs?.trim_requirements   || [];
+    const taItems  = sop.timeline || [];
+
+    const reqTaIds = new Set([
+        ...fabReqs.filter(r => r.ta_id).map(r => r.ta_id),
+        ...trimReqs.filter(r => r.ta_id).map(r => r.ta_id),
+    ]);
+
+    const allItems = [
+        ...fabReqs.filter(r => r.ta_id).map(r => ({
+            id:                    r.ta_id,
+            req_id:                r.id,
+            title:                 `${r.fabric_type_name}${r.color_name ? ' – ' + r.color_name : ''}`,
+            subtitle:              `${(r.meters_required || 0).toFixed(1)} m`,
+            type:                  'fabric',
+            status:                r.ta_status    || 'pending',
+            priority:              r.ta_priority  || 'medium',
+            start_date:            r.ta_start_date || null,
+            end_date:              r.ta_end_date   || null,
+            notes:                 r.ta_notes || null,
+            isReq:                 true,
+            unit:                  'm',
+            meters_required:       r.meters_required || 0,
+            meters_reserved:       r.meters_reserved || 0,
+            meters_available:      r.stock_suggestion?.total_meters_available || 0,
+            available_rolls:       r.stock_suggestion?.available_rolls || [],
+            inStock:               (r.stock_suggestion?.total_meters_available || 0) >= (r.meters_required || 0),
+            calculation_breakdown: r.calculation_breakdown || null,
+        })),
+        ...trimReqs.filter(r => r.ta_id).map(r => ({
+            id:                    r.ta_id,
+            req_id:                r.id,
+            title:                 `${r.trim_item_name}${r.color_name ? ' – ' + r.color_name : ''}`,
+            subtitle:              `${(r.quantity_required || 0).toLocaleString()} ${r.unit_of_measure || 'pcs'}`,
+            type:                  'trim',
+            status:                r.ta_status    || 'pending',
+            priority:              r.ta_priority  || 'medium',
+            start_date:            r.ta_start_date || null,
+            end_date:              r.ta_end_date   || null,
+            notes:                 r.ta_notes || null,
+            isReq:                 true,
+            unit:                  r.unit_of_measure || 'pcs',
+            inStock:               r.is_fulfilled,
+            exact_variant_id:      r.stock_suggestion?.exact_variant?.id || null,
+            exact_variant_stock:   r.stock_suggestion?.exact_variant?.in_stock ?? null,
+            substitutes:           r.stock_suggestion?.substitutes || [],
+            quantity_required:     r.quantity_required || 0,
+            quantity_reserved:     r.quantity_reserved || 0,
+            calculation_breakdown: r.calculation_breakdown || null,
+        })),
+        ...taItems
+            .filter(it => !reqTaIds.has(it.id) && it.production_plan_item_id == null)
+            .map(it => ({
+                id:         it.id,
+                title:      it.title,
+                subtitle:   it.category,
+                type:       'manual',
+                status:     it.status,
+                start_date: it.start_date,
+                end_date:   it.end_date,
+                notes:      it.notes,
+                isReq:      false,
+            })),
+    ];
+
+    const q             = search.toLowerCase().trim();
+    const filteredItems = q
+        ? allItems.filter(it =>
+            it.title.toLowerCase().includes(q) ||
+            (it.subtitle || '').toLowerCase().includes(q)
+          )
+        : allItems;
+
+    const today2 = new Date(); today2.setHours(0, 0, 0, 0);
+    const isOverdue = it => it.end_date && new Date(it.end_date) < today2 && it.status !== 'completed';
+    const STATUS_GROUPS = [
+        { key: 'overdue',     label: 'Overdue',     dot: 'bg-red-500',     filter: it =>  isOverdue(it) },
+        { key: 'delayed',     label: 'Delayed',     dot: 'bg-red-400',     filter: it => !isOverdue(it) && it.status === 'delayed'      },
+        { key: 'in-progress', label: 'In Progress', dot: 'bg-blue-400',    filter: it => !isOverdue(it) && it.status === 'in-progress'  },
+        { key: 'pending',     label: 'Pending',     dot: 'bg-amber-400',   filter: it => !isOverdue(it) && it.status === 'pending'      },
+        { key: 'completed',   label: 'Complete',    dot: 'bg-emerald-500', filter: it => !isOverdue(it) && it.status === 'completed'    },
+    ];
+    const groups = STATUS_GROUPS
+        .map(g => ({ ...g, items: filteredItems.filter(g.filter) }))
+        .filter(g => g.items.length > 0);
+
+    const arrivalDate = (() => {
+        if (!poForm.order_date) return '';
+        const d = new Date(poForm.order_date);
+        d.setDate(d.getDate() + parseInt(poForm.turnaround || 0));
+        return d.toISOString().slice(0, 10);
+    })();
+
+    const setPO = (k, v) => setPoForm(p => ({ ...p, [k]: v }));
+
+    const prevWindow = () => setWeekOf(p => { const n = new Date(p); n.setDate(n.getDate() - 14); return n; });
+    const nextWindow = () => setWeekOf(p => { const n = new Date(p); n.setDate(n.getDate() + 14); return n; });
+    const goToday    = () => { const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - 7); setWeekOf(d); };
+
+    const tlStart = days[0];
+    const tlEnd   = (() => { const d = new Date(days[DAYS - 1]); d.setDate(d.getDate() + 1); return d; })();
+    const tlSpan  = tlEnd - tlStart;
+
+    const barStyle = (item) => {
+        if (!item.start_date && !item.end_date) return null;
+        const s    = new Date(item.start_date || item.end_date);
+        const eRaw = new Date(item.end_date   || item.start_date);
+        const eInc = new Date(eRaw); eInc.setDate(eInc.getDate() + 1);
+        const left  = Math.max(0,   (s    - tlStart) / tlSpan) * 100;
+        const right = Math.min(100, (eInc - tlStart) / tlSpan) * 100;
+        if (right <= 0 || left >= 100) return null;
+        return { left: `${left}%`, width: `${Math.max(0.5, right - left)}%` };
+    };
+
+    const todayPct = ((today - tlStart) / tlSpan) * 100;
+
+    const ST = {
+        pending:       { bg: 'bg-amber-400',   label: 'Pending'     },
+        'in-progress': { bg: 'bg-blue-400',    label: 'In Progress' },
+        completed:     { bg: 'bg-emerald-500', label: 'Complete'    },
+        delayed:       { bg: 'bg-red-400',     label: 'Delayed'     },
+    };
+
+    const counts = { pending: 0, 'in-progress': 0, completed: 0, delayed: 0 };
+    allItems.forEach(it => { if (counts[it.status] !== undefined) counts[it.status]++; });
+
+    const handleMarkAvailable = async (item) => {
+        setBusy(true); setErr(null);
+        try {
+            await taApi.updateTimelineItem(item.id, { status: 'completed' });
+            refetchLocal(); onRefresh(); setSelId(null);
+        } catch(e) { setErr(e?.response?.data?.error || 'Failed'); }
+        finally { setBusy(false); }
+    };
+
+    const handleLogPO = async (item) => {
+        if (!poForm.order_date) { setErr('Order date is required'); return; }
+        if (!arrivalDate) { setErr('Turnaround days must be set to calculate expected arrival date'); return; }
+        setBusy(true); setErr(null);
+        try {
+            await taApi.updateTimelineItem(item.id, {
+                status: 'in-progress', start_date: poForm.order_date || null,
+                end_date: arrivalDate || null, notes: poForm.notes || null,
+            });
+            await taApi.createProcurementEvent({
+                item_name:              item.title,
+                type:                   item.type === 'fabric' ? 'fabric' : item.type === 'trim' ? 'trim' : 'other',
+                order_date:             poForm.order_date || null,
+                expected_date:          arrivalDate,
+                status:                 'pending',
+                supplier_id:            poForm.supplier_id ? parseInt(poForm.supplier_id) : null,
+                priority:               item.priority || 'medium',
+                timeline_item_id:       item.id,
+                purchase_order_id:      null,
+                sales_order_product_id: sop.id,
+                quantity:               poForm.quantity ? parseFloat(poForm.quantity) : null,
+                unit:                   poForm.unit || null,
+                notes:                  poForm.notes || null,
+            });
+            refetchLocal(); onRefresh(); setActionMode(null);
+        } catch(e) { setErr(e?.response?.data?.error || 'Failed to log PO'); }
+        finally { setBusy(false); }
+    };
+
+    const generateFabricPDF = () => {
+        const completed = allItems.filter(it => it.type === 'fabric' && it.status === 'completed');
+        const doc = new jsPDF();
+        doc.setFontSize(14);
+        doc.text(`Fabric T&A — ${sop.product_name}`, 14, 18);
+        doc.setFontSize(9);
+        doc.text(`Generated: ${new Date().toLocaleDateString('en', { dateStyle: 'medium' })}`, 14, 25);
+        autoTable(doc, {
+            startY: 30,
+            head: [['Item / Color', 'Required (m)', 'Reserved (m)', 'Available (m)', 'Rolls', 'Formula']],
+            body: completed.map(it => [
+                it.title,
+                fmt(it.meters_required),
+                fmt(it.meters_reserved),
+                fmt(it.meters_available),
+                (it.available_rolls || []).length,
+                it.calculation_breakdown
+                    ? `${it.calculation_breakdown.base_quantity_per_set ?? ''}m × ${it.calculation_breakdown.total_sets ?? ''} sets + ${it.calculation_breakdown.wastage_percentage ?? 0}% waste`
+                    : '—',
+            ]),
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [99, 102, 241] },
+        });
+        doc.save(`fabric-ta-${sop.product_name.replace(/\s+/g, '-')}.pdf`);
+    };
+
+    const generateTrimPDF = () => {
+        const completed = allItems.filter(it => it.type === 'trim' && it.status === 'completed');
+        const doc = new jsPDF();
+        doc.setFontSize(14);
+        doc.text(`Trim T&A — ${sop.product_name}`, 14, 18);
+        doc.setFontSize(9);
+        doc.text(`Generated: ${new Date().toLocaleDateString('en', { dateStyle: 'medium' })}`, 14, 25);
+        autoTable(doc, {
+            startY: 30,
+            head: [['Item / Color', 'Required', 'Reserved', 'Variant ID', 'Substitutes', 'Formula']],
+            body: completed.map(it => [
+                it.title,
+                `${fmt(it.quantity_required)} ${it.unit}`,
+                `${fmt(it.quantity_reserved)} ${it.unit}`,
+                it.exact_variant_id ?? '—',
+                (it.substitutes || []).map(s => `${s.item_name}${s.color_name ? ' – ' + s.color_name : ''} (${s.in_stock ?? 0})`).join('; ') || '—',
+                it.calculation_breakdown
+                    ? `${it.calculation_breakdown.base_quantity_per_set ?? ''}× ${it.calculation_breakdown.total_sets ?? ''} sets + ${it.calculation_breakdown.wastage_percentage ?? 0}% waste`
+                    : '—',
+            ]),
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [245, 158, 11] },
+        });
+        doc.save(`trim-ta-${sop.product_name.replace(/\s+/g, '-')}.pdf`);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-start justify-center pt-6 pb-6 px-4" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 shrink-0">
+                    <div className="min-w-0">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                            Production Tracking · {sop.product_name}
+                        </p>
+                        <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                            {[
+                                { k: 'pending',     cls: 'bg-amber-400',   lbl: 'pending'     },
+                                { k: 'in-progress', cls: 'bg-blue-400',    lbl: 'in progress' },
+                                { k: 'completed',   cls: 'bg-emerald-500', lbl: 'complete'    },
+                                { k: 'delayed',     cls: 'bg-red-400',     lbl: 'delayed'     },
+                            ].map(({ k, cls, lbl }) => counts[k] > 0 && (
+                                <span key={k} className="flex items-center gap-1 text-xs text-slate-600">
+                                    <span className={`w-1.5 h-1.5 rounded-full ${cls}`} /> {counts[k]} {lbl}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 ml-3">
+                        <button
+                            onClick={generateFabricPDF}
+                            className="text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg transition-colors"
+                            title="Export completed fabric T&A items as PDF"
+                        >
+                            Fabric PDF
+                        </button>
+                        <button
+                            onClick={generateTrimPDF}
+                            className="text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1.5 rounded-lg transition-colors"
+                            title="Export completed trim T&A items as PDF"
+                        >
+                            Trim PDF
+                        </button>
+                        <button
+                            onClick={() => { setEditItem(null); setAddModal(true); }}
+                            className="flex items-center gap-1.5 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 px-3 py-1.5 rounded-lg transition-colors"
+                        >
+                            <Plus size={13} /> Add Milestone
+                        </button>
+                        <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
+                            <X size={16} />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Timeline body */}
+                <div className="flex-1 overflow-y-auto">
+                    {/* Navigation bar */}
+                    <div className="flex items-center gap-2 px-5 py-2.5 border-b border-slate-100 sticky top-0 bg-white/95 backdrop-blur-sm z-10">
+                        <button onClick={prevWindow} className="p-1 rounded hover:bg-slate-100 text-slate-500"><ChevronLeft size={14} /></button>
+                        <button onClick={nextWindow} className="p-1 rounded hover:bg-slate-100 text-slate-500"><ChevronRight size={14} /></button>
+                        <button onClick={goToday} className="text-[10px] font-bold text-violet-600 px-2 py-0.5 rounded bg-violet-50 hover:bg-violet-100 transition-colors">Today</button>
+                        <span className="text-xs text-slate-500 mr-auto">
+                            {days[0].toLocaleDateString('en', { month: 'short', day: 'numeric' })}
+                            {' – '}
+                            {days[DAYS - 1].toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </span>
+                        <div className="relative">
+                            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                            <input
+                                type="search"
+                                placeholder="Search items…"
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
+                                className="text-xs pl-6 pr-3 py-1 border border-slate-200 rounded-lg focus:outline-none focus:border-violet-400 w-40"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="px-5 pt-2 pb-4">
+                        {/* Week-marker header row */}
+                        <div className="flex mb-1 select-none">
+                            <div className="w-44 shrink-0" />
+                            <div className="flex-1 relative h-7">
+                                {days
+                                    .filter((d, i) => i === 0 || d.getDay() === 1)
+                                    .map(d => {
+                                        const pct = ((d - tlStart) / tlSpan) * 100;
+                                        const showMonth = d.getDate() <= 7 || d === days[0];
+                                        return (
+                                            <div key={d.toDateString()}
+                                                className="absolute top-0 flex flex-col items-start"
+                                                style={{ left: `${pct}%` }}>
+                                                {showMonth && (
+                                                    <span className="text-[7px] font-bold text-violet-500 uppercase leading-none mb-0.5 whitespace-nowrap">
+                                                        {d.toLocaleDateString('en', { month: 'short' })}
+                                                    </span>
+                                                )}
+                                                <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap">
+                                                    {d.toLocaleDateString('en', { day: 'numeric' })}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                {todayPct >= 0 && todayPct <= 100 && (
+                                    <div className="absolute top-0 bottom-0 flex flex-col items-center pointer-events-none"
+                                        style={{ left: `${todayPct}%` }}>
+                                        <span className="text-[7px] font-bold text-violet-500 whitespace-nowrap" style={{ transform: 'translateX(-50%)' }}>today</span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="w-20 shrink-0" />
+                        </div>
+
+                        {loadingLocal ? (
+                            <div className="flex items-center justify-center gap-2 py-12 text-slate-400">
+                                <Loader2 size={16} className="animate-spin" />
+                                <span className="text-sm">Loading requirements…</span>
+                            </div>
+                        ) : filteredItems.length === 0 ? (
+                            <p className="text-center text-sm text-slate-400 py-10 italic">
+                                {search ? 'No items match your search.' : 'No requirements linked yet. Calculate requirements first.'}
+                            </p>
+                        ) : (
+                            <div className="space-y-5">
+                                {groups.map(group => (
+                                    <div key={group.key}>
+                                        {/* Group header */}
+                                        <div className="flex items-center gap-2 mb-1.5 px-1">
+                                            <span className={`w-2 h-2 rounded-full ${group.dot}`} />
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{group.label}</span>
+                                            <span className="text-[9px] font-bold text-slate-300">{group.items.length}</span>
+                                        </div>
+                                        <div className="space-y-0.5">
+                                            {group.items.map(item => {
+                                                const st      = ST[item.status] || ST.pending;
+                                                const bStyle  = barStyle(item);
+                                                const isSel   = selId === item.id;
+                                                const overdue = isOverdue(item);
+                                                const hasPO   = !!(item.start_date);
+
+
+                                                return (
+                                                    <div key={item.id}>
+                                                        <div
+                                                            onClick={() => {
+                                                                setSelId(isSel ? null : item.id);
+                                                                setActionMode(null);
+                                                                setErr(null);
+                                                            }}
+                                                            className={`flex items-center cursor-pointer rounded-lg transition-all ${isSel ? 'bg-violet-50 ring-1 ring-violet-200' : 'hover:bg-slate-50'}`}
+                                                        >
+                                                            {/* Label */}
+                                                            <div className="w-44 shrink-0 flex items-center gap-2 px-2 py-2">
+                                                                <span className={`w-2 h-2 rounded-full shrink-0 ${overdue ? 'bg-red-500' : st.bg}`} />
+                                                                <div className="min-w-0">
+                                                                    <p className="text-[10px] font-bold text-slate-700 truncate">{item.title}</p>
+                                                                    <p className="text-[8px] text-slate-400 truncate">{item.subtitle}</p>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Bar track */}
+                                                            <div className="flex-1 relative h-7">
+                                                                {days.map((d, i) => (d.getDay() === 0 || d.getDay() === 6) && (
+                                                                    <div key={i}
+                                                                        className="absolute top-0 bottom-0 bg-slate-50/80 pointer-events-none"
+                                                                        style={{ left: `${(i / DAYS) * 100}%`, width: `${(1 / DAYS) * 100}%` }}
+                                                                    />
+                                                                ))}
+                                                                {todayPct >= 0 && todayPct <= 100 && (
+                                                                    <div className="absolute top-0 bottom-0 w-px bg-violet-400/60 z-10 pointer-events-none"
+                                                                        style={{ left: `${todayPct}%` }} />
+                                                                )}
+                                                                {bStyle ? (
+                                                                    <div
+                                                                        className={`absolute top-1.5 bottom-1.5 rounded-full ${overdue ? 'bg-red-500' : st.bg} opacity-80 cursor-pointer hover:opacity-100 transition-opacity`}
+                                                                        style={bStyle}
+                                                                        title="Click to edit purchase order"
+                                                                        onClick={e => {
+                                                                            e.stopPropagation();
+                                                                            setSelId(item.id);
+                                                                            const ta = item.start_date && item.end_date
+                                                                                ? Math.round((new Date(item.end_date) - new Date(item.start_date)) / 86400000)
+                                                                                : 7;
+                                                                            setPoForm({
+                                                                                turnaround: ta,
+                                                                                order_date: (item.start_date || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
+                                                                                quantity: item.type === 'fabric' ? String(item.meters_required || '') : String(item.quantity_required || ''),
+                                                                                unit: item.unit || '',
+                                                                                notes: item.notes || '',
+                                                                            });
+                                                                            setActionMode('po');
+                                                                            setErr(null);
+                                                                        }}
+                                                                    />
+                                                                ) : (
+                                                                    <div className="absolute inset-0 flex items-center px-2 pointer-events-none">
+                                                                        <div className="flex-1 border-t border-dashed border-slate-200" />
+                                                                    </div>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Status chip */}
+                                                            <div className="w-20 shrink-0 flex justify-end pr-2">
+                                                                <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full text-white ${overdue ? 'bg-red-500' : st.bg}`}>
+                                                                    {overdue ? 'Overdue' : st.label}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Inline action panel */}
+                                                        {isSel && (
+                                                            <div className="mx-2 mb-1.5 bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
+                                                                {/* Item info + calc breakdown */}
+                                                                <div className="flex items-start justify-between gap-2">
+                                                                    <div className="min-w-0 flex-1 space-y-2">
+                                                                        <div>
+                                                                            <p className="text-xs font-bold text-slate-800">{item.title}</p>
+                                                                            {item.start_date && (
+                                                                                <p className="text-[10px] text-slate-500 mt-0.5">
+                                                                                    Order: {fmtD(item.start_date)}{item.end_date ? ` → Arrival: ${fmtD(item.end_date)}` : ''}
+                                                                                </p>
+                                                                            )}
+                                                                            {item.notes && <p className="text-[10px] text-slate-400 italic mt-0.5">{item.notes}</p>}
+                                                                        </div>
+                                                                        {/* Calculation breakdown */}
+                                                                        {item.type === 'fabric' && (
+                                                                            <div className="grid grid-cols-3 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
+                                                                                <div>
+                                                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">Required</p>
+                                                                                    <p className="text-xs font-bold text-slate-700">{item.meters_required.toFixed(1)} m</p>
+                                                                                </div>
+                                                                                <div>
+                                                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">In Stock</p>
+                                                                                    <p className={`text-xs font-bold ${item.inStock ? 'text-emerald-600' : 'text-slate-700'}`}>{item.meters_available.toFixed(1)} m</p>
+                                                                                </div>
+                                                                                <div>
+                                                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">{item.inStock ? 'Surplus' : 'Shortfall'}</p>
+                                                                                    <p className={`text-xs font-bold ${item.inStock ? 'text-emerald-600' : 'text-red-500'}`}>
+                                                                                        {item.inStock
+                                                                                            ? `+${(item.meters_available - item.meters_required).toFixed(1)} m`
+                                                                                            : `−${(item.meters_required - item.meters_available).toFixed(1)} m`}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                        {item.type === 'trim' && (
+                                                                            <div className="grid grid-cols-3 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
+                                                                                <div>
+                                                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">Required</p>
+                                                                                    <p className="text-xs font-bold text-slate-700">{item.quantity_required.toLocaleString()} {item.unit}</p>
+                                                                                </div>
+                                                                                <div>
+                                                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">Reserved</p>
+                                                                                    <p className={`text-xs font-bold ${item.inStock ? 'text-emerald-600' : 'text-slate-700'}`}>{item.quantity_reserved.toLocaleString()} {item.unit}</p>
+                                                                                </div>
+                                                                                <div>
+                                                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">{item.inStock ? 'Fulfilled' : 'Still Needed'}</p>
+                                                                                    <p className={`text-xs font-bold ${item.inStock ? 'text-emerald-600' : 'text-red-500'}`}>
+                                                                                        {item.inStock
+                                                                                            ? '✓ All reserved'
+                                                                                            : `${(item.quantity_required - item.quantity_reserved).toLocaleString()} ${item.unit}`}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                        {/* Substitutes for trim not in stock */}
+                                                                        {item.type === 'trim' && !item.inStock && item.substitutes?.length > 0 && (
+                                                                            <div className="bg-amber-50 border border-amber-100 rounded-lg p-2 space-y-1.5">
+                                                                                <p className="text-[9px] font-bold text-amber-700 uppercase tracking-wider">Substitutes Available</p>
+                                                                                {item.substitutes.map(s => (
+                                                                                    <div key={s.substitute_variant_id} className="flex items-center justify-between text-[9px]">
+                                                                                        <span className="font-bold text-slate-700">
+                                                                                            {s.item_name}{s.color_name ? ` – ${s.color_name}` : ''}{s.color_number ? ` (${s.color_number})` : ''}
+                                                                                        </span>
+                                                                                        <span className={s.in_stock > 0 ? 'text-emerald-600 font-bold' : 'text-slate-400'}>
+                                                                                            {s.in_stock != null ? `${s.in_stock.toLocaleString()} in stock` : '—'}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    {!item.isReq && (
+                                                                        <div className="flex items-center gap-1 shrink-0">
+                                                                            <button onClick={e => { e.stopPropagation(); setEditItem(item); setAddModal(true); }}
+                                                                                className="p-1 text-slate-400 hover:text-violet-600 transition-colors">
+                                                                                <Pencil size={11} />
+                                                                            </button>
+                                                                            <button onClick={async e => {
+                                                                                    e.stopPropagation();
+                                                                                    if (!window.confirm('Delete this milestone?')) return;
+                                                                                    try { await taApi.deleteTimelineItem(item.id); refetchLocal(); onRefresh(); setSelId(null); } catch {}
+                                                                                }}
+                                                                                className="p-1 text-slate-400 hover:text-red-500 transition-colors">
+                                                                                <X size={11} />
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
+                                                                {err && (
+                                                                    <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{err}</p>
+                                                                )}
+
+                                                                {/* Action buttons */}
+                                                                {actionMode !== 'po' && (
+                                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                                        {item.status !== 'completed' ? (
+                                                                            <>
+                                                                                <button
+                                                                                    onClick={() => item.isReq && item.req_id ? setReserveItem(item) : handleMarkAvailable(item)}
+                                                                                    disabled={busy}
+                                                                                    className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors">
+                                                                                    <CheckCircle2 size={13} /> Mark Available
+                                                                                </button>
+                                                                                <button
+                                                                                    onClick={() => {
+                                                                                        const ta = hasPO && item.end_date
+                                                                                            ? Math.round((new Date(item.end_date) - new Date(item.start_date)) / 86400000)
+                                                                                            : 7;
+                                                                                        setPoForm({
+                                                                                            turnaround: ta,
+                                                                                            order_date: (item.start_date || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
+                                                                                            quantity: item.type === 'fabric' ? String(item.meters_required || '') : String(item.quantity_required || ''),
+                                                                                            unit: item.unit || '',
+                                                                                            notes: item.notes || '',
+                                                                                        });
+                                                                                        setActionMode('po');
+                                                                                        setErr(null);
+                                                                                    }}
+                                                                                    className="flex items-center gap-1.5 text-xs font-bold text-white bg-blue-500 hover:bg-blue-600 px-3 py-1.5 rounded-lg transition-colors">
+                                                                                    <ShoppingBag size={13} /> {hasPO ? 'Edit Purchase Order' : 'Log Purchase Order'}
+                                                                                </button>
+                                                                                {item.status !== 'delayed' && (
+                                                                                    <button onClick={async () => {
+                                                                                            try { await taApi.updateTimelineItem(item.id, { status: 'delayed' }); refetchLocal(); onRefresh(); }
+                                                                                            catch(e) { setErr(e?.response?.data?.error || 'Failed'); }
+                                                                                        }}
+                                                                                        className="text-xs font-bold text-slate-500 hover:text-red-600 bg-slate-100 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors">
+                                                                                        Mark Delayed
+                                                                                    </button>
+                                                                                )}
+                                                                            </>
+                                                                        ) : (
+                                                                            <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-600">
+                                                                                <CheckCircle2 size={13} /> Available · Completed
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+
+                                                                {/* Purchase Order form */}
+                                                                {actionMode === 'po' && (
+                                                                    <div className="space-y-3 pt-2 border-t border-slate-200">
+                                                                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                                                                            {hasPO ? 'Edit Purchase Order' : 'New Purchase Order'}
+                                                                        </p>
+                                                                        <div className="grid grid-cols-2 gap-3">
+                                                                            <div>
+                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Order Date</label>
+                                                                                <input type="date" value={poForm.order_date} onChange={e => setPO('order_date', e.target.value)}
+                                                                                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400" />
+                                                                            </div>
+                                                                            <div>
+                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Turnaround (days)</label>
+                                                                                <input type="number" min={1} value={poForm.turnaround} onChange={e => setPO('turnaround', e.target.value)}
+                                                                                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400" />
+                                                                            </div>
+                                                                            <div>
+                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Expected Arrival</label>
+                                                                                <div className="text-xs text-slate-700 font-bold px-2.5 py-1.5 bg-slate-50 border border-slate-100 rounded-lg">
+                                                                                    {arrivalDate ? fmtD(arrivalDate) : '—'}
+                                                                                </div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Quantity</label>
+                                                                                <input type="number" min={0} step="any" placeholder="0" value={poForm.quantity} onChange={e => setPO('quantity', e.target.value)}
+                                                                                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400" />
+                                                                            </div>
+                                                                            <div className="col-span-2">
+                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Unit</label>
+                                                                                <input type="text" placeholder="m / pcs / kg…" value={poForm.unit} onChange={e => setPO('unit', e.target.value)}
+                                                                                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400" />
+                                                                            </div>
+                                                                            <div className="col-span-2">
+                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Supplier</label>
+                                                                                <select value={poForm.supplier_id} onChange={e => setPO('supplier_id', e.target.value)}
+                                                                                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400 bg-white">
+                                                                                    <option value="">— No supplier —</option>
+                                                                                    {suppliers.map(s => (
+                                                                                        <option key={s.id} value={s.id}>{s.name || s.username || `User #${s.id}`}</option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            </div>
+                                                                            <div className="col-span-2">
+                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Notes</label>
+                                                                                <textarea rows={2} placeholder="Optional notes…" value={poForm.notes} onChange={e => setPO('notes', e.target.value)}
+                                                                                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400 resize-none" />
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="flex justify-end gap-2">
+                                                                            <button onClick={() => { setActionMode(null); setErr(null); }}
+                                                                                className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+                                                                                Cancel
+                                                                            </button>
+                                                                            <button onClick={() => handleLogPO(item)} disabled={busy}
+                                                                                className="flex items-center gap-1.5 text-xs font-bold text-white bg-blue-500 hover:bg-blue-600 disabled:opacity-40 px-4 py-1.5 rounded-lg transition-colors">
+                                                                                {busy && <Loader2 size={12} className="animate-spin" />}
+                                                                                {hasPO ? 'Update Purchase Order' : 'Save Purchase Order'}
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
                                     </div>
                                 ))}
                             </div>
                         )}
-
-                        <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-3 space-y-2">
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="number" min="0" step="0.01"
-                                    value={purchaseAmt}
-                                    onChange={e => setPurchaseAmt(e.target.value)}
-                                    placeholder={`Amount needed (${unit})`}
-                                    className="flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-amber-400"
-                                />
-                            </div>
-                            <input
-                                type="text"
-                                value={purchaseNotes}
-                                onChange={e => setPurchaseNotes(e.target.value)}
-                                placeholder="Notes (optional)"
-                                className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-amber-400"
-                            />
-                            <button
-                                onClick={handlePurchase}
-                                disabled={!purchaseAmt || busy === 'purchase'}
-                                className="w-full flex items-center justify-center gap-1.5 text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 disabled:opacity-40 px-4 py-2 rounded-lg transition-colors"
-                            >
-                                {busy === 'purchase' ? <Loader2 size={12} className="animate-spin" /> : <ShoppingCart size={12} />}
-                                Raise Purchase Order
-                            </button>
-                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    );
-};
 
-// ─── RESERVATION SUMMARY MODAL ───────────────────────────────────────────────
+            {reserveItem && (
+                <ReserveFulfillModal
+                    item={reserveItem}
+                    onClose={() => setReserveItem(null)}
+                    onDone={() => { setReserveItem(null); setSelId(null); refetchLocal(); onRefresh(); }}
+                />
+            )}
 
-const ReservationSummaryModal = ({ sopReqs, sop, orderInfo, onClose }) => {
-    // ── Fabric: one row per reservation ──────────────────────────────────────
-    const fabricRows = (sopReqs.fabric_requirements || []).flatMap(fr =>
-        (fr.reservations || []).map(res => ({
-            fabricType:  fr.fabric_type_name  || '—',
-            colorName:   fr.color_name        || '—',
-            colorNum:    fr.color_number      || '—',
-            rollId:      res.fabric_roll_id,
-            rollColor:   res.color_name       || res.roll_color || '—',
-            rollMeter:   res.roll_meter != null ? parseFloat(res.roll_meter).toFixed(2) : '—',
-            mRequired:   parseFloat(fr.meters_required  || 0).toFixed(2),
-            mReserved:   res.meters_reserved != null ? parseFloat(res.meters_reserved).toFixed(2) : '—',
-            status:      fr.status || '—',
-        }))
-    );
-
-    // ── Trim: one row per reservation ────────────────────────────────────────
-    const trimRows = (sopReqs.trim_requirements || []).flatMap(tr =>
-        (tr.reservations || []).map(res => ({
-            item:        tr.trim_item_name    || '—',
-            itemCode:    tr.item_code         || '—',
-            colorName:   tr.color_name        || 'All',
-            colorNum:    tr.color_number      || '—',
-            variantId:   res.trim_item_variant_id,
-            variantName: res.variant_name     || res.color_name || '—',
-            variantColor:res.color_number     || '—',
-            qRequired:   parseFloat(tr.quantity_required || 0).toFixed(2),
-            qReserved:   res.quantity_reserved != null ? parseFloat(res.quantity_reserved).toFixed(2) : '—',
-            unit:        tr.unit_of_measure   || 'pcs',
-            status:      tr.status            || '—',
-        }))
-    );
-
-    const totalCount = fabricRows.length + trimRows.length;
-
-    // ── CSV: two sections ─────────────────────────────────────────────────────
-    const handleDownloadCSV = () => {
-        const lines = [];
-        if (fabricRows.length > 0) {
-            lines.push(['--- FABRIC RESERVATIONS ---']);
-            lines.push(['Fabric Type', 'Color', 'Color #', 'Roll #', 'Roll Color', 'Roll Meter (m)', 'Required (m)', 'Reserved (m)', 'Status']);
-            fabricRows.forEach(r => lines.push([r.fabricType, r.colorName, r.colorNum, `Roll #${r.rollId}`, r.rollColor, r.rollMeter, r.mRequired, r.mReserved, r.status]));
-            lines.push([]);
-        }
-        if (trimRows.length > 0) {
-            lines.push(['--- TRIM RESERVATIONS ---']);
-            lines.push(['Item', 'Item Code', 'Color', 'Color #', 'Variant #', 'Variant Name', 'Variant Color #', 'Required', 'Reserved', 'Unit', 'Status']);
-            trimRows.forEach(r => lines.push([r.item, r.itemCode, r.colorName, r.colorNum, `#${r.variantId}`, r.variantName, r.variantColor, r.qRequired, r.qReserved, r.unit, r.status]));
-        }
-        const csv = lines.map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement('a');
-        a.href = url; a.download = 'reservations.csv'; a.click();
-        URL.revokeObjectURL(url);
-    };
-
-    // ── PDF: header + two tables ──────────────────────────────────────────────
-    const handleDownloadPDF = () => {
-        const doc = new jsPDF({ orientation: 'landscape' });
-        let y = 14;
-
-        // Sales order header
-        if (orderInfo) {
-            doc.setFontSize(13); doc.setFont(undefined, 'bold');
-            doc.text(`Sales Order: #${orderInfo.order_number || '—'}`, 14, y); y += 7;
-            doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(80);
-            doc.text([
-                `Customer: ${orderInfo.customer_name || orderInfo.buyer_name || '—'}`,
-                `Status: ${orderInfo.status || '—'}`,
-                `Delivery: ${orderInfo.delivery_date ? new Date(orderInfo.delivery_date).toLocaleDateString() : '—'}`,
-                orderInfo.buyer_po_number ? `PO: ${orderInfo.buyer_po_number}` : '',
-            ].filter(Boolean).join('   |   '), 14, y); y += 6;
-        }
-
-        // Product / SOP header
-        if (sop) {
-            doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(0);
-            doc.text(`Product: ${sop.product_name || '—'}`, 14, y); y += 6;
-            doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(80);
-            const sopMeta = [
-                sop.bom_name   ? `BOM: ${sop.bom_name}`           : '',
-                sop.fabric_type_name ? `Fabric: ${sop.fabric_type_name}` : '',
-            ].filter(Boolean).join('   |   ');
-            if (sopMeta) { doc.text(sopMeta, 14, y); y += 6; }
-            const colorSummary = (sop.colors || []).map(c =>
-                `${c.color_name || c.color_number || '?'}: ${(c.quantity || c.total_quantity || 0).toLocaleString()} pcs`
-            ).join('   ');
-            if (colorSummary) { doc.text(`Colors: ${colorSummary}`, 14, y); y += 6; }
-        }
-
-        // Finalized plan items
-        const planItems = sopReqs.production_plan_items || [];
-        if (planItems.length > 0) {
-            const totalPcs = planItems.reduce((s, p) => s + (p.finalized_quantity || 0), 0);
-            doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(80);
-            const planText = planItems.map(p =>
-                `${p.color_name || p.color_number}: ${(p.finalized_quantity || 0).toLocaleString()} pcs (${p.marker_runs} runs)`
-            ).join('   |   ');
-            doc.text(`Finalized: ${planText}   →   Total: ${totalPcs.toLocaleString()} pcs`, 14, y); y += 8;
-        }
-
-        doc.setTextColor(0);
-
-        // Fabric table
-        if (fabricRows.length > 0) {
-            doc.setFontSize(10); doc.setFont(undefined, 'bold');
-            doc.text('Fabric Reservations', 14, y); y += 3;
-            autoTable(doc, {
-                startY: y,
-                head: [['Fabric Type', 'Color', 'Color #', 'Roll #', 'Roll Color', 'Roll Total (m)', 'Required (m)', 'Reserved (m)', 'Status']],
-                body: fabricRows.map(r => [r.fabricType, r.colorName, r.colorNum, `Roll #${r.rollId}`, r.rollColor, r.rollMeter, r.mRequired, r.mReserved, r.status]),
-                styles:     { fontSize: 8, cellPadding: 2 },
-                headStyles: { fillColor: [99, 102, 241], textColor: 255, fontStyle: 'bold' },
-                alternateRowStyles: { fillColor: [238, 242, 255] },
-            });
-            y = doc.lastAutoTable.finalY + 8;
-        }
-
-        // Trim table
-        if (trimRows.length > 0) {
-            doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(0);
-            doc.text('Trim Reservations', 14, y); y += 3;
-            autoTable(doc, {
-                startY: y,
-                head: [['Item', 'Item Code', 'Color', 'Color #', 'Variant #', 'Variant Name', 'Variant Color #', 'Required', 'Reserved', 'Unit', 'Status']],
-                body: trimRows.map(r => [r.item, r.itemCode, r.colorName, r.colorNum, `#${r.variantId}`, r.variantName, r.variantColor, r.qRequired, r.qReserved, r.unit, r.status]),
-                styles:     { fontSize: 8, cellPadding: 2 },
-                headStyles: { fillColor: [245, 158, 11], textColor: 255, fontStyle: 'bold' },
-                alternateRowStyles: { fillColor: [255, 251, 235] },
-            });
-        }
-
-        doc.save('reservations.pdf');
-    };
-
-    const SectionTable = ({ headers, rows, cols }) => (
-        <table className="w-full text-xs border-collapse">
-            <thead>
-                <tr className="border-b-2 border-slate-200 bg-slate-50">
-                    {headers.map(h => (
-                        <th key={h} className="text-left py-2 px-2 font-bold text-slate-500 text-[10px] uppercase tracking-wider whitespace-nowrap">{h}</th>
-                    ))}
-                </tr>
-            </thead>
-            <tbody>
-                {rows.map((r, i) => (
-                    <tr key={i} className={`border-b border-slate-100 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-                        {cols(r)}
-                    </tr>
-                ))}
-            </tbody>
-        </table>
-    );
-
-    return (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
-
-                {/* Header */}
-                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
-                    <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Summary</p>
-                        <h2 className="font-extrabold text-slate-800 text-base">Reserved Stock</h2>
-                        <p className="text-xs text-slate-400 mt-0.5">{totalCount} reservation{totalCount !== 1 ? 's' : ''}{sop ? ` · ${sop.product_name}` : ''}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={handleDownloadCSV}
-                            className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors">
-                            <Download size={12} /> CSV
-                        </button>
-                        <button onClick={handleDownloadPDF}
-                            className="flex items-center gap-1.5 text-xs font-bold text-violet-700 bg-violet-50 border border-violet-200 hover:bg-violet-100 px-3 py-1.5 rounded-lg transition-colors">
-                            <Printer size={12} /> PDF
-                        </button>
-                        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 ml-1"><X size={18} /></button>
-                    </div>
-                </div>
-
-                {/* Order + product info strip */}
-                {(orderInfo || sop) && (
-                    <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 text-xs text-slate-600 flex flex-wrap gap-x-6 gap-y-1">
-                        {orderInfo?.order_number && <span><b>Order:</b> #{orderInfo.order_number}</span>}
-                        {(orderInfo?.customer_name || orderInfo?.buyer_name) && <span><b>Customer:</b> {orderInfo.customer_name || orderInfo.buyer_name}</span>}
-                        {orderInfo?.delivery_date && <span><b>Delivery:</b> {new Date(orderInfo.delivery_date).toLocaleDateString()}</span>}
-                        {sop?.product_name && <span><b>Product:</b> {sop.product_name}</span>}
-                        {sop?.bom_name     && <span><b>BOM:</b> {sop.bom_name}</span>}
-                    </div>
-                )}
-
-                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-                    {totalCount === 0 && (
-                        <p className="text-sm text-slate-400 text-center py-10 italic">No reservations yet.</p>
-                    )}
-
-                    {/* Fabric section */}
-                    {fabricRows.length > 0 && (
-                        <div>
-                            <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
-                                Fabric Reservations ({fabricRows.length})
-                            </p>
-                            <div className="overflow-x-auto">
-                                <SectionTable
-                                    headers={['Fabric Type', 'Color', 'Color #', 'Roll #', 'Roll Color', 'Roll Total (m)', 'Required (m)', 'Reserved (m)', 'Status']}
-                                    rows={fabricRows}
-                                    cols={r => <>
-                                        <td className="py-2 px-2 font-semibold text-slate-700 whitespace-nowrap">{r.fabricType}</td>
-                                        <td className="py-2 px-2 text-slate-600">{r.colorName}</td>
-                                        <td className="py-2 px-2 font-mono text-[10px] text-slate-500">{r.colorNum}</td>
-                                        <td className="py-2 px-2 font-mono text-[10px] text-slate-500 whitespace-nowrap">Roll #{r.rollId}</td>
-                                        <td className="py-2 px-2 text-slate-500">{r.rollColor}</td>
-                                        <td className="py-2 px-2 text-slate-500">{r.rollMeter}</td>
-                                        <td className="py-2 px-2 text-slate-500">{r.mRequired}</td>
-                                        <td className="py-2 px-2 font-bold text-emerald-700">{r.mReserved}</td>
-                                        <td className="py-2 px-2 whitespace-nowrap"><ReqStatusPill status={r.status} /></td>
-                                    </>}
-                                />
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Trim section */}
-                    {trimRows.length > 0 && (
-                        <div>
-                            <p className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-                                Trim Reservations ({trimRows.length})
-                            </p>
-                            <div className="overflow-x-auto">
-                                <SectionTable
-                                    headers={['Item', 'Item Code', 'Color', 'Color #', 'Variant #', 'Variant Name', 'Variant Color #', 'Required', 'Reserved', 'Unit', 'Status']}
-                                    rows={trimRows}
-                                    cols={r => <>
-                                        <td className="py-2 px-2 font-semibold text-slate-700 whitespace-nowrap">{r.item}</td>
-                                        <td className="py-2 px-2 font-mono text-[10px] text-slate-500">{r.itemCode}</td>
-                                        <td className="py-2 px-2 text-slate-600">{r.colorName}</td>
-                                        <td className="py-2 px-2 font-mono text-[10px] text-slate-500">{r.colorNum}</td>
-                                        <td className="py-2 px-2 font-mono text-[10px] text-slate-500">#{r.variantId}</td>
-                                        <td className="py-2 px-2 text-slate-600">{r.variantName}</td>
-                                        <td className="py-2 px-2 font-mono text-[10px] text-slate-500">{r.variantColor}</td>
-                                        <td className="py-2 px-2 text-slate-500">{r.qRequired}</td>
-                                        <td className="py-2 px-2 font-bold text-emerald-700">{r.qReserved}</td>
-                                        <td className="py-2 px-2 text-slate-400">{r.unit}</td>
-                                        <td className="py-2 px-2 whitespace-nowrap"><ReqStatusPill status={r.status} /></td>
-                                    </>}
-                                />
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// ─── PURCHASE ORDER SUMMARY MODAL ─────────────────────────────────────────────
-
-const PurchaseSummaryModal = ({ sopReqs, sop, orderInfo, onClose }) => {
-
-    console.log('Fabric requirements:', sopReqs.fabric_requirements);
-    const fabricRows = (sopReqs.fabric_requirements || []).flatMap(fr =>
-        (fr.purchase_requirements || []).map(pr => ({
-            fabricType: fr.fabric_type_name || '—',
-            colorName:  fr.color_name       || '—',
-            colorNum:   fr.color_number     || '—',
-            mRequired:  parseFloat(fr.meters_required || 0).toFixed(2),
-            mReserved:  parseFloat(fr.meters_reserved || 0).toFixed(2),
-            qty:        pr.meters_required  != null ? parseFloat(pr.meters_required).toFixed(2)  : '—',
-            notes:      pr.notes || '—',
-            poId:       pr.id,
-            status:     pr.status || '—',
-        }))
-    );
-
-    console.log('Trim requirements:', sopReqs.trim_requirements);
-    const trimRows = (sopReqs.trim_requirements || []).flatMap(tr =>
-        (tr.purchase_requirements || []).map(pr => ({
-            item:      tr.trim_item_name    || '—',
-            itemCode:  tr.item_code         || '—',
-            colorName: tr.color_name        || 'All',
-            colorNum:  tr.color_number      || '—',
-            qRequired: parseFloat(tr.quantity_required || 0).toFixed(2),
-            qReserved: parseFloat(tr.quantity_reserved || 0).toFixed(2),
-            qty:       pr.quantity_required != null ? parseFloat(pr.quantity_required).toFixed(2) : '—',
-            unit:      tr.unit_of_measure   || 'pcs',
-            notes:     pr.notes || '—',
-            poId:      pr.id,
-            status:    tr.status || '—',
-        }))
-    );
-
-    const totalCount = fabricRows.length + trimRows.length;
-
-    const handleDownloadCSV = () => {
-        const lines = [];
-        if (fabricRows.length > 0) {
-            lines.push(['--- FABRIC PURCHASE ORDERS ---']);
-            lines.push(['Fabric Type', 'Color', 'Color #', 'Total Required (m)', 'Already Reserved (m)', 'PO Qty (m)', 'Notes', 'PO #', 'Status']);
-            fabricRows.forEach(r => lines.push([r.fabricType, r.colorName, r.colorNum, r.mRequired, r.mReserved, r.qty, r.notes, `#${r.poId}`, r.status]));
-            lines.push([]);
-        }
-        if (trimRows.length > 0) {
-            lines.push(['--- TRIM PURCHASE ORDERS ---']);
-            lines.push(['Item', 'Item Code', 'Color', 'Color #', 'Total Required', 'Already Reserved', 'PO Qty', 'Unit', 'Notes', 'PO #', 'Status']);
-            trimRows.forEach(r => lines.push([r.item, r.itemCode, r.colorName, r.colorNum, r.qRequired, r.qReserved, r.qty, r.unit, r.notes, `#${r.poId}`, r.status]));
-        }
-        const csv = lines.map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement('a');
-        a.href = url; a.download = 'purchase_orders.csv'; a.click();
-        URL.revokeObjectURL(url);
-    };
-
-    const handleDownloadPDF = () => {
-        const doc = new jsPDF({ orientation: 'landscape' });
-        let y = 14;
-
-        if (orderInfo) {
-            doc.setFontSize(13); doc.setFont(undefined, 'bold');
-            doc.text(`Sales Order: #${orderInfo.order_number || '—'}`, 14, y); y += 7;
-            doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(80);
-            doc.text([
-                `Customer: ${orderInfo.customer_name || orderInfo.buyer_name || '—'}`,
-                `Status: ${orderInfo.status || '—'}`,
-                `Delivery: ${orderInfo.delivery_date ? new Date(orderInfo.delivery_date).toLocaleDateString() : '—'}`,
-                orderInfo.buyer_po_number ? `PO: ${orderInfo.buyer_po_number}` : '',
-            ].filter(Boolean).join('   |   '), 14, y); y += 6;
-        }
-
-        if (sop) {
-            doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(0);
-            doc.text(`Product: ${sop.product_name || '—'}`, 14, y); y += 6;
-            doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(80);
-            const sopMeta = [
-                sop.bom_name        ? `BOM: ${sop.bom_name}`              : '',
-                sop.fabric_type_name ? `Fabric: ${sop.fabric_type_name}` : '',
-            ].filter(Boolean).join('   |   ');
-            if (sopMeta) { doc.text(sopMeta, 14, y); y += 6; }
-            const colorSummary = (sop.colors || []).map(c =>
-                `${c.color_name || c.color_number || '?'}: ${(c.quantity || c.total_quantity || 0).toLocaleString()} pcs`
-            ).join('   ');
-            if (colorSummary) { doc.text(`Colors: ${colorSummary}`, 14, y); y += 6; }
-        }
-
-        const planItems = sopReqs.production_plan_items || [];
-        if (planItems.length > 0) {
-            const totalPcs = planItems.reduce((s, p) => s + (p.finalized_quantity || 0), 0);
-            doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(80);
-            doc.text(`Finalized: ${planItems.map(p => `${p.color_name || p.color_number}: ${(p.finalized_quantity || 0).toLocaleString()} pcs`).join('   |   ')}   →   Total: ${totalPcs.toLocaleString()} pcs`, 14, y);
-            y += 8;
-        }
-
-        doc.setTextColor(0);
-
-        if (fabricRows.length > 0) {
-            doc.setFontSize(10); doc.setFont(undefined, 'bold');
-            doc.text('Fabric Purchase Orders', 14, y); y += 3;
-            autoTable(doc, {
-                startY: y,
-                head: [['Fabric Type', 'Color', 'Color #', 'Total Req (m)', 'Reserved (m)', 'PO Qty (m)', 'Notes', 'PO #', 'Status']],
-                body: fabricRows.map(r => [r.fabricType, r.colorName, r.colorNum, r.mRequired, r.mReserved, r.qty, r.notes, `#${r.poId}`, r.status]),
-                styles:     { fontSize: 8, cellPadding: 2 },
-                headStyles: { fillColor: [99, 102, 241], textColor: 255, fontStyle: 'bold' },
-                alternateRowStyles: { fillColor: [238, 242, 255] },
-            });
-            y = doc.lastAutoTable.finalY + 8;
-        }
-
-        if (trimRows.length > 0) {
-            doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(0);
-            doc.text('Trim Purchase Orders', 14, y); y += 3;
-            autoTable(doc, {
-                startY: y,
-                head: [['Item', 'Item Code', 'Color', 'Color #', 'Total Req', 'Reserved', 'PO Qty', 'Unit', 'Notes', 'PO #', 'Status']],
-                body: trimRows.map(r => [r.item, r.itemCode, r.colorName, r.colorNum, r.qRequired, r.qReserved, r.qty, r.unit, r.notes, `#${r.poId}`, r.status]),
-                styles:     { fontSize: 8, cellPadding: 2 },
-                headStyles: { fillColor: [245, 158, 11], textColor: 255, fontStyle: 'bold' },
-                alternateRowStyles: { fillColor: [255, 251, 235] },
-            });
-        }
-
-        doc.save('purchase_orders.pdf');
-    };
-
-    const SectionTable = ({ headers, rows, cols }) => (
-        <table className="w-full text-xs border-collapse">
-            <thead>
-                <tr className="border-b-2 border-slate-200 bg-slate-50">
-                    {headers.map(h => (
-                        <th key={h} className="text-left py-2 px-2 font-bold text-slate-500 text-[10px] uppercase tracking-wider whitespace-nowrap">{h}</th>
-                    ))}
-                </tr>
-            </thead>
-            <tbody>
-                {rows.map((r, i) => (
-                    <tr key={i} className={`border-b border-slate-100 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-                        {cols(r)}
-                    </tr>
-                ))}
-            </tbody>
-        </table>
-    );
-
-    return (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
-
-                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
-                    <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Summary</p>
-                        <h2 className="font-extrabold text-slate-800 text-base">Purchase Orders</h2>
-                        <p className="text-xs text-slate-400 mt-0.5">{totalCount} PO line{totalCount !== 1 ? 's' : ''}{sop ? ` · ${sop.product_name}` : ''}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={handleDownloadCSV}
-                            className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors">
-                            <Download size={12} /> CSV
-                        </button>
-                        <button onClick={handleDownloadPDF}
-                            className="flex items-center gap-1.5 text-xs font-bold text-violet-700 bg-violet-50 border border-violet-200 hover:bg-violet-100 px-3 py-1.5 rounded-lg transition-colors">
-                            <Printer size={12} /> PDF
-                        </button>
-                        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 ml-1"><X size={18} /></button>
-                    </div>
-                </div>
-
-                {(orderInfo || sop) && (
-                    <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 text-xs text-slate-600 flex flex-wrap gap-x-6 gap-y-1">
-                        {orderInfo?.order_number && <span><b>Order:</b> #{orderInfo.order_number}</span>}
-                        {(orderInfo?.customer_name || orderInfo?.buyer_name) && <span><b>Customer:</b> {orderInfo.customer_name || orderInfo.buyer_name}</span>}
-                        {orderInfo?.delivery_date && <span><b>Delivery:</b> {new Date(orderInfo.delivery_date).toLocaleDateString()}</span>}
-                        {sop?.product_name && <span><b>Product:</b> {sop.product_name}</span>}
-                        {sop?.bom_name     && <span><b>BOM:</b> {sop.bom_name}</span>}
-                    </div>
-                )}
-
-                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-                    {totalCount === 0 && (
-                        <p className="text-sm text-slate-400 text-center py-10 italic">No purchase orders raised yet.</p>
-                    )}
-
-                    {fabricRows.length > 0 && (
-                        <div>
-                            <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
-                                Fabric POs ({fabricRows.length})
-                            </p>
-                            <div className="overflow-x-auto">
-                                <SectionTable
-                                    headers={['Fabric Type', 'Color', 'Color #', 'Total Req (m)', 'Reserved (m)', 'PO Qty (m)', 'Notes', 'PO #', 'Status']}
-                                    rows={fabricRows}
-                                    cols={r => <>
-                                        <td className="py-2 px-2 font-semibold text-slate-700 whitespace-nowrap">{r.fabricType}</td>
-                                        <td className="py-2 px-2 text-slate-600">{r.colorName}</td>
-                                        <td className="py-2 px-2 font-mono text-[10px] text-slate-500">{r.colorNum}</td>
-                                        <td className="py-2 px-2 text-slate-500">{r.mRequired}</td>
-                                        <td className="py-2 px-2 text-emerald-600 font-medium">{r.mReserved}</td>
-                                        <td className="py-2 px-2 font-bold text-amber-700">{r.qty}</td>
-                                        <td className="py-2 px-2 text-slate-400 italic">{r.notes}</td>
-                                        <td className="py-2 px-2 font-mono text-[10px] text-slate-400">#{r.poId}</td>
-                                        <td className="py-2 px-2 whitespace-nowrap"><ReqStatusPill status={r.status} /></td>
-                                    </>}
-                                />
-                            </div>
-                        </div>
-                    )}
-
-                    {trimRows.length > 0 && (
-                        <div>
-                            <p className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-                                Trim POs ({trimRows.length})
-                            </p>
-                            <div className="overflow-x-auto">
-                                <SectionTable
-                                    headers={['Item', 'Item Code', 'Color', 'Color #', 'Total Req', 'Reserved', 'PO Qty', 'Unit', 'Notes', 'PO #', 'Status']}
-                                    rows={trimRows}
-                                    cols={r => <>
-                                        <td className="py-2 px-2 font-semibold text-slate-700 whitespace-nowrap">{r.item}</td>
-                                        <td className="py-2 px-2 font-mono text-[10px] text-slate-500">{r.itemCode}</td>
-                                        <td className="py-2 px-2 text-slate-600">{r.colorName}</td>
-                                        <td className="py-2 px-2 font-mono text-[10px] text-slate-500">{r.colorNum}</td>
-                                        <td className="py-2 px-2 text-slate-500">{r.qRequired}</td>
-                                        <td className="py-2 px-2 text-emerald-600 font-medium">{r.qReserved}</td>
-                                        <td className="py-2 px-2 font-bold text-amber-700">{r.qty}</td>
-                                        <td className="py-2 px-2 text-slate-400">{r.unit}</td>
-                                        <td className="py-2 px-2 text-slate-400 italic">{r.notes}</td>
-                                        <td className="py-2 px-2 font-mono text-[10px] text-slate-400">#{r.poId}</td>
-                                        <td className="py-2 px-2 whitespace-nowrap"><ReqStatusPill status={r.status} /></td>
-                                    </>}
-                                />
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
+            {addModal && (
+                <TAItemFormModal
+                    sop={sop}
+                    item={editItem}
+                    onClose={() => { setAddModal(false); setEditItem(null); }}
+                    onSaved={() => { setAddModal(false); setEditItem(null); onRefresh(); }}
+                />
+            )}
         </div>
     );
 };
@@ -1137,7 +1372,7 @@ const READINESS_CFG = {
     force_ready:          { label: 'Force Ready',  cls: 'bg-violet-50 text-violet-700 border-violet-200',  icon: ShieldCheck },
 };
 
-const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCalculate, calcKey = 0, orderInfo, onReadinessChange }) => {
+const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCalculate, calcKey = 0, onReadinessChange, onTAChange }) => {
     const [showPicker,       setShowPicker]       = useState(false);
     const [pickedBomId,      setPickedBomId]      = useState('');
     const [selectedRgIdxs,   setSelectedRgIdxs]   = useState(new Set());
@@ -1146,34 +1381,20 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCa
     // Full BOM detail (with items + number_of_pieces) fetched on pick
     const [pickedBomDetail,   setPickedBomDetail]   = useState(null);
     const [loadingBomDetail,  setLoadingBomDetail]  = useState(false);
-    // Per-SOP requirements (auto-fetched, refreshed after each calculate or reservation)
-    const [sopReqs,         setSopReqs]         = useState(null);
-    const [loadingReqs,     setLoadingReqs]     = useState(false);
-    const [reqsRefreshKey,  setReqsRefreshKey]  = useState(0);
-    const [showReqs,        setShowReqs]        = useState(false);
-    const [reservingReq,    setReservingReq]    = useState(null); // { id, reqType }
-    const [showResvSummary, setShowResvSummary] = useState(false);
-    const [showPoSummary,   setShowPoSummary]   = useState(false);
+    // Per-SOP requirements
+    const [sopReqs,           setSopReqs]           = useState(null);
+    const [loadingReqs,       setLoadingReqs]       = useState(false);
+    // Production tracking modal
+    const [showTrackingModal, setShowTrackingModal] = useState(false);
 
     useEffect(() => {
         if (!sop.bom_id) return;
         setLoadingReqs(true);
         planningApi.getRequirements(sop.id)
-        .then(r => {
-            console.log("Received data:", r); // Logs the full response object
-            // console.log("Extracted data:", r.data?.data ?? r.data); // Use this to see exactly what is being set
-            setSopReqs(r.data?.data ?? r.data);
-        })
+        .then(r => setSopReqs(r.data?.data ?? r.data))
         .catch(() => setSopReqs(null))
         .finally(() => setLoadingReqs(false));
-    }, [sop.bom_id, sop.id, calcKey, reqsRefreshKey]);
-
-    // Derive the currently-open requirement from fresh sopReqs (so modal reflects updates)
-    const activeReq = reservingReq
-        ? (reservingReq.reqType === 'fabric'
-            ? (sopReqs?.fabric_requirements || []).find(r => String(r.id) === String(reservingReq.id))
-            : (sopReqs?.trim_requirements   || []).find(r => String(r.id) === String(reservingReq.id)))
-        : null;
+    }, [sop.bom_id, sop.id, calcKey]);
 
     const linkedBomDetail = bomOptions.find(b => b.id === sop.bom_id);
     const totalQty        = (sop.colors || []).reduce((s, c) => s + (c.quantity || c.total_quantity || 0), 0);
@@ -1716,401 +1937,70 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCa
                 )}
             </div>
 
-            {/* ── Requirements section (collapsible) ── */}
-            {sopReqs && (() => {
-                const fabricReqs = sopReqs.fabric_requirements || [];
-                const trimReqs   = sopReqs.trim_requirements   || [];
-                const hasShortfall = fabricReqs.some(fr =>
+            {/* ── Production Tracking ── */}
+            {(() => {
+                const fabReqs  = sopReqs?.fabric_requirements || [];
+                const trimReqs = sopReqs?.trim_requirements   || [];
+                const allTracked = [
+                    ...fabReqs.filter(r => r.ta_id).map(r => r.ta_status || 'pending'),
+                    ...trimReqs.filter(r => r.ta_id).map(r => r.ta_status || 'pending'),
+                    ...((sop.timeline || [])
+                        .filter(it => it.production_plan_item_id == null &&
+                            !fabReqs.some(r => r.ta_id === it.id) &&
+                            !trimReqs.some(r => r.ta_id === it.id))
+                        .map(it => it.status)
+                    ),
+                ];
+                const total   = allTracked.length;
+                const compl   = allTracked.filter(s => s === 'completed').length;
+                const overdue = (sop.timeline || []).filter(it =>
+                    it.end_date && new Date(it.end_date) < new Date() && it.status !== 'completed'
+                ).length;
+                const fabShort = fabReqs.filter(fr =>
                     Math.max(0, (fr.meters_required || 0) - (fr.stock_suggestion?.total_meters_available ?? 0)) > 0
-                ) || trimReqs.some(tr => !tr.is_fulfilled);
+                ).length;
+                const trimUnf  = trimReqs.filter(tr => !tr.is_fulfilled).length;
                 return (
                     <div className="border-t border-slate-100">
-                        {/* Collapse toggle + summary action buttons */}
-                        <div className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-50 transition-colors">
-                            <button
-                                onClick={() => setShowReqs(v => !v)}
-                                className="flex-1 flex items-center gap-2 flex-wrap text-left min-w-0"
-                            >
-                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Calculated Requirements</p>
-                                {fabricReqs.length > 0 && (
-                                    <span className="text-[10px] font-bold bg-indigo-50 text-indigo-600 border border-indigo-100 px-1.5 py-0.5 rounded-full">
-                                        {fabricReqs.length} fabric
+                        <div
+                            onClick={() => setShowTrackingModal(true)}
+                            className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-50 transition-colors cursor-pointer"
+                        >
+                            <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Production Tracking</p>
+                                {total > 0 && (
+                                    <span className="text-[10px] font-bold bg-violet-50 text-violet-600 border border-violet-100 px-1.5 py-0.5 rounded-full">
+                                        {compl}/{total} done
                                     </span>
                                 )}
-                                {trimReqs.length > 0 && (
-                                    <span className="text-[10px] font-bold bg-amber-50 text-amber-600 border border-amber-100 px-1.5 py-0.5 rounded-full">
-                                        {trimReqs.length} trim
-                                    </span>
-                                )}
-                                {hasShortfall && (
+                                {overdue > 0 && (
                                     <span className="text-[10px] font-bold bg-red-50 text-red-600 border border-red-100 px-1.5 py-0.5 rounded-full">
-                                        shortfalls
+                                        {overdue} overdue
                                     </span>
                                 )}
-                            </button>
-                            <div className="flex items-center gap-0.5 shrink-0 ml-2">
-                                <button
-                                    onClick={() => setShowResvSummary(true)}
-                                    title="View reservations summary"
-                                    className="p-1.5 text-slate-400 hover:text-emerald-600 rounded-lg transition-colors"
-                                >
-                                    <Download size={12} />
-                                </button>
-                                <button
-                                    onClick={() => setShowPoSummary(true)}
-                                    title="View purchase order summary"
-                                    className="p-1.5 text-slate-400 hover:text-amber-600 rounded-lg transition-colors"
-                                >
-                                    <Printer size={12} />
-                                </button>
-                                <button onClick={() => setShowReqs(v => !v)} className="p-1.5">
-                                    <ChevronDown size={13} className={`text-slate-400 transition-transform ${showReqs ? 'rotate-180' : ''}`} />
-                                </button>
+                                {(fabShort > 0 || trimUnf > 0) && (
+                                    <span className="text-[10px] font-bold bg-amber-50 text-amber-600 border border-amber-100 px-1.5 py-0.5 rounded-full">
+                                        {fabShort + trimUnf} shortfall{fabShort + trimUnf !== 1 ? 's' : ''}
+                                    </span>
+                                )}
+                                {total === 0 && !loadingReqs && sop.bom_id && (
+                                    <span className="text-[10px] text-slate-400 italic">Calculate requirements to track procurement</span>
+                                )}
+                                {loadingReqs && <span className="text-[10px] text-slate-400">Loading…</span>}
                             </div>
+                            <ChevronRight size={13} className="text-slate-400 shrink-0 ml-2" />
                         </div>
-
-                        {showReqs && (
-                            <div className="px-4 pb-4 space-y-4">
-
-                                {/* Finalized quantities per color */}
-                                {(sopReqs.production_plan_items || []).length > 0 && (() => {
-                                    const items    = sopReqs.production_plan_items;
-                                    const totalPcs = items.reduce((s, i) => s + (i.finalized_quantity || 0), 0);
-                                    return (
-                                        <div>
-                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Finalized Quantities</p>
-                                            <div className="flex flex-wrap gap-1.5 items-center">
-                                                {items.map(c => (
-                                                    <span key={c.fabric_color_id} className="flex items-center gap-1 text-xs bg-indigo-50 border border-indigo-100 px-2 py-1 rounded-lg">
-                                                        <span className="font-bold text-indigo-700">{c.color_name || c.color_number}</span>
-                                                        <span className="text-slate-300">·</span>
-                                                        <span className="font-bold text-slate-700">{(c.finalized_quantity || 0).toLocaleString()} pcs</span>
-                                                        <span className="text-slate-400">/{c.marker_runs} runs</span>
-                                                    </span>
-                                                ))}
-                                                <span className="text-[10px] font-bold bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg text-slate-600">
-                                                    ∑ {totalPcs.toLocaleString()} pcs
-                                                </span>
-                                            </div>
-                                        </div>
-                                    );
-                                })()}
-
-                                {/* Fabric requirements */}
-                                {fabricReqs.length > 0 && (
-                                    <div>
-                                        <p className="text-xs font-bold text-slate-600 mb-2">Fabric</p>
-                                        <div className="space-y-1.5">
-                                            {fabricReqs.map(fr => {
-                                                const available = fr.stock_suggestion?.total_meters_available ?? 0;
-                                                const shortfall = Math.max(0, (fr.meters_required || 0) - available);
-                                                const bd        = fr.calculation_breakdown;
-                                                return (
-                                                    <div key={fr.id} className={`px-3 py-2.5 rounded-lg border text-xs ${shortfall > 0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
-                                                        <div className="flex items-start justify-between gap-2">
-                                                            <div className="min-w-0 flex-1">
-                                                                <div className="flex items-center gap-1.5 flex-wrap">
-                                                                    <p className="font-bold text-slate-700">{fr.fabric_type_name}</p>
-                                                                    <ReqStatusPill status={fr.status} />
-                                                                </div>
-                                                                <p className="text-slate-500 mt-0.5">{fr.color_name}{fr.color_number ? ` · ${fr.color_number}` : ''}</p>
-                                                                <p className="text-slate-500 mt-0.5">
-                                                                    {(fr.meters_required || 0).toFixed(2)} m req
-                                                                    {shortfall > 0
-                                                                        ? <span className="font-bold text-red-600"> · −{shortfall.toFixed(2)} m short</span>
-                                                                        : <span className="text-emerald-600"> · {available.toFixed(2)} m avail</span>
-                                                                    }
-                                                                </p>
-                                                                {bd && (
-                                                                    <div className="mt-1.5 space-y-0.5">
-                                                                        {(bd.ratio_group_contributions || []).map((rg, i) => (
-                                                                            <p key={i} className="text-[10px] text-slate-500 font-mono truncate" title={rg.formula}>
-                                                                                {rg.ratio_group_name}: {rg.meters.toFixed(2)} m
-                                                                                <span className="text-slate-300 ml-1">({rg.formula})</span>
-                                                                            </p>
-                                                                        ))}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                            <button
-                                                                onClick={() => setReservingReq({ id: fr.id, reqType: 'fabric' })}
-                                                                className="shrink-0 text-[10px] font-bold text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-2.5 py-1.5 rounded-lg transition-colors"
-                                                            >
-                                                                Manage
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Trim requirements */}
-                                {trimReqs.length > 0 && (
-                                    <div>
-                                        <p className="text-xs font-bold text-slate-600 mb-2">Trim & Materials</p>
-                                        <div className="space-y-1.5">
-                                            {[...trimReqs].sort((a, b) => {
-                                                const S = { PENDING: 0, PARTIALLY_RESERVED: 1, RESERVED: 2, PURCHASE_RAISED: 3 };
-                                                return (S[a.status] ?? 99) - (S[b.status] ?? 99);
-                                            }).map(tr => {
-                                                const exact      = tr.stock_suggestion?.exact_variant;
-                                                const subs       = tr.stock_suggestion?.substitutes || [];
-                                                const exactStock = parseFloat(exact?.in_stock) || 0;
-                                                const hasStock   = exactStock > 0 || subs.some(s => (parseFloat(s.in_stock) || 0) > 0);
-                                                const bd         = tr.calculation_breakdown;
-                                                return (
-                                                    <div key={tr.id} className={`px-3 py-2.5 rounded-lg border text-xs ${tr.is_fulfilled ? 'bg-emerald-50 border-emerald-200' : hasStock ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'}`}>
-                                                        <div className="flex items-start justify-between gap-2">
-                                                            <div className="min-w-0 flex-1">
-                                                                <div className="flex items-center gap-1.5 flex-wrap">
-                                                                    <p className="font-bold text-slate-700">{tr.trim_item_name}</p>
-                                                                    {tr.item_code && <span className="text-slate-400 font-mono">{tr.item_code}</span>}
-                                                                    <ReqStatusPill status={tr.status} />
-                                                                    {tr.is_color_agnostic && <span className="text-[8px] bg-slate-100 text-slate-500 border border-slate-200 px-1 py-0.5 rounded">agnostic</span>}
-                                                                </div>
-                                                                <p className="text-slate-500 mt-0.5">
-                                                                    {tr.color_name ? `${tr.color_name}${tr.color_number ? ` · ${tr.color_number}` : ''}` : 'All colors'}
-                                                                    {tr.unit_of_measure ? ` · ${tr.unit_of_measure}` : ''}
-                                                                </p>
-                                                                <p className="text-slate-500 mt-0.5">
-                                                                    {(tr.quantity_required || 0).toLocaleString()} req
-                                                                    {tr.quantity_reserved > 0 && (
-                                                                        <span className="text-emerald-600"> · {(tr.quantity_reserved || 0).toLocaleString()} reserved</span>
-                                                                    )}
-                                                                </p>
-                                                                {bd && (
-                                                                    <p className="text-[10px] text-slate-500 font-mono mt-0.5 truncate" title={bd.formula}>{bd.formula}</p>
-                                                                )}
-                                                                {/* Stock chips */}
-                                                                <div className="flex gap-1 mt-1.5 flex-wrap">
-                                                                    {exact ? (
-                                                                        <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${exactStock > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
-                                                                            {exact.match_type === 'agnostic' ? 'Stock' : 'Exact'}: {exactStock.toLocaleString()}
-                                                                        </span>
-                                                                    ) : (
-                                                                        <span className="px-1.5 py-0.5 rounded border text-[8px] font-bold bg-red-50 text-red-600 border-red-200">No exact</span>
-                                                                    )}
-                                                                    {subs.map(s => (
-                                                                        <span key={s.substitute_variant_id} className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${parseFloat(s.in_stock) > 0 ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-                                                                            Sub {s.color_name}{s.color_number ? ` · ${s.color_number}` : ''}: {parseFloat(s.in_stock).toLocaleString()}
-                                                                        </span>
-                                                                    ))}
-                                                                </div>
-                                                            </div>
-                                                            <button
-                                                                onClick={() => setReservingReq({ id: tr.id, reqType: 'trim' })}
-                                                                className="shrink-0 text-[10px] font-bold text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-2.5 py-1.5 rounded-lg transition-colors"
-                                                            >
-                                                                Manage
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {fabricReqs.length === 0 && trimReqs.length === 0 && (
-                                    <p className="text-[10px] text-slate-400 italic">No requirements calculated yet.</p>
-                                )}
-                            </div>
-                        )}
                     </div>
                 );
             })()}
 
-            {/* Reservation & Purchase modal */}
-            {reservingReq && activeReq && (
-                <ReservationModal
-                    reqType={reservingReq.reqType}
-                    requirement={activeReq}
-                    onClose={() => setReservingReq(null)}
-                    onUpdate={() => setReqsRefreshKey(k => k + 1)}
+            {showTrackingModal && (
+                <ProductionTrackingModal
+                    sop={sop}
+                    sopReqs={sopReqs}
+                    onClose={() => setShowTrackingModal(false)}
+                    onRefresh={onTAChange}
                 />
-            )}
-            {showResvSummary && sopReqs && (
-                <ReservationSummaryModal sopReqs={sopReqs} sop={sop} orderInfo={orderInfo} onClose={() => setShowResvSummary(false)} />
-            )}
-            {showPoSummary && sopReqs && (
-                <PurchaseSummaryModal sopReqs={sopReqs} sop={sop} orderInfo={orderInfo} onClose={() => setShowPoSummary(false)} />
-            )}
-        </div>
-    );
-};
-
-// ─── FABRIC REQUIREMENTS SECTION (Available / Short split) ──────────────────────
-
-const FabricRow = ({ r }) => (
-    <div className={`flex items-center justify-between border rounded-xl px-4 py-3 ${r.meters_shortfall > 0 ? 'border-red-200 bg-red-50/40' : 'border-slate-200'}`}>
-        <div>
-            <p className="font-semibold text-slate-800 text-sm">{r.fabric_type_name}</p>
-            <p className="text-[10px] text-slate-400 mt-0.5">{r.color_name} · {r.roll_count ?? 0} rolls</p>
-        </div>
-        <div className="flex items-center gap-5 text-right">
-            <div>
-                <p className="text-[9px] text-slate-400 uppercase tracking-wider">Required</p>
-                <p className="font-bold text-slate-700 text-sm">{fmt(r.meters_required)} m</p>
-            </div>
-            <div>
-                <p className="text-[9px] text-slate-400 uppercase tracking-wider">In Stock</p>
-                <p className={`font-bold text-sm ${r.meters_shortfall > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{fmt(r.meters_in_stock)} m</p>
-            </div>
-            {r.meters_shortfall > 0 && (
-                <div>
-                    <p className="text-[9px] text-slate-400 uppercase tracking-wider">Short</p>
-                    <p className="font-bold text-red-600 text-sm">-{fmt(r.meters_shortfall)} m</p>
-                </div>
-            )}
-        </div>
-    </div>
-);
-
-const FabricRequirementsSection = ({ rows }) => {
-    if (!rows?.length) return <p className="text-sm text-slate-400 italic">No fabric requirements.</p>;
-    const short     = rows.filter(r => r.meters_shortfall > 0);
-    const available = rows.filter(r => !(r.meters_shortfall > 0));
-    return (
-        <div className="space-y-5">
-            {short.length > 0 && (
-                <div>
-                    <div className="flex items-center gap-2 mb-2.5">
-                        <AlertTriangle size={13} className="text-red-500" />
-                        <p className="text-xs font-bold text-red-600 uppercase tracking-wider">Short — {short.length} type{short.length !== 1 ? 's' : ''}</p>
-                        <span className="text-[10px] text-slate-400">No substitute — purchase order required</span>
-                    </div>
-                    <div className="space-y-2">{short.map((r, i) => <FabricRow key={i} r={r} />)}</div>
-                </div>
-            )}
-            {available.length > 0 && (
-                <div>
-                    <div className="flex items-center gap-2 mb-2.5">
-                        <CheckCircle2 size={13} className="text-emerald-500" />
-                        <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider">Available — {available.length} type{available.length !== 1 ? 's' : ''}</p>
-                    </div>
-                    <div className="space-y-2">{available.map((r, i) => <FabricRow key={i} r={r} />)}</div>
-                </div>
-            )}
-        </div>
-    );
-};
-
-// ─── TRIM REQUIREMENTS SECTION (Available / Short split + substitute modal) ──────
-
-const TrimDetailExpanded = ({ trim }) => {
-    const matchCls = { exact: 'bg-emerald-50 text-emerald-700 border-emerald-200', missing: 'bg-red-50 text-red-600 border-red-200' };
-    if (trim.is_color_agnostic) {
-        return (
-            <div className="flex flex-wrap items-center gap-6 text-sm">
-                {[
-                    { label: 'Required', val: fmt(trim.total_quantity_required), cls: 'text-slate-700' },
-                    { label: 'In Stock',  val: fmt(trim.in_stock), cls: (trim.shortfall || 0) > 0 ? 'text-red-600' : 'text-emerald-600' },
-                    ...(trim.shortfall > 0 ? [{ label: 'Shortfall', val: `-${fmt(trim.shortfall)}`, cls: 'text-red-600' }] : []),
-                ].map(({ label, val, cls }) => (
-                    <div key={label}>
-                        <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-0.5">{label}</p>
-                        <p className={`font-bold ${cls}`}>{val}</p>
-                    </div>
-                ))}
-            </div>
-        );
-    }
-    return (
-        <div className="space-y-2">
-            {(trim.color_requirements || []).map((cr, i) => (
-                <div key={i} className={`flex flex-wrap items-center gap-5 text-sm p-3 rounded-lg ${cr.shortfall > 0 ? 'bg-red-50' : 'bg-slate-50'}`}>
-                    <div className="w-28 shrink-0">
-                        <p className="text-[10px] text-slate-400 uppercase mb-0.5">Color</p>
-                        <p className="font-semibold text-slate-700 text-xs">{cr.color_name}</p>
-                    </div>
-                    <div className="w-20 shrink-0">
-                        <p className="text-[10px] text-slate-400 uppercase mb-0.5">Required</p>
-                        <p className="font-bold text-slate-700">{fmt(cr.quantity_required)}</p>
-                    </div>
-                    <div className="w-20 shrink-0">
-                        <p className="text-[10px] text-slate-400 uppercase mb-0.5">In Stock</p>
-                        <p className={`font-bold ${cr.shortfall > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{fmt(cr.in_stock)}</p>
-                    </div>
-                    <div className="shrink-0">
-                        <p className="text-[10px] text-slate-400 uppercase mb-0.5">Match</p>
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold uppercase ${matchCls[cr.match_type] || 'bg-amber-50 text-amber-600 border-amber-200'}`}>{cr.match_type}</span>
-                    </div>
-                    {cr.shortfall > 0 && (
-                        <div className="shrink-0">
-                            <p className="text-[10px] text-slate-400 uppercase mb-0.5">Shortfall</p>
-                            <p className="font-bold text-red-600">-{fmt(cr.shortfall)}</p>
-                        </div>
-                    )}
-                </div>
-            ))}
-        </div>
-    );
-};
-
-const trimIsShort    = t => t.is_color_agnostic ? (t.shortfall || 0) > 0 : (t.color_requirements || []).some(cr => cr.shortfall > 0);
-const trimHasSubs    = t => t.is_color_agnostic ? (t.substitutes || []).length > 0 : (t.color_requirements || []).some(cr => (cr.substitutes || []).length > 0);
-
-const TrimRequirementsSection = ({ rows, onSelectSubstitute }) => {
-    const [expanded, setExpanded] = useState(new Set());
-    if (!rows?.length) return <p className="text-sm text-slate-400 italic">No trim requirements.</p>;
-
-    const toggle = id => setExpanded(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
-    const short     = rows.filter(trimIsShort);
-    const available = rows.filter(t => !trimIsShort(t));
-
-    const TrimRow = ({ trim }) => {
-        const isOpen     = expanded.has(trim.trim_item_id);
-        const isShort    = trimIsShort(trim);
-        const hasSubs    = trimHasSubs(trim);
-        return (
-            <div className={`border rounded-xl overflow-hidden ${isShort ? 'border-red-200' : 'border-slate-200'}`}>
-                <button onClick={() => toggle(trim.trim_item_id)}
-                    className={`w-full flex items-center justify-between px-4 py-3 hover:bg-slate-100 transition-colors text-left ${isShort ? 'bg-red-50/50' : 'bg-slate-50'}`}>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                        <span className="font-semibold text-slate-800 text-sm">{trim.trim_item_name}</span>
-                        {trim.item_code && <span className="text-[9px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{trim.item_code}</span>}
-                        {trim.is_color_agnostic
-                            ? <span className="text-[9px] bg-slate-100 text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded font-bold uppercase">Agnostic</span>
-                            : <span className="text-[9px] bg-indigo-50 text-indigo-600 border border-indigo-100 px-1.5 py-0.5 rounded font-bold uppercase">Color Matched</span>}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                        {isShort && hasSubs && (
-                            <button onClick={e => { e.stopPropagation(); onSelectSubstitute(trim); }}
-                                className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 px-2 py-0.5 rounded-lg transition-colors flex items-center gap-1">
-                                <RefreshCw size={9} /> Substitute
-                            </button>
-                        )}
-                        {trim.is_color_agnostic && <span className="text-xs text-slate-500">{fmt(trim.total_quantity_required)} total</span>}
-                        {isOpen ? <ChevronDown size={15} className="text-slate-400" /> : <ChevronRight size={15} className="text-slate-400" />}
-                    </div>
-                </button>
-                {isOpen && <div className="px-4 py-3 border-t border-slate-100"><TrimDetailExpanded trim={trim} /></div>}
-            </div>
-        );
-    };
-
-    return (
-        <div className="space-y-5">
-            {short.length > 0 && (
-                <div>
-                    <div className="flex items-center gap-2 mb-2.5">
-                        <AlertTriangle size={13} className="text-red-500" />
-                        <p className="text-xs font-bold text-red-600 uppercase tracking-wider">Short — {short.length} item{short.length !== 1 ? 's' : ''}</p>
-                        {short.some(trimHasSubs) && <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded font-bold">Substitutes available</span>}
-                    </div>
-                    <div className="space-y-2">{short.map(t => <TrimRow key={t.trim_item_id} trim={t} />)}</div>
-                </div>
-            )}
-            {available.length > 0 && (
-                <div>
-                    <div className="flex items-center gap-2 mb-2.5">
-                        <CheckCircle2 size={13} className="text-emerald-500" />
-                        <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider">Available — {available.length} item{available.length !== 1 ? 's' : ''}</p>
-                    </div>
-                    <div className="space-y-2">{available.map(t => <TrimRow key={t.trim_item_id} trim={t} />)}</div>
-                </div>
             )}
         </div>
     );
@@ -2163,12 +2053,12 @@ const QuantitySuggestionModal = ({ linkedSops, onClose, onDone }) => {
                 suggestions.map(async ({ sopId, colors }) => {
                     const quantities = colors.map(c => {
                         const opt    = choices[`${sopId}_${c.fabric_color_id}`] || 'lower';
-                        const chosen = c[opt] ?? c.lower ?? c.upper;
+                        const chosen = (opt === 'exact' ? c.lower : c[opt]) ?? c.lower ?? c.upper;
                         return {
                             fabric_color_id:    c.fabric_color_id,
                             selected_option:    opt,
                             finalized_quantity: chosen?.total_pieces ?? c.ordered_quantity,
-                            marker_runs:        chosen?.runs ?? 1,
+                            marker_runs:        chosen?.runs ?? null,
                         };
                     });
                     await planningApi.finalizeQuantities(sopId, { quantities });
@@ -2312,106 +2202,6 @@ const QuantitySuggestionModal = ({ linkedSops, onClose, onDone }) => {
     );
 };
 
-// ─── TRIM SUBSTITUTE MODAL ────────────────────────────────────────────────────
-
-const TrimSubstituteModal = ({ trim, onClose, onReserved }) => {
-    const [selectedSubId, setSelectedSubId] = useState(null);
-    const [submitting,    setSubmitting]    = useState(false);
-    const [error,         setError]         = useState(null);
-
-    const reqId = trim.id || trim.requirement_id;
-
-    const substitutes = trim.is_color_agnostic
-        ? (trim.substitutes || []).map(s => ({ ...s, _forColor: null }))
-        : (trim.color_requirements || []).flatMap(cr =>
-            cr.shortfall > 0
-                ? (cr.substitutes || []).map(s => ({ ...s, _forColor: cr.color_name }))
-                : []
-          );
-
-    const handleReserve = async () => {
-        if (!selectedSubId) return;
-        setSubmitting(true);
-        setError(null);
-        try {
-            await planningApi.reserveTrim(reqId, { substitute_variant_id: selectedSubId, match_type: 'substitute' });
-            onReserved();
-        } catch (e) {
-            setError(e?.response?.data?.error || 'Reservation failed');
-            setSubmitting(false);
-        }
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
-                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
-                    <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Select Substitute</p>
-                        <h2 className="font-extrabold text-slate-800 text-base">{trim.trim_item_name}</h2>
-                        <p className="text-xs text-red-500 mt-0.5">Short — choose a substitute to reserve</p>
-                    </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 mt-0.5"><X size={18} /></button>
-                </div>
-
-                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2">
-                    {substitutes.length === 0 ? (
-                        <p className="text-sm text-slate-400 italic text-center py-10">No substitutes available.</p>
-                    ) : substitutes.map(s => {
-                        const subId   = s.substitute_variant_id || s.trim_variant_id;
-                        const active  = selectedSubId === subId;
-                        return (
-                            <button key={subId} onClick={() => setSelectedSubId(subId)}
-                                className={`w-full flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-all ${
-                                    active ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'
-                                }`}>
-                                <input type="radio" readOnly checked={active} className="mt-0.5 accent-emerald-600 shrink-0" />
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <p className="font-bold text-slate-800 text-sm">{s.item_name}</p>
-                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                                            s.in_stock > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'
-                                        }`}>
-                                            {s.in_stock > 0 ? `${s.in_stock} in stock` : 'Out of stock'}
-                                        </span>
-                                    </div>
-                                    {s._forColor && <p className="text-[10px] text-slate-400 mt-0.5">For color: {s._forColor}</p>}
-                                    {s.color_name && <p className="text-[10px] text-slate-400">Variant: {s.color_name}</p>}
-                                    {s.item_code  && <p className="text-[10px] font-mono text-slate-400">{s.item_code}</p>}
-                                </div>
-                            </button>
-                        );
-                    })}
-                    {error && <p className="text-sm text-red-500 bg-red-50 rounded-xl px-3 py-2">{error}</p>}
-                </div>
-
-                {substitutes.length > 0 && (
-                    <div className="px-5 py-4 border-t border-slate-100 flex justify-end gap-3">
-                        <button onClick={onClose}
-                            className="text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors">
-                            Cancel
-                        </button>
-                        <button onClick={handleReserve} disabled={!selectedSubId || submitting}
-                            className="flex items-center gap-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 px-5 py-2.5 rounded-xl transition-colors shadow-sm">
-                            {submitting ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
-                            Reserve Substitute
-                        </button>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-
-// ─── STAT CARD ─────────────────────────────────────────────────────────────────
-
-const StatCard = ({ label, value, ok }) => (
-    <div className={`rounded-xl p-4 border ${ok ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">{label}</p>
-        <p className={`text-2xl font-extrabold ${ok ? 'text-emerald-700' : 'text-red-600'}`}>{value}</p>
-    </div>
-);
-
 // ─── SECTION WRAPPER ───────────────────────────────────────────────────────────
 
 const Section = ({ icon: Icon, iconCls, title, badge, children }) => (
@@ -2438,14 +2228,11 @@ const ProductionPlanningPage = () => {
     const [orderDetail,     setOrderDetail]     = useState(null);
     const [loadingOrder,    setLoadingOrder]    = useState(false);
 
-    const [requirements,    setRequirements]    = useState(null);
-
     const [linking,           setLinking]           = useState({});
     const [searchQ,           setSearchQ]           = useState('');
     const [previewBomId,      setPreviewBomId]      = useState(null);
     const [calcSopId,         setCalcSopId]         = useState(null);
     const [calcKeys,          setCalcKeys]          = useState({});
-    const [substituteTrim,    setSubstituteTrim]    = useState(null);
 
     // Load sales orders + approved BOMs on mount
     useEffect(() => {
@@ -2460,7 +2247,7 @@ const ProductionPlanningPage = () => {
             planningApi.getOrderDetail(orderId),
             planningApi.getFormData(),
         ]);
-        console.log('Order detail refreshed', detailRes.data, fdRes.data);
+        console.log('Order detaildvd refreshfed', detailRes.data, fdRes.data);
         setOrderDetail(detailRes.data?.data ?? detailRes.data);
         setFormData(fdRes.data?.data ?? fdRes.data);
     }, []);
@@ -2468,7 +2255,6 @@ const ProductionPlanningPage = () => {
     const selectOrder = useCallback((orderId) => {
         if (orderId === selectedOrderId) return;
         setSelectedOrderId(orderId);
-        setRequirements(null);
         setOrderDetail(null);
         setLoadingOrder(true);
         planningApi.getOrderDetail(orderId)
@@ -2476,6 +2262,8 @@ const ProductionPlanningPage = () => {
             .catch(e  => console.error('Order detail fetch failed', e))
             .finally(() => setLoadingOrder(false));
     }, [selectedOrderId]);
+
+    console.log('Rendering with order detail', orderDetail);
 
     const handleLink = useCallback(async (sopId, bomId, ratioGroupIds) => {
         setLinking(l => ({ ...l, [sopId]: true }));
@@ -2485,7 +2273,6 @@ const ProductionPlanningPage = () => {
                 ratio_group_ids: ratioGroupIds,
             });
             await refreshOrder(selectedOrderId);
-            setRequirements(null);
         } catch (e) {
             console.error('Link BOM failed', e);
         } finally {
@@ -2498,7 +2285,6 @@ const ProductionPlanningPage = () => {
         try {
             await planningApi.unlinkBom(sopId);
             await refreshOrder(selectedOrderId);
-            setRequirements(null);
         } catch (e) {
             console.error('Unlink BOM failed', e);
         } finally {
@@ -2510,17 +2296,6 @@ const ProductionPlanningPage = () => {
         await refreshOrder(selectedOrderId);
     }, [selectedOrderId, refreshOrder]);
 
-    const handleSubstituteReserved = useCallback(async () => {
-        setSubstituteTrim(null);
-        try {
-            const res = await planningApi.getRequirements(selectedOrderId);
-            console.log('Requirements refreshed after substitution', res.data);
-            setRequirements(res.data?.data ?? res.data);
-        } catch (e) {
-            console.error('Failed to refresh requirements', e);
-        }
-    }, [selectedOrderId]);
-
     const orders         = formData?.sales_orders    || [];
     const bomsByProduct  = formData?.boms_by_product || {};
     const sops           = orderDetail?.products     || [];
@@ -2531,11 +2306,6 @@ const ProductionPlanningPage = () => {
         o.order_number?.toLowerCase().includes(searchQ.toLowerCase()) ||
         (o.customer_name || o.buyer_name || '').toLowerCase().includes(searchQ.toLowerCase())
     );
-
-    const fabricShortfalls = (requirements?.fabric_requirements || []).filter(r => r.meters_shortfall > 0).length;
-    const trimShortfalls   = (requirements?.trim_requirements  || []).filter(t =>
-        t.is_color_agnostic ? (t.shortfall || 0) > 0 : (t.color_requirements || []).some(cr => cr.shortfall > 0)
-    ).length;
 
     return (
         <>
@@ -2659,43 +2429,12 @@ const ProductionPlanningPage = () => {
                                                 calcKey={calcKeys[sop.id] || 0}
                                                 isLinking={!!linking[sop.id]}
                                                 onReadinessChange={handleReadiness}
-                                                orderInfo={orderDetail}
+                                                onTAChange={() => refreshOrder(selectedOrderId)}
                                             />
                                         ))}
                                     </div>
                                 </Section>
 
-                                {/* ── Requirements ── */}
-                                {requirements && (
-                                    <>
-                                        {(requirements.unlinked_products || []).length > 0 && (
-                                            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
-                                                <AlertTriangle size={15} className="shrink-0" />
-                                                Products excluded (no BOM): {requirements.unlinked_products.map(p => p.product_name).join(', ')}
-                                            </div>
-                                        )}
-
-                                        {/* Summary */}
-                                        <div className="grid grid-cols-3 gap-3">
-                                            <StatCard label="Fabric types" value={requirements.fabric_requirements?.length || 0} ok={true} />
-                                            <StatCard label="Fabric shortfalls" value={fabricShortfalls} ok={fabricShortfalls === 0} />
-                                            <StatCard label="Trim shortfalls"   value={trimShortfalls}   ok={trimShortfalls === 0} />
-                                        </div>
-
-                                        {/* Fabric requirements */}
-                                        <Section icon={Layers} iconCls="text-indigo-500" title="Fabric Requirements">
-                                            <FabricRequirementsSection rows={requirements.fabric_requirements} />
-                                        </Section>
-
-                                        {/* Trim requirements */}
-                                        <Section icon={Package} iconCls="text-emerald-500" title="Trim & Material Requirements">
-                                            <TrimRequirementsSection
-                                                rows={requirements.trim_requirements}
-                                                onSelectSubstitute={setSubstituteTrim}
-                                            />
-                                        </Section>
-                                    </>
-                                )}
                             </>
                         )}
                     </div>
@@ -2716,14 +2455,7 @@ const ProductionPlanningPage = () => {
                 }}
             />
         )}
-        {substituteTrim && (
-            <TrimSubstituteModal
-                trim={substituteTrim}
-                onClose={() => setSubstituteTrim(null)}
-                onReserved={handleSubstituteReserved}
-            />
-        )}
-        </>
+</>
     );
 };
 

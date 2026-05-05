@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     Plus, FileText, Loader2, X, ChevronDown, ChevronRight,
-    AlertCircle, Scissors, ArrowLeft, Check, XCircle,
+    AlertCircle, Scissors, ArrowLeft, Check, XCircle, Ruler,
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
 
@@ -211,7 +211,7 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
 
 // ─── Material Accordion ───────────────────────────────────────────────────────
 
-const MaterialCard = ({ mc, mIdx, trimItems, expanded, onToggle, onUpdate, onRemove }) => {
+const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, onUpdate, onRemove }) => {
     const trimItem = trimItems.find(t => String(t.id) === String(mc.trim_item_id));
     const uom = trimItem?.unit_of_measure;
     const upd = (field, val) => onUpdate(mIdx, field, val);
@@ -223,6 +223,19 @@ const MaterialCard = ({ mc, mIdx, trimItems, expanded, onToggle, onUpdate, onRem
             .then(res => setVariantSizes(res.data?.data ?? res.data ?? []))
             .catch(() => setVariantSizes([]));
     }, [mc.trim_item_id]);
+
+    // Sync size_consumptions whenever calculation_type or marker sizes change
+    const syncKeyRef = useRef(null);
+    useEffect(() => {
+        if (mc.calculation_type !== 'PER_SIZE') { syncKeyRef.current = null; return; }
+        const key = markerSizes.join(',');
+        if (syncKeyRef.current === key) return;
+        syncKeyRef.current = key;
+        const existingMap = Object.fromEntries(mc.size_consumptions.map(sc => [sc.size, sc]));
+        const markerRows = markerSizes.map(s => existingMap[s] ?? { _key: genKey(), size: s, quantity: '', target_variant_size: '' });
+        const extraRows  = mc.size_consumptions.filter(sc => !markerSizes.includes(sc.size));
+        onUpdate(mIdx, 'size_consumptions', [...markerRows, ...extraRows]);
+    }, [mc.calculation_type, markerSizes]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const addSize = () => upd('size_consumptions', [...mc.size_consumptions, { _key: genKey(), size: '', quantity: '', target_variant_size: '' }]);
     const removeSize = (sIdx) => upd('size_consumptions', mc.size_consumptions.filter((_, i) => i !== sIdx));
@@ -334,6 +347,18 @@ const MaterialCard = ({ mc, mIdx, trimItems, expanded, onToggle, onUpdate, onRem
                             <p className="text-[10px] font-bold text-slate-400 uppercase mb-1.5">
                                 Qty Per Size{uom ? ` (${uom})` : ''}
                             </p>
+                            {markerSizes.length > 0 && (() => {
+                                const missing = markerSizes.filter(s => {
+                                    const row = mc.size_consumptions.find(sc => sc.size === s);
+                                    return !row || row.quantity === '' || row.quantity == null;
+                                });
+                                return missing.length > 0 ? (
+                                    <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2 text-[10px] text-amber-700 font-bold">
+                                        <AlertCircle size={11} className="shrink-0" />
+                                        Qty required for: {missing.join(', ')}
+                                    </div>
+                                ) : null;
+                            })()}
                             <table className="w-full text-xs mb-2">
                                 <thead>
                                     <tr className="text-slate-400 font-bold border-b border-slate-100">
@@ -344,14 +369,23 @@ const MaterialCard = ({ mc, mIdx, trimItems, expanded, onToggle, onUpdate, onRem
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {mc.size_consumptions.map((sc, sIdx) => (
+                                    {mc.size_consumptions.map((sc, sIdx) => {
+                                        const isRequired = markerSizes.includes(sc.size);
+                                        const isEmpty    = sc.quantity === '' || sc.quantity == null;
+                                        return (
                                         <tr key={sc._key} className="border-b border-slate-50">
                                             <td className="py-1.5 pr-2">
-                                                <input type="text" value={sc.size}
-                                                    onChange={e => updateSize(sIdx, 'size', e.target.value)}
-                                                    placeholder="S"
-                                                    className="w-14 border border-slate-200 rounded px-2 py-0.5 text-xs outline-none text-center"
-                                                />
+                                                {isRequired ? (
+                                                    <span className={`inline-flex items-center justify-center w-14 px-2 py-0.5 text-xs font-bold rounded border ${isEmpty ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                                                        {sc.size}
+                                                    </span>
+                                                ) : (
+                                                    <input type="text" value={sc.size}
+                                                        onChange={e => updateSize(sIdx, 'size', e.target.value)}
+                                                        placeholder="S"
+                                                        className="w-14 border border-slate-200 rounded px-2 py-0.5 text-xs outline-none text-center"
+                                                    />
+                                                )}
                                             </td>
                                             <td className="py-1.5 px-2">
                                                 <select
@@ -369,16 +403,21 @@ const MaterialCard = ({ mc, mIdx, trimItems, expanded, onToggle, onUpdate, onRem
                                                 <input type="number" min="0" step="0.0001" value={sc.quantity}
                                                     onChange={e => updateSize(sIdx, 'quantity', e.target.value)}
                                                     placeholder="6"
-                                                    className="w-20 border border-slate-200 rounded px-2 py-0.5 text-xs outline-none text-right"
+                                                    className={`w-20 border rounded px-2 py-0.5 text-xs outline-none text-right ${isEmpty && isRequired ? 'border-amber-300 focus:ring-amber-300' : 'border-slate-200'}`}
                                                 />
                                             </td>
                                             <td className="py-1.5 text-center">
-                                                <button onClick={() => removeSize(sIdx)} className="text-slate-300 hover:text-red-400">
-                                                    <X size={11} />
-                                                </button>
+                                                {isRequired ? (
+                                                    <span className="w-5 inline-block" title="Required by marker" />
+                                                ) : (
+                                                    <button onClick={() => removeSize(sIdx)} className="text-slate-300 hover:text-red-400">
+                                                        <X size={11} />
+                                                    </button>
+                                                )}
                                             </td>
                                         </tr>
-                                    ))}
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                             <button onClick={addSize} className="text-[10px] font-bold text-violet-500 hover:text-violet-600 flex items-center gap-1">
@@ -541,9 +580,27 @@ export default function BomFormPage() {
         })),
     });
 
+    const markerSizes = useMemo(() => {
+        const sizes = new Set();
+        form.ratio_groups.forEach(rg => rg.items.forEach(it => { if (it.size) sizes.add(it.size); }));
+        return [...sizes];
+    }, [form.ratio_groups]);
+
     const handleSave = async () => {
         if (!form.product_id) { setErr('Please select a product.'); return; }
         if (!form.bom_name.trim()) { setErr('BOM name is required.'); return; }
+        for (const mc of form.material_consumptions) {
+            if (mc.calculation_type !== 'PER_SIZE') continue;
+            const missing = markerSizes.filter(s => {
+                const row = mc.size_consumptions.find(sc => sc.size === s);
+                return !row || row.quantity === '' || row.quantity == null;
+            });
+            if (missing.length > 0) {
+                const name = formMeta.trimItems.find(t => String(t.id) === String(mc.trim_item_id))?.name || 'a material';
+                setErr(`"${name}" is missing qty for sizes: ${missing.join(', ')}`);
+                return;
+            }
+        }
         setSaving(true); setErr(null);
         try {
             const payload = serialize();
@@ -597,6 +654,12 @@ export default function BomFormPage() {
                         </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                        {isEdit && (
+                            <button onClick={() => navigate(`/merchandiser/bom/${bomId}/measurement-chart`)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-violet-600 hover:text-violet-700 border border-violet-200 hover:border-violet-300 hover:bg-violet-50 rounded-lg transition-colors">
+                                <Ruler size={13} /> Measurement Chart
+                            </button>
+                        )}
                         <button onClick={() => navigate('/merchandiser/bom')}
                             className="px-4 py-1.5 text-sm font-bold text-slate-600 hover:text-slate-800 rounded-lg hover:bg-slate-100 transition-colors">
                             Cancel
@@ -686,6 +749,7 @@ export default function BomFormPage() {
                             <MaterialCard key={mc._key}
                                 mc={mc} mIdx={mIdx}
                                 trimItems={formMeta.trimItems}
+                                markerSizes={markerSizes}
                                 expanded={expandedMaterials.has(mc._key)}
                                 onToggle={() => toggleMaterial(mc._key)}
                                 onUpdate={updateMaterial}

@@ -451,7 +451,7 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
         const cf = cycleFlow[stageIndex];
         const progress = progressMap[cf.id] ?? null;
         const readyRolls = getReadyRolls(stageIndex);
-        setDetailData({ stage: cf, progress, readyRolls });
+        setDetailData({ stage: cf, progress, readyRolls, stageIndex });
     };
 
     const handleActivate = (stageIndex) => {
@@ -560,7 +560,7 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                         progress={detailData.progress}
                         readyRolls={detailData.readyRolls}
                         onClose={() => setDetailData(null)}
-                        onAssign={detailData.readyRolls.length > 0 ? () => handleActivate(cycleFlow.findIndex(cf => cf.id === detailData.stage.id)) : null}
+                        onAssign={detailData.readyRolls.length > 0 && detailData.stageIndex !== 0 ? () => handleActivate(detailData.stageIndex) : null}
                     />
                 </Modal>
             )}

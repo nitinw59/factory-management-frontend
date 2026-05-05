@@ -3,9 +3,10 @@ import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 
 const NAV = [
-    { to: '/accounts/sales/orders',        label: 'All Sales Orders'   },
-    { to: '/accounts/sales/new',           label: 'Create Order'       },
-    { to: '/accounts/purchase-requirements', label: 'Purchase Requirements' },
+    { to: '/accounts/sales/orders',          label: 'All Sales Orders'       },
+    { to: '/accounts/sales/new',             label: 'Create Order'           },
+    { to: '/accounts/purchase-requirements', label: 'Purchase Requirements'  },
+    { to: '/accounts/fabric-rolls',          label: 'Fabric Rolls'           },
 ];
 
 const AccountsLayout = () => {

@@ -99,6 +99,7 @@ import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
 import CuttingDailyReportPage from './modules/initialisation_portal/CuttingDailyReportPage';
 import InterliningManagerPage from './modules/initialisation_portal/InterliningManagerPage';
 import PlanPurchaseRequirementsPage from './modules/accounts/purchase/PlanPurchaseRequirementsPage';
+import FabricRollManagementPage from './modules/accounts/purchase/FabricIntakeForm';
 
 import MechanicsLayout from './shared/MechanicsLayout';
 import MechanicsProtectedRoute from './shared/MechanicsProtectedRoute';
@@ -121,6 +122,7 @@ import MerchandiserProtectedRoute from './shared/MerchandiserProtectedRoute';
 import MerchandiserLayout from './shared/MerchandiserLayout';
 import BomDashboardPage from './modules/merchandiser/BomDashboardPage';
 import BomFormPage from './modules/merchandiser/BomFormPage';
+import GarmentMeasurementChartPage from './modules/merchandiser/GarmentMeasurementChartPage';
 import MerchandiserPlanningPage from './modules/merchandiser/MerchandiserPlanningPage';
 
 
@@ -268,6 +270,7 @@ function App() {
             <Route path="sales/:orderId/edit" element={<CreateSalesOrder />} />
             <Route path="sales/orders" element={<SalesOrderListPage />} />
             <Route path="purchase-requirements" element={<PlanPurchaseRequirementsPage />} />
+            <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
         </Route>
 
       <Route path="/cutting-portal" element={<CuttingOperatorProtectedRoute><CuttingPortalLayout /></CuttingOperatorProtectedRoute>}>
@@ -408,6 +411,7 @@ function App() {
         <Route path="bom" element={<BomDashboardPage />} />
         <Route path="bom/new" element={<BomFormPage />} />
         <Route path="bom/:bomId/edit" element={<BomFormPage />} />
+        <Route path="bom/:bomId/measurement-chart" element={<GarmentMeasurementChartPage />} />
         <Route path="planning" element={<MerchandiserPlanningPage />} />
         <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
         <Route path="trims" element={<TrimManagementPage />} />

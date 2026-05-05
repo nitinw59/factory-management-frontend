@@ -185,11 +185,18 @@ const BomDetailModal = ({ bomId, onClose }) => {
                                                         </span>
                                                     </p>
                                                 ) : (
-                                                    <div className="flex flex-wrap gap-1.5">
+                                                    <div className="space-y-1">
                                                         {(mc.size_consumptions || []).map((sc, j) => (
-                                                            <span key={j} className="bg-violet-50 text-violet-700 border border-violet-100 rounded px-2 py-0.5 text-[10px] font-bold">
-                                                                {sc.size || '—'}: {sc.quantity}{mc.unit_of_measure ? ` ${mc.unit_of_measure}` : ''}
-                                                            </span>
+                                                            <div key={j} className="flex items-center gap-2">
+                                                                <span className="bg-violet-50 text-violet-700 border border-violet-100 rounded px-2 py-0.5 text-[10px] font-bold min-w-[52px] text-center">
+                                                                    {sc.size || '—'}: {sc.quantity}{mc.unit_of_measure ? ` ${mc.unit_of_measure}` : ''}
+                                                                </span>
+                                                                {sc.target_variant_size && (
+                                                                    <span className="text-[10px] text-slate-400 font-medium">
+                                                                        → sz <span className="font-bold text-slate-600">{sc.target_variant_size}</span>
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                         ))}
                                                     </div>
                                                 )}
