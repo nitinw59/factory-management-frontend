@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 const MerchandiserProtectedRoute = ({ children }) => {
     const { user } = useAuth();
     if (!user) return <Navigate to="/login" replace />;
-    if (user.role !== 'merchandiser' && user.role !== 'factory_admin') {
+    if (user.role !== 'merchandiser' && user.role !== 'factory_admin' && user.role !== 'cutting_manager') {
         return <Navigate to="/unauthorized" replace />;
     }
     return children;
