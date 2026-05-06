@@ -1376,7 +1376,7 @@ const UniversalWorkstationDashboard = () => {
     // ── Work log fetch ────────────────────────────────────────────────────────
     const fetchWork = useCallback(async (date) => {
         setLoadingWork(true);
-        try { const res = await universalApi.getTodayWork(date); setWorkData(res.data); }
+        try { const res = await universalApi.getTodayWork(date); console.log("Fetched work data:", res.data); setWorkData(res.data); }
         // eslint-disable-next-line react-hooks/exhaustive-deps
         catch (err) { setWorkData(null); popApiError(err.response?.data?.error || err.message || 'Failed to load work log'); }
         finally { setLoadingWork(false); }
