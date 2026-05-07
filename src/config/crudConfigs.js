@@ -26,7 +26,8 @@ export const factoryUserConfig = {
                 'cutting_manager',
                 'mechanic',
                 'dispatch_officer',
-                'merchandiser'
+                'merchandiser',
+                'purchase_manager'
                 ],
     },
   ],

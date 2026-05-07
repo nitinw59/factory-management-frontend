@@ -125,6 +125,11 @@ import BomFormPage from './modules/merchandiser/BomFormPage';
 import GarmentMeasurementChartPage from './modules/merchandiser/GarmentMeasurementChartPage';
 import MerchandiserPlanningPage from './modules/merchandiser/MerchandiserPlanningPage';
 
+import PurchaseDepartmentProtectedRoute from './shared/PurchaseDepartmentProtectedRoute';
+import PurchaseDepartmentLayout from './shared/PurchaseDepartmentLayout';
+import RequirementsPage from './modules/purchase_department/RequirementsPage';
+import OrdersPage from './modules/purchase_department/OrdersPage';
+
 
 
 
@@ -416,6 +421,13 @@ function App() {
         <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
         <Route path="trims" element={<TrimManagementPage />} />
         <Route path="sales-orders" element={<SalesOrderListPage />} />
+    </Route>
+
+    {/* Purchase Department Portal */}
+    <Route path="/purchase-department" element={<PurchaseDepartmentProtectedRoute><PurchaseDepartmentLayout /></PurchaseDepartmentProtectedRoute>}>
+        <Route index element={<Navigate to="requirements" replace />} />
+        <Route path="requirements" element={<RequirementsPage />} />
+        <Route path="orders" element={<OrdersPage />} />
     </Route>
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}

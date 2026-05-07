@@ -3,12 +3,13 @@ import {
     Loader2, Link2, ChevronRight, ChevronLeft,
     AlertTriangle, CheckCircle2, Search,
     Calculator, ShoppingBag, X, Eye, Plus, Pencil,
-    ShieldCheck, ShieldOff,
+    ShieldCheck, ShieldOff, RotateCw,
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { planningApi } from '../../api/planningApi';
 import { bomApi } from '../../api/bomApi';
 import { taApi } from '../../api/taApi';
-import api from '../../utils/api';
+import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { stdSize } from '../../utils/sizeUtils';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -657,20 +658,16 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
         const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 7); return d;
     });
     const [selId,      setSelId]      = useState(null);
-    const [actionMode, setActionMode] = useState(null);  // null | 'po'
+    const [actionMode, setActionMode] = useState(null);
     const [addModal,   setAddModal]   = useState(false);
     const [editItem,   setEditItem]   = useState(null);
     const [busy,       setBusy]       = useState(false);
     const [err,        setErr]        = useState(null);
-    const [poForm,     setPoForm]     = useState({
-        turnaround: 7, order_date: new Date().toISOString().slice(0, 10),
-        quantity: '', unit: '', notes: '', supplier_id: '',
-    });
+    const [reqForm,    setReqForm]    = useState({ urgency: 'normal', notes: '' });
     const [localReqs,    setLocalReqs]    = useState(sopReqs);
     const [loadingLocal, setLoadingLocal] = useState(!sopReqs);
     const [search,       setSearch]       = useState('');
     const [reserveItem,  setReserveItem]  = useState(null);
-    const [suppliers,    setSuppliers]    = useState([]);
 
     const refetchLocal = useCallback(() => {
         planningApi.getRequirements(sop.id)
@@ -686,14 +683,6 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
             .finally(() => setLoadingLocal(false));
     }, [sop.id]);
 
-    useEffect(() => {
-        api.get('/shared/factory_users')
-            .then(r => {
-                const users = r.data?.data ?? r.data ?? [];
-                setSuppliers(users.filter(u => u.role === 'supplier'));
-            })
-            .catch(() => {});
-    }, []);
     console.log('Local reqs:', localReqs);
     const today = new Date(); today.setHours(0, 0, 0, 0);
 
@@ -704,7 +693,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
     const fabReqs  = localReqs?.fabric_requirements || [];
     const trimReqs = localReqs?.trim_requirements   || [];
     const taItems  = sop.timeline || [];
-
+    console.log('TA items:', taItems);
     const reqTaIds = new Set([
         ...fabReqs.filter(r => r.ta_id).map(r => r.ta_id),
         ...trimReqs.filter(r => r.ta_id).map(r => r.ta_id),
@@ -730,6 +719,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
             available_rolls:       r.stock_suggestion?.available_rolls || [],
             inStock:               (r.stock_suggestion?.total_meters_available || 0) >= (r.meters_required || 0),
             calculation_breakdown: r.calculation_breakdown || null,
+            procurement_events:    r.procurement_events    || [],
         })),
         ...trimReqs.filter(r => r.ta_id).map(r => ({
             id:                    r.ta_id,
@@ -751,6 +741,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
             quantity_required:     r.quantity_required || 0,
             quantity_reserved:     r.quantity_reserved || 0,
             calculation_breakdown: r.calculation_breakdown || null,
+            procurement_events:    r.procurement_events    || [],
         })),
         ...taItems
             .filter(it => !reqTaIds.has(it.id) && it.production_plan_item_id == null)
@@ -788,14 +779,6 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
         .map(g => ({ ...g, items: filteredItems.filter(g.filter) }))
         .filter(g => g.items.length > 0);
 
-    const arrivalDate = (() => {
-        if (!poForm.order_date) return '';
-        const d = new Date(poForm.order_date);
-        d.setDate(d.getDate() + parseInt(poForm.turnaround || 0));
-        return d.toISOString().slice(0, 10);
-    })();
-
-    const setPO = (k, v) => setPoForm(p => ({ ...p, [k]: v }));
 
     const prevWindow = () => setWeekOf(p => { const n = new Date(p); n.setDate(n.getDate() - 14); return n; });
     const nextWindow = () => setWeekOf(p => { const n = new Date(p); n.setDate(n.getDate() + 14); return n; });
@@ -825,6 +808,13 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
         delayed:       { bg: 'bg-red-400',     label: 'Delayed'     },
     };
 
+    const EVT_ST = {
+        pending:      { bg: 'bg-amber-400',   ring: 'ring-amber-200',   label: 'Pending'    },
+        'in-transit': { bg: 'bg-blue-400',    ring: 'ring-blue-200',    label: 'In Transit' },
+        received:     { bg: 'bg-emerald-500', ring: 'ring-emerald-200', label: 'Received'   },
+        delayed:      { bg: 'bg-red-500',     ring: 'ring-red-200',     label: 'Delayed'    },
+    };
+
     const counts = { pending: 0, 'in-progress': 0, completed: 0, delayed: 0 };
     allItems.forEach(it => { if (counts[it.status] !== undefined) counts[it.status]++; });
 
@@ -837,32 +827,31 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
         finally { setBusy(false); }
     };
 
-    const handleLogPO = async (item) => {
-        if (!poForm.order_date) { setErr('Order date is required'); return; }
-        if (!arrivalDate) { setErr('Turnaround days must be set to calculate expected arrival date'); return; }
+    const handleRaiseRequirement = async (item) => {
         setBusy(true); setErr(null);
         try {
-            await taApi.updateTimelineItem(item.id, {
-                status: 'in-progress', start_date: poForm.order_date || null,
-                end_date: arrivalDate || null, notes: poForm.notes || null,
-            });
-            await taApi.createProcurementEvent({
-                item_name:              item.title,
-                type:                   item.type === 'fabric' ? 'fabric' : item.type === 'trim' ? 'trim' : 'other',
-                order_date:             poForm.order_date || null,
-                expected_date:          arrivalDate,
-                status:                 'pending',
-                supplier_id:            poForm.supplier_id ? parseInt(poForm.supplier_id) : null,
-                priority:               item.priority || 'medium',
-                timeline_item_id:       item.id,
-                purchase_order_id:      null,
-                sales_order_product_id: sop.id,
-                quantity:               poForm.quantity ? parseFloat(poForm.quantity) : null,
-                unit:                   poForm.unit || null,
-                notes:                  poForm.notes || null,
-            });
+            const payload = {
+                sales_order_product_id:   sop.id,
+                type:                     item.type === 'fabric' ? 'fabric' : item.type === 'trim' ? 'trim' : 'other',
+                urgency:                  reqForm.urgency || 'normal',
+                notes:                    reqForm.notes || null,
+                plan_fabric_requirement_id: item.isReq ? item.req_id : null,
+            };
+            const rawFab  = fabReqs.find(r => r.id === item.req_id);
+            const rawTrim = trimReqs.find(r => r.id === item.req_id);
+            if (item.type === 'fabric' && rawFab) {
+                payload.meters_required  = rawFab.meters_required;
+                payload.fabric_type_id   = rawFab.fabric_type_id;
+                payload.fabric_color_id  = rawFab.fabric_color_id;
+            } else if (item.type === 'trim' && rawTrim) {
+                payload.quantity_required      = rawTrim.quantity_required;
+                payload.trim_item_id           = rawTrim.trim_item_id;
+                payload.trim_item_variant_id   = rawTrim.trim_item_variant_id;
+            }
+            await purchaseDeptApi.raiseRequirement(payload);
+            await taApi.updateTimelineItem(item.id, { status: 'in-progress', notes: reqForm.notes || null });
             refetchLocal(); onRefresh(); setActionMode(null);
-        } catch(e) { setErr(e?.response?.data?.error || 'Failed to log PO'); }
+        } catch(e) { setErr(e?.response?.data?.error || 'Failed to raise requirement'); }
         finally { setBusy(false); }
     };
 
@@ -1138,9 +1127,6 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                 const bStyle  = barStyle(item);
                                                 const isSel   = selId === item.id;
                                                 const overdue = isOverdue(item);
-                                                const hasPO   = !!(item.start_date);
-
-
                                                 return (
                                                     <div key={item.id}>
                                                         <div
@@ -1172,27 +1158,40 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                     <div className="absolute top-0 bottom-0 w-px bg-violet-400/60 z-10 pointer-events-none"
                                                                         style={{ left: `${todayPct}%` }} />
                                                                 )}
+                                                                {(item.procurement_events || []).map(evt => {
+                                                                    const startStr = evt.order_date;
+                                                                    const endStr   = evt.actual_date || evt.expected_date;
+                                                                    if (!startStr && !endStr) return null;
+                                                                    const s    = new Date(startStr || endStr);
+                                                                    const eRaw = new Date(endStr   || startStr);
+                                                                    const eInc = new Date(eRaw); eInc.setDate(eInc.getDate() + 1);
+                                                                    const left  = Math.max(0,   (s    - tlStart) / tlSpan) * 100;
+                                                                    const right = Math.min(100, (eInc - tlStart) / tlSpan) * 100;
+                                                                    if (right <= 0 || left >= 100) return null;
+                                                                    const est = EVT_ST[evt.status] || EVT_ST.pending;
+                                                                    const tip = [
+                                                                        evt.po_code || (evt.purchase_order_id ? `PO #${evt.purchase_order_id}` : 'PO'),
+                                                                        evt.supplier_name,
+                                                                        est.label,
+                                                                        startStr ? `Ordered ${fmtD(startStr)}` : null,
+                                                                        endStr   ? (evt.actual_date ? `Received ${fmtD(endStr)}` : `Expected ${fmtD(endStr)}`) : null,
+                                                                        evt.quantity ? `${evt.quantity}${evt.unit ? ' ' + evt.unit : ''}` : null,
+                                                                    ].filter(Boolean).join(' · ');
+                                                                    return (
+                                                                        <div
+                                                                            key={evt.id}
+                                                                            title={tip}
+                                                                            className={`absolute top-0.5 h-1.5 rounded-full ${est.bg} z-20 cursor-pointer hover:h-2 transition-all`}
+                                                                            style={{ left: `${left}%`, width: `${Math.max(0.5, right - left)}%` }}
+                                                                            onClick={e => { e.stopPropagation(); setSelId(item.id); }}
+                                                                        />
+                                                                    );
+                                                                })}
                                                                 {bStyle ? (
                                                                     <div
                                                                         className={`absolute top-1.5 bottom-1.5 rounded-full ${overdue ? 'bg-red-500' : st.bg} opacity-80 cursor-pointer hover:opacity-100 transition-opacity`}
                                                                         style={bStyle}
-                                                                        title="Click to edit purchase order"
-                                                                        onClick={e => {
-                                                                            e.stopPropagation();
-                                                                            setSelId(item.id);
-                                                                            const ta = item.start_date && item.end_date
-                                                                                ? Math.round((new Date(item.end_date) - new Date(item.start_date)) / 86400000)
-                                                                                : 7;
-                                                                            setPoForm({
-                                                                                turnaround: ta,
-                                                                                order_date: (item.start_date || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
-                                                                                quantity: item.type === 'fabric' ? String(item.meters_required || '') : String(item.quantity_required || ''),
-                                                                                unit: item.unit || '',
-                                                                                notes: item.notes || '',
-                                                                            });
-                                                                            setActionMode('po');
-                                                                            setErr(null);
-                                                                        }}
+                                                                        onClick={e => { e.stopPropagation(); setSelId(item.id); }}
                                                                     />
                                                                 ) : (
                                                                     <div className="absolute inset-0 flex items-center px-2 pointer-events-none">
@@ -1305,7 +1304,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                 )}
 
                                                                 {/* Action buttons */}
-                                                                {actionMode !== 'po' && (
+                                                                {actionMode !== 'req' && (
                                                                     <div className="flex items-center gap-2 flex-wrap">
                                                                         {item.status !== 'completed' ? (
                                                                             <>
@@ -1315,24 +1314,22 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                                     className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors">
                                                                                     <CheckCircle2 size={13} /> Mark Available
                                                                                 </button>
-                                                                                <button
-                                                                                    onClick={() => {
-                                                                                        const ta = hasPO && item.end_date
-                                                                                            ? Math.round((new Date(item.end_date) - new Date(item.start_date)) / 86400000)
-                                                                                            : 7;
-                                                                                        setPoForm({
-                                                                                            turnaround: ta,
-                                                                                            order_date: (item.start_date || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
-                                                                                            quantity: item.type === 'fabric' ? String(item.meters_required || '') : String(item.quantity_required || ''),
-                                                                                            unit: item.unit || '',
-                                                                                            notes: item.notes || '',
-                                                                                        });
-                                                                                        setActionMode('po');
-                                                                                        setErr(null);
-                                                                                    }}
-                                                                                    className="flex items-center gap-1.5 text-xs font-bold text-white bg-blue-500 hover:bg-blue-600 px-3 py-1.5 rounded-lg transition-colors">
-                                                                                    <ShoppingBag size={13} /> {hasPO ? 'Edit Purchase Order' : 'Log Purchase Order'}
-                                                                                </button>
+                                                                                {item.isReq && item.status !== 'in-progress' && (
+                                                                                    <button
+                                                                                        onClick={() => {
+                                                                                            setReqForm({ urgency: 'normal', notes: item.notes || '' });
+                                                                                            setActionMode('req');
+                                                                                            setErr(null);
+                                                                                        }}
+                                                                                        className="flex items-center gap-1.5 text-xs font-bold text-white bg-blue-500 hover:bg-blue-600 px-3 py-1.5 rounded-lg transition-colors">
+                                                                                        <ShoppingBag size={13} /> Raise Requirement
+                                                                                    </button>
+                                                                                )}
+                                                                                {item.status === 'in-progress' && (
+                                                                                    <span className="text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-200 px-2 py-1 rounded-lg">
+                                                                                        Requirement raised
+                                                                                    </span>
+                                                                                )}
                                                                                 {item.status !== 'delayed' && (
                                                                                     <button onClick={async () => {
                                                                                             try { await taApi.updateTimelineItem(item.id, { status: 'delayed' }); refetchLocal(); onRefresh(); }
@@ -1351,52 +1348,34 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                     </div>
                                                                 )}
 
-                                                                {/* Purchase Order form */}
-                                                                {actionMode === 'po' && (
+                                                                {/* Raise Requirement form */}
+                                                                {actionMode === 'req' && (
                                                                     <div className="space-y-3 pt-2 border-t border-slate-200">
                                                                         <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                                                                            {hasPO ? 'Edit Purchase Order' : 'New Purchase Order'}
+                                                                            Raise Purchase Requirement
                                                                         </p>
-                                                                        <div className="grid grid-cols-2 gap-3">
+                                                                        <div className="space-y-2.5">
                                                                             <div>
-                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Order Date</label>
-                                                                                <input type="date" value={poForm.order_date} onChange={e => setPO('order_date', e.target.value)}
-                                                                                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400" />
-                                                                            </div>
-                                                                            <div>
-                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Turnaround (days)</label>
-                                                                                <input type="number" min={1} value={poForm.turnaround} onChange={e => setPO('turnaround', e.target.value)}
-                                                                                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400" />
-                                                                            </div>
-                                                                            <div>
-                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Expected Arrival</label>
-                                                                                <div className="text-xs text-slate-700 font-bold px-2.5 py-1.5 bg-slate-50 border border-slate-100 rounded-lg">
-                                                                                    {arrivalDate ? fmtD(arrivalDate) : '—'}
+                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Urgency</label>
+                                                                                <div className="flex gap-2">
+                                                                                    {['urgent', 'normal', 'low'].map(u => (
+                                                                                        <button key={u}
+                                                                                            onClick={() => setReqForm(p => ({ ...p, urgency: u }))}
+                                                                                            className={`text-[10px] font-bold px-3 py-1.5 rounded-lg border transition-colors ${reqForm.urgency === u
+                                                                                                ? u === 'urgent' ? 'bg-red-500 text-white border-red-500'
+                                                                                                    : u === 'normal' ? 'bg-blue-500 text-white border-blue-500'
+                                                                                                    : 'bg-slate-500 text-white border-slate-500'
+                                                                                                : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+                                                                                            {u.charAt(0).toUpperCase() + u.slice(1)}
+                                                                                        </button>
+                                                                                    ))}
                                                                                 </div>
                                                                             </div>
                                                                             <div>
-                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Quantity</label>
-                                                                                <input type="number" min={0} step="any" placeholder="0" value={poForm.quantity} onChange={e => setPO('quantity', e.target.value)}
-                                                                                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400" />
-                                                                            </div>
-                                                                            <div className="col-span-2">
-                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Unit</label>
-                                                                                <input type="text" placeholder="m / pcs / kg…" value={poForm.unit} onChange={e => setPO('unit', e.target.value)}
-                                                                                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400" />
-                                                                            </div>
-                                                                            <div className="col-span-2">
-                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Supplier</label>
-                                                                                <select value={poForm.supplier_id} onChange={e => setPO('supplier_id', e.target.value)}
-                                                                                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400 bg-white">
-                                                                                    <option value="">— No supplier —</option>
-                                                                                    {suppliers.map(s => (
-                                                                                        <option key={s.id} value={s.id}>{s.name || s.username || `User #${s.id}`}</option>
-                                                                                    ))}
-                                                                                </select>
-                                                                            </div>
-                                                                            <div className="col-span-2">
-                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Notes</label>
-                                                                                <textarea rows={2} placeholder="Optional notes…" value={poForm.notes} onChange={e => setPO('notes', e.target.value)}
+                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Notes (optional)</label>
+                                                                                <textarea rows={2} placeholder="Additional context for purchase dept…"
+                                                                                    value={reqForm.notes}
+                                                                                    onChange={e => setReqForm(p => ({ ...p, notes: e.target.value }))}
                                                                                     className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400 resize-none" />
                                                                             </div>
                                                                         </div>
@@ -1405,10 +1384,10 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                                 className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
                                                                                 Cancel
                                                                             </button>
-                                                                            <button onClick={() => handleLogPO(item)} disabled={busy}
+                                                                            <button onClick={() => handleRaiseRequirement(item)} disabled={busy}
                                                                                 className="flex items-center gap-1.5 text-xs font-bold text-white bg-blue-500 hover:bg-blue-600 disabled:opacity-40 px-4 py-1.5 rounded-lg transition-colors">
                                                                                 {busy && <Loader2 size={12} className="animate-spin" />}
-                                                                                {hasPO ? 'Update Purchase Order' : 'Save Purchase Order'}
+                                                                                Send to Purchase Dept
                                                                             </button>
                                                                         </div>
                                                                     </div>
@@ -1458,7 +1437,189 @@ const READINESS_CFG = {
     force_ready:          { label: 'Force Ready',  cls: 'bg-violet-50 text-violet-700 border-violet-200',  icon: ShieldCheck },
 };
 
-const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCalculate, calcKey = 0, onReadinessChange, onTAChange }) => {
+const RecalculateConfirmModal = ({ preview, sopName, onClose, onConfirm, busy, err }) => {
+    const fabReqs      = preview?.fabric_requirements || [];
+    const trimReqs     = preview?.trim_requirements   || [];
+    const reservations = preview?.reservations        || [];
+    const purchReqs    = preview?.purchase_requests   || [];
+    const purchOrders  = preview?.purchase_orders     || [];
+    const summary      = preview?.summary             || {};
+
+    const fabricCount      = summary.fabric_count           ?? fabReqs.length;
+    const trimCount        = summary.trim_count             ?? trimReqs.length;
+    const reservationCount = summary.reservation_count      ?? reservations.length;
+    const prCount          = summary.purchase_request_count ?? purchReqs.length;
+    const poCount          = summary.purchase_order_count   ?? purchOrders.length;
+    const totalMeters      = summary.total_meters
+        ?? fabReqs.reduce((s, r) => s + Number(r.meters_required ?? r.meters ?? 0), 0);
+    const totalQty         = summary.total_quantity
+        ?? trimReqs.reduce((s, r) => s + Number(r.quantity_required ?? r.quantity ?? 0), 0);
+
+    const fabLabel  = (r) => `${r.fabric_type_name || r.type || 'Fabric'}${(r.color_name || r.color) ? ' · ' + (r.color_name || r.color) : ''}`;
+    const trimLabel = (r) => `${r.trim_item_name  || r.item || 'Trim'}${(r.color_name || r.color) ? ' · ' + (r.color_name || r.color) : ''}`;
+    const poStatusCls = (s) =>
+        s === 'received'   ? 'bg-emerald-100 text-emerald-700' :
+        s === 'in-transit' ? 'bg-blue-100 text-blue-700' :
+        s === 'delayed'    ? 'bg-red-100 text-red-700' :
+                             'bg-amber-100 text-amber-700';
+
+    const Tile = ({ label, value, sub }) => (
+        <div className="bg-slate-50 border border-slate-100 rounded-lg p-2.5 text-center">
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{label}</p>
+            <p className="text-base font-extrabold text-slate-800 leading-none mt-1">{value}</p>
+            {sub && <p className="text-[9px] text-slate-400 mt-0.5">{sub}</p>}
+        </div>
+    );
+
+    const SectionBlock = ({ title, count, children }) => (
+        <div>
+            <div className="flex items-center justify-between mb-1 px-1">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{title}</p>
+                <span className="text-[10px] font-bold text-slate-300">{count}</span>
+            </div>
+            <ul className="rounded-lg border border-slate-100 divide-y divide-slate-100">{children}</ul>
+        </div>
+    );
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={!busy ? onClose : undefined}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
+                    <div>
+                        <p className="text-[10px] font-bold text-red-500 uppercase tracking-wider mb-0.5">
+                            Destructive — recalculation will delete the items below
+                        </p>
+                        <h2 className="font-extrabold text-slate-800 text-base">Recalculate Requirements?</h2>
+                        {sopName && <p className="text-xs text-slate-500 mt-0.5">{sopName}</p>}
+                    </div>
+                    {!busy && (
+                        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 mt-0.5">
+                            <X size={18} />
+                        </button>
+                    )}
+                </div>
+
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                    <div className="grid grid-cols-4 gap-2">
+                        <Tile label="Fabric reqs"  value={fabricCount}      sub={`${Number(totalMeters).toFixed(1)} m`} />
+                        <Tile label="Trim reqs"    value={trimCount}        sub={`${Number(totalQty).toLocaleString()} pcs`} />
+                        <Tile label="Reservations" value={reservationCount} />
+                        <Tile label="PR / PO"      value={`${prCount} / ${poCount}`} />
+                    </div>
+
+                    {fabReqs.length > 0 && (
+                        <SectionBlock title="Fabric Requirements" count={fabReqs.length}>
+                            {fabReqs.map((r, i) => (
+                                <li key={r.id ?? `f-${i}`} className="flex items-center justify-between text-xs py-1.5 px-3">
+                                    <span className="truncate">{fabLabel(r)}</span>
+                                    <span className="font-bold text-slate-700 shrink-0 ml-2">
+                                        {Number(r.meters_required ?? r.meters ?? 0).toFixed(1)} m
+                                    </span>
+                                </li>
+                            ))}
+                        </SectionBlock>
+                    )}
+
+                    {trimReqs.length > 0 && (
+                        <SectionBlock title="Trim Requirements" count={trimReqs.length}>
+                            {trimReqs.map((r, i) => (
+                                <li key={r.id ?? `t-${i}`} className="flex items-center justify-between text-xs py-1.5 px-3">
+                                    <span className="truncate">{trimLabel(r)}</span>
+                                    <span className="font-bold text-slate-700 shrink-0 ml-2">
+                                        {Number(r.quantity_required ?? r.quantity ?? 0).toLocaleString()} {r.unit_of_measure ?? r.unit ?? 'pcs'}
+                                    </span>
+                                </li>
+                            ))}
+                        </SectionBlock>
+                    )}
+
+                    {reservations.length > 0 && (
+                        <SectionBlock title="Reservations" count={reservations.length}>
+                            {reservations.map((r, i) => {
+                                const isFabric = (r.type || '').toLowerCase() === 'fabric'
+                                              || r.meters_reserved != null
+                                              || r.meters != null;
+                                const label = isFabric ? fabLabel(r) : trimLabel(r);
+                                const amount = isFabric
+                                    ? `${Number(r.meters_reserved ?? r.reserved ?? r.meters ?? 0).toFixed(1)} m reserved`
+                                    : `${Number(r.quantity_reserved ?? r.reserved ?? r.quantity ?? 0).toLocaleString()} ${r.unit_of_measure ?? r.unit ?? 'pcs'} reserved`;
+                                return (
+                                    <li key={r.id ?? `rs-${i}`} className="flex items-center justify-between text-xs py-1.5 px-3 bg-emerald-50/40">
+                                        <span className="truncate">{label}</span>
+                                        <span className="font-bold text-emerald-700 shrink-0 ml-2">{amount}</span>
+                                    </li>
+                                );
+                            })}
+                        </SectionBlock>
+                    )}
+
+                    {purchReqs.length > 0 && (
+                        <SectionBlock title="Purchase Requests (not on PO)" count={purchReqs.length}>
+                            {purchReqs.map((r, i) => {
+                                const isFabric = (r.type || '').toLowerCase() === 'fabric';
+                                const label = isFabric ? fabLabel(r) : trimLabel(r);
+                                return (
+                                    <li key={r.id ?? `pr-${i}`} className="flex items-center justify-between text-xs py-1.5 px-3">
+                                        <span className="truncate">{label}</span>
+                                        <span className="font-bold text-amber-700 shrink-0 ml-2">
+                                            {Number(r.quantity ?? r.meters ?? 0).toLocaleString()} {r.unit ?? (isFabric ? 'm' : 'pcs')}
+                                        </span>
+                                    </li>
+                                );
+                            })}
+                        </SectionBlock>
+                    )}
+
+                    {purchOrders.length > 0 && (
+                        <SectionBlock title="Purchase Orders" count={purchOrders.length}>
+                            {purchOrders.map((r, i) => {
+                                const isFabric = (r.type || '').toLowerCase() === 'fabric';
+                                const label = isFabric ? fabLabel(r) : trimLabel(r);
+                                const status = r.po_status ?? r.status ?? 'pending';
+                                return (
+                                    <li key={r.id ?? `po-${i}`} className="flex items-center justify-between text-xs py-1.5 px-3 gap-2">
+                                        <span className="truncate flex-1 min-w-0">
+                                            <span className="font-semibold">{r.po_code || (r.purchase_order_id ? `PO #${r.purchase_order_id}` : 'PO')}</span>
+                                            {r.supplier_name ? ` · ${r.supplier_name}` : ''}
+                                            <span className="text-slate-400"> · {label}</span>
+                                            {(r.quantity != null || r.meters != null) && (
+                                                <span className="text-slate-500"> · {Number(r.quantity ?? r.meters ?? 0).toLocaleString()} {r.unit ?? (isFabric ? 'm' : 'pcs')}</span>
+                                            )}
+                                        </span>
+                                        <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full shrink-0 ${poStatusCls(status)}`}>
+                                            {status}
+                                        </span>
+                                    </li>
+                                );
+                            })}
+                        </SectionBlock>
+                    )}
+
+                    {fabReqs.length === 0 && trimReqs.length === 0 && reservations.length === 0 && purchReqs.length === 0 && purchOrders.length === 0 && (
+                        <p className="text-center text-sm text-slate-400 italic py-6">No existing data — recalculation will compute from scratch.</p>
+                    )}
+
+                    {err && <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{err}</p>}
+                </div>
+
+                <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-end gap-3">
+                    <button onClick={onClose} disabled={busy}
+                        className="text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40">
+                        Cancel
+                    </button>
+                    <button onClick={onConfirm} disabled={busy}
+                        className="flex items-center gap-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 px-5 py-2.5 rounded-xl transition-colors shadow-sm">
+                        {busy ? <Loader2 size={15} className="animate-spin" /> : <RotateCw size={15} />}
+                        Confirm Recalculate
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onReadinessChange, onTAChange }) => {
+    const { user } = useAuth();
     const [showPicker,       setShowPicker]       = useState(false);
     const [pickedBomId,      setPickedBomId]      = useState('');
     const [selectedRgIdxs,   setSelectedRgIdxs]   = useState(new Set());
@@ -1472,6 +1633,12 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCa
     const [loadingReqs,       setLoadingReqs]       = useState(false);
     // Production tracking modal
     const [showTrackingModal, setShowTrackingModal] = useState(false);
+    // Recalculate flow
+    const [showRecalcConfirm, setShowRecalcConfirm] = useState(false);
+    const [recalcing,         setRecalcing]         = useState(false);
+    const [recalcErr,         setRecalcErr]         = useState(null);
+    const [preview,           setPreview]           = useState(null);
+    const [refreshTick,       setRefreshTick]       = useState(0);
 
     useEffect(() => {
         if (!sop.bom_id) return;
@@ -1480,7 +1647,46 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCa
         .then(r => setSopReqs(r.data?.data ?? r.data))
         .catch(() => setSopReqs(null))
         .finally(() => setLoadingReqs(false));
-    }, [sop.bom_id, sop.id, calcKey]);
+    }, [sop.bom_id, sop.id, refreshTick]);
+
+    const doRecalculate = async () => {
+        console.log('Starting recalculation for SOP', sop.id);
+        setRecalcing(true);
+        setRecalcErr(null);
+        try {
+            await planningApi.calculateRequirements(sop.id);
+            setShowRecalcConfirm(false);
+            setPreview(null);
+            setRefreshTick(t => t + 1);
+            if (onTAChange) onTAChange();
+        } catch (e) {
+            setRecalcErr(e?.response?.data?.error || 'Recalculation failed');
+        } finally {
+            setRecalcing(false);
+        }
+    };
+
+    const handleRecalcClick = async () => {
+        setRecalcErr(null);
+        setRecalcing(true);
+        try {
+            const res  = await planningApi.getRecalculationPreview(sop.id);
+            console.log("recalculfationn preview", res);
+            const data = res.data?.data ?? res.data;
+            if (!data?.has_existing_data) {
+                await planningApi.calculateRequirements(sop.id);
+                setRefreshTick(t => t + 1);
+                if (onTAChange) onTAChange();
+            } else {
+                setPreview(data);
+                setShowRecalcConfirm(true);
+            }
+        } catch (e) {
+            setRecalcErr(e?.response?.data?.error || 'Recalculation preview failed');
+        } finally {
+            setRecalcing(false);
+        }
+    };
 
     const linkedBomDetail = bomOptions.find(b => b.id === sop.bom_id);
     const totalQty        = (sop.colors || []).reduce((s, c) => s + (c.quantity || c.total_quantity || 0), 0);
@@ -1735,14 +1941,20 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCa
                                     <Loader2 size={10} className="animate-spin" /> Loading requirements…
                                 </span>
                             )}
-                            <button
-                                onClick={() => onCalculate(sop.id)}
-                                className="ml-auto flex items-center gap-1.5 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 px-3 py-1.5 rounded-lg transition-colors"
-                            >
-                                <Calculator size={12} />
-                                {sopReqs ? 'Recalculate' : 'Calculate Requirements'}
-                            </button>
+                            {user?.role === 'merchandiser' && (
+                                <button
+                                    onClick={handleRecalcClick}
+                                    disabled={recalcing}
+                                    className="ml-auto flex items-center gap-1.5 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors"
+                                >
+                                    {recalcing ? <Loader2 size={12} className="animate-spin" /> : <Calculator size={12} />}
+                                    {sopReqs ? 'Recalculate' : 'Calculate Requirements'}
+                                </button>
+                            )}
                         </div>
+                        {recalcErr && !showRecalcConfirm && (
+                            <p className="text-[10px] text-red-500 mt-1 text-right">{recalcErr}</p>
+                        )}
                     </>
                 ) : (
                     !showPicker ? (
@@ -2088,202 +2300,21 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onCa
                     onRefresh={onTAChange}
                 />
             )}
-        </div>
-    );
-};
 
-// ─── QUANTITY SUGGESTION MODAL ───────────────────────────────────────────────
-
-const QuantitySuggestionModal = ({ linkedSops, onClose, onDone }) => {
-    const [suggestions, setSuggestions] = useState(null);
-    const [loading,     setLoading]     = useState(true);
-    const [error,       setError]       = useState(null);
-    const [choices,     setChoices]     = useState({});  // key: `${sopId}_${colorId}` → 'lower'|'upper'|'exact'
-    const [submitting,  setSubmitting]  = useState(false);
-
-    useEffect(() => {
-        Promise.all(
-            linkedSops.map(sop =>
-                planningApi.getSuggestions(sop.id)
-                    .then(r => {
-                        const raw = r.data?.data ?? r.data;
-                        return {
-                            sopId:    sop.id,
-                            sopName:  sop.product_name,
-                            ratioSum: raw?.ratio_sum ?? null,
-                            colors:   raw?.suggestions || [],
-                        };
-                    })
-            )
-        ).then(results => {
-            setSuggestions(results);
-            const init = {};
-            results.forEach(({ sopId, colors }) => {
-                colors.forEach(c => {
-                    init[`${sopId}_${c.fabric_color_id}`] = c.exact ? 'exact' : 'lower';
-                });
-            });
-            setChoices(init);
-        }).catch(e => setError(e?.response?.data?.error || 'Failed to load suggestions'))
-          .finally(() => setLoading(false));
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-    const pick = (sopId, colorId, opt) =>
-        setChoices(p => ({ ...p, [`${sopId}_${colorId}`]: opt }));
-
-    const handleConfirm = async () => {
-        setSubmitting(true);
-        setError(null);
-        try {
-            await Promise.all(
-                suggestions.map(async ({ sopId, colors }) => {
-                    const quantities = colors.map(c => {
-                        const opt    = choices[`${sopId}_${c.fabric_color_id}`] || 'lower';
-                        const chosen = (opt === 'exact' ? c.lower : c[opt]) ?? c.lower ?? c.upper;
-                        return {
-                            fabric_color_id:    c.fabric_color_id,
-                            selected_option:    opt,
-                            finalized_quantity: chosen?.total_pieces ?? c.ordered_quantity,
-                            marker_runs:        chosen?.runs ?? null,
-                        };
-                    });
-                    await planningApi.finalizeQuantities(sopId, { quantities });
-                    await planningApi.calculateRequirements(sopId);
-                })
-            );
-            onDone();
-        } catch (e) {
-            setError(e?.response?.data?.error || 'Calculation failed');
-            setSubmitting(false);
-        }
-    };
-
-    const totalSelections  = suggestions?.reduce((s, g) => s + g.colors.length, 0) ?? 0;
-    const madeSelections   = Object.keys(choices).length;
-    const allChosen        = madeSelections >= totalSelections && totalSelections > 0;
-
-    return (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={!submitting ? onClose : undefined}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
-                {/* Header */}
-                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
-                    <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Step 1 of 2 — Confirm Quantities</p>
-                        <h2 className="font-extrabold text-slate-800 text-base">Choose Nearest Marker Run</h2>
-                        <p className="text-xs text-slate-400 mt-0.5">Select lower or upper run for each color, then confirm to calculate requirements.</p>
-                    </div>
-                    {!submitting && <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 mt-0.5"><X size={18} /></button>}
-                </div>
-
-                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-                    {loading && <Spinner />}
-                    {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>}
-
-                    {suggestions?.map(({ sopId, sopName, ratioSum, colors }) => (
-                        <div key={sopId} className="border border-slate-200 rounded-xl overflow-hidden">
-                            {/* SOP header */}
-                            <div className="bg-slate-50 px-4 py-3 border-b border-slate-100">
-                                <p className="font-bold text-slate-800 text-sm">{sopName}</p>
-                                <p className="text-[10px] text-slate-400 mt-0.5">
-                                    {colors.length} color{colors.length !== 1 ? 's' : ''}
-                                    {ratioSum != null && <> · ratio sum: {ratioSum} pcs/cycle</>}
-                                </p>
-                            </div>
-
-                            {/* Per-color lower / upper / exact choice */}
-                            <div className="p-4 space-y-3">
-                                {colors.map(c => {
-                                    const key    = `${sopId}_${c.fabric_color_id}`;
-                                    const chosen = choices[key] || 'lower';
-                                    return (
-                                        <div key={c.fabric_color_id} className="rounded-xl border border-slate-200 overflow-hidden">
-                                            <div className="flex items-center gap-2.5 px-3 py-2.5 bg-slate-50 border-b border-slate-100">
-                                                <span className="font-bold text-slate-800 text-sm">{c.color_name}</span>
-                                                {c.color_number && (
-                                                    <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{c.color_number}</span>
-                                                )}
-                                                <span className="ml-auto text-[10px] text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded font-medium">
-                                                    Ordered: {(c.ordered_quantity || 0).toLocaleString()} pcs
-                                                </span>
-                                            </div>
-                                            <div className="p-3">
-                                                {c.exact ? (
-                                                    <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
-                                                        <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
-                                                        <div>
-                                                            <p className="text-[9px] font-bold text-emerald-600 uppercase tracking-wider">Exact match</p>
-                                                            <p className="text-xl font-extrabold text-slate-800 leading-none">
-                                                                {(c.lower?.total_pieces ?? c.upper?.total_pieces ?? c.ordered_quantity).toLocaleString()}
-                                                            </p>
-                                                            {c.lower?.runs != null && (
-                                                                <p className="text-[10px] text-slate-500 mt-0.5">{c.lower.runs} run{c.lower.runs !== 1 ? 's' : ''}</p>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <div className="grid grid-cols-2 gap-2">
-                                                        {['lower', 'upper'].map(opt => {
-                                                            const d       = c[opt];
-                                                            if (!d) return null;
-                                                            const active  = chosen === opt;
-                                                            const diff    = (d.total_pieces || 0) - (c.ordered_quantity || 0);
-                                                            const isUnder = diff < 0;
-                                                            return (
-                                                                <button key={opt} onClick={() => pick(sopId, c.fabric_color_id, opt)}
-                                                                    className={`relative flex flex-col items-start p-3 rounded-xl border-2 text-left transition-all ${
-                                                                        active
-                                                                            ? isUnder ? 'border-blue-400 bg-blue-50' : 'border-violet-400 bg-violet-50'
-                                                                            : 'border-slate-200 bg-white hover:border-slate-300'
-                                                                    }`}>
-                                                                    {active && (
-                                                                        <CheckCircle2 size={13} className={`absolute top-2 right-2 ${isUnder ? 'text-blue-500' : 'text-violet-500'}`} />
-                                                                    )}
-                                                                    <span className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${isUnder ? 'text-blue-500' : 'text-violet-500'}`}>
-                                                                        {isUnder ? '▼ Under-run' : '▲ Over-run'}
-                                                                    </span>
-                                                                    <span className="text-xl font-extrabold text-slate-800 leading-none">
-                                                                        {(d.total_pieces || 0).toLocaleString()}
-                                                                    </span>
-                                                                    <span className="text-[10px] text-slate-500 mt-0.5">
-                                                                        {d.runs} run{d.runs !== 1 ? 's' : ''}
-                                                                    </span>
-                                                                    <span className={`text-[10px] font-bold mt-1 ${isUnder ? 'text-blue-600' : 'text-violet-600'}`}>
-                                                                        {isUnder ? `${Math.abs(diff).toLocaleString()} fewer` : `${diff.toLocaleString()} extra`} vs order
-                                                                    </span>
-                                                                </button>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                {/* Footer */}
-                {!loading && suggestions && (
-                    <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-between">
-                        <p className="text-xs text-slate-400">
-                            {madeSelections}/{totalSelections} color{totalSelections !== 1 ? 's' : ''} configured
-                        </p>
-                        <div className="flex items-center gap-3">
-                            <button onClick={onClose} disabled={submitting}
-                                className="text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40">
-                                Cancel
-                            </button>
-                            <button onClick={handleConfirm} disabled={submitting || !allChosen}
-                                className="flex items-center gap-2 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-5 py-2.5 rounded-xl transition-colors shadow-sm">
-                                {submitting ? <Loader2 size={15} className="animate-spin" /> : <Calculator size={15} />}
-                                Confirm & Calculate
-                            </button>
-                        </div>
-                    </div>
-                )}
-            </div>
+            {showRecalcConfirm && (
+                <RecalculateConfirmModal
+                    preview={preview}
+                    sopName={sop?.product_name}
+                    busy={recalcing}
+                    err={recalcErr}
+                    onClose={() => {
+                        if (recalcing) return;
+                        setShowRecalcConfirm(false);
+                        setPreview(null);
+                    }}
+                    onConfirm={doRecalculate}
+                />
+            )}
         </div>
     );
 };
@@ -2317,13 +2348,15 @@ const ProductionPlanningPage = () => {
     const [linking,           setLinking]           = useState({});
     const [searchQ,           setSearchQ]           = useState('');
     const [previewBomId,      setPreviewBomId]      = useState(null);
-    const [calcSopId,         setCalcSopId]         = useState(null);
-    const [calcKeys,          setCalcKeys]          = useState({});
 
     // Load sales orders + approved BOMs on mount
     useEffect(() => {
         planningApi.getFormData()
-            .then(res => setFormData(res.data?.data ?? res.data))
+            .then(res => {
+                const data = res.data?.data ?? res.data;
+                console.log('planningApi. getFormData received:', data);
+                setFormData(data);
+            })
             .catch(e  => setFormErr(e?.response?.data?.error || 'Failed to load planning data'))
             .finally(() => setLoadingForm(false));
     }, []);
@@ -2333,7 +2366,7 @@ const ProductionPlanningPage = () => {
             planningApi.getOrderDetail(orderId),
             planningApi.getFormData(),
         ]);
-        console.log('Order detaildvd refreshfed', detailRes.data, fdRes.data);
+        console.log('Order detail refreshfed', detailRes.data, fdRes.data);
         setOrderDetail(detailRes.data?.data ?? detailRes.data);
         setFormData(fdRes.data?.data ?? fdRes.data);
     }, []);
@@ -2349,7 +2382,7 @@ const ProductionPlanningPage = () => {
             .finally(() => setLoadingOrder(false));
     }, [selectedOrderId]);
 
-    console.log('Rendering with order detail', orderDetail);
+    
 
     const handleLink = useCallback(async (sopId, bomId, ratioGroupIds) => {
         setLinking(l => ({ ...l, [sopId]: true }));
@@ -2511,8 +2544,6 @@ const ProductionPlanningPage = () => {
                                                 onLink={handleLink}
                                                 onUnlink={handleUnlink}
                                                 onPreview={setPreviewBomId}
-                                                onCalculate={setCalcSopId}
-                                                calcKey={calcKeys[sop.id] || 0}
                                                 isLinking={!!linking[sop.id]}
                                                 onReadinessChange={handleReadiness}
                                                 onTAChange={() => refreshOrder(selectedOrderId)}
@@ -2530,16 +2561,6 @@ const ProductionPlanningPage = () => {
 
         {previewBomId && (
             <BomPreviewModal bomId={previewBomId} onClose={() => setPreviewBomId(null)} />
-        )}
-        {calcSopId != null && (
-            <QuantitySuggestionModal
-                linkedSops={sops.filter(s => s.id === calcSopId)}
-                onClose={() => setCalcSopId(null)}
-                onDone={() => {
-                    setCalcKeys(k => ({ ...k, [calcSopId]: (k[calcSopId] || 0) + 1 }));
-                    setCalcSopId(null);
-                }}
-            />
         )}
 </>
     );

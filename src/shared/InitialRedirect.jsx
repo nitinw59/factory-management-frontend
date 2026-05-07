@@ -72,10 +72,11 @@ const InitialRedirect = () => {
             // HR Managers are sent to their HR dashboard.
             return <Navigate to="/hr-portal/dashboard" replace />;
 
-        case 'merchandiser':    
-
-            // Merchandisers are sent to their merchandising dashboard.
+        case 'merchandiser':
             return <Navigate to="/merchandiser/bom" replace />;
+
+        case 'purchase_manager':
+            return <Navigate to="/purchase-department/requirements" replace />;
 
         default:
             // If a user has a valid login but their role is not recognized

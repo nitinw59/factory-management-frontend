@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 // Added LuMenu for the hamburger icon
-import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX } from 'react-icons/lu';
+import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX, LuCalendarClock } from 'react-icons/lu';
 import { notificationApi } from '../api/notificationApi';
 
 // No changes to NavDropdown component
@@ -109,15 +109,17 @@ const StoreManagerLayout = () => {
                                     <LuFileText className="mr-2" /> Trim Stock Report
                                 </NavLink> */}
                             </NavDropdown>
-                              <NavDropdown title="Spares">      
+                              <NavDropdown title="Spares">
                             <NavLink to="/store-manager/spare-parts" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                 <LuPackage className="mr-2" /> Spare Inventory
                             </NavLink>
                             <NavLink to="/store-manager/spare-parts-issuance" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                 <LuPackage className="mr-2" /> Spare Billing
                             </NavLink>
-
-                            </NavDropdown>    
+                            </NavDropdown>
+                            <NavLink to="/merchandiser/planning" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
+                                <LuCalendarClock className="mr-1" /> Production Planning
+                            </NavLink>
                         </nav>
                     </div>
                     <div className="flex items-center space-x-4">
@@ -180,6 +182,9 @@ const StoreManagerLayout = () => {
                             </NavLink>
                             <NavLink to="/store-manager/spare-parts" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuPackage className="mr-2" /> Spare Parts
+                            </NavLink>
+                            <NavLink to="/merchandiser/planning" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuCalendarClock className="mr-2" /> Production Planning
                             </NavLink>
 
                             <hr />
