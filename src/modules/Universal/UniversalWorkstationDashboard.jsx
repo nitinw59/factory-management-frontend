@@ -189,6 +189,108 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
     );
 };
 
+const ApprovedSummaryModal = ({ workData, loading, onClose, onDateChange }) => {
+    const [modalDate, setModalDate] = useState(workData?.date ?? new Date().toISOString().split('T')[0]);
+
+    const groups = useMemo(() => {
+        const map = new Map();
+        (workData?.rows ?? []).forEach(r => {
+            if (r.action !== 'APPROVED') return;
+            const key = r.part_name || 'Unknown';
+            if (!map.has(key)) map.set(key, { part_name: key, total: 0, sizes: {}, batches: {} });
+            const g = map.get(key);
+            g.total += 1;
+            const sz = r.size || '—';
+            g.sizes[sz] = (g.sizes[sz] || 0) + 1;
+            const bc = r.batch_code || `Batch #${r.batch_id ?? '—'}`;
+            g.batches[bc] = (g.batches[bc] || 0) + 1;
+        });
+        return [...map.values()].sort((a, b) => b.total - a.total);
+    }, [workData]);
+
+    const totalApproved = groups.reduce((s, g) => s + g.total, 0);
+
+    const handleDateChange = (e) => { const d = e.target.value; setModalDate(d); onDateChange(d); };
+
+    return (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-gray-100">
+                    <div className="flex items-center gap-3">
+                        <div>
+                            <h2 className="text-base font-black text-gray-900 flex items-center gap-2">
+                                <ThumbsUp size={16} className="text-emerald-500" /> Approved Summary
+                            </h2>
+                            <p className="text-xs text-gray-400">
+                                {totalApproved} piece{totalApproved === 1 ? '' : 's'} approved · {groups.length} part type{groups.length === 1 ? '' : 's'}
+                            </p>
+                        </div>
+                        <input type="date" value={modalDate} onChange={handleDateChange}
+                            className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-emerald-400 bg-gray-50" />
+                    </div>
+                    <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-full transition">
+                        <LuX size={16} className="text-gray-500" />
+                    </button>
+                </div>
+
+                <div className="overflow-auto flex-1 p-4">
+                    {loading ? (
+                        <div className="flex items-center justify-center py-20 text-gray-400 gap-2">
+                            <LuLoader size={18} className="animate-spin" /><span className="text-sm">Loading…</span>
+                        </div>
+                    ) : groups.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                            <LuCircleCheck size={36} className="mb-2 opacity-30" />
+                            <p className="text-sm font-medium">No approved pieces for this date.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            {groups.map(g => {
+                                const sortedSizes   = Object.entries(g.sizes).sort((a, b) => a[0].localeCompare(b[0]));
+                                const sortedBatches = Object.entries(g.batches).sort((a, b) => b[1] - a[1]);
+                                return (
+                                    <div key={g.part_name} className="border border-gray-200 rounded-xl overflow-hidden">
+                                        <div className="bg-emerald-50/60 px-4 py-2.5 flex items-center justify-between border-b border-emerald-100">
+                                            <span className="font-black text-gray-700 text-sm capitalize">{g.part_name}</span>
+                                            <span className="text-base font-black tabular-nums text-emerald-600">{g.total} approved</span>
+                                        </div>
+                                        <div className="px-4 py-2.5 space-y-2">
+                                            {sortedSizes.length > 0 && (
+                                                <div>
+                                                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">By Size</p>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {sortedSizes.map(([sz, n]) => (
+                                                            <span key={sz} className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                                                                {sz} <span className="text-emerald-600 font-black">×{n}</span>
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {sortedBatches.length > 0 && (
+                                                <div>
+                                                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">By Batch</p>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {sortedBatches.map(([bc, n]) => (
+                                                            <span key={bc} className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 font-mono">
+                                                                {bc} <span className="text-emerald-600 font-black">×{n}</span>
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ============================================================================
 // UI & LOGIC HELPERS
 // ============================================================================
@@ -1278,10 +1380,11 @@ const UniversalWorkstationDashboard = () => {
     const [openBatchId, setOpenBatchId] = useState(null);
     const [showNav,     setShowNav]     = useState(false);
     const [showHistory, setShowHistory] = useState(false);
-    const [stats,       setStats]       = useState(null);
-    const [showModal,   setShowModal]   = useState(false);
-    const [workData,    setWorkData]    = useState(null);
-    const [loadingWork, setLoadingWork] = useState(false);
+    const [stats,             setStats]             = useState(null);
+    const [showModal,         setShowModal]         = useState(false);
+    const [showApprovedModal, setShowApprovedModal] = useState(false);
+    const [workData,          setWorkData]          = useState(null);
+    const [loadingWork,       setLoadingWork]       = useState(false);
     const [apiError,    setApiError]    = useState(null);
     const apiErrTimer = useRef(null);
     const popApiError = (msg) => {
@@ -1383,6 +1486,10 @@ const UniversalWorkstationDashboard = () => {
     }, []);
     const handleOpenModal = () => {
         setShowModal(true);
+        if (workData === null) fetchWork(new Date().toISOString().split('T')[0]);
+    };
+    const handleOpenApprovedModal = () => {
+        setShowApprovedModal(true);
         if (workData === null) fetchWork(new Date().toISOString().split('T')[0]);
     };
     const handleModalDateChange = (date) => { setWorkData(null); fetchWork(date); };
@@ -1574,11 +1681,18 @@ const UniversalWorkstationDashboard = () => {
                             <span className="text-sm font-black tabular-nums text-indigo-600">{stats == null ? '—' : (stats.today_rework ?? 0)}</span>
                         </div>
                         <span className="text-gray-200 hidden sm:inline">│</span>
-                        <div className="flex items-center gap-1.5">
+                        <button
+                            type="button"
+                            onClick={handleOpenApprovedModal}
+                            disabled={loadingWork && !showApprovedModal}
+                            className="flex items-center gap-1.5 hover:bg-emerald-50 rounded px-1.5 py-0.5 transition disabled:opacity-50"
+                            title="View approved-piece breakdown"
+                        >
                             <ThumbsUp size={13} className="text-emerald-500 shrink-0" />
                             <span className="text-xs text-gray-500">Today's Approved</span>
                             <span className="text-sm font-black tabular-nums text-emerald-600">{stats == null ? '—' : (stats.today_approved ?? 0)}</span>
-                        </div>
+                            {loadingWork && !showApprovedModal && <Loader2 size={11} className="animate-spin text-emerald-500" />}
+                        </button>
                     </div>
                     <button
                         onClick={handleOpenModal}
@@ -1777,6 +1891,14 @@ const UniversalWorkstationDashboard = () => {
                     onClose={() => setShowModal(false)}
                     onDateChange={handleModalDateChange}
                     onExport={downloadCSV}
+                />
+            )}
+            {showApprovedModal && (
+                <ApprovedSummaryModal
+                    workData={workData}
+                    loading={loadingWork}
+                    onClose={() => setShowApprovedModal(false)}
+                    onDateChange={handleModalDateChange}
                 />
             )}
             {modalState && modalState.type === 'validate' && <UniversalValidationModal itemInfo={modalState} defectCodes={defectCodes} onClose={() => setModalState(null)} onValidationSubmit={handleValidationSubmit} />}
