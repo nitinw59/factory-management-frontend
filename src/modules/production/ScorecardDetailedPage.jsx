@@ -1,25 +1,33 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { productionManagerApi } from '../../api/productionManagerApi';
-import { LuRefreshCw, LuUsers, LuClock } from 'react-icons/lu';
+import { LuRefreshCw, LuUsers, LuClock, LuFilter } from 'react-icons/lu';
 import LineCard, { buildLineData, pctColor, dhuColor, fmt2 } from './LineCard';
 
-const REFRESH_SECONDS = 300;  // 5-min data refresh
-const PAGE_SIZE       = 6;    // lines visible per screen
-const ROTATE_SECONDS  = 10;   // seconds before rotating to next page
+const REFRESH_SECONDS = 300;
+const STORAGE_KEY     = 'scorecard_detailed_selected_lines';
 
-// ── Main page ──────────────────────────────────────────────────────────────────
-
-export default function ScoreboardPage() {
+export default function ScorecardDetailedPage() {
     const today = new Date().toISOString().split('T')[0];
     const [date,        setDate]        = useState(today);
     const [lineData,    setLineData]    = useState([]);
     const [loading,     setLoading]     = useState(false);
     const [lastRefresh, setLastRefresh] = useState(null);
     const [countdown,   setCountdown]   = useState(REFRESH_SECONDS);
-    const countdownRef  = useRef(REFRESH_SECONDS);
+    const countdownRef                   = useRef(REFRESH_SECONDS);
 
-    // Pagination state
-    const [pageIndex, setPageIndex] = useState(0);
+    // Selected line ids (persisted)
+    const [selectedIds, setSelectedIds] = useState(() => {
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            return saved ? new Set(JSON.parse(saved)) : new Set();
+        } catch {
+            return new Set();
+        }
+    });
+
+    useEffect(() => {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...selectedIds])); } catch {}
+    }, [selectedIds]);
 
     // ── Data loading ────────────────────────────────────────────────────────────
     const loadData = useCallback(async () => {
@@ -40,20 +48,18 @@ export default function ScoreboardPage() {
             countdownRef.current = REFRESH_SECONDS;
             setCountdown(REFRESH_SECONDS);
         } catch (err) {
-            console.error('[Scorecard] load error', err);
+            console.error('[ScorecardDetailed] load error', err);
         } finally {
             setLoading(false);
         }
     }, [date]);
 
-    // Initial load + 5-min auto-refresh
     useEffect(() => {
         loadData();
         const interval = setInterval(loadData, REFRESH_SECONDS * 1000);
         return () => clearInterval(interval);
     }, [loadData]);
 
-    // Countdown tick
     useEffect(() => {
         const tick = setInterval(() => {
             countdownRef.current = Math.max(0, countdownRef.current - 1);
@@ -62,42 +68,39 @@ export default function ScoreboardPage() {
         return () => clearInterval(tick);
     }, []);
 
-    // Reset to page 0 when data reloads
-    useEffect(() => {
-        setPageIndex(0);
-    }, [lineData]);
-
-    // Auto-rotate pages every ROTATE_SECONDS
-    useEffect(() => {
-        if (lineData.length <= PAGE_SIZE) return;
-        const totalPages = Math.ceil(lineData.length / PAGE_SIZE);
-        const rot = setInterval(() => {
-            setPageIndex(prev => (prev + 1) % totalPages);
-        }, ROTATE_SECONDS * 1000);
-        return () => clearInterval(rot);
-    }, [lineData.length]);
-
     const handleRefresh = () => {
         countdownRef.current = REFRESH_SECONDS;
         setCountdown(REFRESH_SECONDS);
         loadData();
     };
 
-    // ── Derived factory-wide stats ──────────────────────────────────────────────
-    const totalPresent  = lineData.reduce((s, l) => s + (l.manpower_present  ?? 0), 0);
-    const totalAssigned = lineData.reduce((s, l) => s + (l.manpower_assigned ?? 0), 0);
-    const grandDefects  = lineData.reduce((s, l) => s + (l.total_defects     ?? 0), 0);
-    const grandOutput   = lineData.reduce((s, l) => s + (l.total_output      ?? 0), 0);
-    const grandTarget   = lineData.reduce((s, l) =>
+    // ── Selection helpers ───────────────────────────────────────────────────────
+    const toggleLine = (id) => {
+        setSelectedIds(prev => {
+            const s = new Set(prev);
+            if (s.has(id)) s.delete(id); else s.add(id);
+            return s;
+        });
+    };
+    const selectAll = () => setSelectedIds(new Set(lineData.map(l => String(l.line_id))));
+    const clearAll  = () => setSelectedIds(new Set());
+
+    const visibleLines = useMemo(
+        () => lineData.filter(l => selectedIds.has(String(l.line_id))),
+        [lineData, selectedIds]
+    );
+
+    // ── KPIs over selected lines ────────────────────────────────────────────────
+    const totalPresent  = visibleLines.reduce((s, l) => s + (l.manpower_present  ?? 0), 0);
+    const totalAssigned = visibleLines.reduce((s, l) => s + (l.manpower_assigned ?? 0), 0);
+    const grandDefects  = visibleLines.reduce((s, l) => s + (l.total_defects     ?? 0), 0);
+    const grandOutput   = visibleLines.reduce((s, l) => s + (l.total_output      ?? 0), 0);
+    const grandTarget   = visibleLines.reduce((s, l) =>
         s + l.parts.reduce((ps, p) => ps + p.target_quantity, 0), 0);
-    const grandActual   = lineData.reduce((s, l) =>
+    const grandActual   = visibleLines.reduce((s, l) =>
         s + l.parts.reduce((ps, p) => ps + p.actual, 0), 0);
     const grandPct      = grandTarget > 0 ? Math.round(grandActual * 100 / grandTarget) : null;
     const grandDHU      = grandOutput  > 0 ? (grandDefects / grandOutput) * 100 : null;
-
-    // ── Pagination ──────────────────────────────────────────────────────────────
-    const totalPages   = Math.max(1, Math.ceil(lineData.length / PAGE_SIZE));
-    const visibleLines = lineData.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE);
 
     // ── Date display ───────────────────────────────────────────────────────────
     const d         = new Date(date + 'T12:00:00');
@@ -109,19 +112,15 @@ export default function ScoreboardPage() {
         ? lastRefresh.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         : null;
 
-    // ── Render ─────────────────────────────────────────────────────────────────
     return (
         <div className="min-h-screen bg-black text-white">
-
-            {/* ── Sticky header ── */}
+            {/* Sticky header */}
             <div className="sticky top-0 z-20 bg-black/95 backdrop-blur border-b border-gray-800 px-6 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-4">
-
-                    {/* Left: title + factory KPIs */}
                     <div>
                         <div className="flex items-center gap-3 mb-2">
                             <h1 className="text-xl font-black tracking-widest text-white uppercase">
-                                Production Scorecard
+                                Detailed Scorecard
                             </h1>
                             <div className="flex items-center gap-1.5">
                                 <span className="relative flex h-2.5 w-2.5">
@@ -130,10 +129,12 @@ export default function ScoreboardPage() {
                                 </span>
                                 <span className="text-sm text-emerald-400 font-black tracking-widest">LIVE</span>
                             </div>
+                            <span className="text-xs text-gray-600 font-bold uppercase tracking-wider">
+                                {visibleLines.length}/{lineData.length} lines
+                            </span>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-5">
-                            {/* Manpower */}
                             <div className="flex items-center gap-2">
                                 <LuUsers size={15} className="text-gray-500" />
                                 <span className="text-lg font-black text-white tabular-nums">{totalPresent}</span>
@@ -169,7 +170,7 @@ export default function ScoreboardPage() {
                                 <>
                                     <span className="text-gray-800 hidden sm:inline">│</span>
                                     <div className="flex items-center gap-2">
-                                        <span className="text-xs text-gray-500 uppercase tracking-wide">Factory DHU</span>
+                                        <span className="text-xs text-gray-500 uppercase tracking-wide">DHU</span>
                                         <span className="text-lg font-black tabular-nums"
                                               style={{ color: dhuColor(grandDHU) }}>
                                             {fmt2(grandDHU)}
@@ -186,7 +187,6 @@ export default function ScoreboardPage() {
                         </div>
                     </div>
 
-                    {/* Right: date + controls */}
                     <div className="flex flex-col items-end gap-1.5">
                         <div className="text-right">
                             <p className="text-lg font-black text-white">{dateStr}</p>
@@ -222,9 +222,58 @@ export default function ScoreboardPage() {
                         )}
                     </div>
                 </div>
+
+                {/* Line picker */}
+                <div className="mt-4 pt-4 border-t border-gray-900">
+                    <div className="flex items-start gap-3 flex-wrap">
+                        <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-widest font-bold pt-1">
+                            <LuFilter size={12} />
+                            <span>Lines</span>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5 flex-1">
+                            {lineData.length === 0 ? (
+                                <span className="text-xs text-gray-700 italic pt-1">No lines available for this date.</span>
+                            ) : lineData.map(l => {
+                                const id  = String(l.line_id);
+                                const sel = selectedIds.has(id);
+                                return (
+                                    <button
+                                        key={id}
+                                        onClick={() => toggleLine(id)}
+                                        className={`text-xs font-bold uppercase tracking-wide px-2.5 py-1 rounded-full border transition-colors ${
+                                            sel
+                                                ? 'bg-emerald-600 border-emerald-500 text-white'
+                                                : 'bg-gray-900 border-gray-800 text-gray-500 hover:border-gray-700 hover:text-gray-300'
+                                        }`}
+                                    >
+                                        {l.line_name}
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        {lineData.length > 0 && (
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={selectAll}
+                                    className="text-xs text-gray-500 hover:text-white px-2 py-1 border border-gray-800 hover:border-gray-600 rounded transition-colors"
+                                >
+                                    Select all
+                                </button>
+                                <button
+                                    onClick={clearAll}
+                                    className="text-xs text-gray-500 hover:text-white px-2 py-1 border border-gray-800 hover:border-gray-600 rounded transition-colors"
+                                >
+                                    Clear
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
             </div>
 
-            {/* ── Content ── */}
+            {/* Content */}
             <div className="p-5">
                 {loading && lineData.length === 0 && (
                     <div className="flex justify-center items-center py-32 text-gray-700">
@@ -239,32 +288,24 @@ export default function ScoreboardPage() {
                     </p>
                 )}
 
-                {/* 6-line grid */}
-                <div className="grid grid-cols-2 xl:grid-cols-3 gap-5">
-                    {visibleLines.map(line => (
-                        <LineCard key={line.line_id} line={line} />
-                    ))}
-                </div>
-
-                {/* Page indicator dots */}
-                {totalPages > 1 && (
-                    <div className="flex justify-center items-center gap-3 mt-6">
-                        {Array.from({ length: totalPages }, (_, i) => (
-                            <button
-                                key={i}
-                                onClick={() => setPageIndex(i)}
-                                className={`rounded-full transition-all duration-300 ${
-                                    i === pageIndex
-                                        ? 'w-6 h-3 bg-white'
-                                        : 'w-3 h-3 bg-gray-700 hover:bg-gray-500'
-                                }`}
-                            />
-                        ))}
-                        <span className="text-xs text-gray-700 ml-1 tabular-nums">
-                            {pageIndex + 1} / {totalPages}
-                        </span>
+                {!loading && lineData.length > 0 && visibleLines.length === 0 && (
+                    <div className="text-center py-32 text-gray-700">
+                        <p className="text-base mb-2">No lines selected.</p>
+                        <p className="text-xs text-gray-800">
+                            Pick one or more lines above to display their progress.
+                        </p>
                     </div>
                 )}
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    {visibleLines.map(line => (
+                        <LineCard
+                            key={line.line_id}
+                            line={line}
+                            defaultExpandEmployees={true}
+                        />
+                    ))}
+                </div>
             </div>
         </div>
     );

@@ -521,7 +521,12 @@ export default function BomFormPage() {
     // ── Ratio group handlers ──
     const addRatioGroup = () => {
         const ng = freshRatioGroup();
-        setForm(f => ({ ...f, ratio_groups: [...f.ratio_groups, ng] }));
+        setForm(f => {
+            const existingSizes = new Set();
+            f.ratio_groups.forEach(rg => rg.items.forEach(it => { if (it.size) existingSizes.add(it.size); }));
+            ng.items = ng.items.filter(it => !existingSizes.has(it.size));
+            return { ...f, ratio_groups: [...f.ratio_groups, ng] };
+        });
         setExpandedRatios(prev => new Set([...prev, ng._key]));
     };
     const removeRatioGroup = (idx) => {

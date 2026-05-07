@@ -150,6 +150,7 @@ import OutputLogsPage from './modules/lineManager/OutputLogsPage';
 import ProductionSettingsPage from './modules/production/ProductionSettingsPage';
 import ProductionTargetPage from './modules/production/ProductionTargetPage';
 import ScoreboardPage from './modules/production/ScoreboardPage';
+import ScorecardDetailedPage from './modules/production/ScorecardDetailedPage';
 import BomApprovalPage from './modules/production/BomApprovalPage';
 
 import AdminLineConfigPage from './modules/asset/AdminLineConfigPage';
@@ -260,6 +261,7 @@ function App() {
           <Route path="qc-analytics" element={<QCAnalyticsDashboard />} />
           <Route path="production-targets" element={<ProductionTargetPage />} />
           <Route path="scorecard" element={<ScoreboardPage />} />
+          <Route path="scorecard-detailed" element={<ScorecardDetailedPage />} />
           <Route path="bom-approvals" element={<BomApprovalPage />} />
 
         </Route>
