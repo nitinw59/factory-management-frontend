@@ -233,7 +233,9 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
         syncKeyRef.current = key;
         const existingMap = Object.fromEntries(mc.size_consumptions.map(sc => [sc.size, sc]));
         const markerRows = markerSizes.map(s => existingMap[s] ?? { _key: genKey(), size: s, quantity: '', target_variant_size: '' });
-        const extraRows  = mc.size_consumptions.filter(sc => !markerSizes.includes(sc.size));
+        const extraRows  = mc.size_consumptions.filter(sc =>
+            !markerSizes.includes(sc.size) && (sc.quantity || sc.target_variant_size)
+        );
         onUpdate(mIdx, 'size_consumptions', [...markerRows, ...extraRows]);
     }, [mc.calculation_type, markerSizes]); // eslint-disable-line react-hooks/exhaustive-deps
 

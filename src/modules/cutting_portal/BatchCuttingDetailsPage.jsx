@@ -29,6 +29,13 @@ const SIZE_LABELS = {
 
 const getSizeLabel = (size) => SIZE_LABELS[size] || size;
 
+const formatRollId = (rid) => {
+    if (rid == null) return '';
+    const digits = String(rid).replace(/\D/g, '');
+    if (!digits) return String(rid);
+    return String(parseInt(digits, 10) % 1000).padStart(3, '0');
+};
+
 const sortSizes = (a, b) => {
     const indexA = SIZE_ORDER.indexOf(a);
     const indexB = SIZE_ORDER.indexOf(b);
@@ -239,7 +246,7 @@ const BatchCuttingDetailsPage = () => {
                 grandTotalOk += rollGoodTotal;
 
                 return [
-                    roll.roll_identifier,
+                    formatRollId(roll.roll_identifier),
                     roll.type_name,
                     ...summaryStats.allSizes.map(size => statsBySize[size] || 0),
                     rollGoodTotal
@@ -356,7 +363,7 @@ const BatchCuttingDetailsPage = () => {
             totalEndBits += endBits;
 
             return [
-                roll.id%100, 
+                formatRollId(roll.id),
                 roll.type_name || '-', 
                 `${roll.color_name || ''} ${roll.color_number || ''}`,
                 meter.toFixed(2), 
@@ -440,7 +447,7 @@ const BatchCuttingDetailsPage = () => {
             }, {});
             const rollTotalPieces = Object.values(rollCutsBySize).reduce((sum, qty) => sum + qty, 0);
             return [
-                roll.roll_identifier, roll.type_name || '-', `${roll.color_name || ''} ${roll.color_number ? `(${roll.color_number})` : ''}`,
+                formatRollId(roll.roll_identifier), roll.type_name || '-', `${roll.color_name || ''} ${roll.color_number ? `(${roll.color_number})` : ''}`,
                 parseFloat(roll.meter || 0).toFixed(2), 
                 parseFloat(roll.shortage_meters || 0).toFixed(2), // NEW
                 parseFloat(roll.end_bits || 0).toFixed(2),        // NEW
@@ -647,7 +654,7 @@ const BatchCuttingDetailsPage = () => {
                                 const rollTotalPieces = Object.values(rollCutsBySize).reduce((sum, qty) => sum + qty, 0);
                                 return (
                                     <tr key={roll.id} className="hover:bg-gray-50">
-                                        <td className="py-3 px-4 font-medium">{roll.roll_identifier}</td>
+                                        <td className="py-3 px-4 font-medium">{formatRollId(roll.roll_identifier)}</td>
                                         <td className="py-3 px-4">{roll.color_name || 'N/A'}({roll.color_number || 'N/A'})</td>
                                         <td className="py-3 px-4">{roll.type_name || 'N/A'}</td>
                                         <td className="py-3 px-4 text-right border-l border-gray-200 font-medium">{parseFloat(roll.meter || 0).toFixed(2)}</td>
@@ -706,7 +713,7 @@ const BatchCuttingDetailsPage = () => {
                         {Object.entries(bundlesByRoll).map(([rollId, rollBundles]) => {
                             // Find roll info for header
                             const rollInfo = details.rolls?.find(r => r.id.toString() === rollId);
-                            const rollName = rollInfo ? rollInfo.roll_identifier : `Roll #${rollId}`;
+                            const rollName = rollInfo ? formatRollId(rollInfo.roll_identifier) : `Roll #${rollId}`;
                             
                             return (
                                 <div key={rollId} className="space-y-3">
