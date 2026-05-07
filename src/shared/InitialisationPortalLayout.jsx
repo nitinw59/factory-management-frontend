@@ -1,11 +1,12 @@
 import React from 'react';
 import BaseManagerLayout from './BaseManagerLayout'; // Adjust path as needed
-import { LuLayoutDashboard, LuHammer, LuFileText, LuCalendarClock } from 'react-icons/lu';
+import { LuLayoutDashboard, LuHammer, LuFileText, LuCalendarClock, LuTruck } from 'react-icons/lu';
 
 export default function InitializationPortalLayout() {
     const initLinks = [
         { to: '/initialization-portal/production-workflow', label: 'Workflow Dashboard' },
         { to: '/initialization-portal/dashboard', label: 'Initialization Queue', icon: LuLayoutDashboard },
+        { to: '/initialization-portal/ready-to-load', label: 'Ready to Load', icon: LuTruck },
         { to: '/initialization-portal/alter-pieces', label: 'Alter Pieces', icon: LuHammer },
         { to: '/initialization-portal/summary', label: 'Batch QC Summary', icon: LuFileText },
         { to: '/merchandiser/planning', label: 'Production Planning', icon: LuCalendarClock },

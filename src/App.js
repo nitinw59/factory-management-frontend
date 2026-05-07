@@ -73,6 +73,7 @@ import CheckingWorkstationDashboardPage from './modules/checking_portal/Checking
 import NumberingWorkstationDashboardPage from './modules/numbering_portal/NumberingWorkstationDashboardPage';
 import InitializationDashboardPortalPage from './modules/initialisation_portal/InitializationDashboardPortalPage';
 import AlterPiecesDashboardPage from './modules/initialisation_portal/AlterPiecesDashboardPage';
+import ReadyToLoadPage from './modules/initialisation_portal/ReadyToLoadPage';
 import NumberingBatchDetailsPage from './modules/numbering_portal/NumberingBatchDetailsPage';
 import PreparationManagerDashboardPage from './modules/preparation_portal/PreparationManagerDashboardPage';
 import BatchCuttingDetailsPage from './modules/cutting_portal/BatchCuttingDetailsPage';
@@ -326,7 +327,9 @@ function App() {
       <Route path="/initialization-portal" element={<InitializationPortalProtectedRoute><InitializationPortalLayout /></InitializationPortalProtectedRoute>}>
           <Route index element={<InitializationDashboardPortalPage />} />
           <Route path="dashboard" element={<InitializationDashboardPortalPage />} />
-          <Route path="alter-pieces" element={<AlterPiecesDashboardPage />} />  
+          <Route path="alter-pieces" element={<AlterPiecesDashboardPage />} />
+          <Route path="ready-to-load" element={<ReadyToLoadPage />} />
+
           <Route path="summary" element={<NumberingBatchDetailsPage />} />
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
           <Route path="reports" element={<CuttingManagerReportPage />} />

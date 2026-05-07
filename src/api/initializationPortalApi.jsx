@@ -32,6 +32,8 @@ export const initializationPortalApi = {
 
 
 
+    getRollsReadyForNextCycle: () => api.get('/initialization-portal/rolls-ready-for-next-cycle'),
+
     getInterliningTemplates: () => api.get('/initialization-portal/interlining/templates'),
     createInterliningTemplate: (templateData) => api.post('/initialization-portal/interlining/templates', templateData),
     updateInterliningTemplate: (templateId, templateData) => api.put(`/initialization-portal/interlining/templates/${templateId}`, templateData),
