@@ -24,19 +24,13 @@ const StatusPill = ({ status }) => {
 // ── Roll Detail Modal ─────────────────────────────────────────────────────────
 
 const RollDetailModal = ({ batch, roll, onClose }) => {
-    const piecesByPart = useMemo(() => {
-        const map = new Map();
-        (roll.pieces || []).forEach(p => {
-            const key = p.part_name || `Part #${p.part_id ?? '—'}`;
-            if (!map.has(key)) map.set(key, []);
-            map.get(key).push(p);
-        });
-        return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-    }, [roll]);
+    const sizes = useMemo(
+        () => [...(roll.sizes || [])].sort((a, b) => (a.size || '').localeCompare(b.size || '')),
+        [roll]
+    );
 
-    const totalPieces     = roll.piece_count ?? (roll.pieces || []).length;
-    const completedPieces = roll.completed_piece_count
-        ?? (roll.pieces || []).filter(p => p.is_completed).length;
+    const totalPieces     = roll.total_pieces     ?? sizes.length;
+    const completedPieces = roll.completed_pieces ?? sizes.filter(s => s.is_piece_completed).length;
 
     return (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
@@ -86,7 +80,7 @@ const RollDetailModal = ({ batch, roll, onClose }) => {
                         </p>
                     </div>
                     <div>
-                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Pieces</p>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Sizes</p>
                         <p className="text-sm font-bold text-slate-700 tabular-nums">
                             <span className="text-emerald-600">{completedPieces}</span>
                             <span className="text-slate-400"> / {totalPieces}</span>
@@ -94,75 +88,78 @@ const RollDetailModal = ({ batch, roll, onClose }) => {
                     </div>
                 </div>
 
-                {/* Pieces by part */}
+                {/* Sizes & parts breakdown */}
                 <div className="overflow-auto flex-1 px-5 py-4 space-y-3">
-                    {piecesByPart.length === 0 ? (
-                        <p className="text-sm text-slate-400 italic text-center py-6">No pieces on this roll.</p>
-                    ) : piecesByPart.map(([partName, pieces]) => {
-                        const sizesMap = pieces.reduce((acc, p) => {
-                            const sz = p.size || '—';
-                            if (!acc[sz]) acc[sz] = { total: 0, completed: 0 };
-                            acc[sz].total += 1;
-                            if (p.is_completed) acc[sz].completed += 1;
-                            return acc;
-                        }, {});
-                        const sizes = Object.entries(sizesMap).sort((a, b) => a[0].localeCompare(b[0]));
-                        const partType = pieces[0]?.part_type;
-                        const allDone  = pieces.every(p => p.is_completed);
-
+                    {sizes.length === 0 ? (
+                        <div className="text-center py-8 text-slate-400">
+                            <Package size={28} className="mx-auto mb-2 opacity-30" />
+                            <p className="text-sm font-medium">Cutting hasn't started for this roll.</p>
+                        </div>
+                    ) : sizes.map(s => {
+                        const parts        = s.parts || [];
+                        const missingParts = s.missing_parts || [];
+                        const required     = s.required_parts ?? (parts.length + missingParts.length);
+                        const completed    = s.completed_parts ?? parts.filter(p => p.is_part_completed).length;
+                        const isComplete   = s.is_piece_completed ?? (completed === required && missingParts.length === 0);
                         return (
-                            <div key={partName} className="border border-slate-200 rounded-xl overflow-hidden">
-                                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-2">
+                            <div key={s.size} className={`border rounded-xl overflow-hidden ${isComplete ? 'border-emerald-200' : 'border-slate-200'}`}>
+                                <div className={`px-4 py-2.5 flex items-center justify-between gap-2 border-b ${isComplete ? 'bg-emerald-50/60 border-emerald-100' : 'bg-slate-50 border-slate-100'}`}>
                                     <div className="flex items-center gap-2 min-w-0">
-                                        <span className="font-black text-sm text-slate-700 capitalize truncate">{partName}</span>
-                                        {partType && (
-                                            <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">
-                                                {partType}
-                                            </span>
-                                        )}
+                                        <span className="font-black text-sm text-slate-700">Size {s.size || '—'}</span>
+                                        {isComplete && <CheckCircle2 size={14} className="text-emerald-500" />}
                                     </div>
-                                    <div className="flex items-center gap-2 shrink-0">
-                                        <span className="text-xs font-bold tabular-nums text-slate-600">
-                                            {pieces.filter(p => p.is_completed).length} / {pieces.length}
-                                        </span>
-                                        {allDone && <CheckCircle2 size={14} className="text-emerald-500" />}
-                                    </div>
+                                    <span className="text-xs font-bold tabular-nums text-slate-600 shrink-0">
+                                        {completed} / {required} parts
+                                    </span>
                                 </div>
-                                <div className="px-4 py-2.5">
-                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">By Size</p>
-                                    <div className="flex flex-wrap gap-1.5 mb-3">
-                                        {sizes.map(([sz, c]) => (
-                                            <span key={sz}
-                                                className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
-                                                    c.completed === c.total
-                                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                                        : 'bg-amber-50 text-amber-700 border-amber-200'
-                                                }`}>
-                                                {sz} <span className="font-black tabular-nums">{c.completed}/{c.total}</span>
-                                            </span>
-                                        ))}
-                                    </div>
-                                    <details className="text-xs">
-                                        <summary className="cursor-pointer text-slate-500 hover:text-slate-700 font-semibold">
-                                            Show {pieces.length} individual piece{pieces.length === 1 ? '' : 's'}
-                                        </summary>
-                                        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                                            {pieces.map(p => (
-                                                <div key={p.cut_piece_id}
-                                                    className={`text-[11px] flex items-center justify-between px-2 py-1 rounded border ${
-                                                        p.is_completed
-                                                            ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
-                                                            : 'bg-slate-50 border-slate-100 text-slate-500'
-                                                    }`}>
-                                                    <span className="font-mono">#{p.cut_piece_id}</span>
-                                                    <span className="font-bold">{p.size || '—'}</span>
-                                                    {p.is_completed
-                                                        ? <CheckCircle2 size={11} />
-                                                        : <span className="text-[9px] uppercase">pending</span>}
-                                                </div>
-                                            ))}
+                                <div className="px-4 py-2.5 space-y-2.5">
+                                    {missingParts.length > 0 && (
+                                        <div>
+                                            <p className="text-[9px] font-bold text-red-500 uppercase tracking-wider mb-1.5">
+                                                Not yet cut · {missingParts.length}
+                                            </p>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {missingParts.map(name => (
+                                                    <span key={name}
+                                                        className="text-xs font-semibold capitalize px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
+                                                        {name}
+                                                    </span>
+                                                ))}
+                                            </div>
                                         </div>
-                                    </details>
+                                    )}
+                                    {parts.length > 0 && (
+                                        <div>
+                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                                                Cut parts · {parts.length}
+                                            </p>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                                {parts.map(p => (
+                                                    <div key={p.cut_piece_id}
+                                                        className={`flex items-center justify-between gap-2 text-xs px-2.5 py-1.5 rounded-lg border ${
+                                                            p.is_part_completed
+                                                                ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
+                                                                : 'bg-amber-50 border-amber-100 text-amber-700'
+                                                        }`}>
+                                                        <div className="min-w-0 flex items-center gap-1.5">
+                                                            <span className="font-bold capitalize truncate">{p.part_name || `Part #${p.part_id}`}</span>
+                                                            {p.part_type && (
+                                                                <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0 rounded bg-white/70">
+                                                                    {p.part_type}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-1.5 shrink-0">
+                                                            <span className="font-mono text-[10px] text-slate-500">{p.quantity_cut ?? 0} cut</span>
+                                                            {p.is_part_completed
+                                                                ? <CheckCircle2 size={11} />
+                                                                : <span className="text-[9px] uppercase font-black">pending</span>}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         );
@@ -176,9 +173,8 @@ const RollDetailModal = ({ batch, roll, onClose }) => {
 // ── Roll card ─────────────────────────────────────────────────────────────────
 
 const RollCard = ({ roll, onOpen }) => {
-    const totalPieces     = roll.piece_count ?? (roll.pieces || []).length;
-    const completedPieces = roll.completed_piece_count
-        ?? (roll.pieces || []).filter(p => p.is_completed).length;
+    const totalPieces     = roll.total_pieces     ?? (roll.sizes || []).length;
+    const completedPieces = roll.completed_pieces ?? (roll.sizes || []).filter(s => s.is_piece_completed).length;
     const pct = totalPieces > 0 ? Math.round((completedPieces / totalPieces) * 100) : 0;
 
     return (
@@ -269,12 +265,15 @@ const BatchCard = ({ batch, expanded, onToggle, onSelectRoll }) => {
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
-                            <Truck size={12} className="text-emerald-500" />
+                            <Truck size={12} className={batch.seq2 ? 'text-emerald-500' : 'text-slate-400'} />
                             <div>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Seq 2 (next)</p>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                                    {batch.seq2 ? 'Seq 2 (next)' : 'Seq 2'}
+                                </p>
                                 <p className="font-mono text-[10px] text-slate-600 truncate">
-                                    {batch.seq2?.tracking_table || '—'}
-                                    {batch.seq2?.processing_mode ? ` · ${batch.seq2.processing_mode}` : ''}
+                                    {batch.seq2
+                                        ? `${batch.seq2.tracking_table}${batch.seq2.processing_mode ? ` · ${batch.seq2.processing_mode}` : ''}`
+                                        : <span className="italic text-slate-400">Final stage — no next cycle</span>}
                                 </p>
                             </div>
                         </div>
