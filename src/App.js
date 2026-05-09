@@ -57,8 +57,6 @@ import ProductManagementPage from './modules/products/ProductManagementPage';
 import ProductBrandsPage from './modules/products/ProductBrandsPage';
 import ProductTypesPage from './modules/products/ProductTypesPage';
 import ProductionLineTypesPage from './modules/production/ProductionLineTypesPage';
-import StoreManagerDashboardPage from './modules/store_manager/StoreManagerDashboardPage';
-import FabricStockByPOPage from './modules/store_manager/FabricStockByPOPage';
 import ProductionPlanningPage from './modules/production/ProductionPlanningPage';
 import CuttingDashboardPage from './modules/cutting_portal/CuttingDashboardPage'; // New
 import FactoryLayoutPlannerPage from './modules/production/FactoryLayoutPlannerPage';
@@ -210,9 +208,7 @@ function App() {
 
               {/* Store Manager Portal */}
         <Route path="/store-manager" element={<StoreManagerProtectedRoute><StoreManagerLayout /></StoreManagerProtectedRoute>}>
-          <Route index element={<StoreManagerDashboardPage />} />
-          <Route path="fabric-stock" element={<StoreManagerDashboardPage />} />
-          <Route path="fabric-stock-by-po" element={<FabricStockByPOPage />} />
+          <Route index element={<Navigate to="fabric-rolls" replace />} />
           <Route path="trim-management" element={<TrimManagementPage />} />
           <Route path="trim-stock-intake" element={<ListInventoryIntakes />} />
           
@@ -229,6 +225,8 @@ function App() {
 
           <Route path="spare-parts" element={<SparePartsPage />} />
           <Route path="spare-parts-issuance" element={<SparesIssuanceDashboard />} />
+          <Route path="planning" element={<MerchandiserPlanningPage />} />
+          <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
         </Route>
 
         {/* Production Manager Portal */}

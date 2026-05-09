@@ -1,10 +1,30 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { trimsApi } from '../../api/trimsApi';
 import { useAuth } from '../../context/AuthContext';
-import { 
-    Plus, Edit2, Trash2, ChevronRight, Search, Package, Layers, Repeat, 
-    FileSpreadsheet, Loader2, Upload
+import {
+    Plus, Edit2, Trash2, ChevronRight, Search, Package, Layers, Repeat,
+    FileSpreadsheet, Loader2, Upload, X, Check, AlertCircle, CheckCircle2,
+    Palette, RefreshCw,
 } from 'lucide-react';
+
+// ── Stock-tone helper: emerald (healthy) / amber (low) / red (out) ────────────
+const stockTone = (stock, threshold = 0) => {
+    const s = Number(stock ?? 0);
+    const t = Number(threshold ?? 0);
+    if (s <= 0)              return { key: 'out', cls: 'bg-red-50 text-red-700 border-red-200',         dotCls: 'bg-red-500'    };
+    if (t > 0 && s < t)      return { key: 'low', cls: 'bg-amber-50 text-amber-700 border-amber-200',   dotCls: 'bg-amber-500'  };
+    return                          { key: 'ok',  cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dotCls: 'bg-emerald-500' };
+};
+
+// ── Stable swatch color from any string seed (color_number / color_name / id) ──
+const swatchFromVariant = (v = {}) => {
+    const raw = String(v.color_number ?? '').replace('#', '').trim();
+    if (/^[0-9a-fA-F]{6}$/.test(raw)) return `#${raw}`;
+    const seed = (v.color_name || v.color_number || String(v.fabric_color_id ?? v.id ?? 'x'));
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
+    return `hsl(${Math.abs(hash) % 360}, 55%, 60%)`;
+};
 
 const downloadAsExcel = (data, fileName = 'trim_inventory.csv') => {
     if (!data || !data.length) return alert("No data available to export.");
@@ -205,33 +225,93 @@ const VariantFormModal = ({ onSave, onClose, initialData = {}, isColorAgnostic, 
 };
 
 const SubstituteFormModal = ({ onSave, onClose, variants, currentVariantId, existingSubstitutes, parentItemName, parentItemBrand }) => {
-    const [substituteId, setSubstituteId] = useState('');
-    const handleSubmit = (e) => { e.preventDefault(); onSave({ substitute_variant_id: substituteId }); };
+    const [substituteId, setSubstituteId]   = useState('');
+    const [search,       setSearch]         = useState('');
+    const [inStockOnly,  setInStockOnly]    = useState(false);
 
-    const availableOptions = variants.filter(v => 
+    const availableOptions = variants.filter(v =>
         v.id !== currentVariantId && !existingSubstitutes.some(s => s.substitute_variant_id === v.id)
     );
 
+    const q = search.toLowerCase();
+    const filteredOptions = availableOptions.filter(v => {
+        if (inStockOnly && Number(v.main_store_stock || 0) <= 0) return false;
+        if (!q) return true;
+        return (v.color_name || 'generic').toLowerCase().includes(q)
+            || String(v.color_number ?? '').toLowerCase().includes(q)
+            || (v.variant_size || '').toLowerCase().includes(q);
+    });
+
+    const handleSubmit = (e) => { e.preventDefault(); onSave({ substitute_variant_id: substituteId }); };
+
     return (
-        <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="bg-blue-50 p-3 rounded-md text-sm text-blue-700 mb-2 border border-blue-100">
-                <p>Showing variants for <strong>{parentItemName} - {parentItemBrand}</strong> only.</p>
+        <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="bg-blue-50 p-3 rounded-md text-sm text-blue-700 border border-blue-100">
+                Showing variants for <strong>{parentItemName} – {parentItemBrand}</strong>.
             </div>
-            <div>
-                <label className="text-sm font-medium mb-1 block">Select Substitute</label>
-                <select value={substituteId} onChange={e => setSubstituteId(e.target.value)} required className="w-full p-2 border rounded">
-                    <option value="">Choose a variant...</option>
-                    {availableOptions.map(v => (
-                        <option key={v.id} value={v.id}>
-                            {v.color_name || 'Generic'}{v.variant_size ? ` — Sz: ${v.variant_size}` : ''} (Stock: {v.main_store_stock})
-                        </option>
-                    ))}
-                </select>
-                {availableOptions.length === 0 && (
-                    <p className="text-xs text-orange-500 mt-1">No other variants available to substitute.</p>
-                )}
+
+            <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <input
+                        type="text"
+                        placeholder="Search by color, number, or size…"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 bg-gray-50 focus:bg-white"
+                    />
+                </div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 cursor-pointer select-none whitespace-nowrap">
+                    <input type="checkbox" checked={inStockOnly} onChange={e => setInStockOnly(e.target.checked)} className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />
+                    In stock only
+                </label>
             </div>
-            <div className="flex justify-end space-x-2 pt-4 border-t"><button type="button" onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded">Cancel</button><button type="submit" disabled={!substituteId} className="px-4 py-2 text-sm bg-blue-600 text-white rounded disabled:bg-gray-400">Add Substitute</button></div>
+
+            <div className="max-h-72 overflow-y-auto space-y-1 border border-gray-200 rounded-lg p-1 bg-gray-50">
+                {availableOptions.length === 0 ? (
+                    <p className="text-xs text-orange-500 italic text-center py-6">No other variants available to substitute.</p>
+                ) : filteredOptions.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic text-center py-6">No variants match your filter.</p>
+                ) : filteredOptions.map(v => {
+                    const tone = stockTone(v.main_store_stock, v.low_stock_threshold);
+                    const sel = String(substituteId) === String(v.id);
+                    return (
+                        <button
+                            key={v.id}
+                            type="button"
+                            onClick={() => setSubstituteId(String(v.id))}
+                            className={`w-full flex items-center gap-2 text-left px-2.5 py-2 rounded-md border transition-all ${
+                                sel
+                                    ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-200'
+                                    : 'border-transparent bg-white hover:border-gray-200 hover:bg-gray-50'
+                            }`}
+                        >
+                            <span
+                                className="w-3.5 h-3.5 rounded-full border border-slate-300 shrink-0"
+                                style={{ backgroundColor: swatchFromVariant(v) }}
+                            />
+                            <span className={`w-3 h-3 rounded-full border shrink-0 ${sel ? 'border-blue-500 bg-blue-500' : 'border-gray-300'}`}>
+                                {sel && <span className="block w-1 h-1 m-auto mt-1 bg-white rounded-full" />}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-gray-800 truncate">
+                                    {v.color_name || 'Generic'}
+                                    {v.color_number && <span className="ml-1.5 text-[10px] font-mono text-gray-400">{v.color_number}</span>}
+                                    {v.variant_size && <span className="ml-1.5 text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">Sz: {v.variant_size}</span>}
+                                </p>
+                            </div>
+                            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${tone.cls}`}>
+                                {v.main_store_stock} stock
+                            </span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t">
+                <button type="button" onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded">Cancel</button>
+                <button type="submit" disabled={!substituteId} className="px-4 py-2 text-sm bg-blue-600 text-white rounded disabled:bg-gray-400">Add Substitute</button>
+            </div>
         </form>
     );
 };
@@ -259,6 +339,78 @@ const TrimManagementPage = () => {
     const fileInputRef = useRef(null);
     const [colors, setColors] = useState([]);
 
+    // Phase 1 additions
+    const [variantsByItem,   setVariantsByItem]   = useState({});  // { [trim_item_id]: variants[] } for summary badges
+    const [quickFilter,      setQuickFilter]      = useState('all');  // 'all' | 'low' | 'out'
+    const [toast,            setToast]            = useState(null);   // { kind, message }
+    const [confirmDelete,    setConfirmDelete]    = useState(null);   // { type, id }
+    const [editing,          setEditing]          = useState(null);   // { variantId, field, value }
+    const [savingEdit,       setSavingEdit]       = useState(false);
+    // Phase 2 additions
+    const [showColors,       setShowColors]       = useState(false);
+    const [colorFilter,      setColorFilter]      = useState('');
+    const [selectedVariants, setSelectedVariants] = useState(new Set());
+    const [bulkThreshold,    setBulkThreshold]    = useState('');
+    const [bulkBusy,         setBulkBusy]         = useState(false);
+    const [importPreview,    setImportPreview]    = useState(null);   // { updates: [...] } | null
+    // Phase 3 additions: keyboard-driven column navigation
+    const [activeColumn,     setActiveColumn]     = useState('items'); // 'items' | 'variants' | 'substitutes'
+    const itemFilterRef        = useRef(null);
+    const variantFilterRef     = useRef(null);
+    const substituteFilterRef  = useRef(null);
+    const [isSyncing,        setIsSyncing]        = useState(false);
+
+    const showToast = (kind, message) => {
+        setToast({ kind, message });
+        clearTimeout(showToast._t);
+        showToast._t = setTimeout(() => setToast(null), 3500);
+    };
+
+    // Compute per-item summary { total, low, out } from the cached variants.
+    const itemSummary = (itemId) => {
+        const vs = variantsByItem[itemId] || [];
+        let low = 0, out = 0;
+        vs.forEach(v => {
+            const tone = stockTone(v.main_store_stock, v.low_stock_threshold);
+            if (tone.key === 'out') out++;
+            else if (tone.key === 'low') low++;
+        });
+        return { total: vs.length, low, out };
+    };
+
+    // Inline-edit helpers
+    const startEdit = (variant, field) =>
+        setEditing({ variantId: variant.id, field, value: String(variant[field] ?? '') });
+    const cancelEdit = () => setEditing(null);
+    const commitEdit = async () => {
+        if (!editing) return;
+        const { variantId, field, value } = editing;
+        const num = parseInt(value, 10);
+        if (Number.isNaN(num) || num < 0) {
+            showToast('error', 'Enter a valid non-negative number.');
+            return;
+        }
+        setSavingEdit(true);
+        try {
+            await trimsApi.updateVariant(variantId, { [field]: num });
+            // Update both the active variants column and the summary cache.
+            setVariants(prev => prev.map(v => v.id === variantId ? { ...v, [field]: num } : v));
+            setVariantsByItem(prev => {
+                const next = { ...prev };
+                Object.keys(next).forEach(k => {
+                    next[k] = next[k].map(v => v.id === variantId ? { ...v, [field]: num } : v);
+                });
+                return next;
+            });
+            showToast('success', 'Updated.');
+            setEditing(null);
+        } catch (e) {
+            showToast('error', e?.response?.data?.error || 'Update failed.');
+        } finally {
+            setSavingEdit(false);
+        }
+    };
+
     const fetchData = useCallback(async () => {
         setLoading(p => ({ ...p, items: true }));
         try {
@@ -268,6 +420,21 @@ const TrimManagementPage = () => {
             ]);
             setItems(itemsRes.data);
             setColors(colorsRes.data);
+            // Populate per-item variant summaries (for stock-health badges).
+            try {
+                const allRes = await trimsApi.getAllVariants();
+                const flat = Array.isArray(allRes.data) ? allRes.data : (allRes.data?.data || []);
+                const map = {};
+                flat.forEach(v => {
+                    const id = v.trim_item_id ?? v.item_id;
+                    if (id == null) return;
+                    if (!map[id]) map[id] = [];
+                    map[id].push(v);
+                });
+                setVariantsByItem(map);
+            } catch (err) {
+                console.warn('Variant summary fetch failed; badges will be hidden.', err);
+            }
         } catch (error) { console.error("Failed to fetch initial data", error); }
         finally { setLoading(p => ({ ...p, items: false })); }
     }, []);
@@ -278,7 +445,11 @@ const TrimManagementPage = () => {
         if (selectedItem) {
             setLoading(p => ({ ...p, variants: true }));
             trimsApi.getVariants(selectedItem.id)
-                .then(res => setVariants(res.data))
+                .then(res => {
+                    setVariants(res.data);
+                    // Refresh the cached summary for this item.
+                    setVariantsByItem(prev => ({ ...prev, [selectedItem.id]: res.data }));
+                })
                 .catch(err => console.error("Failed to fetch variants", err))
                 .finally(() => setLoading(p => ({ ...p, variants: false })));
         } else {
@@ -301,13 +472,15 @@ const TrimManagementPage = () => {
     const handleSelectItem = (item) => {
         setSelectedItem(item);
         setSelectedVariant(null);
-        setVariantFilter(''); 
+        setVariantFilter('');
         setSubstituteFilter('');
+        setActiveColumn('items');
     };
-    
+
     const handleSelectVariant = (variant) => {
         setSelectedVariant(variant);
         setSubstituteFilter('');
+        setActiveColumn('variants');
     };
 
     // --- Export / Import Logic ---
@@ -317,9 +490,10 @@ const TrimManagementPage = () => {
             const res = await trimsApi.exportInventory();
             const date = new Date().toISOString().split('T')[0];
             downloadAsExcel(res.data, `Trim_Catalog_Export_${date}.csv`);
+            showToast('success', 'Inventory exported.');
         } catch (error) {
             console.error("Export failed", error);
-            alert("Export failed.");
+            showToast('error', 'Export failed.');
         } finally {
             setIsExporting(false);
         }
@@ -355,17 +529,13 @@ const TrimManagementPage = () => {
 
                 if (updates.length === 0) throw new Error("No valid variant IDs found to update.");
 
-                const res = await trimsApi.bulkUpdateInventory({ updates });
-                alert(res.data.message || `Successfully imported updates for ${updates.length} items.`);
-                
-                // Refresh data to show updates
-                if (selectedItem) {
-                    const variantsRes = await trimsApi.getVariants(selectedItem.id);
-                    setVariants(variantsRes.data);
-                }
+                // Stage as a preview rather than applying immediately. The user reviews
+                // the diff and clicks Apply in the preview modal.
+                setImportPreview({ updates, fileName: file.name, totalRows: parsedData.length });
+                showToast('success', `Parsed ${updates.length} row${updates.length === 1 ? '' : 's'}. Review and apply.`);
             } catch (err) {
                 console.error("Import failed", err);
-                alert(`Import failed: ${err.message}`);
+                showToast('error', `Import failed: ${err.message}`);
             } finally {
                 setIsImporting(false);
                 e.target.value = null; // reset input
@@ -373,7 +543,7 @@ const TrimManagementPage = () => {
         };
 
         reader.onerror = () => {
-            alert("Failed to read the file.");
+            showToast('error', 'Failed to read the file.');
             setIsImporting(false);
         };
 
@@ -407,61 +577,335 @@ const TrimManagementPage = () => {
                 default: break;
             }
         } catch (error) {
-            alert(`Failed to save ${type}: ${error.response?.data?.error || error.message}`);
+            showToast('error', `Failed to save ${type}: ${error.response?.data?.error || error.message}`);
         }
         setModal({ type: null, data: null });
     };
 
-    const handleDelete = async (type, id) => {
-        if (window.confirm(`Are you sure you want to delete this ${type}?`)) {
-            try {
-                switch(type) {
-                    case 'item': await trimsApi.deleteItem(id); fetchData(); break;
-                    case 'variant': await trimsApi.deleteVariant(id); if(selectedItem) { const res = await trimsApi.getVariants(selectedItem.id); setVariants(res.data); } break;
-                    case 'substitute': await trimsApi.deleteSubstitute(id); if(selectedVariant) { const res = await trimsApi.getSubstitutes(selectedVariant.id); setSubstitutes(res.data); } break;
-                    default: break;
-                }
-            } catch (error) {
-                 alert(`Failed to delete ${type}`);
+    // Performs the delete after the inline confirm has been accepted.
+    const performDelete = async (type, id) => {
+        try {
+            switch(type) {
+                case 'item':       await trimsApi.deleteItem(id); fetchData(); break;
+                case 'variant':    await trimsApi.deleteVariant(id); if (selectedItem) { const res = await trimsApi.getVariants(selectedItem.id); setVariants(res.data); } break;
+                case 'substitute': await trimsApi.deleteSubstitute(id); if (selectedVariant) { const res = await trimsApi.getSubstitutes(selectedVariant.id); setSubstitutes(res.data); } break;
+                default: break;
             }
+            showToast('success', `${type[0].toUpperCase()}${type.slice(1)} deleted.`);
+        } catch (error) {
+            showToast('error', `Failed to delete ${type}.`);
+        } finally {
+            setConfirmDelete(null);
+        }
+    };
+    // Trigger the inline confirm popover instead of window.confirm.
+    const handleDelete = (type, id) => setConfirmDelete({ type, id });
+
+    // ── Phase 2: bulk operations on variants ──
+    const toggleVariantSelected = (id) => {
+        setSelectedVariants(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
+    const clearSelection = () => setSelectedVariants(new Set());
+
+    const applyBulkThreshold = async () => {
+        const t = parseInt(bulkThreshold, 10);
+        if (Number.isNaN(t) || t < 0) {
+            showToast('error', 'Enter a valid threshold (≥ 0).');
+            return;
+        }
+        setBulkBusy(true);
+        try {
+            const ids = [...selectedVariants];
+            for (const id of ids) {
+                await trimsApi.updateVariant(id, { low_stock_threshold: t });
+            }
+            // Refresh active list + summary cache
+            if (selectedItem) {
+                const res = await trimsApi.getVariants(selectedItem.id);
+                setVariants(res.data);
+                setVariantsByItem(p => ({ ...p, [selectedItem.id]: res.data }));
+            }
+            showToast('success', `Updated threshold for ${ids.length} variant${ids.length === 1 ? '' : 's'}.`);
+            clearSelection();
+            setBulkThreshold('');
+        } catch (e) {
+            showToast('error', e?.response?.data?.error || 'Bulk threshold update failed.');
+        } finally {
+            setBulkBusy(false);
         }
     };
 
-    const filteredItems = items.filter(item => 
-        item.name.toLowerCase().includes(itemFilter.toLowerCase()) || 
-        item.brand?.toLowerCase().includes(itemFilter.toLowerCase()) ||
-        item.item_code?.toLowerCase().includes(itemFilter.toLowerCase())
-    );
+    const applyBulkDelete = async () => {
+        setBulkBusy(true);
+        try {
+            const ids = [...selectedVariants];
+            for (const id of ids) {
+                await trimsApi.deleteVariant(id);
+            }
+            if (selectedItem) {
+                const res = await trimsApi.getVariants(selectedItem.id);
+                setVariants(res.data);
+                setVariantsByItem(p => ({ ...p, [selectedItem.id]: res.data }));
+            }
+            showToast('success', `Deleted ${ids.length} variant${ids.length === 1 ? '' : 's'}.`);
+            clearSelection();
+        } catch (e) {
+            showToast('error', e?.response?.data?.error || 'Bulk delete failed.');
+        } finally {
+            setBulkBusy(false);
+        }
+    };
 
-    const filteredVariants = variants.filter(variant => {
+    // ── Manual variant sync (server endpoint fills missing trim × color cells) ──
+    const handleSyncVariants = async () => {
+        if (isSyncing) return;
+        setIsSyncing(true);
+        try {
+            const res = await trimsApi.syncVariants({});
+            const inserted = res.data?.inserted ?? 0;
+            const message  = res.data?.message  ?? (inserted
+                ? `Created ${inserted} missing variant(s).`
+                : 'Already in sync — nothing to insert.');
+            showToast(inserted > 0 ? 'success' : 'success', message);
+            if (inserted > 0) {
+                fetchData();
+                if (selectedItem) {
+                    const variantsRes = await trimsApi.getVariants(selectedItem.id);
+                    setVariants(variantsRes.data);
+                }
+            }
+        } catch (e) {
+            showToast('error', e?.response?.data?.error || 'Sync failed.');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
+    // ── Phase 2: colors export ──
+    const handleExportColors = () => {
+        if (!colors?.length) { showToast('error', 'No colors to export.'); return; }
+        const data = colors.map(c => ({
+            'Color Number': c.color_number ?? '',
+            'Name':         c.name || c.color_name || '',
+            'ID':           c.id,
+        }));
+        downloadAsExcel(data, `Fabric_Colors_${new Date().toISOString().split('T')[0]}.csv`);
+        showToast('success', `Exported ${data.length} colors.`);
+    };
+
+    // ── Phase 2: import preview / dry-run ──
+    const applyImportPreview = async () => {
+        if (!importPreview?.updates?.length) return;
+        setIsImporting(true);
+        try {
+            const res = await trimsApi.bulkUpdateInventory({ updates: importPreview.updates });
+            showToast('success', res.data.message || `Applied ${importPreview.updates.length} update(s).`);
+            setImportPreview(null);
+            fetchData();
+            if (selectedItem) {
+                const variantsRes = await trimsApi.getVariants(selectedItem.id);
+                setVariants(variantsRes.data);
+            }
+        } catch (e) {
+            showToast('error', `Import failed: ${e?.response?.data?.error || e.message}`);
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
+    const filteredItems = useMemo(() => items.filter(item => {
+        const q = itemFilter.toLowerCase();
+        const matchText =
+            item.name.toLowerCase().includes(q)
+            || item.brand?.toLowerCase().includes(q)
+            || item.item_code?.toLowerCase().includes(q);
+        if (!matchText) return false;
+        if (quickFilter === 'all') return true;
+        const vs = variantsByItem[item.id] || [];
+        let low = 0, out = 0;
+        vs.forEach(v => {
+            const tone = stockTone(v.main_store_stock, v.low_stock_threshold);
+            if (tone.key === 'out') out++;
+            else if (tone.key === 'low') low++;
+        });
+        if (quickFilter === 'low') return low > 0 || out > 0;
+        if (quickFilter === 'out') return out > 0;
+        return true;
+    }), [items, itemFilter, quickFilter, variantsByItem]);
+
+    const filteredVariants = useMemo(() => variants.filter(variant => {
         const q = variantFilter.toLowerCase();
         return (variant.color_name || 'Generic').toLowerCase().includes(q)
-            || (variant.variant_size || '').toLowerCase().includes(q);
-    });
+            || (variant.variant_size || '').toLowerCase().includes(q)
+            || String(variant.color_number ?? '').toLowerCase().includes(q);
+    }), [variants, variantFilter]);
 
-    const filteredSubstitutes = substitutes.filter(sub => {
+    const filteredSubstitutes = useMemo(() => substitutes.filter(sub => {
         const name = `${sub.substitute_item_name} ${sub.substitute_color_name || 'Generic'}`;
         return name.toLowerCase().includes(substituteFilter.toLowerCase());
-    });
+    }), [substitutes, substituteFilter]);
+
+    // Variant summary for the currently-selected item (for the count chip on the Variants card).
+    const currentVariantSummary = useMemo(() => {
+        let low = 0, out = 0;
+        variants.forEach(v => {
+            const tone = stockTone(v.main_store_stock, v.low_stock_threshold);
+            if (tone.key === 'out') out++;
+            else if (tone.key === 'low') low++;
+        });
+        return { total: variants.length, low, out };
+    }, [variants]);
+
+    // ── Phase 3: keyboard navigation across the three columns ──
+    useEffect(() => {
+        const refMap = { items: itemFilterRef, variants: variantFilterRef, substitutes: substituteFilterRef };
+        const onKey = (e) => {
+            const tag = (document.activeElement?.tagName || '').toLowerCase();
+            const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select';
+            if (e.key === 'Escape' && isTyping) { document.activeElement.blur(); return; }
+            if (isTyping) return;
+
+            const list = activeColumn === 'items' ? filteredItems
+                       : activeColumn === 'variants' ? filteredVariants
+                       : filteredSubstitutes;
+            const selectedId = activeColumn === 'items' ? selectedItem?.id
+                             : activeColumn === 'variants' ? selectedVariant?.id
+                             : null;
+
+            if (e.key === '/' || e.key === '?') {
+                e.preventDefault();
+                refMap[activeColumn]?.current?.focus();
+                return;
+            }
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                if (!list?.length || activeColumn === 'substitutes') return;
+                e.preventDefault();
+                const idx = selectedId != null ? list.findIndex(r => r.id === selectedId) : -1;
+                let next = idx === -1 ? 0 : idx + (e.key === 'ArrowDown' ? 1 : -1);
+                if (next < 0) next = 0;
+                if (next >= list.length) next = list.length - 1;
+                const target = list[next];
+                if (activeColumn === 'items') handleSelectItem(target);
+                else                          handleSelectVariant(target);
+                return;
+            }
+            if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                if (activeColumn === 'items')         setActiveColumn('variants');
+                else if (activeColumn === 'variants') setActiveColumn('substitutes');
+                return;
+            }
+            if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                if (activeColumn === 'substitutes') setActiveColumn('variants');
+                else if (activeColumn === 'variants') setActiveColumn('items');
+                return;
+            }
+            if (e.key === 'e' && !e.metaKey && !e.ctrlKey) {
+                if (activeColumn === 'items' && selectedItem) {
+                    e.preventDefault();
+                    setModal({ type: 'item', data: selectedItem });
+                } else if (activeColumn === 'variants' && selectedVariant) {
+                    e.preventDefault();
+                    setModal({ type: 'variant', data: selectedVariant });
+                }
+                return;
+            }
+            if ((e.key === 'Delete' || e.key === 'Backspace') && user.role === 'factory_admin') {
+                if (activeColumn === 'items' && selectedItem) {
+                    e.preventDefault();
+                    setConfirmDelete({ type: 'item', id: selectedItem.id });
+                } else if (activeColumn === 'variants' && selectedVariant) {
+                    e.preventDefault();
+                    setConfirmDelete({ type: 'variant', id: selectedVariant.id });
+                }
+            }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [activeColumn, filteredItems, filteredVariants, filteredSubstitutes, selectedItem, selectedVariant, user.role]);  // eslint-disable-line react-hooks/exhaustive-deps
 
     return (
         <div className="p-6 bg-gray-100 min-h-screen">
+            {/* Toast notifications */}
+            {toast && (
+                <div className="fixed top-4 right-4 z-[100] animate-in fade-in slide-in-from-top-2">
+                    <div className={`flex items-start gap-2 px-4 py-3 rounded-lg shadow-lg border max-w-sm ${
+                        toast.kind === 'success'
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                            : 'bg-red-50 border-red-200 text-red-800'
+                    }`}>
+                        {toast.kind === 'success'
+                            ? <CheckCircle2 size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+                            : <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />}
+                        <p className="text-sm font-medium">{toast.message}</p>
+                        <button onClick={() => setToast(null)} className="ml-2 text-current opacity-50 hover:opacity-100">
+                            <X size={14}/>
+                        </button>
+                    </div>
+                </div>
+            )}
+
             <div className="flex flex-col md:flex-row justify-between md:items-end gap-4 mb-6">
                 <div>
                     <h1 className="text-3xl font-bold text-gray-800">Trim Management</h1>
                     <p className="text-gray-500 text-sm mt-1">Manage definitions, stock variants, and substitutes.</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5 hidden md:block">
+                        <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-200 rounded font-mono text-[10px]">↑</kbd>
+                        <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-200 rounded font-mono text-[10px] ml-0.5">↓</kbd>
+                        <span className="mx-1">navigate</span>
+                        <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-200 rounded font-mono text-[10px]">←</kbd>
+                        <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-200 rounded font-mono text-[10px] ml-0.5">→</kbd>
+                        <span className="mx-1">switch column</span>
+                        <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-200 rounded font-mono text-[10px]">/</kbd>
+                        <span className="mx-1">filter</span>
+                        <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-200 rounded font-mono text-[10px]">e</kbd>
+                        <span className="mx-1">edit</span>
+                        <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-200 rounded font-mono text-[10px]">Del</kbd>
+                        <span className="mx-1">delete</span>
+                    </p>
                 </div>
                 
                 <div className="flex items-center gap-3">
                     {/* Hidden File Input */}
-                    <input 
-                        type="file" 
-                        accept=".csv" 
-                        ref={fileInputRef} 
-                        onChange={handleFileUpload} 
-                        className="hidden" 
+                    <input
+                        type="file"
+                        accept=".csv"
+                        ref={fileInputRef}
+                        onChange={handleFileUpload}
+                        className="hidden"
                     />
-                    
+
+                    {/* COLORS COUNT — click to view list + export */}
+                    <button
+                        onClick={() => setShowColors(true)}
+                        className="flex items-center gap-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 px-3 py-2 rounded-lg shadow-sm transition-all"
+                        title="View all fabric colors"
+                    >
+                        <Palette className="w-4 h-4" />
+                        <span className="font-semibold text-sm">Colors</span>
+                        <span className="text-xs font-bold bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded-full tabular-nums">{colors.length}</span>
+                    </button>
+
+                    {/* SYNC VARIANTS — manual fill of missing trim × color cells */}
+                    {(user.role === 'factory_admin' || user.role === 'store_manager') && (
+                        <button
+                            onClick={handleSyncVariants}
+                            disabled={isSyncing}
+                            className="flex items-center gap-2 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-3 py-2 rounded-lg shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                            title="Create one variant per fabric color for every non-agnostic trim that's missing some"
+                        >
+                            {isSyncing
+                                ? <Loader2 className="animate-spin w-4 h-4" />
+                                : <RefreshCw className="w-4 h-4" />}
+                            <span className="font-semibold text-sm">{isSyncing ? 'Syncing…' : 'Sync variants'}</span>
+                        </button>
+                    )}
+
                     {/* IMPORT BUTTON */}
                     {(user.role === 'factory_admin') && (
                     <button 
@@ -488,21 +932,39 @@ const TrimManagementPage = () => {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 
                 {/* Column 1: Trim Items */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-[70vh]">
+                <div onClick={() => setActiveColumn('items')} className={`bg-white rounded-xl shadow-sm border flex flex-col h-[70vh] transition ${activeColumn === 'items' ? 'border-blue-300 ring-2 ring-blue-100' : 'border-gray-200'}`}>
                     <div className="border-b border-gray-100 bg-white rounded-t-xl z-10">
                         <header className="flex justify-between items-center p-4 pb-2">
-                            <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
-                                <div className="p-1.5 bg-gray-100 rounded-md"><Package className="text-gray-500 w-5 h-5" /></div>
+                            <h2 className={`font-bold text-lg flex items-center gap-2 ${activeColumn === 'items' ? 'text-blue-700' : 'text-gray-800'}`}>
+                                <div className={`p-1.5 rounded-md ${activeColumn === 'items' ? 'bg-blue-100' : 'bg-gray-100'}`}><Package className={`w-5 h-5 ${activeColumn === 'items' ? 'text-blue-600' : 'text-gray-500'}`} /></div>
                                 Trim Items
+                                <span className="text-xs font-bold bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full tabular-nums">{filteredItems.length}{filteredItems.length !== items.length ? ` of ${items.length}` : ''}</span>
                             </h2>
                             {(user.role === 'factory_admin' || user.role === 'store_manager') && (
-                                <button onClick={() => setModal({ type: 'item' })} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"><Plus size={18} /></button>
+                                <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'item' }); }} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"><Plus size={18} /></button>
                             )}
                         </header>
-                        <div className="px-4 pb-3">
+                        <div className="px-4 pb-3 space-y-2">
                             <div className="relative">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                                <input type="text" placeholder="Filter items..." value={itemFilter} onChange={(e) => setItemFilter(e.target.value)} className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white" />
+                                <input ref={itemFilterRef} type="text" placeholder="Name, brand, or code…  (press / )" value={itemFilter} onChange={(e) => setItemFilter(e.target.value)} className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white" />
+                            </div>
+                            <div className="flex gap-1">
+                                {['all', 'low', 'out'].map(k => {
+                                    const active = quickFilter === k;
+                                    const cls = active
+                                        ? (k === 'low' ? 'bg-amber-500 text-white border-amber-500'
+                                          : k === 'out' ? 'bg-red-500 text-white border-red-500'
+                                          : 'bg-gray-700 text-white border-gray-700')
+                                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300';
+                                    const label = k === 'all' ? 'All' : k === 'low' ? 'Low stock' : 'Out of stock';
+                                    return (
+                                        <button key={k} onClick={() => setQuickFilter(k)}
+                                            className={`flex-1 text-[11px] font-bold uppercase tracking-wide px-2 py-1 rounded-md border transition ${cls}`}>
+                                            {label}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
@@ -510,52 +972,168 @@ const TrimManagementPage = () => {
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                         {loading.items ? (
                             <div className="flex justify-center p-8"><Spinner /></div>
+                        ) : filteredItems.length === 0 ? (
+                            <p className="text-xs text-gray-400 italic text-center py-6">
+                                {quickFilter !== 'all' ? `No items match "${quickFilter === 'low' ? 'Low stock' : 'Out of stock'}".` : 'No items found.'}
+                            </p>
                         ) : (
-                            filteredItems.map(item => (
-                                <div 
-                                    key={item.id} 
-                                    onClick={() => handleSelectItem(item)} 
-                                    className={`group flex justify-between items-center p-3 rounded-lg cursor-pointer border transition-all duration-200 
-                                    ${selectedItem?.id === item.id ? 'border-blue-200 bg-blue-50/80 ring-1 ring-blue-200' : 'border-transparent hover:bg-gray-50 hover:border-gray-100'}`}
-                                >
-                                    <div className="w-full pr-2">
-                                        <p className={`text-sm font-semibold truncate ${selectedItem?.id === item.id ? 'text-blue-900' : 'text-gray-700'}`}>{item.name}</p>
-                                        <p className="text-xs text-gray-500 mt-0.5">
-                                            {item.brand}
-                                            {item.is_color_agnostic && <span className="text-purple-600 font-medium ml-1 text-[10px] bg-purple-50 px-1.5 py-0.5 rounded-full border border-purple-100">Generic</span>}
-                                        </p>
+                            filteredItems.map(item => {
+                                const summary = itemSummary(item.id);
+                                const isConfirming = confirmDelete?.type === 'item' && confirmDelete.id === item.id;
+                                return (
+                                    <div
+                                        key={item.id}
+                                        onClick={() => handleSelectItem(item)}
+                                        className={`group flex justify-between items-center p-3 rounded-lg cursor-pointer border transition-all duration-200
+                                        ${selectedItem?.id === item.id ? 'border-blue-200 bg-blue-50/80 ring-1 ring-blue-200' : 'border-transparent hover:bg-gray-50 hover:border-gray-100'}`}
+                                    >
+                                        <div className="w-full pr-2 min-w-0">
+                                            <p className={`text-sm font-semibold truncate ${selectedItem?.id === item.id ? 'text-blue-900' : 'text-gray-700'}`}>{item.name}</p>
+                                            <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                                <span className="text-xs text-gray-500">{item.brand}</span>
+                                                {item.is_color_agnostic && <span className="text-purple-600 font-medium text-[10px] bg-purple-50 px-1.5 py-0.5 rounded-full border border-purple-100">Generic</span>}
+                                                {summary.total > 0 && (
+                                                    <span className="inline-flex items-center gap-1 text-[10px] text-gray-500">
+                                                        <span className="font-bold text-gray-700">{summary.total}</span> variant{summary.total === 1 ? '' : 's'}
+                                                        {summary.low > 0 && (
+                                                            <span className="inline-flex items-center gap-0.5 text-amber-700 font-bold">
+                                                                · <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> {summary.low} low
+                                                            </span>
+                                                        )}
+                                                        {summary.out > 0 && (
+                                                            <span className="inline-flex items-center gap-0.5 text-red-700 font-bold">
+                                                                · <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> {summary.out} out
+                                                            </span>
+                                                        )}
+                                                        {summary.low === 0 && summary.out === 0 && (
+                                                            <span className="inline-flex items-center gap-0.5 text-emerald-700 font-bold">
+                                                                · <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> healthy
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center space-x-2 shrink-0">
+                                            {isConfirming ? (
+                                                <span className="flex items-center gap-1 bg-red-50 border border-red-200 rounded-md px-1 py-0.5">
+                                                    <span className="text-[10px] font-bold text-red-700 px-1">Delete?</span>
+                                                    <button onClick={(e) => { e.stopPropagation(); performDelete('item', item.id); }} className="p-1 bg-red-500 hover:bg-red-600 text-white rounded"><Check size={11}/></button>
+                                                    <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(null); }} className="p-1 bg-white hover:bg-gray-100 text-gray-500 border border-gray-200 rounded"><X size={11}/></button>
+                                                </span>
+                                            ) : (
+                                                <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    {user.role === 'factory_admin' && (
+                                                        <>
+                                                            <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'item', data: item }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200"><Edit2 size={12}/></button>
+                                                            <button onClick={(e) => { e.stopPropagation(); handleDelete('item', item.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200"><Trash2 size={12}/></button>
+                                                        </>
+                                                    )}
+                                                    <ChevronRight className={`w-4 h-4 text-gray-300 ${selectedItem?.id === item.id ? 'text-blue-400' : ''}`}/>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
-                                    <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                        {user.role === 'factory_admin' && (
-                                            <>
-                                                <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'item', data: item }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200"><Edit2 size={12}/></button>
-                                                <button onClick={(e) => { e.stopPropagation(); handleDelete('item', item.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200"><Trash2 size={12}/></button>
-                                            </>
-                                        )}
-                                        <ChevronRight className={`w-4 h-4 text-gray-300 ${selectedItem?.id === item.id ? 'text-blue-400' : ''}`}/>
-                                    </div>
-                                </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
                 </div>
 
                 {/* Column 2: Variants */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-[70vh]">
+                <div onClick={() => setActiveColumn('variants')} className={`bg-white rounded-xl shadow-sm border flex flex-col h-[70vh] transition ${activeColumn === 'variants' ? 'border-blue-300 ring-2 ring-blue-100' : 'border-gray-200'}`}>
                     <div className="border-b border-gray-100 bg-white rounded-t-xl z-10">
                         <header className="flex justify-between items-center p-4 pb-2">
-                            <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
-                                <div className="p-1.5 bg-gray-100 rounded-md"><Layers className="text-gray-500 w-5 h-5" /></div>
+                            <h2 className={`font-bold text-lg flex items-center gap-2 flex-wrap ${activeColumn === 'variants' ? 'text-blue-700' : 'text-gray-800'}`}>
+                                <div className={`p-1.5 rounded-md ${activeColumn === 'variants' ? 'bg-blue-100' : 'bg-gray-100'}`}><Layers className={`w-5 h-5 ${activeColumn === 'variants' ? 'text-blue-600' : 'text-gray-500'}`} /></div>
                                 Variants
+                                {selectedItem && (
+                                    <span className="text-xs font-bold bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full tabular-nums">
+                                        {filteredVariants.length}{filteredVariants.length !== variants.length ? ` of ${variants.length}` : ''}
+                                    </span>
+                                )}
+                                {selectedItem && currentVariantSummary.total > 0 && (currentVariantSummary.low > 0 || currentVariantSummary.out > 0) && (
+                                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider">
+                                        {currentVariantSummary.low > 0 && (
+                                            <span className="inline-flex items-center gap-0.5 text-amber-700">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> {currentVariantSummary.low} low
+                                            </span>
+                                        )}
+                                        {currentVariantSummary.out > 0 && (
+                                            <span className="inline-flex items-center gap-0.5 text-red-700">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> {currentVariantSummary.out} out
+                                            </span>
+                                        )}
+                                    </span>
+                                )}
+                                {selectedVariants.size > 0 && (
+                                    <span className="text-xs font-bold uppercase tracking-wider bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                                        {selectedVariants.size} selected
+                                    </span>
+                                )}
                             </h2>
                             {selectedItem && (user.role === 'factory_admin' || user.role === 'store_manager') && (
-                                <button onClick={() => setModal({ type: 'variant' })} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"><Plus size={18} /></button>
+                                <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'variant' }); }} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"><Plus size={18} /></button>
                             )}
                         </header>
+                        {/* Bulk action bar — appears when ≥1 variant is selected */}
+                        {selectedVariants.size > 0 && user.role === 'factory_admin' && (
+                            confirmDelete?.type === 'variant-bulk' ? (
+                                <div className="px-4 pb-2 pt-1 flex flex-wrap items-center gap-2 bg-red-50 border-t border-red-200">
+                                    <span className="text-xs font-bold text-red-700 flex items-center gap-1.5">
+                                        <AlertCircle size={13}/> Delete {selectedVariants.size} variant{selectedVariants.size === 1 ? '' : 's'}?
+                                    </span>
+                                    <button onClick={applyBulkDelete} disabled={bulkBusy}
+                                        className="flex items-center gap-1 text-xs font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 px-2.5 py-1 rounded transition">
+                                        {bulkBusy ? <Loader2 size={11} className="animate-spin"/> : <Check size={11}/>}
+                                        Confirm
+                                    </button>
+                                    <button onClick={() => setConfirmDelete(null)} disabled={bulkBusy}
+                                        className="text-xs font-medium text-gray-600 hover:text-gray-800 px-2 py-1 rounded transition">
+                                        Cancel
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="px-4 pb-2 pt-1 flex flex-wrap items-center gap-2 bg-blue-50/40 border-t border-blue-100">
+                                    <div className="flex items-center gap-1.5">
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            value={bulkThreshold}
+                                            onChange={e => setBulkThreshold(e.target.value)}
+                                            placeholder="Threshold"
+                                            className="w-24 text-xs border border-blue-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                        />
+                                        <button
+                                            onClick={applyBulkThreshold}
+                                            disabled={bulkBusy || !bulkThreshold}
+                                            className="flex items-center gap-1 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40 px-2.5 py-1 rounded transition"
+                                        >
+                                            {bulkBusy ? <Loader2 size={11} className="animate-spin"/> : <Check size={11}/>}
+                                            Apply threshold
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={() => setConfirmDelete({ type: 'variant-bulk' })}
+                                        disabled={bulkBusy}
+                                        className="flex items-center gap-1 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 disabled:opacity-40 px-2.5 py-1 rounded transition ml-auto"
+                                    >
+                                        <Trash2 size={11}/> Delete {selectedVariants.size}
+                                    </button>
+                                    <button
+                                        onClick={clearSelection}
+                                        disabled={bulkBusy}
+                                        className="text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1 rounded transition"
+                                    >
+                                        Clear
+                                    </button>
+                                </div>
+                            )
+                        )}
                         <div className="px-4 pb-3">
                             <div className="relative">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                                <input type="text" placeholder="Filter variants..." disabled={!selectedItem} value={variantFilter} onChange={(e) => setVariantFilter(e.target.value)} className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white disabled:bg-gray-100 disabled:text-gray-400" />
+                                <input ref={variantFilterRef} type="text" placeholder="Filter variants…  (press / )" disabled={!selectedItem} value={variantFilter} onChange={(e) => setVariantFilter(e.target.value)} className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white disabled:bg-gray-100 disabled:text-gray-400" />
                             </div>
                         </div>
                     </div>
@@ -566,56 +1144,131 @@ const TrimManagementPage = () => {
                         ) : !selectedItem ? (
                             <div className="h-full flex flex-col items-center justify-center p-6 text-center opacity-60"><Package className="w-10 h-10 text-gray-300 mb-2" /><Placeholder text="Select an item to view variants." /></div>
                         ) : (
-                            filteredVariants.map(variant => (
-                                <div 
-                                    key={variant.id} 
-                                    onClick={() => handleSelectVariant(variant)} 
-                                    className={`group flex justify-between items-center p-3 rounded-lg cursor-pointer border transition-all duration-200 
-                                    ${selectedVariant?.id === variant.id ? 'border-blue-200 bg-blue-50/80 ring-1 ring-blue-200' : 'border-transparent hover:bg-gray-50 hover:border-gray-100'}`}
-                                >
-                                    <div>
-                                        <p className={`text-sm font-semibold ${selectedVariant?.id === variant.id ? 'text-blue-900' : 'text-gray-700'}`}>
-                                            {variant.color_name || 'Generic (Color Agnostic)'}
-                                            {variant.variant_size && (
-                                                <span className="ml-1.5 text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">Sz: {variant.variant_size}</span>
+                            filteredVariants.map(variant => {
+                                const tone = stockTone(variant.main_store_stock, variant.low_stock_threshold);
+                                const isEditingStock = editing?.variantId === variant.id && editing.field === 'main_store_stock';
+                                const isConfirming = confirmDelete?.type === 'variant' && confirmDelete.id === variant.id;
+                                const isPicked = selectedVariants.has(variant.id);
+                                return (
+                                    <div
+                                        key={variant.id}
+                                        onClick={() => { if (!isEditingStock) handleSelectVariant(variant); }}
+                                        className={`group flex justify-between items-center p-3 rounded-lg cursor-pointer border transition-all duration-200
+                                        ${isPicked ? 'border-blue-300 bg-blue-50/60 ring-1 ring-blue-300'
+                                          : selectedVariant?.id === variant.id ? 'border-blue-200 bg-blue-50/80 ring-1 ring-blue-200'
+                                          : 'border-transparent hover:bg-gray-50 hover:border-gray-100'}`}
+                                    >
+                                        <div className="flex items-start gap-2 min-w-0 flex-1">
+                                            {user.role === 'factory_admin' && (
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isPicked}
+                                                    onClick={e => e.stopPropagation()}
+                                                    onChange={() => toggleVariantSelected(variant.id)}
+                                                    className="mt-1 h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 shrink-0"
+                                                    title="Select for bulk operations"
+                                                />
                                             )}
-                                        </p>
-                                        <div className="flex items-center gap-2 mt-1">
-                                            <span className="text-[10px] font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">Stock: {variant.main_store_stock}</span>
-                                            <span className="text-[10px] bg-green-50 text-green-700 px-1.5 py-0.5 rounded border border-green-100">SP: ₹{Number(variant.selling_price || 0).toFixed(2)}</span>
+                                            <span
+                                                aria-hidden
+                                                className="mt-1 w-3.5 h-3.5 rounded-full border border-slate-300 shrink-0"
+                                                style={{ backgroundColor: swatchFromVariant(variant) }}
+                                                title={variant.color_name || 'Generic'}
+                                            />
+                                            <div className="min-w-0 flex-1">
+                                                <p className={`text-sm font-semibold ${selectedVariant?.id === variant.id ? 'text-blue-900' : 'text-gray-700'}`}>
+                                                    {variant.color_name || 'Generic (Color Agnostic)'}
+                                                    {variant.color_number && <span className="ml-1.5 text-[10px] font-mono text-gray-400">{variant.color_number}</span>}
+                                                    {variant.variant_size && (
+                                                        <span className="ml-1.5 text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">Sz: {variant.variant_size}</span>
+                                                    )}
+                                                </p>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                {isEditingStock ? (
+                                                    <span className="inline-flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                                                        <span className="text-[10px] font-mono text-gray-500">Stock</span>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            autoFocus
+                                                            value={editing.value}
+                                                            onChange={e => setEditing(p => ({ ...p, value: e.target.value }))}
+                                                            onKeyDown={e => {
+                                                                if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+                                                                if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+                                                            }}
+                                                            disabled={savingEdit}
+                                                            className="w-16 text-[11px] font-mono border border-blue-300 rounded px-1 py-0.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                                        />
+                                                        <button onClick={commitEdit} disabled={savingEdit} className="p-0.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded">
+                                                            {savingEdit ? <Loader2 size={10} className="animate-spin"/> : <Check size={10}/>}
+                                                        </button>
+                                                        <button onClick={cancelEdit} disabled={savingEdit} className="p-0.5 bg-white hover:bg-gray-100 text-gray-500 border border-gray-200 rounded"><X size={10}/></button>
+                                                    </span>
+                                                ) : (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); startEdit(variant, 'main_store_stock'); }}
+                                                        title="Click to edit stock"
+                                                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${tone.cls} hover:brightness-95 transition`}
+                                                    >
+                                                        Stock: <span className="font-bold">{variant.main_store_stock}</span>
+                                                        {tone.key !== 'ok' && <span className="ml-1 uppercase text-[9px] font-bold">{tone.key}</span>}
+                                                    </button>
+                                                )}
+                                                {variant.low_stock_threshold != null && (
+                                                    <span className="text-[10px] text-gray-400" title="Low-stock threshold">≥ {variant.low_stock_threshold}</span>
+                                                )}
+                                                <span className="text-[10px] bg-green-50 text-green-700 px-1.5 py-0.5 rounded border border-green-100">SP: ₹{Number(variant.selling_price || 0).toFixed(2)}</span>
+                                            </div>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center space-x-2 shrink-0">
+                                            {isConfirming ? (
+                                                <span className="flex items-center gap-1 bg-red-50 border border-red-200 rounded-md px-1 py-0.5" onClick={e => e.stopPropagation()}>
+                                                    <span className="text-[10px] font-bold text-red-700 px-1">Delete?</span>
+                                                    <button onClick={() => performDelete('variant', variant.id)} className="p-1 bg-red-500 hover:bg-red-600 text-white rounded"><Check size={11}/></button>
+                                                    <button onClick={() => setConfirmDelete(null)} className="p-1 bg-white hover:bg-gray-100 text-gray-500 border border-gray-200 rounded"><X size={11}/></button>
+                                                </span>
+                                            ) : (
+                                                <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    {user.role === 'factory_admin' && (
+                                                        <>
+                                                            <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'variant', data: variant }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200"><Edit2 size={12}/></button>
+                                                            <button onClick={(e) => { e.stopPropagation(); handleDelete('variant', variant.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200"><Trash2 size={12}/></button>
+                                                        </>
+                                                    )}
+                                                    <ChevronRight className={`w-4 h-4 text-gray-300 ${selectedVariant?.id === variant.id ? 'text-blue-400' : ''}`}/>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
-                                    <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        {user.role === 'factory_admin' && (
-                                            <>
-                                                <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'variant', data: variant }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200"><Edit2 size={12}/></button>
-                                                <button onClick={(e) => { e.stopPropagation(); handleDelete('variant', variant.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200"><Trash2 size={12}/></button>
-                                            </>
-                                        )}
-                                        <ChevronRight className={`w-4 h-4 text-gray-300 ${selectedVariant?.id === variant.id ? 'text-blue-400' : ''}`}/>
-                                    </div>
-                                </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
                 </div>
 
                 {/* Column 3: Substitutes */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-[70vh]">
+                <div onClick={() => setActiveColumn('substitutes')} className={`bg-white rounded-xl shadow-sm border flex flex-col h-[70vh] transition ${activeColumn === 'substitutes' ? 'border-blue-300 ring-2 ring-blue-100' : 'border-gray-200'}`}>
                     <div className="border-b border-gray-100 bg-white rounded-t-xl z-10">
                         <header className="flex justify-between items-center p-4 pb-2">
-                            <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
-                                <div className="p-1.5 bg-gray-100 rounded-md"><Repeat className="text-gray-500 w-5 h-5" /></div>
+                            <h2 className={`font-bold text-lg flex items-center gap-2 ${activeColumn === 'substitutes' ? 'text-blue-700' : 'text-gray-800'}`}>
+                                <div className={`p-1.5 rounded-md ${activeColumn === 'substitutes' ? 'bg-blue-100' : 'bg-gray-100'}`}><Repeat className={`w-5 h-5 ${activeColumn === 'substitutes' ? 'text-blue-600' : 'text-gray-500'}`} /></div>
                                 Substitutes
+                                {selectedVariant && (
+                                    <span className="text-xs font-bold bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full tabular-nums">
+                                        {filteredSubstitutes.length}{filteredSubstitutes.length !== substitutes.length ? ` of ${substitutes.length}` : ''}
+                                    </span>
+                                )}
                             </h2>
                             {selectedVariant && (
-                                <button onClick={() => setModal({ type: 'substitute' })} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"><Plus size={18} /></button>
+                                <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'substitute' }); }} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"><Plus size={18} /></button>
                             )}
                         </header>
                         <div className="px-4 pb-3">
                             <div className="relative">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                                <input type="text" placeholder="Filter substitutes..." disabled={!selectedVariant} value={substituteFilter} onChange={(e) => setSubstituteFilter(e.target.value)} className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white disabled:bg-gray-100 disabled:text-gray-400" />
+                                <input ref={substituteFilterRef} type="text" placeholder="Filter substitutes…  (press / )" disabled={!selectedVariant} value={substituteFilter} onChange={(e) => setSubstituteFilter(e.target.value)} className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white disabled:bg-gray-100 disabled:text-gray-400" />
                             </div>
                         </div>
                     </div>
@@ -626,24 +1279,34 @@ const TrimManagementPage = () => {
                         ) : !selectedVariant ? (
                             <div className="h-full flex flex-col items-center justify-center p-6 text-center opacity-60"><Layers className="w-10 h-10 text-gray-300 mb-2" /><Placeholder text="Select a variant to manage substitutes." /></div>
                         ) : (
-                            filteredSubstitutes.map(sub => (
-                                <div key={sub.id} className="group flex justify-between items-center p-3 rounded-lg border border-transparent hover:bg-gray-50 hover:border-gray-100 transition-all duration-200">
-                                    <div>
-                                        <p className="text-sm font-semibold text-gray-700">
-                                            {sub.substitute_item_name}
-                                            <span className="text-gray-400 font-normal mx-1">/</span>
-                                            {sub.substitute_color_name || 'Generic'}
-                                            {sub.variant_size && (
-                                                <span className="ml-1.5 text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">Sz: {sub.variant_size}</span>
-                                            )}
-                                        </p>
-                                        <p className="text-xs text-gray-500 mt-0.5 font-mono bg-gray-100 inline-block px-1 rounded">Stock: {sub.substitute_stock}</p>
+                            filteredSubstitutes.map(sub => {
+                                const subTone = stockTone(sub.substitute_stock, 0);
+                                const isConfirming = confirmDelete?.type === 'substitute' && confirmDelete.id === sub.id;
+                                return (
+                                    <div key={sub.id} className="group flex justify-between items-center p-3 rounded-lg border border-transparent hover:bg-gray-50 hover:border-gray-100 transition-all duration-200">
+                                        <div>
+                                            <p className="text-sm font-semibold text-gray-700">
+                                                {sub.substitute_item_name}
+                                                <span className="text-gray-400 font-normal mx-1">/</span>
+                                                {sub.substitute_color_name || 'Generic'}
+                                                {sub.variant_size && (
+                                                    <span className="ml-1.5 text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">Sz: {sub.variant_size}</span>
+                                                )}
+                                            </p>
+                                            <span className={`text-[10px] font-mono mt-0.5 inline-block px-1.5 py-0.5 rounded border ${subTone.cls}`}>Stock: {sub.substitute_stock}</span>
+                                        </div>
+                                        {isConfirming ? (
+                                            <span className="flex items-center gap-1 bg-red-50 border border-red-200 rounded-md px-1 py-0.5">
+                                                <span className="text-[10px] font-bold text-red-700 px-1">Remove?</span>
+                                                <button onClick={() => performDelete('substitute', sub.id)} className="p-1 bg-red-500 hover:bg-red-600 text-white rounded"><Check size={11}/></button>
+                                                <button onClick={() => setConfirmDelete(null)} className="p-1 bg-white hover:bg-gray-100 text-gray-500 border border-gray-200 rounded"><X size={11}/></button>
+                                            </span>
+                                        ) : user.role === 'factory_admin' && (
+                                            <button onClick={() => handleDelete('substitute', sub.id)} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12}/></button>
+                                        )}
                                     </div>
-                                    {user.role === 'factory_admin' && (
-                                        <button onClick={() => handleDelete('substitute', sub.id)} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12}/></button>
-                                    )}
-                                </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
                 </div>
@@ -652,6 +1315,123 @@ const TrimManagementPage = () => {
             {modal.type === 'item' && <Modal title={modal.data ? 'Edit Item' : 'Add New Item'} onClose={() => setModal({type: null})}><ItemFormModal onSave={(data) => handleSave('item', data)} onClose={() => setModal({type: null})} initialData={modal.data} /></Modal>}
             {modal.type === 'variant' && <Modal title={modal.data ? 'Edit Variant' : 'Add New Variant'} onClose={() => setModal({type: null})}><VariantFormModal onSave={(data) => handleSave('variant', data)} onClose={() => setModal({type: null})} initialData={modal.data} isColorAgnostic={selectedItem?.is_color_agnostic} colors={colors} userRole={user.role} /></Modal>}
             {modal.type === 'substitute' && <Modal title="Add Substitute" onClose={() => setModal({type: null})}><SubstituteFormModal onSave={(data) => handleSave('substitute', data)} onClose={() => setModal({type: null})} variants={variants} parentItemName={selectedItem?.name} parentItemBrand={selectedItem?.brand} currentVariantId={selectedVariant?.id} existingSubstitutes={substitutes} /></Modal>}
+
+            {/* Colors list + export modal */}
+            {showColors && (
+                <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={() => setShowColors(false)}>
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="px-5 py-4 border-b flex items-center justify-between">
+                            <div>
+                                <h2 className="text-lg font-semibold flex items-center gap-2">
+                                    <Palette size={18} className="text-purple-600" />
+                                    Fabric Colors
+                                    <span className="text-xs font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full tabular-nums">{colors.length}</span>
+                                </h2>
+                                <p className="text-xs text-gray-500 mt-0.5">Master color palette used across trim variants and fabrics.</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button onClick={handleExportColors}
+                                    className="flex items-center gap-1.5 text-xs font-semibold text-white bg-green-600 hover:bg-green-700 px-3 py-1.5 rounded-lg transition shadow-sm">
+                                    <FileSpreadsheet size={13}/> Export Excel
+                                </button>
+                                <button onClick={() => setShowColors(false)} className="p-1.5 hover:bg-gray-100 rounded-md text-gray-400 hover:text-gray-700">
+                                    <X size={16}/>
+                                </button>
+                            </div>
+                        </div>
+                        <div className="px-5 py-3 border-b">
+                            <div className="relative">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                                <input
+                                    type="text"
+                                    placeholder="Search by name or color number…"
+                                    value={colorFilter}
+                                    onChange={e => setColorFilter(e.target.value)}
+                                    className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 bg-gray-50 focus:bg-white"
+                                />
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-3">
+                            {(() => {
+                                const q = colorFilter.toLowerCase();
+                                const list = q
+                                    ? colors.filter(c =>
+                                        (c.name || c.color_name || '').toLowerCase().includes(q)
+                                        || String(c.color_number ?? '').toLowerCase().includes(q))
+                                    : colors;
+                                if (list.length === 0) return <p className="text-sm text-gray-400 italic text-center py-6">No colors match "{colorFilter}".</p>;
+                                return (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {list.map(c => (
+                                            <div key={c.id} className="flex items-center gap-2 px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg">
+                                                <span
+                                                    className="w-4 h-4 rounded-full border border-slate-300 shrink-0"
+                                                    style={{ backgroundColor: swatchFromVariant({ color_number: c.color_number, color_name: c.name || c.color_name, fabric_color_id: c.id }) }}
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-semibold text-gray-800 truncate">{c.name || c.color_name || `Color #${c.id}`}</p>
+                                                </div>
+                                                {c.color_number && <span className="text-[10px] font-mono text-gray-500 bg-white border border-gray-200 px-1.5 py-0.5 rounded">{c.color_number}</span>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Import preview / dry-run modal */}
+            {importPreview && (
+                <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={() => !isImporting && setImportPreview(null)}>
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="px-5 py-4 border-b">
+                            <h2 className="text-lg font-semibold">Review Import</h2>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                                <span className="font-mono">{importPreview.fileName}</span> · parsed {importPreview.totalRows} row{importPreview.totalRows === 1 ? '' : 's'} · <span className="font-bold text-blue-600">{importPreview.updates.length}</span> valid update{importPreview.updates.length === 1 ? '' : 's'}.
+                            </p>
+                        </div>
+                        <div className="flex-1 overflow-y-auto px-5 py-3">
+                            <table className="w-full text-xs">
+                                <thead className="text-[10px] font-bold text-gray-500 uppercase tracking-wider sticky top-0 bg-white border-b">
+                                    <tr>
+                                        <th className="text-left py-2">Variant ID</th>
+                                        <th className="text-right py-2">Stock</th>
+                                        <th className="text-right py-2">Threshold</th>
+                                        <th className="text-right py-2">Cost</th>
+                                        <th className="text-right py-2">Selling</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {importPreview.updates.slice(0, 100).map((u, i) => (
+                                        <tr key={i} className="hover:bg-gray-50">
+                                            <td className="py-1.5 font-mono">{u.variant_id}</td>
+                                            <td className="py-1.5 text-right tabular-nums">{u.stock ?? <span className="text-gray-300">—</span>}</td>
+                                            <td className="py-1.5 text-right tabular-nums">{u.threshold ?? <span className="text-gray-300">—</span>}</td>
+                                            <td className="py-1.5 text-right tabular-nums">{u.cost_price != null ? Number(u.cost_price).toFixed(2) : <span className="text-gray-300">—</span>}</td>
+                                            <td className="py-1.5 text-right tabular-nums">{u.selling_price != null ? Number(u.selling_price).toFixed(2) : <span className="text-gray-300">—</span>}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {importPreview.updates.length > 100 && (
+                                <p className="text-[10px] text-gray-400 italic text-center py-2">
+                                    Showing first 100 rows. {importPreview.updates.length - 100} more will be applied.
+                                </p>
+                            )}
+                        </div>
+                        <div className="px-5 py-3 border-t flex justify-end gap-2">
+                            <button onClick={() => setImportPreview(null)} disabled={isImporting} className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition disabled:opacity-40">Cancel</button>
+                            <button onClick={applyImportPreview} disabled={isImporting}
+                                className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg transition shadow-sm">
+                                {isImporting ? <Loader2 size={13} className="animate-spin"/> : <Check size={13}/>}
+                                Apply {importPreview.updates.length} update{importPreview.updates.length === 1 ? '' : 's'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

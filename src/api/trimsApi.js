@@ -24,7 +24,11 @@ export const trimsApi = {
     getColors: () => api.get('shared/fabric_color'),
     getAllVariants: () => api.get('trims/variants-detailed'),
 
-    // Export inventory data  
+    // Export inventory data
     exportInventory: () => api.get('trims/export'),
-    bulkUpdateInventory: (data) => api.post('/trims/bulk-update', data)
+    bulkUpdateInventory: (data) => api.post('/trims/bulk-update', data),
+
+    // Manual sync: fills missing (trim_item × fabric_color) variants.
+    // Empty body = whole matrix; pass { trim_item_id } and/or { fabric_color_id } to scope.
+    syncVariants: (body = {}) => api.post('/trims/variants/sync', body),
 };

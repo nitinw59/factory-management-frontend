@@ -61,6 +61,13 @@ const StatusBadge = ({ status }) => {
     );
 };
 
+// New backend shape:
+//   batches live on SOP (so.products[*].batches). Legacy orphan buckets at SO level.
+//   POs live on SOP (so.products[*].purchase_orders). Legacy SOP-less POs at SO level.
+const sopsOf       = so => so?.products || [];
+const allPosOf     = so => [...sopsOf(so).flatMap(p => p.purchase_orders || []), ...(so?.purchase_orders || [])];
+const allBatchesOf = so => [...sopsOf(so).flatMap(p => p.batches || []),         ...(so?.batches || [])];
+
 const Connector = ({ start, end }) => {
     // start.side / end.side: 'right' (default) | 'left' | 'bottom' | 'top'
     // Picks Bezier control points that exit/enter from the named side.
@@ -345,11 +352,12 @@ const CreateBatchCircleNode = ({ x, y, so, onCreateBatch }) => (
         style={{ width: NODE_W_CB, height: NODE_H_CB, left: x, top: y }}
         onClick={e => {
             e.stopPropagation();
-            const po = so?.purchase_orders?.[0] ?? null;
+            const firstSop = so?.products?.[0] ?? null;
+            const po = firstSop?.purchase_orders?.[0] ?? so?.purchase_orders?.[0] ?? null;
             onCreateBatch && onCreateBatch({
                 ...(po ?? {}),
-                sales_order_id:         so?.sales_order_id       ?? null,
-                sales_order_product_id: so?.products?.[0]?.id   ?? null,
+                sales_order_id:         so?.sales_order_id ?? null,
+                sales_order_product_id: firstSop?.id       ?? null,
             });
         }}
         title="Create a new production batch"
@@ -442,14 +450,16 @@ const SopNode = ({ data, x, y, pos = [], sopH, onAddPO, onInward }) => {
 // ─── WORKFLOW GRAPH ───────────────────────────────────────────────────────────
 
 const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders }) => {
-    const { nodes, connectors, height, totalWidth } = useMemo(() => {
+    const { nodes, connectors, height, totalWidth, totalPoCount } = useMemo(() => {
         const nodesList  = [];
         const connList   = [];
         const hasSO      = !!so.sales_order_id;
-        const pos        = so.purchase_orders || [];
         const sops       = so.products        || [];
         const hasSops    = sops.length > 0;
-        const allBatches = pos.flatMap(po => po.batches || []);
+        // POs are now per-SOP (legacy SOP-less POs still appear at SO level).
+        const pos        = allPosOf(so);
+        // Batches are now per-SOP (legacy SO-level orphan bucket too).
+        const allBatches = allBatchesOf(so);
 
         // Column X positions — PO column removed; SOPs now embed POs.
         // CreateBatch circle now sits BELOW the SOP card, not in its own column.
@@ -465,7 +475,7 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
         // Column content heights (all start from MARGIN)
         const soColH    = NODE_H_SO;
         const totalSopH = hasSops
-            ? sops.reduce((sum, _, i) => sum + getSopH(pos.length) + (i < sops.length - 1 ? SOP_GAP_Y : 0), 0)
+            ? sops.reduce((sum, s, i) => sum + getSopH((s.purchase_orders || []).length) + (i < sops.length - 1 ? SOP_GAP_Y : 0), 0)
             : 0;
         const cbSectionH = hasCB ? GAP_Y + NODE_H_CB : 0;
         const sopColH    = totalSopH + cbSectionH;
@@ -485,11 +495,20 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
         // shift up slightly to leave room for the circle below them.
         const sopStartY = hasSops ? Math.max(MARGIN, MARGIN + contentMid - sopColH / 2) : MARGIN;
 
+        // Track each SOP's right-edge midpoint so batches can connect back to their owning SOP.
+        const sopAnchorById = new Map();
         if (hasSops) {
             let sy = sopStartY;
             sops.forEach(sop => {
-                const sopH = getSopH(pos.length);
-                nodesList.push({ type: 'SOP', data: sop, x: sopX, y: sy, pos, sopH });
+                const sopPos = sop.purchase_orders || [];
+                const sopH   = getSopH(sopPos.length);
+                nodesList.push({ type: 'SOP', data: sop, x: sopX, y: sy, pos: sopPos, sopH });
+                if (sop.id != null) {
+                    sopAnchorById.set(sop.id, {
+                        rightX: sopX + NODE_W_SOP,
+                        midY:   sy + sopH / 2,
+                    });
+                }
                 if (hasSO) {
                     connList.push({
                         start: { x: soX + NODE_W_SO, y: soY + NODE_H_SO / 2 },
@@ -523,11 +542,12 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
             const bY = batchStartY + bi * (NODE_H_BATCH + GAP_Y);
             nodesList.push({ type: 'BATCH', data: batch, x: batchX, y: bY });
 
-            // Circle → Batch (when circle exists), else SOP → Batch, else SO → Batch
-            if (hasCB) {
+            // Owning SOP → Batch (new shape). Falls back to bottom-of-SOP-column or SO when sop_id is missing/legacy.
+            const owningSop = batch.sop_id != null ? sopAnchorById.get(batch.sop_id) : null;
+            if (owningSop) {
                 connList.push({
-                    start: { x: cbX + NODE_W_CB, y: cbY + NODE_H_CB / 2 },
-                    end:   { x: batchX,          y: bY + NODE_H_BATCH / 2 },
+                    start: { x: owningSop.rightX, y: owningSop.midY },
+                    end:   { x: batchX,           y: bY + NODE_H_BATCH / 2 },
                 });
             } else if (hasSops) {
                 connList.push({
@@ -570,6 +590,7 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
             connectors: connList,
             height: contentH + 2 * MARGIN,
             totalWidth: dispatchX + NODE_W_DISPATCH_WIDE + MARGIN,
+            totalPoCount: pos.length,
         };
     }, [so]);
 
@@ -579,7 +600,7 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
                 {connectors.map((c, i) => <Connector key={i} start={c.start} end={c.end} />)}
             </svg>
             {nodes.map((node, i) => {
-                if (node.type === 'SO')                  return <SalesOrderNode       key={i} {...node} poCount={so.purchase_orders?.length || 0} onAddPO={onAddPO} onEditSO={onEditSO} />;
+                if (node.type === 'SO')                  return <SalesOrderNode       key={i} {...node} poCount={totalPoCount} onAddPO={onAddPO} onEditSO={onEditSO} />;
                 if (node.type === 'SOP')                 return <SopNode              key={i} {...node} onAddPO={onAddSopPO} onInward={onInward} />;
                 if (node.type === 'CREATE_BATCH_CIRCLE') return <CreateBatchCircleNode key={i} {...node} so={so} onCreateBatch={onCreateBatch} />;
                 if (node.type === 'BATCH')               return <BatchNode            key={i} {...node} onStageClick={onStageClick} onDrilldown={onDrilldown} onTrimOrders={onTrimOrders} />;
@@ -595,8 +616,8 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
 const SalesOrderTableRow = ({ so, onSODetails, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders }) => {
     const [expanded, setExpanded] = useState(false);
 
-    const pos         = so.purchase_orders || [];
-    const allBatches  = pos.flatMap(po => po.batches || []);
+    const pos         = allPosOf(so);
+    const allBatches  = allBatchesOf(so);
     const poCount     = pos.length;
     const batchCount  = allBatches.length;
     const stagesDone  = allBatches.reduce((s, b) => s + (b.stage_progress?.completed || 0), 0);
@@ -677,6 +698,7 @@ const SalesOrderDetailsModal = ({ orderId, onClose }) => {
     useEffect(() => {
         accountingApi.getSalesOrderDetails(orderId)
             .then(res => setOrder(res.data))
+            .then(() => console.log('Fetched SO details:', order))
             .catch(console.error)
             .finally(() => setLoading(false));
     }, [orderId]);
@@ -1859,14 +1881,14 @@ const GlobalSearch = ({ data, onDispatch, onBatchDrilldown }) => {
                 (so.buyer_po_number || '').toLowerCase().includes(lower)
             ) sos.push(so);
 
-            (so.purchase_orders || []).forEach(po => {
+            allPosOf(so).forEach(po => {
                 if ((po.po_code || '').toLowerCase().includes(lower)) pos.push({ ...po, so });
-                (po.batches || []).forEach(b => {
-                    if (
-                        (b.batch_code || '').toLowerCase().includes(lower) ||
-                        String(b.batch_id) === lower
-                    ) batches.push({ ...b, so, po });
-                });
+            });
+            allBatchesOf(so).forEach(b => {
+                if (
+                    (b.batch_code || '').toLowerCase().includes(lower) ||
+                    String(b.batch_id) === lower
+                ) batches.push({ ...b, so });
             });
         });
         return { sos: sos.slice(0, 4), pos: pos.slice(0, 4), batches: batches.slice(0, 8) };
@@ -1961,7 +1983,7 @@ const GlobalSearch = ({ data, onDispatch, onBatchDrilldown }) => {
                                                     <Scissors size={13} className="text-emerald-500 shrink-0" />
                                                     <div className="flex-1 min-w-0">
                                                         <p className="font-mono font-bold text-slate-800 text-sm">{b.batch_code}</p>
-                                                        <p className="text-xs text-slate-500 truncate">#{b.batch_id} · {b.so?.order_number} · {b.po?.po_code}</p>
+                                                        <p className="text-xs text-slate-500 truncate">#{b.batch_id} · {b.so?.order_number}{b.product_name ? ` · ${b.product_name}` : ''}</p>
                                                     </div>
                                                     <StatusBadge status={b.overall_status} />
                                                     <div className="flex gap-1 shrink-0">
@@ -2050,12 +2072,10 @@ const ProductionWorkflowDashboard = () => {
                 (so.order_number    || '').toLowerCase().includes(lower) ||
                 (so.customer_name   || '').toLowerCase().includes(lower) ||
                 (so.buyer_po_number || '').toLowerCase().includes(lower) ||
-                so.purchase_orders?.some(po =>
-                    (po.po_code || '').toLowerCase().includes(lower) ||
-                    po.batches?.some(b =>
-                        (b.batch_code || '').toLowerCase().includes(lower) ||
-                        String(b.batch_id) === lower
-                    )
+                allPosOf(so).some(po => (po.po_code || '').toLowerCase().includes(lower)) ||
+                allBatchesOf(so).some(b =>
+                    (b.batch_code || '').toLowerCase().includes(lower) ||
+                    String(b.batch_id) === lower
                 )
             );
         }

@@ -899,6 +899,12 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
             isReq:                 true,
             unit:                  r.unit_of_measure || 'pcs',
             inStock:               r.is_fulfilled,
+            trim_item_id:          r.trim_item_id ?? null,
+            trim_item_name:        r.trim_item_name || '',
+            trim_item_variant_id:  r.trim_item_variant_id ?? null,
+            color_name:            r.color_name || '',
+            variant_color_name:    r.variant_color_name || null,
+            is_substitute:         !!r.is_substitute,
             exact_variant_id:      r.stock_suggestion?.exact_variant?.id || null,
             exact_variant_stock:   r.stock_suggestion?.exact_variant?.in_stock ?? null,
             substitutes:           r.stock_suggestion?.substitutes || [],
@@ -1146,33 +1152,125 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
 
     const generateTrimPDF = () => {
         const completed = allItems.filter(it => it.type === 'trim' && it.status === 'completed');
-        const doc = new jsPDF();
+        const doc   = new jsPDF();
+        const pageW = doc.internal.pageSize.getWidth();
         doc.setFontSize(14);
         doc.text(`Trim T&A — ${sop.product_name}`, 14, 18);
         doc.setFontSize(9);
         doc.text(`Generated: ${new Date().toLocaleDateString('en', { dateStyle: 'medium' })}`, 14, 25);
-        autoTable(doc, {
-            startY: 30,
-            head: [['Item / Color', 'Required', 'Reserved', 'Variant ID', 'Substitutes', 'Formula']],
-            body: completed.map(it => [
-                it.title,
-                `${fmt(it.quantity_required)} ${it.unit}`,
-                `${fmt(it.quantity_reserved)} ${it.unit}`,
-                it.exact_variant_id ?? '—',
-                (it.substitutes || []).map(s => `${s.item_name}${s.color_name ? ' – ' + s.color_name : ''} (${s.in_stock ?? 0})`).join('; ') || '—',
-                it.calculation_breakdown
-                    ? `${it.calculation_breakdown.base_quantity_per_set ?? ''}× ${it.calculation_breakdown.total_sets ?? ''} sets + ${it.calculation_breakdown.wastage_percentage ?? 0}% waste`
-                    : '—',
-            ]),
-            styles: { fontSize: 8 },
-            headStyles: { fillColor: [245, 158, 11] },
+
+        // Group completed trim items by reserved variant.
+        const groupsMap = new Map();
+        completed.forEach(it => {
+            const key = String(it.trim_item_variant_id ?? `unassigned-${it.req_id ?? it.id}`);
+            if (!groupsMap.has(key)) {
+                groupsMap.set(key, {
+                    trim_item_variant_id: it.trim_item_variant_id ?? null,
+                    trim_item_name:       it.trim_item_name || (it.title || '').split(' – ')[0] || 'Trim',
+                    variant_color_name:   it.variant_color_name,
+                    is_substitute:        !!it.is_substitute,
+                    unit:                 it.unit || 'pcs',
+                    items:                [],
+                    totalRequired:        0,
+                    totalReserved:        0,
+                });
+            }
+            const g = groupsMap.get(key);
+            g.items.push(it);
+            g.totalRequired += Number(it.quantity_required || 0);
+            g.totalReserved += Number(it.quantity_reserved || 0);
         });
+        const groups = [...groupsMap.values()];
+
+        let y = 30;
+        let grandRequired = 0;
+        let grandReserved = 0;
+
+        if (groups.length === 0) {
+            doc.setFontSize(10);
+            doc.text('No completed trim T&A items.', 14, y + 6);
+        }
+
+        groups.forEach((g, idx) => {
+            if (y > 250) { doc.addPage(); y = 14; }
+            // Variant header — "<Trim> <Variant Color> reserved for: <Color1>, <Color2>, …"
+            const requestedColors = g.items
+                .map(it => it.color_name || (it.title || '').split(' – ')[1] || '—')
+                .filter(Boolean);
+            doc.setFontSize(11);
+            doc.setFont(undefined, 'bold');
+            const variantLabel =
+                `${g.trim_item_name}` +
+                `${g.variant_color_name ? ` ${g.variant_color_name}` : ''}` +
+                ` reserved for: ${requestedColors.join(', ') || '—'}` +
+                `${g.is_substitute ? '  (substitute)' : ''}`;
+            const wrapped = doc.splitTextToSize(variantLabel, pageW - 28);
+            doc.text(wrapped, 14, y);
+            const headerLines = Array.isArray(wrapped) ? wrapped.length : 1;
+            y += headerLines * 5;
+            doc.setFont(undefined, 'normal');
+            doc.setFontSize(8);
+            doc.text(
+                `Variant ID: ${g.trim_item_variant_id ?? '—'}  ·  ${g.items.length} requirement${g.items.length === 1 ? '' : 's'}`,
+                14, y
+            );
+            y += 4;
+
+            autoTable(doc, {
+                startY: y,
+                head: [['Requested Color', 'Required', 'Reserved', 'Formula']],
+                body: [
+                    ...g.items.map(it => [
+                        it.color_name || (it.title || '').split(' – ')[1] || '—',
+                        `${fmt(it.quantity_required)} ${g.unit}`,
+                        `${fmt(it.quantity_reserved)} ${g.unit}`,
+                        it.calculation_breakdown
+                            ? `${it.calculation_breakdown.base_quantity_per_set ?? ''}× ${it.calculation_breakdown.total_sets ?? ''} sets + ${it.calculation_breakdown.wastage_percentage ?? 0}% waste`
+                            : '—',
+                    ]),
+                    [
+                        { content: 'Subtotal', styles: { fontStyle: 'bold' } },
+                        { content: `${fmt(g.totalRequired)} ${g.unit}`, styles: { fontStyle: 'bold', halign: 'right' } },
+                        { content: `${fmt(g.totalReserved)} ${g.unit}`, styles: { fontStyle: 'bold', halign: 'right' } },
+                        { content: '', styles: {} },
+                    ],
+                ],
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [245, 158, 11] },
+                columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
+            });
+            y = doc.lastAutoTable.finalY + 5;
+            grandRequired += g.totalRequired;
+            grandReserved += g.totalReserved;
+
+            if (idx < groups.length - 1) {
+                if (y > 255) { doc.addPage(); y = 14; }
+                doc.setDrawColor(210);
+                doc.line(14, y, pageW - 14, y);
+                doc.setDrawColor(0);
+                y += 6;
+            }
+        });
+
+        // Grand total
+        if (groups.length > 0) {
+            if (y > 255) { doc.addPage(); y = 14; }
+            autoTable(doc, {
+                startY: y + 6,
+                head: [['', 'Total Required', 'Total Reserved']],
+                body: [['Grand Total', fmt(grandRequired), fmt(grandReserved)]],
+                styles: { fontSize: 9, fontStyle: 'bold' },
+                headStyles: { fillColor: [30, 41, 59] },
+                columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
+            });
+        }
+
         doc.save(`trim-ta-${sop.product_name.replace(/\s+/g, '-')}.pdf`);
     };
 
     return (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-start justify-center pt-6 pb-6 px-4" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/70 z-50 flex" onClick={onClose}>
+            <div className="bg-white shadow-2xl w-screen h-screen flex flex-col" onClick={e => e.stopPropagation()}>
 
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 shrink-0">
@@ -1239,7 +1337,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                             {procExpanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
                         </button>
                         {procExpanded && (
-                            <div className="px-5 pb-3 space-y-3">
+                            <div className="px-5 pb-3 space-y-3 max-h-[45vh] overflow-y-auto">
                                 {trimGroups.length === 0 ? (
                                     <div className="text-[11px] text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2">
                                         <p className="font-bold text-slate-700 mb-1">No qualifying groups yet.</p>
@@ -1319,18 +1417,40 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                     : null;
                                                 const coveredSet = pickedSub ? new Set(pickedSub.matches_req_ids) : null;
                                                 const excluded   = excludedSet(g.trim_item_id);
-                                                const targetCount = pickedSub
+                                                const targetReqs = pickedSub
                                                     ? g.requirements.filter(r =>
                                                         !r.is_fulfilled && coveredSet.has(r.id) && !excluded.has(r.id)
-                                                      ).length
-                                                    : 0;
+                                                      )
+                                                    : [];
+                                                const targetCount = targetReqs.length;
+                                                const totalSelectedQty = targetReqs.reduce(
+                                                    (sum, r) => sum + Math.max(0, Number(r.quantity_required || 0) - Number(r.quantity_reserved || 0)),
+                                                    0
+                                                );
+                                                const totalInStock = Number(pickedSub?.in_stock ?? 0);
+                                                const overStock    = !!pickedSub && totalSelectedQty > totalInStock;
                                                 return (
                                                     <div className="px-3 py-2 border-t border-slate-100 space-y-2">
                                                         {pickedSub && (
+                                                            <>
                                                             <p className="text-[10px] text-slate-500">
                                                                 <span className="font-bold text-violet-700">{targetCount}</span>
                                                                 {' '}of <span className="font-bold">{coveredSet.size}</span> covered colors selected — click highlighted chips to exclude.
                                                             </p>
+                                                            <p className="text-[10px]">
+                                                                <span className="text-slate-500">Total qty selected: </span>
+                                                                <span className={`font-bold ${overStock ? 'text-red-600' : 'text-violet-700'}`}>
+                                                                    {totalSelectedQty.toLocaleString()} {g.unit}
+                                                                </span>
+                                                                <span className="text-slate-500"> · In stock: </span>
+                                                                <span className={`font-bold ${overStock ? 'text-red-600' : 'text-emerald-700'}`}>
+                                                                    {totalInStock.toLocaleString()} {g.unit}
+                                                                </span>
+                                                                {overStock && (
+                                                                    <span className="ml-1 text-red-600 font-bold">⚠ exceeds available stock — raise PR instead</span>
+                                                                )}
+                                                            </p>
+                                                            </>
                                                         )}
                                                         <div className="flex flex-wrap items-center gap-2">
                                                             <div className="flex flex-wrap gap-1 flex-1 min-w-0">
@@ -1372,8 +1492,11 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                             </div>
                                                             <button
                                                                 onClick={() => handleBulkReserve(g)}
-                                                                disabled={!picked || busy || targetCount === 0}
-                                                                className="flex items-center gap-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 px-2.5 py-1.5 rounded-lg transition-colors"
+                                                                disabled={!picked || busy || targetCount === 0 || overStock}
+                                                                title={overStock ? `Selected ${totalSelectedQty.toLocaleString()} ${g.unit} exceeds ${totalInStock.toLocaleString()} ${g.unit} in stock` : undefined}
+                                                                className={`flex items-center gap-1 text-[11px] font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed px-2.5 py-1.5 rounded-lg transition-colors ${
+                                                                    overStock ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                                                                }`}
                                                             >
                                                                 {busy && <Loader2 size={11} className="animate-spin" />}
                                                                 Reserve {pickedSub ? `(${targetCount})` : 'all'}

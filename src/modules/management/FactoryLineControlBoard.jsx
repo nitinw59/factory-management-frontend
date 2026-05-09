@@ -7,7 +7,8 @@ import {
     Calendar, ChevronRight, WifiOff, RefreshCw
 } from 'lucide-react';
 // Assuming you have a centralized API client configured (e.g., axios instance)
-import { warRoomApi } from '../../api/warRoomApi'; 
+import { warRoomApi } from '../../api/warRoomApi';
+import { productionManagerApi } from '../../api/productionManagerApi';
 
 // ============================================================================
 // DATE HELPERS & PRESETS (Unchanged)
@@ -111,77 +112,123 @@ const STATUS_STYLES = {
 const effColor = (e) => e >= 90 ? 'text-emerald-600' : e >= 75 ? 'text-amber-500' : 'text-rose-600';
 
 // ============================================================================
-// DRILL-DOWN: BATCH DETAIL
+// DRILL-DOWN: BATCH DETAIL (live drilldown via productionManagerApi)
 // ============================================================================
-const BatchDetailView = ({ batch, lineName, onBack }) => (
-    <div className="animate-in fade-in slide-in-from-right-8 duration-300">
-        <button onClick={onBack} className="mb-6 flex items-center text-slate-500 hover:text-black font-black uppercase tracking-widest transition-colors bg-white px-6 py-3 rounded-xl border-2 border-slate-200 shadow-sm active:scale-95">
-            <ArrowLeft className="w-5 h-5 mr-3" /> Back to Floor
-        </button>
-        <div className="bg-white rounded-[2rem] p-10 border-2 border-slate-300 shadow-xl mb-8">
-            <div className="flex justify-between items-start mb-10 pb-8 border-b-2 border-slate-100">
-                <div>
-                    <h2 className="text-4xl font-black text-black flex items-center tracking-tight mb-2">
-                        <Shirt className="w-10 h-10 mr-5 text-indigo-600" /> {batch.batchCode}
-                    </h2>
-                    <span className="text-xl font-bold text-slate-500 flex items-center">
-                        <Layers className="w-5 h-5 mr-2" /> {batch.product}
-                    </span>
-                    {lineName && (
-                        <span className="mt-3 inline-block text-sm font-black text-indigo-700 bg-indigo-50 px-4 py-1.5 rounded-full border border-indigo-200 uppercase tracking-wider">
-                            {lineName}
+const BatchDetailView = ({ batch, lineName, onBack }) => {
+    const [drilldown, setDrilldown] = useState(null);
+    const [loading, setLoading]     = useState(false);
+    const [err, setErr]             = useState(null);
+
+    const fetchDrilldown = useCallback(async () => {
+        if (!batch?.batchId) return;
+        setLoading(true); setErr(null);
+        try {
+            const res = await productionManagerApi.getBatchDrilldownFull(batch.batchId);
+            setDrilldown(res.data || null);
+        } catch (e) {
+            console.error('Batch drilldown failed', e);
+            setErr('Could not load live stage data.');
+        } finally {
+            setLoading(false);
+        }
+    }, [batch?.batchId]);
+
+    useEffect(() => { fetchDrilldown(); }, [fetchDrilldown]);
+
+    // Prefer live drilldown stages; fall back to the snippet history embedded in the floor payload.
+    const stages = drilldown?.stage_pipeline || drilldown?.stages || batch.history || [];
+
+    return (
+        <div className="animate-in fade-in slide-in-from-right-8 duration-300">
+            <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
+                <button onClick={onBack} className="flex items-center text-slate-500 hover:text-black font-black uppercase tracking-widest transition-colors bg-white px-6 py-3 rounded-xl border-2 border-slate-200 shadow-sm active:scale-95">
+                    <ArrowLeft className="w-5 h-5 mr-3" /> Back to Floor
+                </button>
+                <button onClick={fetchDrilldown} disabled={loading} className="flex items-center gap-2 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-2 border-indigo-200 font-black uppercase tracking-widest text-sm px-5 py-3 rounded-xl shadow-sm transition-all active:scale-95 disabled:opacity-60">
+                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                    {loading ? 'Refreshing…' : 'Refresh'}
+                </button>
+            </div>
+
+            <div className="bg-white rounded-[2rem] p-10 border-2 border-slate-300 shadow-xl mb-8">
+                <div className="flex justify-between items-start mb-10 pb-8 border-b-2 border-slate-100">
+                    <div>
+                        <h2 className="text-4xl font-black text-black flex items-center tracking-tight mb-2">
+                            <Shirt className="w-10 h-10 mr-5 text-indigo-600" /> #{batch.batchId ?? batch.batchCode}
+                        </h2>
+                        <span className="block text-sm font-mono font-bold text-slate-500 mb-1">{batch.batchCode}</span>
+                        <span className="text-xl font-bold text-slate-500 flex items-center">
+                            <Layers className="w-5 h-5 mr-2" /> {batch.product}
                         </span>
+                        {lineName && (
+                            <span className="mt-3 inline-block text-sm font-black text-indigo-700 bg-indigo-50 px-4 py-1.5 rounded-full border border-indigo-200 uppercase tracking-wider">
+                                {lineName}
+                            </span>
+                        )}
+                    </div>
+                    <div className="text-right">
+                        <span className="block text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Target Qty</span>
+                        <span className="text-5xl font-black tracking-tighter text-black">{batch.target || 'TBD'}</span>
+                    </div>
+                </div>
+
+                <div className="flex items-center justify-between mb-12 bg-slate-50 p-8 rounded-2xl border-2 border-slate-100">
+                    <div className="w-full mr-8">
+                        <div className="flex justify-between text-sm font-black uppercase tracking-widest text-slate-500 mb-3">
+                            <span>Line Progress ({lineName})</span>
+                            <span className="text-indigo-600">{batch.target > 0 ? Math.round((batch.completed / batch.target) * 100) : 0}%</span>
+                        </div>
+                        <div className="h-6 w-full bg-slate-200 rounded-full overflow-hidden shadow-inner">
+                            <div className="h-full bg-indigo-500 transition-all duration-1000" style={{ width: `${batch.target > 0 ? (batch.completed / batch.target) * 100 : 0}%` }} />
+                        </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                        <span className="block text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Completed</span>
+                        <span className="text-4xl font-black text-indigo-600">{batch.completed}</span>
+                    </div>
+                </div>
+
+                <h3 className="text-2xl font-black text-slate-800 mb-6 flex items-center uppercase tracking-widest">
+                    <Activity className="w-6 h-6 mr-3 text-indigo-500" /> Routing Timeline
+                </h3>
+                {err && (
+                    <div className="mb-4 p-4 bg-rose-50 border-2 border-rose-200 rounded-2xl text-rose-700 font-black uppercase tracking-widest text-sm">{err}</div>
+                )}
+                <div className="space-y-4">
+                    {loading && stages.length === 0 ? (
+                        <div className="p-8 text-center bg-slate-50 rounded-2xl flex items-center justify-center">
+                            <Loader2 className="w-6 h-6 text-indigo-500 animate-spin mr-2" /> <span className="text-slate-500 font-bold uppercase tracking-widest">Loading Stages…</span>
+                        </div>
+                    ) : stages.length > 0 ? stages.map((stage, idx) => {
+                        const status = stage.status || (stage.completed_at ? 'COMPLETED' : stage.started_at ? 'IN_PROGRESS' : 'PENDING');
+                        const stageName = stage.line_type_name || stage.stage || stage.name || `Stage ${idx + 1}`;
+                        const stagePieces = stage.pieces ?? stage.completed ?? stage.qty ?? 0;
+                        const stageTime = stage.time || stage.completed_at || stage.started_at || stage.updated_at || 'Live';
+                        return (
+                            <div key={idx} className="flex items-center p-6 bg-white border-2 border-slate-200 rounded-2xl hover:border-indigo-300 transition-colors">
+                                <div className={`p-3 rounded-xl mr-6 ${status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-600' : status === 'IN_PROGRESS' ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-400'}`}>
+                                    {status === 'COMPLETED' ? <CheckCircle2 className="w-6 h-6" /> : status === 'IN_PROGRESS' ? <Loader2 className="w-6 h-6 animate-spin" /> : <Clock className="w-6 h-6" />}
+                                </div>
+                                <div className="flex-grow">
+                                    <h4 className="font-black text-xl text-slate-900">{stageName}</h4>
+                                    <span className="text-sm font-bold text-slate-500 uppercase tracking-widest">{stageTime}</span>
+                                </div>
+                                <div className="text-right">
+                                    <span className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Pieces Tracked</span>
+                                    <span className="text-2xl font-black text-slate-800">{stagePieces}</span>
+                                </div>
+                            </div>
+                        );
+                    }) : (
+                        <div className="p-6 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl text-center text-slate-500 font-bold uppercase tracking-widest">
+                            No historical routing data available yet.
+                        </div>
                     )}
                 </div>
-                <div className="text-right">
-                    <span className="block text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Target Qty</span>
-                    <span className="text-5xl font-black tracking-tighter text-black">{batch.target || 'TBD'}</span>
-                </div>
-            </div>
-
-            <div className="flex items-center justify-between mb-12 bg-slate-50 p-8 rounded-2xl border-2 border-slate-100">
-                <div className="w-full mr-8">
-                    <div className="flex justify-between text-sm font-black uppercase tracking-widest text-slate-500 mb-3">
-                        <span>Line Progress ({lineName})</span>
-                        <span className="text-indigo-600">{batch.target > 0 ? Math.round((batch.completed / batch.target) * 100) : 0}%</span>
-                    </div>
-                    <div className="h-6 w-full bg-slate-200 rounded-full overflow-hidden shadow-inner">
-                        <div className="h-full bg-indigo-500 transition-all duration-1000" style={{ width: `${batch.target > 0 ? (batch.completed / batch.target) * 100 : 0}%` }} />
-                    </div>
-                </div>
-                <div className="text-right shrink-0">
-                    <span className="block text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Completed</span>
-                    <span className="text-4xl font-black text-indigo-600">{batch.completed}</span>
-                </div>
-            </div>
-
-            <h3 className="text-2xl font-black text-slate-800 mb-6 flex items-center uppercase tracking-widest">
-                <Activity className="w-6 h-6 mr-3 text-indigo-500" /> Routing Timeline
-            </h3>
-            <div className="space-y-4">
-                {batch.history && batch.history.length > 0 ? batch.history.map((stage, idx) => (
-                    <div key={idx} className="flex items-center p-6 bg-white border-2 border-slate-200 rounded-2xl hover:border-indigo-300 transition-colors">
-                        <div className={`p-3 rounded-xl mr-6 ${stage.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-600' : stage.status === 'IN_PROGRESS' ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-400'}`}>
-                            {stage.status === 'COMPLETED' ? <CheckCircle2 className="w-6 h-6" /> : stage.status === 'IN_PROGRESS' ? <Loader2 className="w-6 h-6 animate-spin" /> : <Clock className="w-6 h-6" />}
-                        </div>
-                        <div className="flex-grow">
-                            <h4 className="font-black text-xl text-slate-900">{stage.stage}</h4>
-                            <span className="text-sm font-bold text-slate-500 uppercase tracking-widest">{stage.time}</span>
-                        </div>
-                        <div className="text-right">
-                            <span className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Pieces Tracked</span>
-                            <span className="text-2xl font-black text-slate-800">{stage.pieces}</span>
-                        </div>
-                    </div>
-                )) : (
-                    <div className="p-6 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl text-center text-slate-500 font-bold uppercase tracking-widest">
-                        No historical routing data available yet.
-                    </div>
-                )}
             </div>
         </div>
-    </div>
-);
+    );
+};
 
 // ============================================================================
 // DRILL-DOWN: OPERATOR DETAIL (Now with Live Analytics Fetch)
@@ -196,6 +243,7 @@ const OperatorDetailView = ({ operator, stationName, onBack }) => {
         // Fetch real hourly breakdown from backend
         warRoomApi.getOperatorAnalytics(operator.emp_id)
             .then(res => setAnalytics(res.data || []))
+            .then(() => console.log("Fetched operator analytics", analytics))
             .catch(err => console.error("Failed to load operator stats", err))
             .finally(() => setLoadingStats(false));
     }, [operator]);
@@ -376,9 +424,9 @@ const LineCard = ({ line, onBatchClick, onOperatorClick }) => {
                             const pct  = batch.target > 0 ? Math.round((batch.completed / batch.target) * 100) : 0;
                             const sc   = STATUS_STYLES[getBatchStatus(batch)];
                             return (
-                                <button key={batch.batchCode} onClick={() => onBatchClick(batch, line.line_name)} className="group flex items-center bg-black hover:bg-indigo-700 text-white pl-4 pr-2.5 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest shadow-md transition-all active:scale-95">
+                                <button key={batch.batchId ?? batch.batchCode} onClick={() => onBatchClick(batch, line.line_name)} className="group flex items-center bg-black hover:bg-indigo-700 text-white pl-4 pr-2.5 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest shadow-md transition-all active:scale-95" title={batch.batchCode}>
                                     <Shirt className="w-4 h-4 mr-2 text-indigo-400 group-hover:text-white transition-colors" />
-                                    {batch.batchCode}
+                                    #{batch.batchId ?? batch.batchCode}
                                     <span className={`ml-3 text-[10px] font-black px-2 py-0.5 rounded-md ${sc.badge}`}>{pct}%</span>
                                 </button>
                             );
@@ -450,8 +498,9 @@ const BatchModeCard = ({ batch, lineName, onClick }) => {
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center flex-shrink-0"><Shirt className="w-5 h-5 text-indigo-600" /></div>
                         <div>
-                            <h3 className="font-black text-slate-900 text-lg leading-tight">{batch.batchCode}</h3>
-                            <span className="text-xs font-bold text-slate-500 leading-tight">{batch.product}</span>
+                            <h3 className="font-black text-slate-900 text-lg leading-tight">#{batch.batchId ?? batch.batchCode}</h3>
+                            <span className="text-xs font-bold text-slate-500 leading-tight block truncate max-w-[180px]" title={batch.batchCode}>{batch.batchCode}</span>
+                            <span className="text-[10px] font-bold text-slate-400 leading-tight block truncate max-w-[180px]">{batch.product}</span>
                         </div>
                     </div>
                     <span className={`text-xs font-black px-3 py-1.5 rounded-full uppercase tracking-wider shrink-0 ml-2 ${sc.badge}`}>{sc.label}</span>
@@ -515,6 +564,7 @@ export default function FactoryLineControlBoard() {
     const [selectedEntity, setSelectedEntity] = useState(null);
     const [contextInfo, setContextInfo] = useState('');
     const [batchFilter, setBatchFilter] = useState('ALL');
+    const [lineFilter, setLineFilter]   = useState('ALL');
     const [dateRange, setDateRange] = useState({ preset: 'TODAY', ...getPresetRange('TODAY') });
 
     // ─── DATA FETCHING ENGINE ───
@@ -524,6 +574,7 @@ export default function FactoryLineControlBoard() {
         try {
             // Replace with actual configured API client
             const response = await warRoomApi.getFloorStatus(dateRange.from, dateRange.to);
+            console.log("Raw API Response:", response.data);
             // MOCKING FOR DEMONSTRATION OF MAPPED STRUCTURE
             // const response = await { data: { lines: [
             //     {
@@ -542,6 +593,7 @@ export default function FactoryLineControlBoard() {
                 wip_limit: line.wip_limit || 10,
                 metrics: line.metrics || { total_completed: 0, current_wip: 0, dhu: 0 },
                 active_batches: (line.active_batches || []).map(b => ({
+                    batchId: b.batch_id ?? null,
                     batchCode: b.batch_code || 'UNKNOWN',
                     product: b.product || 'Unknown Product',
                     target: parseInt(b.target) || 0,
@@ -590,9 +642,11 @@ export default function FactoryLineControlBoard() {
     }, [data]);
 
     const filteredBatches = useMemo(() => {
-        if (batchFilter === 'ALL') return allBatches;
-        return allBatches.filter(b => getBatchStatus(b) === batchFilter);
-    }, [allBatches, batchFilter]);
+        let list = allBatches;
+        if (lineFilter !== 'ALL') list = list.filter(b => String(b.line_id) === String(lineFilter));
+        if (batchFilter !== 'ALL') list = list.filter(b => getBatchStatus(b) === batchFilter);
+        return list;
+    }, [allBatches, batchFilter, lineFilter]);
 
     const stats = useMemo(() => {
         if (!data || !data.lines) return {};
@@ -649,10 +703,15 @@ export default function FactoryLineControlBoard() {
                         <div className="flex items-center mt-2 pl-[52px]">
                             <span className="text-slate-400 font-bold tracking-widest uppercase text-sm">Live Workstation Mapping</span>
                             <span className="mx-3 text-slate-700">•</span>
-                            <div className="flex items-center text-xs font-bold tracking-widest text-emerald-400 uppercase bg-slate-900 px-3 py-1 rounded-full border border-slate-800">
-                                <RefreshCw className={`w-3 h-3 mr-2 ${loading ? 'animate-spin' : ''}`} /> 
-                                Updated {lastRefreshed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </div>
+                            <button
+                                onClick={() => loadDashboardData(false)}
+                                disabled={loading}
+                                title="Refresh floor status"
+                                className="flex items-center text-xs font-bold tracking-widest text-emerald-400 hover:text-white uppercase bg-slate-900 hover:bg-slate-800 px-3 py-1 rounded-full border border-slate-800 transition-colors disabled:opacity-60"
+                            >
+                                <RefreshCw className={`w-3 h-3 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                                {loading ? 'Refreshing…' : `Updated ${lastRefreshed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                            </button>
                         </div>
                     </div>
 
@@ -724,13 +783,26 @@ export default function FactoryLineControlBoard() {
 
                 {drillMode === 'MAIN' && boardMode === 'BATCH' && (
                     <div className="animate-in fade-in duration-500">
-                        <div className="flex flex-wrap gap-2 mb-6">
+                        <div className="flex flex-wrap items-center gap-2 mb-6">
                             {BATCH_FILTERS.map(f => (
                                 <button key={f.key} onClick={() => setBatchFilter(f.key)} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-black text-sm uppercase tracking-widest border-2 transition-all ${batchFilter === f.key ? 'bg-black text-white border-black shadow-lg' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
                                     {f.label}
                                     <span className={`text-xs font-black px-2 py-0.5 rounded-full ${batchFilter === f.key ? 'bg-white text-black' : 'bg-slate-100 text-slate-600'}`}>{f.count}</span>
                                 </button>
                             ))}
+                            <div className="ml-auto flex items-center gap-2">
+                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Line</span>
+                                <select
+                                    value={lineFilter}
+                                    onChange={e => setLineFilter(e.target.value)}
+                                    className="px-4 py-2 text-xs font-black uppercase tracking-widest border-2 border-slate-200 rounded-xl bg-white text-slate-700 focus:outline-none focus:border-indigo-400"
+                                >
+                                    <option value="ALL">All Lines</option>
+                                    {data.lines.map(l => (
+                                        <option key={l.line_id} value={l.line_id}>{l.line_name}</option>
+                                    ))}
+                                </select>
+                            </div>
                         </div>
                         {filteredBatches.length === 0 ? (
                             <div className="text-center py-20 bg-white rounded-[2rem] border-2 border-dashed border-slate-300">
@@ -739,7 +811,7 @@ export default function FactoryLineControlBoard() {
                             </div>
                         ) : (
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                                {filteredBatches.map(batch => <BatchModeCard key={`${batch.line_id}-${batch.batchCode}`} batch={batch} lineName={batch.lineName} onClick={() => handleBatchClick(batch, batch.lineName)} />)}
+                                {filteredBatches.map(batch => <BatchModeCard key={`${batch.line_id}-${batch.batchId ?? batch.batchCode}`} batch={batch} lineName={batch.lineName} onClick={() => handleBatchClick(batch, batch.lineName)} />)}
                             </div>
                         )}
                     </div>
