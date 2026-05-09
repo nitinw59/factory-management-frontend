@@ -95,8 +95,8 @@ const NODE_H_SOP_PO_SEC    = 18;    // "Purchase Orders" header strip
 const NODE_H_PO_ROW        = 54;    // per embedded PO mini-row
 const NODE_H_BATCH         = 160;
 const NODE_H_DISPATCH      = 170;
-const NODE_W_CB            = 90;    // CreateBatch circle
-const NODE_H_CB            = 90;
+const NODE_W_CB            = 68;    // CreateBatch circle (3/4 of previous 90)
+const NODE_H_CB            = 68;
 const GAP_X                = 48;
 const GAP_Y                = 10;
 const PO_GAP_Y             = 18;
@@ -451,15 +451,14 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
         const hasSops    = sops.length > 0;
         const allBatches = pos.flatMap(po => po.batches || []);
 
-        // Column X positions — PO column removed; SOPs now embed POs
+        // Column X positions — PO column removed; SOPs now embed POs.
+        // CreateBatch circle now sits BELOW the SOP card, not in its own column.
         const soX    = MARGIN;
         const sopX   = hasSO ? soX + NODE_W_SO + GAP_X : soX;
-        // Circle column sits between SOP and BATCH when any SOP is production-ready
         const anyReady = sops.some(s => s.production_readiness && s.production_readiness !== 'in_planning');
         const hasCB    = hasSops && anyReady;
-        const cbColX   = hasCB ? sopX + NODE_W_SOP + GAP_X : null;
         const batchX   = hasSops
-            ? sopX + NODE_W_SOP + GAP_X + (hasCB ? NODE_W_CB + GAP_X : 0)
+            ? sopX + NODE_W_SOP + GAP_X
             : (hasSO ? soX + NODE_W_SO + GAP_X : soX + GAP_X);
         const dispatchX = batchX + NODE_W_BATCH + GAP_X;
 
@@ -468,11 +467,13 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
         const totalSopH = hasSops
             ? sops.reduce((sum, _, i) => sum + getSopH(pos.length) + (i < sops.length - 1 ? SOP_GAP_Y : 0), 0)
             : 0;
+        const cbSectionH = hasCB ? GAP_Y + NODE_H_CB : 0;
+        const sopColH    = totalSopH + cbSectionH;
         const batchColH = allBatches.length > 0
             ? allBatches.length * NODE_H_BATCH + (allBatches.length - 1) * GAP_Y
             : 0;
 
-        const contentH  = Math.max(soColH, totalSopH, batchColH, NODE_H_DISPATCH);
+        const contentH  = Math.max(soColH, sopColH, batchColH, NODE_H_DISPATCH);
         const contentMid = contentH / 2;
 
         // ── SO node ──────────────────────────────────────────────────────────
@@ -480,8 +481,9 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
         if (hasSO) nodesList.push({ type: 'SO', data: so, x: soX, y: soY });
 
         // ── SOP nodes (embed all SO-level POs inside each card) ──────────────
-        const sopStartY = hasSops ? Math.max(MARGIN, MARGIN + contentMid - totalSopH / 2) : MARGIN;
-        const sopMidY   = sopStartY + totalSopH / 2;
+        // Center the SOP+CB block as a whole when CB is present, so the SOPs
+        // shift up slightly to leave room for the circle below them.
+        const sopStartY = hasSops ? Math.max(MARGIN, MARGIN + contentMid - sopColH / 2) : MARGIN;
 
         if (hasSops) {
             let sy = sopStartY;
@@ -498,15 +500,16 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
             });
         }
 
-        // ── CreateBatch circle (after SOP column, linked to SOP) ─────────────
+        // ── CreateBatch circle (BELOW SOP column, centered horizontally) ─────
         const sopBottomY = sopStartY + totalSopH;
         const sopBottomX = sopX + NODE_W_SOP / 2;
+        const cbX        = hasCB ? sopX + NODE_W_SOP / 2 - NODE_W_CB / 2 : null;
+        const cbY        = hasCB ? sopBottomY + GAP_Y : null;
         if (hasCB) {
-            const cbY = sopMidY - NODE_H_CB / 2;
-            nodesList.push({ type: 'CREATE_BATCH_CIRCLE', x: cbColX, y: cbY });
+            nodesList.push({ type: 'CREATE_BATCH_CIRCLE', x: cbX, y: cbY });
             connList.push({
-                start: { x: sopBottomX, y: sopBottomY, side: 'bottom' },
-                end:   { x: cbColX,     y: cbY + NODE_H_CB / 2 },
+                start: { x: sopBottomX,             y: sopBottomY, side: 'bottom' },
+                end:   { x: cbX + NODE_W_CB / 2,    y: cbY,        side: 'top' },
             });
         }
 
@@ -523,8 +526,8 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
             // Circle → Batch (when circle exists), else SOP → Batch, else SO → Batch
             if (hasCB) {
                 connList.push({
-                    start: { x: cbColX + NODE_W_CB, y: sopMidY },
-                    end:   { x: batchX,             y: bY + NODE_H_BATCH / 2 },
+                    start: { x: cbX + NODE_W_CB, y: cbY + NODE_H_CB / 2 },
+                    end:   { x: batchX,          y: bY + NODE_H_BATCH / 2 },
                 });
             } else if (hasSops) {
                 connList.push({
@@ -549,8 +552,8 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
         if (allBatches.length === 0 && hasSops) {
             if (hasCB) {
                 connList.push({
-                    start: { x: cbColX + NODE_W_CB, y: sopMidY },
-                    end:   { x: dispatchX,          y: dispatchY + NODE_H_DISPATCH / 2 },
+                    start: { x: cbX + NODE_W_CB, y: cbY + NODE_H_CB / 2 },
+                    end:   { x: dispatchX,       y: dispatchY + NODE_H_DISPATCH / 2 },
                 });
             } else {
                 connList.push({

@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-    Loader2, Link2, ChevronRight, ChevronLeft,
+    Loader2, Link2, ChevronRight, ChevronLeft, ChevronDown,
     AlertTriangle, CheckCircle2, Search,
     Calculator, ShoppingBag, X, Eye, Plus, Pencil,
-    ShieldCheck, ShieldOff, RotateCw,
+    ShieldCheck, ShieldOff, RotateCw, Component,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { planningApi } from '../../api/planningApi';
@@ -669,6 +669,12 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
     const [loadingLocal, setLoadingLocal] = useState(!sopReqs);
     const [search,       setSearch]       = useState('');
     const [reserveItem,  setReserveItem]  = useState(null);
+    // Bulk-procurement state (shared substitute picker per trim_item_id)
+    const [bulkPickerByTrim,   setBulkPickerByTrim]   = useState({});
+    const [bulkBusyId,         setBulkBusyId]         = useState(null);
+    const [procExpanded,       setProcExpanded]       = useState(true);
+    // Per-group, per-requirement exclusions: { [trim_item_id]: Set<requirement_id> }
+    const [excludedReqsByTrim, setExcludedReqsByTrim] = useState({});
 
     const refetchLocal = useCallback(() => {
         planningApi.getRequirements(sop.id)
@@ -695,6 +701,163 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
     const trimReqs = localReqs?.trim_requirements   || [];
     const taItems  = sop.timeline || [];
     console.log('TA items:', taItems);
+    // ── Bulk-procurement groups: trims with substitutes covering ≥2 colors ──
+    const trimGroups = useMemo(() => {
+        const reqs = localReqs?.trim_requirements || [];
+        const map = new Map();
+        reqs.forEach(r => {
+            const key = String(r.trim_item_id ?? `req-${r.id}`);
+            if (!map.has(key)) {
+                map.set(key, {
+                    trim_item_id:   r.trim_item_id,
+                    trim_item_name: r.trim_item_name,
+                    item_code:      r.item_code,
+                    unit:           r.unit_of_measure || 'pcs',
+                    requirements:   [],
+                });
+            }
+            map.get(key).requirements.push(r);
+        });
+        return [...map.values()]
+            .filter(g => g.requirements.length >= 2)
+            .map(g => {
+                // For each substitute variant, track which requirements have it.
+                const variantMap = new Map();
+                g.requirements.forEach(r => {
+                    (r.stock_suggestion?.substitutes || []).forEach(s => {
+                        const sid = Number(s.substitute_variant_id);
+                        if (!variantMap.has(sid)) {
+                            variantMap.set(sid, { sample: s, reqIds: new Set() });
+                        }
+                        variantMap.get(sid).reqIds.add(r.id);
+                    });
+                });
+                // Keep only variants that cover ≥2 colors in this group.
+                const commonSubstitutes = [];
+                variantMap.forEach((v, sid) => {
+                    if (v.reqIds.size >= 2) {
+                        commonSubstitutes.push({
+                            ...v.sample,
+                            substitute_variant_id: sid,
+                            matches_req_ids:       [...v.reqIds],
+                            matches_count:         v.reqIds.size,
+                        });
+                    }
+                });
+                // Best coverage first, then by stock.
+                commonSubstitutes.sort((a, b) =>
+                    (b.matches_count - a.matches_count) || ((b.in_stock ?? 0) - (a.in_stock ?? 0))
+                );
+                const totalRequired = g.requirements.reduce((s, r) => s + Number(r.quantity_required || 0), 0);
+                const totalReserved = g.requirements.reduce((s, r) => s + Number(r.quantity_reserved || 0), 0);
+                const fulfilled     = g.requirements.filter(r => r.is_fulfilled).length;
+                return {
+                    ...g,
+                    commonSubstitutes,
+                    totalRequired,
+                    totalReserved,
+                    fulfilled,
+                    pendingCount: g.requirements.length - fulfilled,
+                };
+            })
+            .filter(g => g.pendingCount > 0 && g.commonSubstitutes.length > 0);
+    }, [localReqs]);
+
+    // Returns the set of requirement_ids the chosen variant can be applied to.
+    const eligibleReqIds = (group, variantId) => {
+        const sub = (group.commonSubstitutes || []).find(s => Number(s.substitute_variant_id) === Number(variantId));
+        return new Set(sub?.matches_req_ids || []);
+    };
+    // Set of currently-excluded requirement ids for a given group.
+    const excludedSet = (groupId) => excludedReqsByTrim[groupId] || new Set();
+
+    // Pick a variant — clears any per-req exclusions for this group so the
+    // user starts a fresh selection. Pass null to clear the picker.
+    const pickVariantForGroup = (groupId, variantId) => {
+        setBulkPickerByTrim(p => ({ ...p, [groupId]: variantId }));
+        setExcludedReqsByTrim(p => ({ ...p, [groupId]: new Set() }));
+    };
+
+    // Toggle a single requirement in/out of the bulk action.
+    const toggleExcludeReq = (groupId, reqId) => {
+        setExcludedReqsByTrim(p => {
+            const s = new Set(p[groupId] || []);
+            if (s.has(reqId)) s.delete(reqId); else s.add(reqId);
+            return { ...p, [groupId]: s };
+        });
+    };
+
+    // Final set of req ids that a bulk action will touch:
+    // covered by the variant AND not fulfilled AND not user-excluded.
+    const actionableReqIds = (group, variantId) => {
+        const eligible = eligibleReqIds(group, variantId);
+        const excluded = excludedSet(group.trim_item_id);
+        return new Set(
+            group.requirements
+                .filter(r => !r.is_fulfilled && eligible.has(r.id) && !excluded.has(r.id))
+                .map(r => r.id)
+        );
+    };
+
+    const handleBulkReserve = async (group) => {
+        const variantId = bulkPickerByTrim[group.trim_item_id];
+        if (!variantId) { setErr('Pick a substitute variant first.'); return; }
+        const targets = actionableReqIds(group, variantId);
+        setBulkBusyId(group.trim_item_id); setErr(null);
+        try {
+            let touched = 0;
+            for (const r of group.requirements) {
+                if (!targets.has(r.id)) continue;
+                const pending = Number(r.quantity_required || 0) - Number(r.quantity_reserved || 0);
+                if (pending <= 0) continue;
+                await planningApi.reserveTrim(r.id, {
+                    quantity_reserved:    pending,
+                    trim_item_variant_id: parseInt(variantId, 10),
+                });
+                touched++;
+            }
+            if (touched === 0) setErr('No requirements selected for this variant.');
+            refetchLocal(); onRefresh();
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Bulk reserve failed.');
+        } finally {
+            setBulkBusyId(null);
+        }
+    };
+
+    const handleBulkRaise = async (group) => {
+        const variantId = bulkPickerByTrim[group.trim_item_id];
+        if (!variantId) { setErr('Pick a substitute variant first.'); return; }
+        const targets = actionableReqIds(group, variantId);
+        setBulkBusyId(group.trim_item_id); setErr(null);
+        try {
+            let touched = 0;
+            for (const r of group.requirements) {
+                if (!targets.has(r.id)) continue;
+                const pending = Number(r.quantity_required || 0) - Number(r.quantity_reserved || 0);
+                if (pending <= 0) continue;
+                await purchaseDeptApi.raiseRequirement({
+                    sales_order_product_id:    sop.id,
+                    type:                      'trim',
+                    urgency:                   'normal',
+                    notes:                     `Bulk raised for ${group.trim_item_name} (substitute applied across ${targets.size} colors)`,
+                    quantity_required:         pending,
+                    unit_of_measure:           r.unit_of_measure,
+                    trim_item_id:              r.trim_item_id,
+                    trim_item_variant_id:      parseInt(variantId, 10),
+                    plan_trim_requirement_id:  r.id,
+                });
+                touched++;
+            }
+            if (touched === 0) setErr('No requirements selected for this variant.');
+            refetchLocal(); onRefresh();
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Bulk raise failed.');
+        } finally {
+            setBulkBusyId(null);
+        }
+    };
+
     const reqTaIds = new Set([
         ...fabReqs.filter(r => r.ta_id).map(r => r.ta_id),
         ...trimReqs.filter(r => r.ta_id).map(r => r.ta_id),
@@ -1057,6 +1220,185 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                     </div>
                 </div>
 
+                {/* Bulk Trim Procurement Groups — collapsible section above the timeline */}
+                {(localReqs?.trim_requirements?.length ?? 0) > 0 && (
+                    <div className="border-b border-slate-100 bg-amber-50/30">
+                        <button
+                            onClick={() => setProcExpanded(v => !v)}
+                            className="w-full flex items-center justify-between px-5 py-2.5 hover:bg-amber-50 transition-colors"
+                        >
+                            <div className="flex items-center gap-2">
+                                <Component size={13} className="text-amber-600" />
+                                <span className="text-sm font-bold text-slate-800">Trim Procurement Groups</span>
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${trimGroups.length > 0 ? 'text-amber-700 bg-amber-100' : 'text-slate-500 bg-slate-100'}`}>
+                                    {trimGroups.length === 0
+                                        ? 'No bulk groups available'
+                                        : `${trimGroups.length} group${trimGroups.length === 1 ? '' : 's'} · ${trimGroups.reduce((s, g) => s + g.pendingCount, 0)} pending`}
+                                </span>
+                            </div>
+                            {procExpanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+                        </button>
+                        {procExpanded && (
+                            <div className="px-5 pb-3 space-y-3">
+                                {trimGroups.length === 0 ? (
+                                    <div className="text-[11px] text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                                        <p className="font-bold text-slate-700 mb-1">No qualifying groups yet.</p>
+                                        <p className="text-slate-500">
+                                            This panel activates when a trim spans <strong>≥2 color requirements</strong> AND has at least one <strong>substitute variant that matches every color</strong>. Manage single-color trims one-by-one in the timeline below.
+                                        </p>
+                                    </div>
+                                ) : (<>
+                                <p className="text-[10px] text-slate-500 italic">
+                                    These trims have multiple colors with one or more substitute variants matching <em>every</em> color. Pick a substitute once and reserve or raise a PR for the whole group.
+                                </p>
+                                {trimGroups.map(g => {
+                                    const picked = bulkPickerByTrim[g.trim_item_id];
+                                    const busy   = bulkBusyId === g.trim_item_id;
+                                    return (
+                                        <div key={g.trim_item_id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                                            <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-3">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-bold text-slate-800 truncate">
+                                                        {g.trim_item_name}
+                                                        {g.item_code ? <span className="text-[10px] font-mono text-slate-400 ml-1.5">{g.item_code}</span> : null}
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-500">
+                                                        {g.requirements.length} color{g.requirements.length === 1 ? '' : 's'}
+                                                        {' · '}<span className="text-emerald-700 font-bold">{g.fulfilled} fulfilled</span>
+                                                        {' · '}<span className="text-amber-700 font-bold">{g.pendingCount} pending</span>
+                                                        {' · Total '}{g.totalRequired.toLocaleString()} {g.unit}
+                                                        {' · Reserved '}{g.totalReserved.toLocaleString()} {g.unit}
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            {/* Common substitutes picker */}
+                                            <div className="px-3 py-2 space-y-1.5">
+                                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                                                    Available substitutes (each covers ≥2 colors in this group)
+                                                </p>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                                    {g.commonSubstitutes.map(s => {
+                                                        const sid = Number(s.substitute_variant_id);
+                                                        const sel = picked === sid;
+                                                        const coversAll = s.matches_count >= g.requirements.length;
+                                                        return (
+                                                            <button
+                                                                key={sid}
+                                                                onClick={() => pickVariantForGroup(g.trim_item_id, sel ? null : sid)}
+                                                                disabled={busy}
+                                                                className={`flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-lg border-2 transition-colors text-left ${
+                                                                    sel
+                                                                        ? 'border-violet-400 bg-violet-50'
+                                                                        : 'border-slate-200 bg-white hover:border-violet-200'
+                                                                } disabled:opacity-40 disabled:cursor-not-allowed`}
+                                                            >
+                                                                <span className={`w-3 h-3 rounded-full border-2 shrink-0 ${sel ? 'border-violet-500 bg-violet-500' : 'border-slate-300'}`} />
+                                                                <span className="flex-1 min-w-0 truncate font-bold text-slate-800">
+                                                                    {s.item_name}{s.color_name ? ` – ${s.color_name}` : ''}{s.color_number ? ` (${s.color_number})` : ''}
+                                                                </span>
+                                                                <span
+                                                                    title={`Matches ${s.matches_count} of ${g.requirements.length} colors`}
+                                                                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${coversAll ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}
+                                                                >
+                                                                    {s.matches_count}/{g.requirements.length} colors
+                                                                </span>
+                                                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${(s.in_stock ?? 0) > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                                    {s.in_stock != null ? `${Number(s.in_stock).toLocaleString()} stock` : '—'}
+                                                                </span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+
+                                            {/* Per-color status row + bulk actions */}
+                                            {(() => {
+                                                const pickedSub = picked
+                                                    ? g.commonSubstitutes.find(s => Number(s.substitute_variant_id) === Number(picked))
+                                                    : null;
+                                                const coveredSet = pickedSub ? new Set(pickedSub.matches_req_ids) : null;
+                                                const excluded   = excludedSet(g.trim_item_id);
+                                                const targetCount = pickedSub
+                                                    ? g.requirements.filter(r =>
+                                                        !r.is_fulfilled && coveredSet.has(r.id) && !excluded.has(r.id)
+                                                      ).length
+                                                    : 0;
+                                                return (
+                                                    <div className="px-3 py-2 border-t border-slate-100 space-y-2">
+                                                        {pickedSub && (
+                                                            <p className="text-[10px] text-slate-500">
+                                                                <span className="font-bold text-violet-700">{targetCount}</span>
+                                                                {' '}of <span className="font-bold">{coveredSet.size}</span> covered colors selected — click highlighted chips to exclude.
+                                                            </p>
+                                                        )}
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <div className="flex flex-wrap gap-1 flex-1 min-w-0">
+                                                                {g.requirements.map(r => {
+                                                                    const isFulfilled = r.is_fulfilled;
+                                                                    const pending     = Number(r.quantity_required || 0) - Number(r.quantity_reserved || 0);
+                                                                    const isCovered   = coveredSet ? coveredSet.has(r.id) : false;
+                                                                    const isExcluded  = excluded.has(r.id);
+                                                                    const isClickable = !!pickedSub && isCovered && !isFulfilled;
+                                                                    let cls;
+                                                                    if (isFulfilled) {
+                                                                        cls = 'bg-emerald-100 text-emerald-700 border-emerald-200';
+                                                                    } else if (!pickedSub) {
+                                                                        cls = pending > 0
+                                                                            ? 'bg-amber-100 text-amber-700 border-amber-200'
+                                                                            : 'bg-slate-100 text-slate-600 border-slate-200';
+                                                                    } else if (!isCovered) {
+                                                                        cls = 'bg-slate-50 text-slate-400 border-slate-200 opacity-60';
+                                                                    } else if (isExcluded) {
+                                                                        cls = 'bg-slate-100 text-slate-500 border-slate-300 line-through';
+                                                                    } else {
+                                                                        // Covered + included = highlighted
+                                                                        cls = 'bg-violet-100 text-violet-800 border-violet-400 ring-2 ring-violet-300';
+                                                                    }
+                                                                    return (
+                                                                        <button
+                                                                            key={r.id}
+                                                                            type="button"
+                                                                            disabled={!isClickable || busy}
+                                                                            onClick={isClickable ? () => toggleExcludeReq(g.trim_item_id, r.id) : undefined}
+                                                                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${cls} ${isClickable ? 'cursor-pointer hover:brightness-95' : 'cursor-default'} disabled:cursor-not-allowed`}
+                                                                            title={`${r.color_name || ''}${r.color_number ? ` (${r.color_number})` : ''} · ${r.quantity_reserved || 0}/${r.quantity_required || 0} ${g.unit}${pickedSub && !isCovered ? ' · variant does not match this color' : ''}${isExcluded ? ' · excluded from bulk' : ''}${isClickable ? (isExcluded ? ' · click to include' : ' · click to exclude') : ''}`}
+                                                                        >
+                                                                            {r.color_name || `#${r.id}`}
+                                                                            {isFulfilled ? ' ✓' : isExcluded ? ' ✕' : (pickedSub && isCovered ? '' : '')}
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                            <button
+                                                                onClick={() => handleBulkReserve(g)}
+                                                                disabled={!picked || busy || targetCount === 0}
+                                                                className="flex items-center gap-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 px-2.5 py-1.5 rounded-lg transition-colors"
+                                                            >
+                                                                {busy && <Loader2 size={11} className="animate-spin" />}
+                                                                Reserve {pickedSub ? `(${targetCount})` : 'all'}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleBulkRaise(g)}
+                                                                disabled={!picked || busy || targetCount === 0}
+                                                                className="flex items-center gap-1 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40 px-2.5 py-1.5 rounded-lg transition-colors"
+                                                            >
+                                                                {busy && <Loader2 size={11} className="animate-spin" />}
+                                                                Raise PR {pickedSub ? `(${targetCount})` : 'for all'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    );
+                                })}
+                                </>)}
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* Timeline body */}
                 <div className="flex-1 overflow-y-auto">
                     {/* Navigation bar */}
@@ -1225,32 +1567,46 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                         {/* Inline action panel */}
                                                         {isSel && (
                                                             <div className="mx-2 mb-1.5 bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
+                                                                {/* Red alert: trim req with no procurement option */}
+                                                                {item.type === 'trim' && item.isReq && !item.exact_variant_id && (!item.substitutes || item.substitutes.length === 0) && (
+                                                                    <div className="bg-red-50 border-2 border-red-300 rounded-lg px-3 py-2.5 flex items-start gap-2">
+                                                                        <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
+                                                                        <div className="flex-1">
+                                                                            <p className="text-base font-black text-red-800">No procurement option</p>
+                                                                            <p className="text-sm text-red-700 mt-0.5">
+                                                                                No exact-match variant, trim variant, or substitute is configured for this requirement.
+                                                                                Coordinate with merchandiser / purchase to resolve before production.
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+
                                                                 {/* Item info + calc breakdown */}
                                                                 <div className="flex items-start justify-between gap-2">
                                                                     <div className="min-w-0 flex-1 space-y-2">
                                                                         <div>
-                                                                            <p className="text-xs font-bold text-slate-800">{item.title}</p>
+                                                                            <p className="text-base font-bold text-slate-900">{item.title}</p>
                                                                             {item.start_date && (
-                                                                                <p className="text-[10px] text-slate-500 mt-0.5">
+                                                                                <p className="text-[30px] leading-snug text-slate-700 mt-0.5">
                                                                                     Order: {fmtD(item.start_date)}{item.end_date ? ` → Arrival: ${fmtD(item.end_date)}` : ''}
                                                                                 </p>
                                                                             )}
-                                                                            {item.notes && <p className="text-[10px] text-slate-400 italic mt-0.5">{item.notes}</p>}
+                                                                            {item.notes && <p className="text-[30px] leading-snug text-slate-700 italic mt-0.5">{item.notes}</p>}
                                                                         </div>
                                                                         {/* Calculation breakdown */}
                                                                         {item.type === 'fabric' && (
                                                                             <div className="grid grid-cols-3 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
                                                                                 <div>
-                                                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">Required</p>
-                                                                                    <p className="text-xs font-bold text-slate-700">{item.meters_required.toFixed(1)} m</p>
+                                                                                    <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Required</p>
+                                                                                    <p className="text-3xl font-bold text-slate-900">{item.meters_required.toFixed(1)} m</p>
                                                                                 </div>
                                                                                 <div>
-                                                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">In Stock</p>
-                                                                                    <p className={`text-xs font-bold ${item.inStock ? 'text-emerald-600' : 'text-slate-700'}`}>{item.meters_available.toFixed(1)} m</p>
+                                                                                    <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">In Stock</p>
+                                                                                    <p className={`text-3xl font-bold ${item.inStock ? 'text-emerald-700' : 'text-slate-900'}`}>{item.meters_available.toFixed(1)} m</p>
                                                                                 </div>
                                                                                 <div>
-                                                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">{item.inStock ? 'Surplus' : 'Shortfall'}</p>
-                                                                                    <p className={`text-xs font-bold ${item.inStock ? 'text-emerald-600' : 'text-red-500'}`}>
+                                                                                    <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">{item.inStock ? 'Surplus' : 'Shortfall'}</p>
+                                                                                    <p className={`text-3xl font-bold ${item.inStock ? 'text-emerald-700' : 'text-red-600'}`}>
                                                                                         {item.inStock
                                                                                             ? `+${(item.meters_available - item.meters_required).toFixed(1)} m`
                                                                                             : `−${(item.meters_required - item.meters_available).toFixed(1)} m`}
@@ -1259,18 +1615,26 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                             </div>
                                                                         )}
                                                                         {item.type === 'trim' && (
-                                                                            <div className="grid grid-cols-3 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
+                                                                            <div className="grid grid-cols-4 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
                                                                                 <div>
-                                                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">Required</p>
-                                                                                    <p className="text-xs font-bold text-slate-700">{item.quantity_required.toLocaleString()} {item.unit}</p>
+                                                                                    <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Required</p>
+                                                                                    <p className="text-3xl font-bold text-slate-900">{item.quantity_required.toLocaleString()} {item.unit}</p>
                                                                                 </div>
                                                                                 <div>
-                                                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">Reserved</p>
-                                                                                    <p className={`text-xs font-bold ${item.inStock ? 'text-emerald-600' : 'text-slate-700'}`}>{item.quantity_reserved.toLocaleString()} {item.unit}</p>
+                                                                                    <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Reserved</p>
+                                                                                    <p className={`text-3xl font-bold ${item.inStock ? 'text-emerald-700' : 'text-slate-900'}`}>{item.quantity_reserved.toLocaleString()} {item.unit}</p>
                                                                                 </div>
                                                                                 <div>
-                                                                                    <p className="text-[8px] font-bold text-slate-400 uppercase">{item.inStock ? 'Fulfilled' : 'Still Needed'}</p>
-                                                                                    <p className={`text-xs font-bold ${item.inStock ? 'text-emerald-600' : 'text-red-500'}`}>
+                                                                                    <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">In Stock</p>
+                                                                                    <p className={`text-3xl font-bold ${(item.exact_variant_stock ?? 0) > 0 ? 'text-emerald-700' : 'text-slate-900'}`}>
+                                                                                        {item.exact_variant_stock != null
+                                                                                            ? `${Number(item.exact_variant_stock).toLocaleString()} ${item.unit}`
+                                                                                            : '—'}
+                                                                                    </p>
+                                                                                </div>
+                                                                                <div>
+                                                                                    <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">{item.inStock ? 'Fulfilled' : 'Still Needed'}</p>
+                                                                                    <p className={`text-3xl font-bold ${item.inStock ? 'text-emerald-700' : 'text-red-600'}`}>
                                                                                         {item.inStock
                                                                                             ? '✓ All reserved'
                                                                                             : `${(item.quantity_required - item.quantity_reserved).toLocaleString()} ${item.unit}`}
@@ -1281,13 +1645,13 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                         {/* Substitutes for trim not in stock */}
                                                                         {item.type === 'trim' && !item.inStock && item.substitutes?.length > 0 && (
                                                                             <div className="bg-amber-50 border border-amber-100 rounded-lg p-2 space-y-1.5">
-                                                                                <p className="text-[9px] font-bold text-amber-700 uppercase tracking-wider">Substitutes Available</p>
+                                                                                <p className="text-[27px] leading-tight font-bold text-amber-800 uppercase tracking-wider">Substitutes Available</p>
                                                                                 {item.substitutes.map(s => (
-                                                                                    <div key={s.substitute_variant_id} className="flex items-center justify-between text-[9px]">
-                                                                                        <span className="font-bold text-slate-700">
+                                                                                    <div key={s.substitute_variant_id} className="flex items-center justify-between text-[27px] leading-tight">
+                                                                                        <span className="font-bold text-slate-900">
                                                                                             {s.item_name}{s.color_name ? ` – ${s.color_name}` : ''}{s.color_number ? ` (${s.color_number})` : ''}
                                                                                         </span>
-                                                                                        <span className={s.in_stock > 0 ? 'text-emerald-600 font-bold' : 'text-slate-400'}>
+                                                                                        <span className={s.in_stock > 0 ? 'text-emerald-700 font-bold' : 'text-slate-700'}>
                                                                                             {s.in_stock != null ? `${s.in_stock.toLocaleString()} in stock` : '—'}
                                                                                         </span>
                                                                                     </div>
