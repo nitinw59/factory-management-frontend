@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Loader2, PackageCheck, ChevronDown, ChevronUp,
-    CheckCircle2, Clock, AlertTriangle, Package, Scissors, Tag,
+    CheckCircle2, Clock, AlertTriangle, Package, Scissors, Tag, GitBranch, Plus,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
+import CreateFreshPoModal from './CreateFreshPoModal';
 
 const STATUS_CFG = {
     PENDING:     { cls: 'bg-amber-100 text-amber-700 border-amber-200',   label: 'Pending'    },
@@ -22,11 +24,13 @@ const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en', { dateStyle: 'me
 const fmt = (n, dec = 1) => Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: dec });
 
 const OrdersPage = () => {
-    const [orders,     setOrders]     = useState([]);
-    const [loading,    setLoading]    = useState(true);
-    const [expandedId, setExpandedId] = useState(null);
-    const [busy,       setBusy]       = useState(null);
-    const [err,        setErr]        = useState(null);
+    const navigate = useNavigate();
+    const [orders,        setOrders]        = useState([]);
+    const [loading,       setLoading]       = useState(true);
+    const [expandedId,    setExpandedId]    = useState(null);
+    const [busy,          setBusy]          = useState(null);
+    const [err,           setErr]           = useState(null);
+    const [showFreshPo,   setShowFreshPo]   = useState(false);
 
     const fetchOrders = useCallback(async () => {
         setLoading(true);
@@ -95,6 +99,14 @@ const OrdersPage = () => {
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0">
+                        <button
+                            onClick={e => { e.stopPropagation(); navigate(`/purchase-department/orders/${order.id}`); }}
+                            className="flex items-center gap-1.5 text-xs font-bold text-orange-600 hover:text-white hover:bg-orange-600 border border-orange-200 hover:border-orange-600 px-3 py-1.5 rounded-lg transition-colors"
+                            title="Open purchase flow"
+                        >
+                            <GitBranch size={12} />
+                            View Flow
+                        </button>
                         {order.status !== 'COMPLETED' && order.status !== 'CANCELLED' && (
                             <button
                                 onClick={e => { e.stopPropagation(); handleMarkReceived(order.id); }}
@@ -177,9 +189,17 @@ const OrdersPage = () => {
 
     return (
         <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
-            <div>
-                <h1 className="text-xl font-bold text-slate-800">Purchase Orders</h1>
-                <p className="text-sm text-slate-500 mt-0.5">Track and manage all purchase orders created from requirements</p>
+            <div className="flex items-start justify-between gap-3">
+                <div>
+                    <h1 className="text-xl font-bold text-slate-800">Purchase Orders</h1>
+                    <p className="text-sm text-slate-500 mt-0.5">Track and manage all purchase orders created from requirements</p>
+                </div>
+                <button
+                    onClick={() => setShowFreshPo(true)}
+                    className="flex items-center gap-1.5 text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 px-4 py-2 rounded-xl shadow-sm transition-colors shrink-0"
+                >
+                    <Plus size={14} /> Create PO
+                </button>
             </div>
 
             {err && (
@@ -220,6 +240,17 @@ const OrdersPage = () => {
                         </div>
                     )}
                 </>
+            )}
+
+            {showFreshPo && (
+                <CreateFreshPoModal
+                    onClose={() => setShowFreshPo(false)}
+                    onCreated={(data) => {
+                        setShowFreshPo(false);
+                        fetchOrders();
+                        if (data?.id) navigate(`/purchase-department/orders/${data.id}`);
+                    }}
+                />
             )}
         </div>
     );

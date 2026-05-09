@@ -1,6 +1,7 @@
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import MatrixBrand from './MatrixBrand';
 import { LuLogOut, LuClipboardCheck } from 'react-icons/lu';
 
 const PreparationPortalLayout = () => {
@@ -17,7 +18,7 @@ const PreparationPortalLayout = () => {
       <header className="bg-white shadow-md">
         <div className="container mx-auto px-6 py-3 flex justify-between items-center">
           <div className="flex items-center space-x-8">
-            <div className="text-xl font-bold text-gray-800">Preparation Portal</div>
+            <MatrixBrand portal="Preparation Portal" />
             <nav>
               <NavLink to="/preparation-portal/dashboard" className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-purple-600' : 'text-gray-600 hover:text-purple-600'}`}>  
                 <LuClipboardCheck className="mr-1" />

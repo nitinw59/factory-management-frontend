@@ -5,6 +5,8 @@ export const planningApi = {
     getOrderDetail:           (orderId)          => api.get(`/planning/sales-orders/${orderId}`),
     linkBom:                  (sopId, body)      => api.post(`/planning/sales-order-products/${sopId}/link-bom`, body),
     unlinkBom:                (sopId)            => api.delete(`/planning/sales-order-products/${sopId}/bom`),
+    getSuggestions:           (sopId)            => api.get(`/planning/sales-order-products/${sopId}/quantity-suggestions`),
+    finalizeQuantities:       (sopId, body)      => api.post(`/planning/sales-order-products/${sopId}/finalize-quantities`, body),
     calculateRequirements:    (sopId)            => api.post(`/planning/sales-order-products/${sopId}/calculate-requirements`),
     getRecalculationPreview:  (sopId)            => api.get(`/planning/sales-order-products/${sopId}/recalculation-preview`),
     getRequirements:          (sopId)            => api.get(`/planning/sales-order-products/${sopId}/requirements`),
@@ -12,13 +14,13 @@ export const planningApi = {
     updateFabricRequirement:  (reqId, body)      => api.put(`/planning/fabric-requirements/${reqId}`, body),
     reserveFabric:            (reqId, body)      => api.post(`/planning/fabric-requirements/${reqId}/reservations`, body),
     deleteFabricReservation:  (reservationId)    => api.delete(`/planning/fabric-requirements/reservations/${reservationId}`),
-    createFabricPurchase:     (reqId, body)      => api.post(`/planning/fabric-requirements/${reqId}/purchase`, body),
-    deleteFabricPurchase:     (purchaseReqId)    => api.delete(`/planning/fabric-purchase-requirements/${purchaseReqId}`),
+    // Removed: createFabricPurchase / deleteFabricPurchase
+    // Use purchaseDeptApi.raiseRequirement / cancelRequirement instead.
     // Trim
     updateTrimRequirement:    (reqId, body)      => api.put(`/planning/trim-requirements/${reqId}`, body),
     reserveTrim:              (reqId, body)      => api.post(`/planning/trim-requirements/${reqId}/reservations`, body),
     deleteTrimReservation:    (reservationId)    => api.delete(`/planning/trim-requirements/reservations/${reservationId}`),
-    createTrimPurchase:       (reqId, body)      => api.post(`/planning/trim-requirements/${reqId}/purchase`, body),
-    deleteTrimPurchase:       (purchaseReqId)    => api.delete(`/planning/trim-purchase-requirements/${purchaseReqId}`),
+    // Removed: createTrimPurchase / deleteTrimPurchase
+    // Use purchaseDeptApi.raiseRequirement / cancelRequirement instead.
     updateProductionReadiness: (sopId, readiness) => api.patch(`/planning/sales-order-products/${sopId}/production-readiness`, { readiness }),
 };

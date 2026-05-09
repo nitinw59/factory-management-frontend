@@ -62,8 +62,24 @@ const StatusBadge = ({ status }) => {
 };
 
 const Connector = ({ start, end }) => {
-    const cp = Math.abs(end.x - start.x) * 0.5;
-    const d  = `M ${start.x} ${start.y} C ${start.x + cp} ${start.y}, ${end.x - cp} ${end.y}, ${end.x} ${end.y}`;
+    // start.side / end.side: 'right' (default) | 'left' | 'bottom' | 'top'
+    // Picks Bezier control points that exit/enter from the named side.
+    const startSide = start.side || 'right';
+    const endSide   = end.side   || 'left';
+    const dx = Math.abs(end.x - start.x);
+    const dy = Math.abs(end.y - start.y);
+    const cpLen = Math.max(40, dx * 0.5, dy * 0.5);
+
+    const cp1 = startSide === 'bottom' ? { x: start.x, y: start.y + cpLen }
+              : startSide === 'top'    ? { x: start.x, y: start.y - cpLen }
+              : startSide === 'left'   ? { x: start.x - cpLen, y: start.y }
+                                        : { x: start.x + cpLen, y: start.y };
+    const cp2 = endSide === 'top'      ? { x: end.x, y: end.y - cpLen }
+              : endSide === 'bottom'   ? { x: end.x, y: end.y + cpLen }
+              : endSide === 'right'    ? { x: end.x + cpLen, y: end.y }
+                                        : { x: end.x - cpLen, y: end.y };
+
+    const d = `M ${start.x} ${start.y} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${end.x} ${end.y}`;
     return <path d={d} fill="none" stroke="#cbd5e1" strokeWidth="1.5" />;
 };
 
@@ -483,12 +499,14 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
         }
 
         // ── CreateBatch circle (after SOP column, linked to SOP) ─────────────
+        const sopBottomY = sopStartY + totalSopH;
+        const sopBottomX = sopX + NODE_W_SOP / 2;
         if (hasCB) {
             const cbY = sopMidY - NODE_H_CB / 2;
             nodesList.push({ type: 'CREATE_BATCH_CIRCLE', x: cbColX, y: cbY });
             connList.push({
-                start: { x: sopX + NODE_W_SOP, y: sopMidY },
-                end:   { x: cbColX,            y: cbY + NODE_H_CB / 2 },
+                start: { x: sopBottomX, y: sopBottomY, side: 'bottom' },
+                end:   { x: cbColX,     y: cbY + NODE_H_CB / 2 },
             });
         }
 
@@ -510,8 +528,8 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
                 });
             } else if (hasSops) {
                 connList.push({
-                    start: { x: sopX + NODE_W_SOP, y: sopMidY },
-                    end:   { x: batchX,            y: bY + NODE_H_BATCH / 2 },
+                    start: { x: sopBottomX, y: sopBottomY, side: 'bottom' },
+                    end:   { x: batchX,     y: bY + NODE_H_BATCH / 2 },
                 });
             } else if (hasSO) {
                 connList.push({
@@ -529,11 +547,17 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
 
         // When no batches exist, connect rightmost node → Dispatch
         if (allBatches.length === 0 && hasSops) {
-            const fromX = hasCB ? cbColX + NODE_W_CB : sopX + NODE_W_SOP;
-            connList.push({
-                start: { x: fromX,     y: sopMidY },
-                end:   { x: dispatchX, y: dispatchY + NODE_H_DISPATCH / 2 },
-            });
+            if (hasCB) {
+                connList.push({
+                    start: { x: cbColX + NODE_W_CB, y: sopMidY },
+                    end:   { x: dispatchX,          y: dispatchY + NODE_H_DISPATCH / 2 },
+                });
+            } else {
+                connList.push({
+                    start: { x: sopBottomX, y: sopBottomY, side: 'bottom' },
+                    end:   { x: dispatchX,  y: dispatchY + NODE_H_DISPATCH / 2 },
+                });
+            }
         }
 
         nodesList.push({ type: 'DISPATCH', x: dispatchX, y: dispatchY, batches: allBatches });

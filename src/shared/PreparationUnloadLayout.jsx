@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import MatrixBrand from './MatrixBrand';
 import { useAuth } from '../context/AuthContext';
 import { LuLogOut, LuClipboardCheck, LuMenu, LuX, LuBell ,LuFileText } from 'react-icons/lu';
 
@@ -20,7 +21,7 @@ const PreparationUnloadLayout = () => {
         <div className="flex flex-col h-screen bg-gray-50">
             <header className="bg-white shadow-md sticky top-0 z-20">
                 <div className="container mx-auto px-6 py-3 flex justify-between items-center">
-                    <div className="text-xl font-bold text-gray-800">Preparation Unload Portal</div>
+                    <MatrixBrand portal="Preparation Unload Portal" />
 
                     {/* Desktop Navigation */}
                     <nav className="hidden md:flex items-center space-x-6">

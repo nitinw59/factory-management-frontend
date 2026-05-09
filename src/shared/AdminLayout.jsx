@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import MatrixBrand from './MatrixBrand';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LuCircleUserRound, LuLogOut, LuChevronDown, LuMenu, LuX } from 'react-icons/lu';
@@ -76,8 +77,8 @@ const AdminLayout = () => {
             
             {/* Left Side: Logo & Desktop Nav */}
             <div className="flex items-center space-x-8">
-              <NavLink to="/admin/dashboard" className="text-xl font-bold text-gray-800" onClick={closeMenu}>
-                Admin Portal
+              <NavLink to="/admin/dashboard" onClick={closeMenu}>
+                <MatrixBrand portal="Admin Portal" />
               </NavLink>
               
               {/* Desktop Navigation (Hidden on Mobile) */}

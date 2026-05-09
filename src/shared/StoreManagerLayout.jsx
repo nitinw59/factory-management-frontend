@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import MatrixBrand from './MatrixBrand';
 // Added LuMenu for the hamburger icon
 import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX, LuCalendarClock } from 'react-icons/lu';
 import { notificationApi } from '../api/notificationApi';
@@ -79,7 +80,7 @@ const StoreManagerLayout = () => {
             <header className="bg-white shadow-md sticky top-0 z-20">
                 <div className="container mx-auto px-6 py-3 flex justify-between items-center">
                     <div className="flex items-center space-x-8">
-                        <div className="text-xl font-bold text-gray-800">Store Portal</div>
+                        <MatrixBrand portal="Store Portal" />
                         {/* This is the original desktop navigation */}
                         <nav className="hidden md:flex items-center space-x-6">
                             <NavDropdown title="Fabric">

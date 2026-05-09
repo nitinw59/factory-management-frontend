@@ -7,9 +7,9 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { planningApi } from '../../api/planningApi';
+import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { bomApi } from '../../api/bomApi';
 import { taApi } from '../../api/taApi';
-import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { stdSize } from '../../utils/sizeUtils';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -601,6 +601,7 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                             )}
                             {item.substitutes.map(s => {
                                 const sid = String(s.substitute_variant_id);
+                                
                                 return (
                                     <label key={sid} className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${sourceId === sid ? 'border-violet-400 bg-violet-50' : 'border-slate-200 hover:border-slate-300'}`}>
                                         <input type="radio" name="src" value={sid} checked={sourceId === sid} onChange={() => setSourceId(sid)} className="sr-only" />
@@ -611,7 +612,7 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                                             <p className="text-xs font-bold text-slate-700 truncate">
                                                 {s.item_name}{s.color_name ? ` – ${s.color_name}` : ''}{s.color_number ? ` (${s.color_number})` : ''}
                                             </p>
-                                            <p className="text-[10px] text-slate-400">Substitute</p>
+                                            <p className="text-[10px] text-slate-400">SubstituteD</p>
                                         </div>
                                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.in_stock > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
                                             {s.in_stock != null ? `${s.in_stock.toLocaleString()} in stock` : '—'}
@@ -830,28 +831,41 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
     const handleRaiseRequirement = async (item) => {
         setBusy(true); setErr(null);
         try {
-            const payload = {
-                sales_order_product_id:   sop.id,
-                type:                     item.type === 'fabric' ? 'fabric' : item.type === 'trim' ? 'trim' : 'other',
-                urgency:                  reqForm.urgency || 'normal',
-                notes:                    reqForm.notes || null,
-                plan_fabric_requirement_id: item.isReq ? item.req_id : null,
-            };
             const rawFab  = fabReqs.find(r => r.id === item.req_id);
             const rawTrim = trimReqs.find(r => r.id === item.req_id);
+
+            const base = {
+                sales_order_product_id: sop.id,
+                urgency:                reqForm.urgency || 'normal',
+                notes:                  reqForm.notes || null,
+            };
+
             if (item.type === 'fabric' && rawFab) {
-                payload.meters_required  = rawFab.meters_required;
-                payload.fabric_type_id   = rawFab.fabric_type_id;
-                payload.fabric_color_id  = rawFab.fabric_color_id;
+                await purchaseDeptApi.raiseRequirement({
+                    ...base,
+                    type:                       'fabric',
+                    meters_required:            rawFab.meters_required,
+                    fabric_type_id:             rawFab.fabric_type_id,
+                    fabric_color_id:            rawFab.fabric_color_id,
+                    plan_fabric_requirement_id: rawFab.id,
+                });
             } else if (item.type === 'trim' && rawTrim) {
-                payload.quantity_required      = rawTrim.quantity_required;
-                payload.trim_item_id           = rawTrim.trim_item_id;
-                payload.trim_item_variant_id   = rawTrim.trim_item_variant_id;
+                if (!reqForm.trim_item_variant_id) {
+                    throw new Error('Pick a variant to procure (exact match or substitute).');
+                }
+                await purchaseDeptApi.raiseRequirement({
+                    ...base,
+                    type:                      'trim',
+                    quantity_required:         rawTrim.quantity_required,
+                    unit_of_measure:           rawTrim.unit_of_measure,
+                    trim_item_id:              rawTrim.trim_item_id,
+                    trim_item_variant_id:      reqForm.trim_item_variant_id,
+                    plan_trim_requirement_id:  rawTrim.id,
+                });
             }
-            await purchaseDeptApi.raiseRequirement(payload);
             await taApi.updateTimelineItem(item.id, { status: 'in-progress', notes: reqForm.notes || null });
             refetchLocal(); onRefresh(); setActionMode(null);
-        } catch(e) { setErr(e?.response?.data?.error || 'Failed to raise requirement'); }
+        } catch(e) { setErr(e?.response?.data?.error || e.message || 'Failed to raise requirement'); }
         finally { setBusy(false); }
     };
 
@@ -1317,7 +1331,11 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                                 {item.isReq && item.status !== 'in-progress' && (
                                                                                     <button
                                                                                         onClick={() => {
-                                                                                            setReqForm({ urgency: 'normal', notes: item.notes || '' });
+                                                                                            setReqForm({
+                                                                                                urgency: 'normal',
+                                                                                                notes: item.notes || '',
+                                                                                                trim_item_variant_id: item.type === 'trim' ? (item.exact_variant_id ?? null) : null,
+                                                                                            });
                                                                                             setActionMode('req');
                                                                                             setErr(null);
                                                                                         }}
@@ -1355,6 +1373,67 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                             Raise Purchase Requirement
                                                                         </p>
                                                                         <div className="space-y-2.5">
+                                                                            {item.type === 'trim' && (
+                                                                                <div>
+                                                                                    <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">
+                                                                                        Variant to Procure <span className="text-red-500">*</span>
+                                                                                    </label>
+                                                                                    <div className="space-y-1.5">
+                                                                                        {item.exact_variant_id != null && (
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => setReqForm(p => ({ ...p, trim_item_variant_id: item.exact_variant_id }))}
+                                                                                                className={`w-full flex items-center justify-between gap-2 text-xs px-3 py-2 rounded-lg border transition ${
+                                                                                                    reqForm.trim_item_variant_id === item.exact_variant_id
+                                                                                                        ? 'bg-emerald-50 border-emerald-300'
+                                                                                                        : 'bg-white border-slate-200 hover:border-emerald-200'
+                                                                                                }`}
+                                                                                            >
+                                                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                                                    <CheckCircle2 size={12} className={reqForm.trim_item_variant_id === item.exact_variant_id ? 'text-emerald-500' : 'text-slate-300'} />
+                                                                                                    <span className="font-bold truncate">{item.title}</span>
+                                                                                                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 shrink-0">Exact</span>
+                                                                                                </div>
+                                                                                                <span className="text-[10px] text-slate-500 shrink-0">
+                                                                                                    Stock: <span className={`font-bold ${(item.exact_variant_stock || 0) > 0 ? 'text-emerald-600' : 'text-red-500'}`}>{item.exact_variant_stock ?? 0}</span>
+                                                                                                </span>
+                                                                                            </button>
+                                                                                        )}
+                                                                                        {(item.substitutes || []).map(s => {
+                                                                                            const sid = s.substitute_variant_id ?? s.id;
+                                                                                            const selected = reqForm.trim_item_variant_id === sid;
+                                                                                            return (
+                                                                                                <button
+                                                                                                    key={sid}
+                                                                                                    type="button"
+                                                                                                    onClick={() => setReqForm(p => ({ ...p, trim_item_variant_id: sid }))}
+                                                                                                    className={`w-full flex items-center justify-between gap-2 text-xs px-3 py-2 rounded-lg border transition ${
+                                                                                                        selected
+                                                                                                            ? 'bg-amber-50 border-amber-300'
+                                                                                                            : 'bg-white border-slate-200 hover:border-amber-200'
+                                                                                                    }`}
+                                                                                                >
+                                                                                                    <div className="flex items-center gap-2 min-w-0">
+                                                                                                        <CheckCircle2 size={12} className={selected ? 'text-amber-500' : 'text-slate-300'} />
+                                                                                                        <span className="font-bold truncate">
+                                                                                                            {s.item_name}{s.color_name ? ` – ${s.color_name}` : ''}{s.color_number ? ` (${s.color_number})` : ''}
+                                                                                                        </span>
+                                                                                                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 shrink-0">Substitute</span>
+                                                                                                    </div>
+                                                                                                    <span className="text-[10px] text-slate-500 shrink-0">
+                                                                                                        Stock: <span className={`font-bold ${(s.in_stock || 0) > 0 ? 'text-emerald-600' : 'text-red-500'}`}>{s.in_stock ?? 0}</span>
+                                                                                                    </span>
+                                                                                                </button>
+                                                                                            );
+                                                                                        })}
+                                                                                        {item.exact_variant_id == null && (item.substitutes || []).length === 0 && (
+                                                                                            <p className="text-[10px] text-amber-600 italic px-2 py-1.5 bg-amber-50 border border-amber-100 rounded-lg">
+                                                                                                No variants resolved for this item — backend cannot accept a purchase request without a variant id.
+                                                                                            </p>
+                                                                                        )}
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
                                                                             <div>
                                                                                 <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Urgency</label>
                                                                                 <div className="flex gap-2">
@@ -1384,7 +1463,8 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                                 className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
                                                                                 Cancel
                                                                             </button>
-                                                                            <button onClick={() => handleRaiseRequirement(item)} disabled={busy}
+                                                                            <button onClick={() => handleRaiseRequirement(item)}
+                                                                                disabled={busy || (item.type === 'trim' && !reqForm.trim_item_variant_id)}
                                                                                 className="flex items-center gap-1.5 text-xs font-bold text-white bg-blue-500 hover:bg-blue-600 disabled:opacity-40 px-4 py-1.5 rounded-lg transition-colors">
                                                                                 {busy && <Loader2 size={12} className="animate-spin" />}
                                                                                 Send to Purchase Dept
@@ -1435,6 +1515,208 @@ const READINESS_CFG = {
     in_planning:          { label: 'In Planning',  cls: 'bg-amber-50  text-amber-600  border-amber-200',   icon: null },
     ready_for_production: { label: 'Ready',        cls: 'bg-emerald-50 text-emerald-600 border-emerald-200', icon: CheckCircle2 },
     force_ready:          { label: 'Force Ready',  cls: 'bg-violet-50 text-violet-700 border-violet-200',  icon: ShieldCheck },
+};
+
+const QuantitySuggestionModal = ({ linkedSops, onClose, onDone }) => {
+    const [suggestions, setSuggestions] = useState(null);
+    const [loading,     setLoading]     = useState(true);
+    const [error,       setError]       = useState(null);
+    const [choices,     setChoices]     = useState({});
+    const [submitting,  setSubmitting]  = useState(false);
+
+    useEffect(() => {
+        Promise.all(
+            linkedSops.map(sop =>
+                planningApi.getSuggestions(sop.id)
+                    .then(r => {
+                        const raw = r.data?.data ?? r.data;
+                        return {
+                            sopId:    sop.id,
+                            sopName:  sop.product_name,
+                            ratioSum: raw?.ratio_sum ?? null,
+                            colors:   raw?.suggestions || [],
+                        };
+                    })
+            )
+        ).then(results => {
+            setSuggestions(results);
+            const init = {};
+            results.forEach(({ sopId, colors }) => {
+                colors.forEach(c => {
+                    let selected = c.exact ? 'exact' : 'lower';
+                    // If the API tells us the previous selection, use it.
+                    if (c.selected_option) {
+                        selected = c.selected_option;
+                    } else {
+                        // Otherwise infer from previously-finalized quantity
+                        const prev = c.finalized_quantity ?? c.previous_finalized_quantity;
+                        if (prev != null) {
+                            const prevNum = Number(prev);
+                            if (Number(c.lower?.total_pieces) === prevNum)      selected = 'lower';
+                            else if (Number(c.upper?.total_pieces) === prevNum) selected = 'upper';
+                        }
+                    }
+                    init[`${sopId}_${c.fabric_color_id}`] = selected;
+                });
+            });
+            setChoices(init);
+        }).catch(e => setError(e?.response?.data?.error || 'Failed to load suggestions'))
+          .finally(() => setLoading(false));
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const pick = (sopId, colorId, opt) =>
+        setChoices(p => ({ ...p, [`${sopId}_${colorId}`]: opt }));
+
+    const handleConfirm = async () => {
+        setSubmitting(true);
+        setError(null);
+        try {
+            await Promise.all(
+                suggestions.map(async ({ sopId, colors }) => {
+                    const quantities = colors.map(c => {
+                        const opt    = choices[`${sopId}_${c.fabric_color_id}`] || 'lower';
+                        const chosen = (opt === 'exact' ? c.lower : c[opt]) ?? c.lower ?? c.upper;
+                        return {
+                            fabric_color_id:    c.fabric_color_id,
+                            selected_option:    opt,
+                            finalized_quantity: chosen?.total_pieces ?? c.ordered_quantity,
+                            marker_runs:        chosen?.runs ?? null,
+                        };
+                    });
+                    await planningApi.finalizeQuantities(sopId, { quantities });
+                    await planningApi.calculateRequirements(sopId);
+                })
+            );
+            onDone();
+        } catch (e) {
+            setError(e?.response?.data?.error || 'Calculation failed');
+            setSubmitting(false);
+        }
+    };
+
+    const totalSelections = suggestions?.reduce((s, g) => s + g.colors.length, 0) ?? 0;
+    const madeSelections  = Object.keys(choices).length;
+    const allChosen       = madeSelections >= totalSelections && totalSelections > 0;
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={!submitting ? onClose : undefined}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
+                    <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Step 1 of 2 — Confirm Quantities</p>
+                        <h2 className="font-extrabold text-slate-800 text-base">Choose Nearest Marker Run</h2>
+                        <p className="text-xs text-slate-400 mt-0.5">Select lower or upper run for each color, then confirm to calculate requirements.</p>
+                    </div>
+                    {!submitting && <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 mt-0.5"><X size={18} /></button>}
+                </div>
+
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+                    {loading && <Spinner />}
+                    {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>}
+
+                    {suggestions?.map(({ sopId, sopName, ratioSum, colors }) => (
+                        <div key={sopId} className="border border-slate-200 rounded-xl overflow-hidden">
+                            <div className="bg-slate-50 px-4 py-3 border-b border-slate-100">
+                                <p className="font-bold text-slate-800 text-sm">{sopName}</p>
+                                <p className="text-[10px] text-slate-400 mt-0.5">
+                                    {colors.length} color{colors.length !== 1 ? 's' : ''}
+                                    {ratioSum != null && <> · ratio sum: {ratioSum} pcs/cycle</>}
+                                </p>
+                            </div>
+                            <div className="p-4 space-y-3">
+                                {colors.map(c => {
+                                    const key    = `${sopId}_${c.fabric_color_id}`;
+                                    const chosen = choices[key] || 'lower';
+                                    return (
+                                        <div key={c.fabric_color_id} className="rounded-xl border border-slate-200 overflow-hidden">
+                                            <div className="flex items-center gap-2.5 px-3 py-2.5 bg-slate-50 border-b border-slate-100">
+                                                <span className="font-bold text-slate-800 text-sm">{c.color_name}</span>
+                                                {c.color_number && (
+                                                    <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{c.color_number}</span>
+                                                )}
+                                                <span className="ml-auto text-[10px] text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded font-medium">
+                                                    Ordered: {(c.ordered_quantity || 0).toLocaleString()} pcs
+                                                </span>
+                                            </div>
+                                            <div className="p-3">
+                                                {c.exact ? (
+                                                    <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+                                                        <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+                                                        <div>
+                                                            <p className="text-[9px] font-bold text-emerald-600 uppercase tracking-wider">Exact match</p>
+                                                            <p className="text-xl font-extrabold text-slate-800 leading-none">
+                                                                {(c.lower?.total_pieces ?? c.upper?.total_pieces ?? c.ordered_quantity).toLocaleString()}
+                                                            </p>
+                                                            {c.lower?.runs != null && (
+                                                                <p className="text-[10px] text-slate-500 mt-0.5">{c.lower.runs} run{c.lower.runs !== 1 ? 's' : ''}</p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        {['lower', 'upper'].map(opt => {
+                                                            const d       = c[opt];
+                                                            if (!d) return null;
+                                                            const active  = chosen === opt;
+                                                            const diff    = (d.total_pieces || 0) - (c.ordered_quantity || 0);
+                                                            const isUnder = diff < 0;
+                                                            return (
+                                                                <button key={opt} onClick={() => pick(sopId, c.fabric_color_id, opt)}
+                                                                    className={`relative flex flex-col items-start p-3 rounded-xl border-2 text-left transition-all ${
+                                                                        active
+                                                                            ? isUnder ? 'border-blue-400 bg-blue-50' : 'border-violet-400 bg-violet-50'
+                                                                            : 'border-slate-200 bg-white hover:border-slate-300'
+                                                                    }`}>
+                                                                    {active && (
+                                                                        <CheckCircle2 size={13} className={`absolute top-2 right-2 ${isUnder ? 'text-blue-500' : 'text-violet-500'}`} />
+                                                                    )}
+                                                                    <span className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${isUnder ? 'text-blue-500' : 'text-violet-500'}`}>
+                                                                        {isUnder ? '▼ Under-run' : '▲ Over-run'}
+                                                                    </span>
+                                                                    <span className="text-xl font-extrabold text-slate-800 leading-none">
+                                                                        {(d.total_pieces || 0).toLocaleString()}
+                                                                    </span>
+                                                                    <span className="text-[10px] text-slate-500 mt-0.5">
+                                                                        {d.runs} run{d.runs !== 1 ? 's' : ''}
+                                                                    </span>
+                                                                    <span className={`text-[10px] font-bold mt-1 ${isUnder ? 'text-blue-600' : 'text-violet-600'}`}>
+                                                                        {isUnder ? `${Math.abs(diff).toLocaleString()} fewer` : `${diff.toLocaleString()} extra`} vs order
+                                                                    </span>
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                {!loading && suggestions && (
+                    <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-between">
+                        <p className="text-xs text-slate-400">
+                            {madeSelections}/{totalSelections} color{totalSelections !== 1 ? 's' : ''} configured
+                        </p>
+                        <div className="flex items-center gap-3">
+                            <button onClick={onClose} disabled={submitting}
+                                className="text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40">
+                                Cancel
+                            </button>
+                            <button onClick={handleConfirm} disabled={submitting || !allChosen}
+                                className="flex items-center gap-2 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-5 py-2.5 rounded-xl transition-colors shadow-sm">
+                                {submitting ? <Loader2 size={15} className="animate-spin" /> : <Calculator size={15} />}
+                                Confirm & Calculate
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
 };
 
 const RecalculateConfirmModal = ({ preview, sopName, onClose, onConfirm, busy, err }) => {
@@ -1635,6 +1917,7 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onRe
     const [showTrackingModal, setShowTrackingModal] = useState(false);
     // Recalculate flow
     const [showRecalcConfirm, setShowRecalcConfirm] = useState(false);
+    const [showQuantityPicker, setShowQuantityPicker] = useState(false);
     const [recalcing,         setRecalcing]         = useState(false);
     const [recalcErr,         setRecalcErr]         = useState(null);
     const [preview,           setPreview]           = useState(null);
@@ -1649,21 +1932,13 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onRe
         .finally(() => setLoadingReqs(false));
     }, [sop.bom_id, sop.id, refreshTick]);
 
-    const doRecalculate = async () => {
-        console.log('Starting recalculation for SOP', sop.id);
-        setRecalcing(true);
+    // Confirm "delete & recalc" → hand off to the marker-run picker (pre-populated
+    // with previous finalized choices). The picker calls finalize + calculate.
+    const doRecalculate = () => {
+        setShowRecalcConfirm(false);
+        setPreview(null);
         setRecalcErr(null);
-        try {
-            await planningApi.calculateRequirements(sop.id);
-            setShowRecalcConfirm(false);
-            setPreview(null);
-            setRefreshTick(t => t + 1);
-            if (onTAChange) onTAChange();
-        } catch (e) {
-            setRecalcErr(e?.response?.data?.error || 'Recalculation failed');
-        } finally {
-            setRecalcing(false);
-        }
+        setShowQuantityPicker(true);
     };
 
     const handleRecalcClick = async () => {
@@ -1671,12 +1946,10 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onRe
         setRecalcing(true);
         try {
             const res  = await planningApi.getRecalculationPreview(sop.id);
-            console.log("recalculfationn preview", res);
             const data = res.data?.data ?? res.data;
             if (!data?.has_existing_data) {
-                await planningApi.calculateRequirements(sop.id);
-                setRefreshTick(t => t + 1);
-                if (onTAChange) onTAChange();
+                // First-time calc — go through the marker-run picker (finalize quantities → calculate)
+                setShowQuantityPicker(true);
             } else {
                 setPreview(data);
                 setShowRecalcConfirm(true);
@@ -1867,20 +2140,38 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onRe
                 </div>
             </div>
 
-            {(sop.colors || []).length > 0 && (
+            {(sop.colors || []).length > 0 && (() => {
+                const planByColor = {};
+                (sop.production_plan_items || []).forEach(p => {
+                    planByColor[String(p.fabric_color_id)] = p;
+                });
+                return (
                 <div className="px-4 py-2.5 border-t border-slate-100 flex flex-wrap gap-1.5">
-                    {sop.colors.map(c => (
-                        <span key={c.fabric_color_id}
-                            className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-md font-bold">
-                            {c.color_number || c.color_name}
-                            {c.color_number && c.color_name && (
-                                <span className="font-normal text-indigo-400 ml-1">#{c.color_name}</span>
-                            )}
-                            {' '}· {(c.quantity || c.total_quantity || 0).toLocaleString()} pcs
-                        </span>
-                    ))}
+                    {sop.colors.map(c => {
+                        const ordered = Number(c.quantity ?? c.total_quantity ?? 0);
+                        const plan    = planByColor[String(c.fabric_color_id)];
+                        const finalized = plan?.finalized_quantity;
+                        const runs    = plan?.marker_runs;
+                        return (
+                            <span key={c.fabric_color_id}
+                                className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-md font-bold">
+                                {c.color_number || c.color_name}
+                                {c.color_number && c.color_name && (
+                                    <span className="font-normal text-indigo-400 ml-1">#{c.color_name}</span>
+                                )}
+                                {' '}· {ordered.toLocaleString()} ordered
+                                {finalized != null && (
+                                    <span className="ml-1 text-emerald-700">
+                                        · {Number(finalized).toLocaleString()} final
+                                        {runs != null && <span className="font-normal text-emerald-500"> ({runs} run{runs === 1 ? '' : 's'})</span>}
+                                    </span>
+                                )}
+                            </span>
+                        );
+                    })}
                 </div>
-            )}
+                );
+            })()}
 
             <div className="px-4 py-3 border-t border-slate-100">
                 {sop.bom_id ? (
@@ -2254,6 +2545,7 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onRe
                 const overdue = (sop.timeline || []).filter(it =>
                     it.end_date && new Date(it.end_date) < new Date() && it.status !== 'completed'
                 ).length;
+                console.log('Production tracking status:', { sop , compl, overdue, fabReqs, trimReqs });
                 const fabShort = fabReqs.filter(fr =>
                     Math.max(0, (fr.meters_required || 0) - (fr.stock_suggestion?.total_meters_available ?? 0)) > 0
                 ).length;
@@ -2315,6 +2607,18 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onRe
                     onConfirm={doRecalculate}
                 />
             )}
+
+            {showQuantityPicker && (
+                <QuantitySuggestionModal
+                    linkedSops={[sop]}
+                    onClose={() => setShowQuantityPicker(false)}
+                    onDone={() => {
+                        setShowQuantityPicker(false);
+                        setRefreshTick(t => t + 1);
+                        if (onTAChange) onTAChange();
+                    }}
+                />
+            )}
         </div>
     );
 };
@@ -2354,7 +2658,7 @@ const ProductionPlanningPage = () => {
         planningApi.getFormData()
             .then(res => {
                 const data = res.data?.data ?? res.data;
-                console.log('planningApi. getFormData received:', data);
+                console.log('planning ddApi. getFormData received:', data);
                 setFormData(data);
             })
             .catch(e  => setFormErr(e?.response?.data?.error || 'Failed to load planning data'))

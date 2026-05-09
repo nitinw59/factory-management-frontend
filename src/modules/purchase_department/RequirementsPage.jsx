@@ -8,9 +8,17 @@ import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import api from '../../utils/api';
 
 const URGENCY_CFG = {
-    urgent: { cls: 'bg-red-100 text-red-700 border-red-200',    dot: 'bg-red-500',    label: 'Urgent'  },
-    normal: { cls: 'bg-blue-100 text-blue-700 border-blue-200',  dot: 'bg-blue-400',   label: 'Normal'  },
-    low:    { cls: 'bg-slate-100 text-slate-600 border-slate-200', dot: 'bg-slate-400', label: 'Low'     },
+    urgent: { cls: 'bg-red-100 text-red-700 border-red-200',         dot: 'bg-red-500',     label: 'Urgent' },
+    high:   { cls: 'bg-orange-100 text-orange-700 border-orange-200', dot: 'bg-orange-500', label: 'High'   },
+    normal: { cls: 'bg-blue-100 text-blue-700 border-blue-200',       dot: 'bg-blue-400',   label: 'Normal' },
+    low:    { cls: 'bg-slate-100 text-slate-600 border-slate-200',    dot: 'bg-slate-400',  label: 'Low'    },
+};
+
+const STATUS_CFG = {
+    PENDING:   { cls: 'bg-amber-100 text-amber-700 border-amber-200',         label: 'Pending'    },
+    PO_RAISED: { cls: 'bg-blue-100 text-blue-700 border-blue-200',             label: 'PO Raised'  },
+    FULFILLED: { cls: 'bg-emerald-100 text-emerald-700 border-emerald-200',    label: 'Fulfilled'  },
+    CANCELLED: { cls: 'bg-slate-100 text-slate-500 border-slate-200',          label: 'Cancelled'  },
 };
 
 const TYPE_CFG = {
@@ -54,28 +62,38 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
     const groups = useMemo(() => {
         const map = new Map();
         requirements.forEach(req => {
+            // Trim: one bucket per trim_item_variant_id (so substitute vs exact stay separate).
+            // Fabric: one bucket per (fabric_type_id, fabric_color_id) — what the backend expects.
             const key =
-                req.type === 'fabric' ? `fabric:${req.fabric_type_name || `id-${req.id}`}` :
-                req.type === 'trim'   ? `trim:${req.trim_item_name   || `id-${req.id}`}` :
-                `other:${req.id}`;
+                req.type === 'fabric'
+                    ? `fabric:${req.fabric_type_id ?? 't?'}:${req.fabric_color_id ?? 'c?'}`
+                    : req.type === 'trim'
+                        ? `trim:${req.trim_item_variant_id ?? `req-${req.id}`}`
+                        : `other:${req.id}`;
             if (!map.has(key)) {
                 map.set(key, {
                     key,
                     type: req.type,
                     label:
-                        req.type === 'fabric' ? (req.fabric_type_name || 'Fabric') :
-                        req.type === 'trim'   ? (req.trim_item_name   || 'Trim')   :
-                        'Other',
+                        req.type === 'fabric'
+                            ? `${req.fabric_type_name || 'Fabric'}${req.fabric_color_name ? ` · ${req.fabric_color_name}` : ''}${req.fabric_color_number ? ` (${req.fabric_color_number})` : ''}`
+                            : req.type === 'trim'
+                                ? `${req.trim_item_name || 'Trim'}${req.variant_color_name ? ` · ${req.variant_color_name}` : ''}${req.is_substitute ? ' (sub)' : ''}`
+                                : 'Other',
                     items: [],
                     totalMeters: 0,
                     totalQty: 0,
-                    unitOfMeasure: req.unit_of_measure,
+                    unitOfMeasure: req.unit_of_measure || req.trim_uom,
+                    // Payload identifiers, captured from the first member
+                    fabric_type_id:       req.fabric_type_id ?? null,
+                    fabric_color_id:      req.fabric_color_id ?? null,
+                    trim_item_variant_id: req.trim_item_variant_id ?? null,
                 });
             }
             const g = map.get(key);
             g.items.push(req);
-            g.totalMeters += Number(req.meters_required || 0);
-            g.totalQty    += Number(req.quantity_required || 0);
+            g.totalMeters += parseFloat(req.meters_required ?? 0);
+            g.totalQty    += parseFloat(req.quantity_required ?? 0);
         });
         return [...map.values()];
     }, [requirements]);
@@ -85,18 +103,34 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
         if (!deliveryDate)  { setErr('Please set an expected delivery date'); return; }
         setBusy(true); setErr(null);
         try {
-            const flatUnitPrices = {};
-            groups.forEach(g => {
-                const price = unitPrices[g.key];
-                if (price !== undefined && price !== '') {
-                    g.items.forEach(item => { flatUnitPrices[item.id] = price; });
+            const items = groups.map(g => {
+                const unit_price      = parseFloat(unitPrices[g.key] ?? 0) || 0;
+                const requirement_ids = g.items.map(i => i.id);
+                if (g.type === 'fabric') {
+                    return {
+                        type:            'fabric',
+                        fabric_type_id:  g.fabric_type_id,
+                        fabric_color_id: g.fabric_color_id,
+                        quantity:        g.totalMeters,
+                        uom:             'meter',
+                        unit_price,
+                        requirement_ids,
+                    };
                 }
+                return {
+                    type:                 'trim',
+                    trim_item_variant_id: g.trim_item_variant_id,
+                    quantity:             g.totalQty,
+                    uom:                  g.unitOfMeasure || 'pcs',
+                    unit_price,
+                    requirement_ids,
+                };
             });
+
             await purchaseDeptApi.createOrder({
-                supplier_id:            parseInt(supplierId),
-                expected_delivery_date: deliveryDate,
-                requirement_ids:        requirements.map(r => r.id),
-                unit_prices:            flatUnitPrices,
+                supplier_id:            supplierId ? parseInt(supplierId) : null,
+                expected_delivery_date: deliveryDate || null,
+                items,
             });
             onCreated();
         } catch (e) {
@@ -161,8 +195,8 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
                                                         ? (item.fabric_color_name
                                                             ? `${item.fabric_color_name}${item.fabric_color_number ? ` · ${item.fabric_color_number}` : ''}`
                                                             : 'No color')
-                                                        : (item.trim_color_name
-                                                            ? `${item.trim_color_name}${item.trim_color_number ? ` · ${item.trim_color_number}` : ''}`
+                                                        : (item.variant_color_name
+                                                            ? `${item.variant_color_name}${item.variant_color_number ? ` · ${item.variant_color_number}` : ''}${item.is_substitute ? ' · sub' : ''}`
                                                             : (item.trim_item_code || 'No variant'));
                                                     return (
                                                         <div key={item.id} className="flex items-center justify-between text-[10px] text-slate-500">
@@ -172,7 +206,7 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
                                                             <span className="shrink-0 ml-2 font-medium">
                                                                 {isFabric
                                                                     ? `${fmt(item.meters_required)} m`
-                                                                    : `${fmt(item.quantity_required, 0)} ${item.unit_of_measure || 'pcs'}`}
+                                                                    : `${fmt(item.quantity_required, 0)} ${item.unit_of_measure || item.trim_uom || 'pcs'}`}
                                                             </span>
                                                         </div>
                                                     );
@@ -272,14 +306,15 @@ const RequirementsPage = () => {
             return [
                 r.product_name, r.trim_item_name, r.trim_item_code,
                 r.fabric_type_name, r.fabric_color_name,
+                r.variant_color_name, r.variant_color_number,
                 r.customer_name, r.order_number, r.buyer_po_number,
-                r.raised_by_name,
+                r.raised_by_name, r.po_code,
             ].some(v => (v || '').toLowerCase().includes(q));
           })
         : requirements;
 
-    // Sort: urgent first, then normal, then low; within same urgency, newest first
-    const URGENCY_ORDER = { urgent: 0, normal: 1, low: 2 };
+    // Sort: urgent → high → normal → low; within same urgency, newest first
+    const URGENCY_ORDER = { urgent: 0, high: 1, normal: 2, low: 3 };
     const sorted = [...filtered].sort((a, b) => {
         const ua = URGENCY_ORDER[(a.urgency || '').toLowerCase()] ?? 1;
         const ub = URGENCY_ORDER[(b.urgency || '').toLowerCase()] ?? 1;
@@ -312,7 +347,7 @@ const RequirementsPage = () => {
     };
 
     // Group by urgency for display
-    const URGENCY_GROUPS = ['urgent', 'normal', 'low'];
+    const URGENCY_GROUPS = ['urgent', 'high', 'normal', 'low'];
     const groups = URGENCY_GROUPS
         .map(urgency => ({ urgency, items: sorted.filter(r => (r.urgency || 'normal').toLowerCase() === urgency) }))
         .filter(g => g.items.length > 0);
@@ -361,13 +396,13 @@ const RequirementsPage = () => {
                     ))}
                 </div>
                 <div className="flex items-center gap-1.5 text-sm">
-                    {['PENDING', 'ACKNOWLEDGED', 'IN_PROGRESS', 'COMPLETED'].map(s => (
+                    {['PENDING', 'PO_RAISED', 'FULFILLED', 'CANCELLED'].map(s => (
                         <button
                             key={s}
                             onClick={() => setStatusFilter(prev => prev === s ? '' : s)}
                             className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${statusFilter === s ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                         >
-                            {s.charAt(0) + s.slice(1).toLowerCase().replace('_', ' ')}
+                            {STATUS_CFG[s]?.label || s}
                         </button>
                     ))}
                 </div>
@@ -455,6 +490,12 @@ const RequirementsPage = () => {
                                                             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${typeCfg.cls}`}>
                                                                 {typeCfg.label}
                                                             </span>
+                                                            {req.is_substitute === true && (
+                                                                <span title={`Planned ${req.fabric_color_name || '—'} → buying ${req.variant_color_name || '—'}`}
+                                                                    className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                                                                    🔄 Sub
+                                                                </span>
+                                                            )}
                                                         </div>
                                                         <p className="text-xs text-slate-500 mt-0.5">
                                                             {req.order_number || 'No SO linked'}
@@ -470,10 +511,10 @@ const RequirementsPage = () => {
                                                         <p className="text-sm font-bold text-slate-700">
                                                             {req.type === 'fabric'
                                                                 ? `${fmt(req.meters_required)} m`
-                                                                : `${fmt(req.quantity_required, 0)} ${req.unit_of_measure || 'pcs'}`}
+                                                                : `${fmt(req.quantity_required, 0)} ${req.unit_of_measure || req.trim_uom || 'pcs'}`}
                                                         </p>
-                                                        <p className="text-[9px] text-slate-400 uppercase font-medium">
-                                                            {req.status || 'PENDING'}
+                                                        <p className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded-full border inline-block mt-0.5 ${(STATUS_CFG[req.status] || STATUS_CFG.PENDING).cls}`}>
+                                                            {(STATUS_CFG[req.status] || { label: req.status || 'PENDING' }).label}
                                                         </p>
                                                     </div>
 
@@ -485,47 +526,89 @@ const RequirementsPage = () => {
 
                                                 {/* Expanded detail */}
                                                 {isExpanded && (
-                                                    <div className="px-4 pb-4 pt-0 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-                                                        {req.fabric_type_name && (
-                                                            <div>
-                                                                <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Fabric Type</p>
-                                                                <p className="font-medium text-slate-700">{req.fabric_type_name}</p>
+                                                    <div className="px-4 pb-4 pt-0 border-t border-slate-100 space-y-3">
+                                                        {req.is_substitute === true && (
+                                                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5">
+                                                                <p className="text-[9px] font-bold text-amber-700 uppercase tracking-wider mb-0.5">🔄 Substitution</p>
+                                                                <p className="text-xs text-amber-700">
+                                                                    Planned: <span className="font-bold">{req.fabric_color_name || '—'}{req.fabric_color_number ? ` (${req.fabric_color_number})` : ''}</span>
+                                                                    {' → '}
+                                                                    Buying: <span className="font-bold">{req.variant_color_name || '—'}{req.variant_color_number ? ` (${req.variant_color_number})` : ''}</span>
+                                                                </p>
                                                             </div>
                                                         )}
-                                                        {req.fabric_color_name && (
-                                                            <div>
-                                                                <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Color</p>
-                                                                <p className="font-medium text-slate-700">{req.fabric_color_name}{req.fabric_color_number ? ` · ${req.fabric_color_number}` : ''}</p>
-                                                            </div>
-                                                        )}
-                                                        {req.trim_item_name && (
-                                                            <div>
-                                                                <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Trim Item</p>
-                                                                <p className="font-medium text-slate-700">{req.trim_item_name}</p>
-                                                            </div>
-                                                        )}
-                                                        {req.trim_item_code && (
-                                                            <div>
-                                                                <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Item Code</p>
-                                                                <p className="font-medium text-slate-700">{req.trim_item_code}</p>
-                                                            </div>
-                                                        )}
-                                                        {req.trim_color_name && (
-                                                            <div>
-                                                                <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Trim Color</p>
-                                                                <p className="font-medium text-slate-700">{req.trim_color_name}{req.trim_color_number ? ` · ${req.trim_color_number}` : ''}</p>
-                                                            </div>
-                                                        )}
-                                                        {req.buyer_po_number && (
-                                                            <div>
-                                                                <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Buyer PO</p>
-                                                                <p className="font-medium text-slate-700">{req.buyer_po_number}</p>
-                                                            </div>
-                                                        )}
+
+                                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                                                            {req.fabric_type_name && (
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Fabric Type</p>
+                                                                    <p className="font-medium text-slate-700">{req.fabric_type_name}</p>
+                                                                </div>
+                                                            )}
+                                                            {req.type === 'fabric' && req.fabric_color_name && (
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Color</p>
+                                                                    <p className="font-medium text-slate-700">{req.fabric_color_name}{req.fabric_color_number ? ` · ${req.fabric_color_number}` : ''}</p>
+                                                                </div>
+                                                            )}
+                                                            {req.trim_item_name && (
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Trim Item</p>
+                                                                    <p className="font-medium text-slate-700">{req.trim_item_name}</p>
+                                                                </div>
+                                                            )}
+                                                            {req.trim_item_code && (
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Item Code</p>
+                                                                    <p className="font-medium text-slate-700">{req.trim_item_code}</p>
+                                                                </div>
+                                                            )}
+                                                            {req.variant_color_name && (
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Variant Color</p>
+                                                                    <p className="font-medium text-slate-700">
+                                                                        {req.variant_color_name}{req.variant_color_number ? ` · ${req.variant_color_number}` : ''}
+                                                                    </p>
+                                                                </div>
+                                                            )}
+                                                            {req.variant_in_stock != null && (
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">In Stock</p>
+                                                                    <p className={`font-bold ${Number(req.variant_in_stock) > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                                                        {Number(req.variant_in_stock).toLocaleString()}
+                                                                    </p>
+                                                                </div>
+                                                            )}
+                                                            {req.variant_last_purchase_price != null && (
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Last Purchase Price</p>
+                                                                    <p className="font-medium text-slate-700">{parseFloat(req.variant_last_purchase_price).toFixed(2)}</p>
+                                                                </div>
+                                                            )}
+                                                            {req.unit_price != null && (
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Unit Price (PO)</p>
+                                                                    <p className="font-medium text-slate-700">{parseFloat(req.unit_price).toFixed(2)}</p>
+                                                                </div>
+                                                            )}
+                                                            {req.buyer_po_number && (
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Buyer PO</p>
+                                                                    <p className="font-medium text-slate-700">{req.buyer_po_number}</p>
+                                                                </div>
+                                                            )}
+                                                            {req.po_code && (
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Linked PO</p>
+                                                                    <p className="font-mono text-slate-700">{req.po_code}</p>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
                                                         {req.notes && (
-                                                            <div className="col-span-2 sm:col-span-3">
+                                                            <div>
                                                                 <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Notes</p>
-                                                                <p className="text-slate-600 italic">{req.notes}</p>
+                                                                <p className="text-xs text-slate-600 italic">{req.notes}</p>
                                                             </div>
                                                         )}
                                                     </div>

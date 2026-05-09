@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import MatrixBrand from './MatrixBrand';
 import {
-    LuLogOut, LuMenu, LuX, LuShoppingCart, LuClipboardList, LuPackageCheck,
+    LuLogOut, LuMenu, LuX, LuClipboardList, LuPackageCheck,
 } from 'react-icons/lu';
 
 const NAV = [
@@ -21,12 +22,7 @@ const PurchaseDepartmentLayout = () => {
         <div className="flex flex-col h-screen bg-slate-50 font-sans">
             <header className="bg-white shadow-sm border-b border-slate-200 relative z-30">
                 <div className="container mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
-                    <div className="flex items-center gap-2 text-lg font-bold text-slate-800">
-                        <div className="bg-orange-600 p-1.5 rounded-lg shadow-sm">
-                            <LuShoppingCart className="text-white" size={18} />
-                        </div>
-                        <span className="tracking-tight">Purchase Portal</span>
-                    </div>
+                    <MatrixBrand portal="Purchase Portal" wordmarkClassName="text-slate-800" />
 
                     <div className="hidden md:flex items-center gap-6">
                         <nav className="flex items-center gap-5">

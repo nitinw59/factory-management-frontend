@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import MatrixBrand from './MatrixBrand';
 import { LuLogOut, LuChevronDown, LuLayoutDashboard, LuHammer, LuMenu, LuX, LuBell ,LuFileText} from 'react-icons/lu';
 // Assuming notificationApi exists
 // import { notificationApi } from '../api/notificationApi';
@@ -46,7 +47,7 @@ const PreparationManagerLayout = () => {
         <div className="flex flex-col h-screen bg-gray-50">
             <header className="bg-white shadow-md sticky top-0 z-20">
                 <div className="container mx-auto px-6 py-3 flex justify-between items-center">
-                    <div className="text-xl font-bold text-gray-800"> Preparation Manager</div>
+                    <MatrixBrand portal="Preparation Manager" />
 
                     {/* Desktop Navigation */}
                     <nav className="hidden md:flex items-center space-x-6">

@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 // Added LuSettings to the import
 import { LuCircleUserRound, LuLogOut, LuChevronDown, LuPencil, LuSettings } from 'react-icons/lu';
+import MatrixBrand from './MatrixBrand';
 
 // A reusable dropdown component for the navbar
 const NavDropdown = ({ title, children }) => {
@@ -47,7 +48,7 @@ const ProductionManagerLayout = () => {
       <header className="bg-white shadow-md sticky top-0 z-20">
         <div className="container mx-auto px-6 py-3 flex justify-between items-center">
           <div className="flex items-center space-x-8">
-            <div className="text-xl font-bold text-gray-800">Production Portal</div>
+            <MatrixBrand portal="Production Portal" />
             <nav className="hidden md:flex items-center space-x-6">
 
                 <NavDropdown title="Workflow">

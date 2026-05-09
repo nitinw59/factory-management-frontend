@@ -69,8 +69,12 @@ export default function BaseManagerLayout({ portalName, basePath, customLinks = 
                     
                     {/* Left: Brand & Desktop Nav */}
                     <div className="flex items-center gap-8">
-                        <div className="text-xl font-extrabold text-slate-800 tracking-tight">
-                            {portalName}
+                        <div className="flex items-center gap-2.5">
+                            <img src="/matrix_logo.png" alt="MATRIX" className="h-8 w-auto" />
+                            <div className="flex flex-col leading-tight">
+                                <span className="text-base font-black tracking-[0.2em] text-slate-800">MATRIX</span>
+                                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">{portalName}</span>
+                            </div>
                         </div>
                         
                         {/* Desktop Navigation */}

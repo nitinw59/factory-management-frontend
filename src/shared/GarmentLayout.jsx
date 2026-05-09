@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import MatrixBrand from './MatrixBrand';
 import { useAuth } from '../context/AuthContext'; // Assuming this is your auth context
 
 import { FiLogOut, FiClipboard, FiMenu, FiX, FiBell, FiFileText } from 'react-icons/fi';
@@ -21,7 +22,7 @@ const AssemblyLayout = () => {
         <div className="flex flex-col h-screen bg-gray-50">
             <header className="bg-white shadow-md sticky top-0 z-20">
                 <div className="container mx-auto px-6 py-3 flex justify-between items-center">
-                    <div className="text-xl font-bold text-gray-800">Assembly Portal</div>
+                    <MatrixBrand portal="Assembly Portal" />
 
                     {/* Desktop Navigation */}
                     <nav className="hidden md:flex items-center space-x-6">

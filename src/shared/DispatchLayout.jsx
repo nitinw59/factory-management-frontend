@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import MatrixBrand from './MatrixBrand';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LuLogOut, LuClipboardCheck, LuTruck, LuMenu, LuX, LuArchive } from 'react-icons/lu';
@@ -22,13 +23,7 @@ export const DispatchLayout = () => {
             <header className="bg-white shadow-sm border-b border-slate-200 relative z-30">
                 <div className="container mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
                     
-                    {/* Dispatch Branding */}
-                    <div className="flex items-center space-x-2 text-lg sm:text-xl font-bold text-slate-800">
-                        <div className="bg-blue-600 p-1.5 rounded-lg shadow-sm">
-                            <LuTruck className="text-white" size={20} />
-                        </div>
-                        <span className="tracking-tight">Dispatch Portal</span>
-                    </div>
+                    <MatrixBrand portal="Dispatch Portal" wordmarkClassName="text-slate-800" />
                     
                     {/* Desktop Navigation & Actions */}
                     <div className="hidden md:flex items-center space-x-8">

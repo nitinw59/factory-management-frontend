@@ -130,6 +130,7 @@ import PurchaseDepartmentProtectedRoute from './shared/PurchaseDepartmentProtect
 import PurchaseDepartmentLayout from './shared/PurchaseDepartmentLayout';
 import RequirementsPage from './modules/purchase_department/RequirementsPage';
 import OrdersPage from './modules/purchase_department/OrdersPage';
+import PurchaseFlowPage from './modules/purchase_department/PurchaseFlowPage';
 
 
 
@@ -433,6 +434,7 @@ function App() {
         <Route index element={<Navigate to="requirements" replace />} />
         <Route path="requirements" element={<RequirementsPage />} />
         <Route path="orders" element={<OrdersPage />} />
+        <Route path="orders/:id" element={<PurchaseFlowPage />} />
     </Route>
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import MatrixBrand from './MatrixBrand';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -108,10 +109,7 @@ const HRLayout = () => {
 
             {/* Mobile Header & Hamburger Menu */}
             <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-slate-900 text-white flex items-center justify-between px-4 z-30 shadow-md">
-                <div className="flex items-center gap-2">
-                    <Building2 className="text-indigo-400" size={20} />
-                    <span className="font-bold text-lg tracking-tight">HR Portal</span>
-                </div>
+                <MatrixBrand portal="HR Portal" wordmarkClassName="text-white" />
                 <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 bg-slate-800 rounded-lg text-slate-300 hover:text-white">
                     {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
                 </button>
