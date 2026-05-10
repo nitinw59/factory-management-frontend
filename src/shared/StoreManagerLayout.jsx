@@ -94,17 +94,21 @@ const StoreManagerLayout = () => {
                                     <LuClipboardList className="mr-2" /> Trim Orders
                                 </NavLink>
                             </NavDropdown>
-                             <NavDropdown title="Purchase">
+                            
+                             {/* <NavDropdown title="Purchase">
                                 <NavLink to="/store-manager/record-trim-purchase" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuCircle className="mr-2" /> Record Trim Purchase
                                 </NavLink>
                                 <NavLink to="/store-manager/trim-stock-intake" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuClipboardList className="mr-2" /> Purchase History
                                 </NavLink>
-                                {/* <NavLink to="/store-manager/trim-stock-report" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                 <NavLink to="/store-manager/trim-stock-report" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuFileText className="mr-2" /> Trim Stock Report
-                                </NavLink> */}
-                            </NavDropdown>
+                                </NavLink> 
+                            </NavDropdown> */}
+
+
+
                               <NavDropdown title="Spares">
                             <NavLink to="/store-manager/spare-parts" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                 <LuPackage className="mr-2" /> Spare Inventory
@@ -167,9 +171,9 @@ const StoreManagerLayout = () => {
                             <NavLink to="/store-manager/trim-management" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuScissors className="mr-2" /> Trim Management
                             </NavLink>
-                            <NavLink to="/store-manager/record-trim-purchase" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                            {/* <NavLink to="/store-manager/record-trim-purchase" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuCircle className="mr-2" /> Record Trim Purchase
-                            </NavLink>
+                            </NavLink> */}
                             <NavLink to="/store-manager/trim-orders" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuClipboardList className="mr-2" /> Trim Orders
                             </NavLink>
