@@ -342,6 +342,7 @@ function App() {
           <Route path="maintenance/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
           <Route path="line-staff" element={<LineStaffCostingPage />} />
           <Route path="production-logs" element={<OutputLogsPage />} />
+          <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
       </Route>
 
       <Route path="/preparation-unload-portal" element={<PreparationUnloadProtectedRoute><PreparationUnloadLayout /></PreparationUnloadProtectedRoute>}>
@@ -425,6 +426,7 @@ function App() {
         <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
         <Route path="trims" element={<TrimManagementPage />} />
         <Route path="sales-orders" element={<SalesOrderListPage />} />
+        <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
     </Route>
 
     {/* Purchase Department Portal */}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-    Loader2, Link2, ChevronRight, ChevronLeft, ChevronDown,
+    Loader2, Link2, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
     AlertTriangle, CheckCircle2, Search,
     Calculator, ShoppingBag, X, Eye, Plus, Pencil,
     ShieldCheck, ShieldOff, RotateCw, Component,
@@ -437,7 +437,6 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                 else if (item.exact_variant_id) body.trim_item_variant_id = parseInt(item.exact_variant_id);
                 await planningApi.reserveTrim(item.req_id, body);
             }
-            await taApi.updateTimelineItem(item.id, { status: 'completed' });
             onDone();
         } catch(e) { setErr(e?.response?.data?.error || 'Failed to reserve'); }
         finally { setBusy(false); }
@@ -660,6 +659,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
     });
     const [selId,      setSelId]      = useState(null);
     const [actionMode, setActionMode] = useState(null);
+    const [openReqId,  setOpenReqId]  = useState(null);
     const [addModal,   setAddModal]   = useState(false);
     const [editItem,   setEditItem]   = useState(null);
     const [busy,       setBusy]       = useState(false);
@@ -672,7 +672,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
     // Bulk-procurement state (shared substitute picker per trim_item_id)
     const [bulkPickerByTrim,   setBulkPickerByTrim]   = useState({});
     const [bulkBusyId,         setBulkBusyId]         = useState(null);
-    const [procExpanded,       setProcExpanded]       = useState(true);
+    const [procExpanded,       setProcExpanded]       = useState(false);
     // Per-group, per-requirement exclusions: { [trim_item_id]: Set<requirement_id> }
     const [excludedReqsByTrim, setExcludedReqsByTrim] = useState({});
 
@@ -864,11 +864,14 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
     ]);
 
     const allItems = [
-        ...fabReqs.filter(r => r.ta_id).map(r => ({
+        ...fabReqs.filter(r => r.ta_id).map(r => {
+            const req = Number(r.meters_required || 0);
+            const res = Number(r.meters_reserved || 0);
+            return ({
             id:                    r.ta_id,
             req_id:                r.id,
             title:                 `${r.fabric_type_name}${r.color_name ? ' – ' + r.color_name : ''}`,
-            subtitle:              `${(r.meters_required || 0).toFixed(1)} m`,
+            subtitle:              `${req.toFixed(1)} m${res > 0 ? ` · Reserved ${res.toFixed(1)} m` : ''}`,
             type:                  'fabric',
             status:                r.ta_status    || 'pending',
             priority:              r.ta_priority  || 'medium',
@@ -884,12 +887,19 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
             inStock:               (r.stock_suggestion?.total_meters_available || 0) >= (r.meters_required || 0),
             calculation_breakdown: r.calculation_breakdown || null,
             procurement_events:    r.procurement_events    || [],
-        })),
-        ...trimReqs.filter(r => r.ta_id).map(r => ({
+            reservations:          r.reservations          || [],
+            purchase_requirements: r.purchase_requirements || [],
+            });
+        }),
+        ...trimReqs.filter(r => r.ta_id).map(r => {
+            const reqQ = Number(r.quantity_required || 0);
+            const resQ = Number(r.quantity_reserved || 0);
+            const uom  = r.unit_of_measure || 'pcs';
+            return ({
             id:                    r.ta_id,
             req_id:                r.id,
             title:                 `${r.trim_item_name}${r.color_name ? ' – ' + r.color_name : ''}`,
-            subtitle:              `${(r.quantity_required || 0).toLocaleString()} ${r.unit_of_measure || 'pcs'}`,
+            subtitle:              `${reqQ.toLocaleString()} ${uom}${resQ > 0 ? ` · Reserved ${resQ.toLocaleString()} ${uom}` : ''}`,
             type:                  'trim',
             status:                r.ta_status    || 'pending',
             priority:              r.ta_priority  || 'medium',
@@ -912,7 +922,10 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
             quantity_reserved:     r.quantity_reserved || 0,
             calculation_breakdown: r.calculation_breakdown || null,
             procurement_events:    r.procurement_events    || [],
-        })),
+            reservations:          r.reservations          || [],
+            purchase_requirements: r.purchase_requirements || [],
+            });
+        }),
         ...taItems
             .filter(it => !reqTaIds.has(it.id) && it.production_plan_item_id == null)
             .map(it => ({
@@ -1009,11 +1022,14 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                 notes:                  reqForm.notes || null,
             };
 
+            const formQty = parseFloat(reqForm.quantity);
+            const qty     = Number.isFinite(formQty) && formQty > 0 ? formQty : null;
+
             if (item.type === 'fabric' && rawFab) {
                 await purchaseDeptApi.raiseRequirement({
                     ...base,
                     type:                       'fabric',
-                    meters_required:            rawFab.meters_required,
+                    meters_required:            qty ?? rawFab.meters_required,
                     fabric_type_id:             rawFab.fabric_type_id,
                     fabric_color_id:            rawFab.fabric_color_id,
                     plan_fabric_requirement_id: rawFab.id,
@@ -1025,7 +1041,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                 await purchaseDeptApi.raiseRequirement({
                     ...base,
                     type:                      'trim',
-                    quantity_required:         rawTrim.quantity_required,
+                    quantity_required:         qty ?? rawTrim.quantity_required,
                     unit_of_measure:           rawTrim.unit_of_measure,
                     trim_item_id:              rawTrim.trim_item_id,
                     trim_item_variant_id:      reqForm.trim_item_variant_id,
@@ -1619,10 +1635,26 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                             {/* Label */}
                                                             <div className="w-44 shrink-0 flex items-center gap-2 px-2 py-2">
                                                                 <span className={`w-2 h-2 rounded-full shrink-0 ${overdue ? 'bg-red-500' : st.bg}`} />
-                                                                <div className="min-w-0">
+                                                                <div className="min-w-0 flex-1">
                                                                     <p className="text-[10px] font-bold text-slate-700 truncate">{item.title}</p>
                                                                     <p className="text-[8px] text-slate-400 truncate">{item.subtitle}</p>
                                                                 </div>
+                                                                {(item.reservations?.length || 0) > 0 && (
+                                                                    <span
+                                                                        title={`${item.reservations.length} reservation${item.reservations.length === 1 ? '' : 's'} — click to view`}
+                                                                        className="text-[8px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-1.5 py-0.5 shrink-0"
+                                                                    >
+                                                                        {item.reservations.length}×
+                                                                    </span>
+                                                                )}
+                                                                {(item.purchase_requirements?.length || 0) > 0 && (
+                                                                    <span
+                                                                        title={`${item.purchase_requirements.length} purchase requirement${item.purchase_requirements.length === 1 ? '' : 's'} — click to view`}
+                                                                        className="text-[8px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-1.5 py-0.5 shrink-0"
+                                                                    >
+                                                                        PR {item.purchase_requirements.length}
+                                                                    </span>
+                                                                )}
                                                             </div>
 
                                                             {/* Bar track */}
@@ -1690,6 +1722,139 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                         {/* Inline action panel */}
                                                         {isSel && (
                                                             <div className="mx-2 mb-1.5 bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
+                                                                {/* Raised purchase requirements */}
+                                                                {(item.purchase_requirements?.length || 0) > 0 && (
+                                                                    <div className="bg-white border-2 border-blue-200 rounded-lg overflow-hidden">
+                                                                        <div className="flex items-center justify-between px-3 py-2 bg-blue-50 border-b border-blue-200">
+                                                                            <p className="text-sm font-bold text-blue-800">
+                                                                                {item.purchase_requirements.length} Raised Requirement{item.purchase_requirements.length === 1 ? '' : 's'}
+                                                                            </p>
+                                                                            <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">click to expand</p>
+                                                                        </div>
+                                                                        <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+                                                                            {item.purchase_requirements.map(pr => {
+                                                                                const prId      = pr.id ?? pr.requirement_id;
+                                                                                const isOpen    = openReqId === prId;
+                                                                                const qty       = Number(pr.quantity_required ?? pr.quantity ?? pr.meters_required ?? 0);
+                                                                                const uom       = pr.unit_of_measure || pr.uom || (item.type === 'fabric' ? 'm' : (item.unit || 'pcs'));
+                                                                                const status    = (pr.status || 'PENDING').toString();
+                                                                                const urgency   = (pr.urgency || '').toString();
+                                                                                const created   = pr.created_at;
+                                                                                const poCode    = pr.po_code || pr.purchase_order_code;
+                                                                                const supplier  = pr.supplier_name;
+                                                                                const expected  = pr.expected_date;
+                                                                                const statusCls = status.toUpperCase().includes('FULFIL') || status.toUpperCase().includes('RECEIV')
+                                                                                    ? 'bg-emerald-100 text-emerald-700'
+                                                                                    : status.toUpperCase().includes('ORDER') || status.toUpperCase().includes('PARTIAL')
+                                                                                        ? 'bg-amber-100 text-amber-700'
+                                                                                        : 'bg-slate-100 text-slate-600';
+                                                                                return (
+                                                                                    <div key={prId}>
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={(e) => { e.stopPropagation(); setOpenReqId(isOpen ? null : prId); }}
+                                                                                            className="w-full flex items-center gap-3 px-3 py-2 text-xs hover:bg-blue-50 transition-colors text-left"
+                                                                                        >
+                                                                                            <span className="font-mono font-bold text-blue-700 shrink-0">PR-{prId}</span>
+                                                                                            <span className="font-bold text-slate-800 tabular-nums shrink-0">
+                                                                                                {qty.toLocaleString(undefined, { maximumFractionDigits: 2 })} {uom}
+                                                                                            </span>
+                                                                                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 ${statusCls}`}>
+                                                                                                {status.replace(/_/g, ' ')}
+                                                                                            </span>
+                                                                                            {urgency && (
+                                                                                                <span className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full shrink-0">
+                                                                                                    {urgency}
+                                                                                                </span>
+                                                                                            )}
+                                                                                            <span className="ml-auto text-[10px] text-slate-400 shrink-0">{created ? fmtD(created) : ''}</span>
+                                                                                            {isOpen ? <ChevronUp size={12} className="text-slate-400 shrink-0" /> : <ChevronDown size={12} className="text-slate-400 shrink-0" />}
+                                                                                        </button>
+                                                                                        {isOpen && (
+                                                                                            <div className="px-3 py-2 bg-slate-50 border-t border-slate-100 text-[11px] text-slate-600 space-y-1">
+                                                                                                {poCode && (
+                                                                                                    <p><span className="font-bold text-slate-700">PO:</span> <span className="font-mono">{poCode}</span></p>
+                                                                                                )}
+                                                                                                {supplier && (
+                                                                                                    <p><span className="font-bold text-slate-700">Supplier:</span> {supplier}</p>
+                                                                                                )}
+                                                                                                {expected && (
+                                                                                                    <p><span className="font-bold text-slate-700">Expected:</span> {fmtD(expected)}</p>
+                                                                                                )}
+                                                                                                {pr.notes && (
+                                                                                                    <p><span className="font-bold text-slate-700">Notes:</span> {pr.notes}</p>
+                                                                                                )}
+                                                                                                {!poCode && !supplier && !expected && !pr.notes && (
+                                                                                                    <p className="italic text-slate-400">No additional details — awaiting purchase team.</p>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+
+                                                                {/* Reservations list */}
+                                                                {(item.reservations?.length || 0) > 0 && (() => {
+                                                                    const unit = item.type === 'fabric' ? 'm' : (item.unit || 'pcs');
+                                                                    const totalReserved = item.reservations.reduce(
+                                                                        (s, rs) => s + Number(rs.meters_reserved ?? rs.quantity_reserved ?? 0),
+                                                                        0
+                                                                    );
+                                                                    return (
+                                                                        <div className="bg-white border-2 border-emerald-200 rounded-lg overflow-hidden">
+                                                                            <div className="flex items-center justify-between px-3 py-2 bg-emerald-50 border-b border-emerald-200">
+                                                                                <p className="text-sm font-bold text-emerald-800">
+                                                                                    {item.reservations.length} Reservation{item.reservations.length === 1 ? '' : 's'}
+                                                                                </p>
+                                                                                <p className="text-sm font-bold text-emerald-700 tabular-nums">
+                                                                                    {totalReserved.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit} reserved
+                                                                                </p>
+                                                                            </div>
+                                                                            <div className="divide-y divide-slate-100 max-h-48 overflow-y-auto">
+                                                                                {item.reservations.map(rs => {
+                                                                                    const reservedAmount = Number(rs.meters_reserved ?? rs.quantity_reserved ?? 0);
+                                                                                    const rollTotal      = Number(rs.roll_total_meters ?? rs.roll_total ?? 0);
+                                                                                    const rollStatus     = rs.roll_status || rs.status;
+                                                                                    const rollId         = rs.fabric_roll_id ?? rs.trim_inventory_id ?? rs.roll_id;
+                                                                                    const reservedAt     = rs.reserved_at;
+                                                                                    return (
+                                                                                        <div key={rs.id} className="flex items-center gap-3 px-3 py-2 text-xs hover:bg-slate-50">
+                                                                                            {rollId != null && (
+                                                                                                <span className="font-mono font-bold text-emerald-700 shrink-0">R-{rollId}</span>
+                                                                                            )}
+                                                                                            <div className="flex-1 min-w-0">
+                                                                                                <p className="font-bold text-slate-800 tabular-nums">
+                                                                                                    {reservedAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
+                                                                                                    {rollTotal > 0 && (
+                                                                                                        <span className="font-normal text-slate-400 ml-1">
+                                                                                                            of {rollTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
+                                                                                                        </span>
+                                                                                                    )}
+                                                                                                </p>
+                                                                                                {reservedAt && (
+                                                                                                    <p className="text-[10px] text-slate-400">Reserved {fmtD(reservedAt)}</p>
+                                                                                                )}
+                                                                                            </div>
+                                                                                            {rollStatus && (
+                                                                                                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                                                                                                    rollStatus === 'IN_STOCK'
+                                                                                                        ? 'bg-emerald-100 text-emerald-700'
+                                                                                                        : 'bg-blue-100 text-blue-700'
+                                                                                                }`}>
+                                                                                                    {String(rollStatus).replace(/_/g, ' ')}
+                                                                                                </span>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })()}
+
                                                                 {/* Red alert: trim req with no procurement option */}
                                                                 {item.type === 'trim' && item.isReq && !item.exact_variant_id && (!item.substitutes || item.substitutes.length === 0) && (
                                                                     <div className="bg-red-50 border-2 border-red-300 rounded-lg px-3 py-2.5 flex items-start gap-2">
@@ -1717,26 +1882,78 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                             {item.notes && <p className="text-[30px] leading-snug text-slate-700 italic mt-0.5">{item.notes}</p>}
                                                                         </div>
                                                                         {/* Calculation breakdown */}
-                                                                        {item.type === 'fabric' && (
-                                                                            <div className="grid grid-cols-3 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
-                                                                                <div>
-                                                                                    <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Required</p>
-                                                                                    <p className="text-3xl font-bold text-slate-900">{item.meters_required.toFixed(1)} m</p>
+                                                                        {item.type === 'fabric' && (() => {
+                                                                            const isCompleted    = item.status === 'completed';
+                                                                            const fullyReserved  = (item.meters_reserved || 0) >= (item.meters_required || 0);
+                                                                            const partlyReserved = (item.meters_reserved || 0) > 0 && !fullyReserved;
+
+                                                                            // Case A: completed + fully reserved → only Required + Reserved (stock/shortfall irrelevant).
+                                                                            if (isCompleted && fullyReserved) {
+                                                                                return (
+                                                                                    <div className="grid grid-cols-2 gap-2 text-center bg-white border border-emerald-200 rounded-lg p-2">
+                                                                                        <div>
+                                                                                            <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Required</p>
+                                                                                            <p className="text-3xl font-bold text-slate-900">{item.meters_required.toFixed(1)} m</p>
+                                                                                        </div>
+                                                                                        <div>
+                                                                                            <p className="text-[24px] leading-tight font-bold text-emerald-700 uppercase">Reserved</p>
+                                                                                            <p className="text-3xl font-bold text-emerald-700">{item.meters_reserved.toFixed(1)} m</p>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                );
+                                                                            }
+
+                                                                            // Case B: completed + partially reserved → Required + Reserved + In Stock + Surplus/Shortfall.
+                                                                            if (isCompleted && partlyReserved) {
+                                                                                const surplus = item.meters_available - (item.meters_required - item.meters_reserved);
+                                                                                const hasSurplus = surplus >= 0;
+                                                                                return (
+                                                                                    <div className="grid grid-cols-4 gap-2 text-center bg-white border border-amber-200 rounded-lg p-2">
+                                                                                        <div>
+                                                                                            <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Required</p>
+                                                                                            <p className="text-3xl font-bold text-slate-900">{item.meters_required.toFixed(1)} m</p>
+                                                                                        </div>
+                                                                                        <div>
+                                                                                            <p className="text-[24px] leading-tight font-bold text-amber-700 uppercase">Reserved</p>
+                                                                                            <p className="text-3xl font-bold text-amber-700">{item.meters_reserved.toFixed(1)} m</p>
+                                                                                        </div>
+                                                                                        <div>
+                                                                                            <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">In Stock</p>
+                                                                                            <p className={`text-3xl font-bold ${item.meters_available > 0 ? 'text-emerald-700' : 'text-slate-900'}`}>{item.meters_available.toFixed(1)} m</p>
+                                                                                        </div>
+                                                                                        <div>
+                                                                                            <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">{hasSurplus ? 'Surplus' : 'Shortfall'}</p>
+                                                                                            <p className={`text-3xl font-bold ${hasSurplus ? 'text-emerald-700' : 'text-red-600'}`}>
+                                                                                                {hasSurplus ? `+${surplus.toFixed(1)} m` : `−${(-surplus).toFixed(1)} m`}
+                                                                                            </p>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                );
+                                                                            }
+
+                                                                            // Default: shortfall/surplus always accounts for what's already reserved.
+                                                                            const remaining  = (item.meters_required || 0) - (item.meters_reserved || 0);
+                                                                            const surplus    = (item.meters_available || 0) - remaining;
+                                                                            const hasSurplus = surplus >= 0;
+                                                                            return (
+                                                                                <div className="grid grid-cols-3 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
+                                                                                    <div>
+                                                                                        <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Required</p>
+                                                                                        <p className="text-3xl font-bold text-slate-900">{item.meters_required.toFixed(1)} m</p>
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">In Stock</p>
+                                                                                        <p className={`text-3xl font-bold ${item.meters_available > 0 ? 'text-emerald-700' : 'text-slate-900'}`}>{item.meters_available.toFixed(1)} m</p>
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">{hasSurplus ? 'Surplus' : 'Shortfall'}</p>
+                                                                                        <p className={`text-3xl font-bold ${hasSurplus ? 'text-emerald-700' : 'text-red-600'}`}>
+                                                                                            {hasSurplus ? `+${surplus.toFixed(1)} m` : `−${(-surplus).toFixed(1)} m`}
+                                                                                        </p>
+                                                                                    </div>
                                                                                 </div>
-                                                                                <div>
-                                                                                    <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">In Stock</p>
-                                                                                    <p className={`text-3xl font-bold ${item.inStock ? 'text-emerald-700' : 'text-slate-900'}`}>{item.meters_available.toFixed(1)} m</p>
-                                                                                </div>
-                                                                                <div>
-                                                                                    <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">{item.inStock ? 'Surplus' : 'Shortfall'}</p>
-                                                                                    <p className={`text-3xl font-bold ${item.inStock ? 'text-emerald-700' : 'text-red-600'}`}>
-                                                                                        {item.inStock
-                                                                                            ? `+${(item.meters_available - item.meters_required).toFixed(1)} m`
-                                                                                            : `−${(item.meters_required - item.meters_available).toFixed(1)} m`}
-                                                                                    </p>
-                                                                                </div>
-                                                                            </div>
-                                                                        )}
+                                                                            );
+                                                                        })()}
                                                                         {item.type === 'trim' && (
                                                                             <div className="grid grid-cols-4 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
                                                                                 <div>
@@ -1815,25 +2032,29 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                                     className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors">
                                                                                     <CheckCircle2 size={13} /> Mark Available
                                                                                 </button>
-                                                                                {item.isReq && item.status !== 'in-progress' && (
+                                                                                {item.isReq && (
                                                                                     <button
                                                                                         onClick={() => {
+                                                                                            // Default to shortfall: required − reserved − in_stock_available (never negative).
+                                                                                            const req = item.type === 'fabric' ? Number(item.meters_required || 0) : Number(item.quantity_required || 0);
+                                                                                            const res = item.type === 'fabric' ? Number(item.meters_reserved || 0) : Number(item.quantity_reserved || 0);
+                                                                                            const avail = item.type === 'fabric'
+                                                                                                ? Number(item.meters_available || 0)
+                                                                                                : Number(item.exact_variant_stock || 0);
+                                                                                            const shortfall = Math.max(0, req - res - avail);
                                                                                             setReqForm({
                                                                                                 urgency: 'normal',
                                                                                                 notes: item.notes || '',
                                                                                                 trim_item_variant_id: item.type === 'trim' ? (item.exact_variant_id ?? null) : null,
+                                                                                                quantity: shortfall > 0 ? String(shortfall) : String(Math.max(0, req - res)),
                                                                                             });
                                                                                             setActionMode('req');
                                                                                             setErr(null);
                                                                                         }}
                                                                                         className="flex items-center gap-1.5 text-xs font-bold text-white bg-blue-500 hover:bg-blue-600 px-3 py-1.5 rounded-lg transition-colors">
-                                                                                        <ShoppingBag size={13} /> Raise Requirement
+                                                                                        <ShoppingBag size={13} />
+                                                                                        {(item.purchase_requirements?.length || 0) > 0 ? 'Raise Another' : 'Raise Requirement'}
                                                                                     </button>
-                                                                                )}
-                                                                                {item.status === 'in-progress' && (
-                                                                                    <span className="text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-200 px-2 py-1 rounded-lg">
-                                                                                        Requirement raised
-                                                                                    </span>
                                                                                 )}
                                                                                 {item.status !== 'delayed' && (
                                                                                     <button onClick={async () => {
@@ -1921,6 +2142,21 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                                     </div>
                                                                                 </div>
                                                                             )}
+                                                                            <div>
+                                                                                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">
+                                                                                    Quantity to Procure ({item.type === 'fabric' ? 'm' : (item.unit || 'pcs')})
+                                                                                    <span className="text-slate-300 font-normal normal-case ml-1">— defaults to shortfall</span>
+                                                                                </label>
+                                                                                <input
+                                                                                    type="number"
+                                                                                    min="0"
+                                                                                    step={item.type === 'fabric' ? '0.01' : '1'}
+                                                                                    value={reqForm.quantity ?? ''}
+                                                                                    onChange={e => setReqForm(p => ({ ...p, quantity: e.target.value }))}
+                                                                                    placeholder="0"
+                                                                                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-400 tabular-nums"
+                                                                                />
+                                                                            </div>
                                                                             <div>
                                                                                 <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Urgency</label>
                                                                                 <div className="flex gap-2">

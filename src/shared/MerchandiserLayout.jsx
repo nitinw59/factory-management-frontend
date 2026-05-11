@@ -4,7 +4,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
     LuLogOut, LuMenu, LuX, LuFileText,
-    LuLayoutDashboard, LuShoppingBag, LuPackage, LuClipboardList,
+    LuLayoutDashboard, LuPackage, LuClipboardList, LuLayers,
 } from 'react-icons/lu';
 
 const NAV = [
@@ -12,7 +12,7 @@ const NAV = [
     { to: '/merchandiser/planning',            icon: LuClipboardList,   label: 'Production Planning'  },
     { to: '/merchandiser/production-workflow', icon: LuLayoutDashboard, label: 'Production Workflow'  },
     { to: '/merchandiser/trims',               icon: LuPackage,         label: 'Trim Management'      },
-    { to: '/merchandiser/sales-orders',        icon: LuShoppingBag,     label: 'Sales Orders'         },
+    { to: '/merchandiser/fabric-rolls',        icon: LuLayers,          label: 'Fabric'               },
 ];
 
 const MerchandiserLayout = () => {

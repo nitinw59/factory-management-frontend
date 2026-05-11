@@ -623,6 +623,7 @@ const PoolCard = ({ row, onClick, dim }) => {
 const PoolTab = ({ pool, allRolls, colors, onRefreshRolls }) => {
     const [selected,      setSelected]      = useState(null);
     const [showZeroStock, setShowZeroStock] = useState(false);
+    const [search,        setSearch]        = useState('');
 
     if (!pool || pool.length === 0) {
         return (
@@ -633,12 +634,38 @@ const PoolTab = ({ pool, allRolls, colors, onRefreshRolls }) => {
         );
     }
 
-    const inStock    = pool.filter(r => r.in_stock_meters > 0);
-    const zeroStock  = pool.filter(r => r.in_stock_meters === 0);
+    const q = search.toLowerCase().trim();
+    const matchesQuery = (r) => !q || (
+        r.fabric_type?.toLowerCase().includes(q) ||
+        r.fabric_color?.toLowerCase().includes(q) ||
+        String(r.color_number || '').toLowerCase().includes(q)
+    );
+
+    const filtered   = pool.filter(matchesQuery);
+    const inStock    = filtered.filter(r => r.in_stock_meters > 0);
+    const zeroStock  = filtered.filter(r => r.in_stock_meters === 0);
 
     return (
         <>
-            {inStock.length === 0 && (
+            <div className="mb-4 flex items-center gap-3">
+                <div className="relative flex-1 max-w-xs">
+                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <input
+                        type="search"
+                        placeholder="Search fabric type, color, code…"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        className="w-full text-xs pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-400"
+                    />
+                </div>
+                <span className="text-xs text-slate-400">{filtered.length} of {pool.length} pool entr{pool.length === 1 ? 'y' : 'ies'}</span>
+            </div>
+
+            {q && filtered.length === 0 && (
+                <p className="text-sm text-slate-400 italic mb-4">No pool entries match "{search}".</p>
+            )}
+
+            {!q && inStock.length === 0 && (
                 <p className="text-sm text-slate-400 italic mb-4">No fabric currently in stock.</p>
             )}
 
@@ -686,6 +713,7 @@ const PoolTab = ({ pool, allRolls, colors, onRefreshRolls }) => {
 
 const RequirementsTab = ({ requirements }) => {
     const [expanded, setExpanded] = useState(new Set());
+    const [search,   setSearch]   = useState('');
     const toggle = (id) => setExpanded(prev => {
         const next = new Set(prev);
         next.has(id) ? next.delete(id) : next.add(id);
@@ -701,9 +729,39 @@ const RequirementsTab = ({ requirements }) => {
         );
     }
 
+    const q = search.toLowerCase().trim();
+    const filtered = q
+        ? requirements.filter(r =>
+            r.fabric_type?.toLowerCase().includes(q) ||
+            r.fabric_color?.toLowerCase().includes(q) ||
+            String(r.color_number || '').toLowerCase().includes(q) ||
+            r.order_number?.toLowerCase().includes(q) ||
+            r.product_name?.toLowerCase().includes(q)
+          )
+        : requirements;
+
     return (
+        <>
+        <div className="mb-4 flex items-center gap-3">
+            <div className="relative flex-1 max-w-xs">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input
+                    type="search"
+                    placeholder="Search fabric, SO, product…"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    className="w-full text-xs pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-400"
+                />
+            </div>
+            <span className="text-xs text-slate-400">{filtered.length} of {requirements.length} requirement{requirements.length === 1 ? '' : 's'}</span>
+        </div>
+
+        {q && filtered.length === 0 && (
+            <p className="text-sm text-slate-400 italic">No requirements match "{search}".</p>
+        )}
+
         <div className="space-y-3">
-            {requirements.map(req => {
+            {filtered.map(req => {
                 const pct = req.meters_required > 0 ? (req.meters_reserved / req.meters_required) * 100 : 0;
                 const isExpanded = expanded.has(req.requirement_id);
                 const hasRolls = (req.reserved_rolls || []).length > 0;
@@ -772,6 +830,7 @@ const RequirementsTab = ({ requirements }) => {
                 );
             })}
         </div>
+        </>
     );
 };
 
