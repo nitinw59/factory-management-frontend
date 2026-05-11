@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { qcApi } from '../../api/qcApi';
 import { productionManagerApi } from '../../api/productionManagerApi';
-import { Loader2, AlertCircle, Check, Save, Search, Plus, X } from 'lucide-react';
+import { Loader2, AlertCircle, Check, Save, Search, Plus, X, Pencil, Trash2 } from 'lucide-react';
 
 const DefectCodeLineTypePage = () => {
     const [lineTypes, setLineTypes] = useState([]);      // [{ id, name }]
@@ -21,6 +21,15 @@ const DefectCodeLineTypePage = () => {
     const [newDescription, setNewDescription] = useState('');
     const [addSaving, setAddSaving] = useState(false);
     const [addError, setAddError] = useState(null);
+    // Edit
+    const [editing, setEditing] = useState(null);        // defect code being edited
+    const [editForm, setEditForm] = useState({ category: '', code: '', description: '' });
+    const [editSaving, setEditSaving] = useState(false);
+    const [editError, setEditError] = useState(null);
+    // Delete (inline confirm)
+    const [deletingId, setDeletingId] = useState(null);
+    const [deleteBusyId, setDeleteBusyId] = useState(null);
+    const [deleteError, setDeleteError] = useState(null);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -130,6 +139,52 @@ const DefectCodeLineTypePage = () => {
             setAddError('Failed to create defect code.');
         } finally {
             setAddSaving(false);
+        }
+    };
+
+    const openEditModal = (dc) => {
+        setEditing(dc);
+        setEditForm({
+            category: dc.category || '',
+            code: dc.code || '',
+            description: dc.description || '',
+        });
+        setEditError(null);
+    };
+
+    const handleUpdateDefectCode = async (e) => {
+        e.preventDefault();
+        if (!editing) return;
+        const category = (editForm.category || '').trim().toUpperCase();
+        const code     = (editForm.code     || '').trim();
+        if (!category || !code) return;
+        setEditSaving(true); setEditError(null);
+        try {
+            await qcApi.updateDefectCode(editing.id, {
+                category,
+                code,
+                description: editForm.description.trim(),
+            });
+            setEditing(null);
+            await load();
+        } catch (err) {
+            setEditError(err?.response?.data?.error || 'Failed to update defect code.');
+        } finally {
+            setEditSaving(false);
+        }
+    };
+
+    const handleDeactivate = async (dc) => {
+        setDeleteBusyId(dc.id);
+        setDeleteError(null);
+        try {
+            await qcApi.deactivateDefectCode(dc.id);
+            setDeletingId(null);
+            await load();
+        } catch (err) {
+            setDeleteError(err?.response?.data?.error || 'Failed to deactivate defect code.');
+        } finally {
+            setDeleteBusyId(null);
         }
     };
 
@@ -334,12 +389,54 @@ const DefectCodeLineTypePage = () => {
                                     className={`transition-colors hover:bg-indigo-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}
                                 >
                                     {/* Label */}
-                                    <td className="sticky left-0 z-10 px-4 py-3 border-r border-slate-200 bg-inherit">
-                                        <span className="font-bold text-slate-800">{dc.code}</span>
-                                        {dc.description && (
-                                            <span className="block text-xs text-slate-400 mt-0.5 truncate max-w-[180px]" title={dc.description}>
-                                                {dc.description}
-                                            </span>
+                                    <td className="sticky left-0 z-10 px-4 py-3 border-r border-slate-200 bg-inherit group">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="min-w-0">
+                                                <span className="font-bold text-slate-800">{dc.code}</span>
+                                                {dc.description && (
+                                                    <span className="block text-xs text-slate-400 mt-0.5 truncate max-w-[180px]" title={dc.description}>
+                                                        {dc.description}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={() => openEditModal(dc)}
+                                                    title="Edit defect code"
+                                                    className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                                                >
+                                                    <Pencil size={12} />
+                                                </button>
+                                                <button
+                                                    onClick={() => { setDeletingId(dc.id); setDeleteError(null); }}
+                                                    title="Deactivate defect code"
+                                                    className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                                >
+                                                    <Trash2 size={12} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        {deletingId === dc.id && (
+                                            <div className="mt-2 bg-red-50 border border-red-200 rounded-md p-2 space-y-1.5">
+                                                <p className="text-[11px] font-bold text-red-700">Deactivate {dc.code}?</p>
+                                                {deleteError && <p className="text-[10px] text-red-600">{deleteError}</p>}
+                                                <div className="flex gap-1.5">
+                                                    <button
+                                                        onClick={() => handleDeactivate(dc)}
+                                                        disabled={deleteBusyId === dc.id}
+                                                        className="flex-1 flex items-center justify-center gap-1 text-[10px] font-bold text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 py-1 rounded transition-colors"
+                                                    >
+                                                        {deleteBusyId === dc.id && <Loader2 className="animate-spin h-2.5 w-2.5" />}
+                                                        Yes
+                                                    </button>
+                                                    <button
+                                                        onClick={() => { setDeletingId(null); setDeleteError(null); }}
+                                                        className="flex-1 text-[10px] font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 py-1 rounded transition-colors"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </div>
                                         )}
                                     </td>
                                     {/* Checkboxes */}
@@ -375,6 +472,81 @@ const DefectCodeLineTypePage = () => {
                     >
                         <Save size={15} /> Save All Changes ({dirty.size} columns)
                     </button>
+                </div>
+            )}
+
+            {/* Edit Defect Code Modal */}
+            {editing && (
+                <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[500]">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+                        <div className="flex items-center justify-between mb-5">
+                            <div>
+                                <h2 className="text-lg font-bold text-slate-900">Edit Defect Code</h2>
+                                <p className="text-xs text-slate-500 mt-0.5">#{editing.id} · originally <span className="font-mono">{editing.code}</span></p>
+                            </div>
+                            <button onClick={() => setEditing(null)} className="text-slate-400 hover:text-slate-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <form onSubmit={handleUpdateDefectCode} className="flex flex-col gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-600 mb-1 uppercase tracking-wide">Category <span className="text-red-500">*</span></label>
+                                <input
+                                    type="text"
+                                    value={editForm.category}
+                                    onChange={e => setEditForm(f => ({ ...f, category: e.target.value }))}
+                                    list="defect-categories"
+                                    required
+                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none uppercase"
+                                />
+                                <datalist id="defect-categories">
+                                    {categories.map(cat => <option key={cat} value={cat} />)}
+                                </datalist>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-600 mb-1 uppercase tracking-wide">Code <span className="text-red-500">*</span></label>
+                                <input
+                                    type="text"
+                                    value={editForm.code}
+                                    onChange={e => setEditForm(f => ({ ...f, code: e.target.value }))}
+                                    required
+                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-600 mb-1 uppercase tracking-wide">Description</label>
+                                <input
+                                    type="text"
+                                    value={editForm.description}
+                                    onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
+                                    placeholder="Short description"
+                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                />
+                            </div>
+                            {editError && (
+                                <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                                    <AlertCircle size={15} /> {editError}
+                                </div>
+                            )}
+                            <div className="flex justify-end gap-3 pt-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setEditing(null)}
+                                    className="px-4 py-2 text-sm text-slate-600 hover:text-slate-900 border border-slate-300 rounded-lg transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={editSaving || !editForm.code.trim() || !editForm.category.trim()}
+                                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-bold transition-colors"
+                                >
+                                    {editSaving ? <Loader2 className="animate-spin h-4 w-4" /> : <Save size={15} />}
+                                    {editSaving ? 'Saving...' : 'Save Changes'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             )}
 

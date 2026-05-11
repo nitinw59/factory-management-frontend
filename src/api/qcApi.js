@@ -4,6 +4,8 @@ export const qcApi = {
     // Defect codes
     getAllDefectCodes: () => api.get('/qc/defect-codes/all'),
     createDefectCode: (data) => api.post('/qc/defect-codes', data),
+    updateDefectCode: (id, data) => api.put(`/qc/defect-codes/${id}`, data),
+    deactivateDefectCode: (id) => api.delete(`/qc/defect-codes/${id}`),
 
     // QC Analytics endpoints (require backend implementation)
     getQCSummary:    (params) => api.get('/qc/analytics/summary',     { params }),
