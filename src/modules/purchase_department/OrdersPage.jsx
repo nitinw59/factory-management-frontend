@@ -25,12 +25,13 @@ const fmt = (n, dec = 1) => Number(n || 0).toLocaleString(undefined, { maximumFr
 
 const OrdersPage = () => {
     const navigate = useNavigate();
-    const [orders,        setOrders]        = useState([]);
-    const [loading,       setLoading]       = useState(true);
-    const [expandedId,    setExpandedId]    = useState(null);
-    const [busy,          setBusy]          = useState(null);
-    const [err,           setErr]           = useState(null);
-    const [showFreshPo,   setShowFreshPo]   = useState(false);
+    const [orders,            setOrders]            = useState([]);
+    const [loading,           setLoading]           = useState(true);
+    const [expandedId,        setExpandedId]        = useState(null);
+    const [busy,              setBusy]              = useState(null);
+    const [err,               setErr]               = useState(null);
+    const [showFreshPo,       setShowFreshPo]       = useState(false);
+    const [completedExpanded, setCompletedExpanded] = useState(false);
 
     const fetchOrders = useCallback(async () => {
         setLoading(true);
@@ -232,11 +233,26 @@ const OrdersPage = () => {
 
                     {completed.length > 0 && (
                         <div>
-                            <div className="flex items-center gap-2 mb-3">
-                                <CheckCircle2 size={14} className="text-emerald-500" />
-                                <span className="text-sm font-bold text-slate-700">Completed · {completed.length}</span>
-                            </div>
-                            <div className="space-y-2 opacity-75">{completed.map(renderOrder)}</div>
+                            <button
+                                type="button"
+                                onClick={() => setCompletedExpanded(v => !v)}
+                                className="w-full flex items-center justify-between gap-2 mb-3 px-4 py-2.5 bg-white border border-slate-200 hover:border-emerald-300 rounded-xl transition-colors text-left"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <CheckCircle2 size={14} className="text-emerald-500" />
+                                    <span className="text-sm font-bold text-slate-700">Completed</span>
+                                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                        {completed.length}
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                    {completedExpanded ? 'Hide' : 'Show'}
+                                    {completedExpanded ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+                                </div>
+                            </button>
+                            {completedExpanded && (
+                                <div className="space-y-2 opacity-75">{completed.map(renderOrder)}</div>
+                            )}
                         </div>
                     )}
                 </>

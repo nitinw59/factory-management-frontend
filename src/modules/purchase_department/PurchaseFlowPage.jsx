@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
+import { useState, useEffect, useCallback, useLayoutEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     Loader2, ArrowLeft, RefreshCw, AlertTriangle, Plus, PackageCheck, FileText, Receipt,
-    Package, Scissors, Tag, Calendar, Building2, ShoppingCart,
+    Package, Scissors, Tag, Calendar, Building2, ShoppingCart, CheckCircle2, Lock,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import InwardModal from './InwardModal';
@@ -196,6 +196,9 @@ export default function PurchaseFlowPage() {
     const [openPo,      setOpenPo]      = useState(false);
     const [creatingInward,  setCreatingInward]  = useState(false);
     const [creatingInvoice, setCreatingInvoice] = useState(false);
+    const [statusBusy,   setStatusBusy]   = useState(false);
+    const [confirmAction, setConfirmAction] = useState(null);   // 'PARTIAL_RECEIPT' | 'COMPLETED' | null
+    const [statusErr,    setStatusErr]    = useState(null);
 
     const loadAll = useCallback(async () => {
         setLoading(true);
@@ -237,6 +240,93 @@ export default function PurchaseFlowPage() {
         setCreatingInvoice(false);
         loadAll();
     };
+
+    const applyStatus = async (newStatus) => {
+        if (!po) return;
+        setStatusBusy(true); setStatusErr(null);
+        try {
+            await purchaseDeptApi.updateOrderStatus(po.id, newStatus);
+            setConfirmAction(null);
+            await loadAll();
+        } catch (e) {
+            setStatusErr(e?.response?.data?.error || e.message || 'Could not update status.');
+        } finally {
+            setStatusBusy(false);
+        }
+    };
+
+    // ── Per-item summary: ordered vs received vs invoiced ────────────────────
+    const summary = useMemo(() => {
+        if (!po) return null;
+
+        // Index inwards-by-invoice so we can tell which inward rows are "invoiced".
+        const invoicedInwardIds = new Set();
+        invoices.forEach(inv => (inv.inwards || []).forEach(iw => invoicedInwardIds.add(iw.id)));
+
+        // Aggregate inward.items into per-PO-item and per-requirement buckets.
+        const receivedByPoItem = {};
+        const receivedByReq    = {};
+        const invoicedByPoItem = {};
+        const invoicedByReq    = {};
+        inwards.forEach(iw => {
+            const isInvoiced = invoicedInwardIds.has(iw.id) || iw.invoice_id != null;
+            (iw.items || []).forEach(it => {
+                const qty = parseFloat(it.qty_received || 0);
+                if (it.purchase_order_item_id != null) {
+                    receivedByPoItem[it.purchase_order_item_id] = (receivedByPoItem[it.purchase_order_item_id] || 0) + qty;
+                    if (isInvoiced) invoicedByPoItem[it.purchase_order_item_id] = (invoicedByPoItem[it.purchase_order_item_id] || 0) + qty;
+                }
+                if (it.purchase_requirement_id != null) {
+                    receivedByReq[it.purchase_requirement_id] = (receivedByReq[it.purchase_requirement_id] || 0) + qty;
+                    if (isInvoiced) invoicedByReq[it.purchase_requirement_id] = (invoicedByReq[it.purchase_requirement_id] || 0) + qty;
+                }
+            });
+        });
+
+        const lines = (po.items || []).map(i => {
+            const ordered  = parseFloat(i.quantity || 0);
+            const unit     = i.uom || (i.item_type === 'fabric' ? 'm' : 'pcs');
+            const price    = parseFloat(i.unit_price || 0);
+            // Sum received across both linking conventions; fall back to whichever populates the PO data.
+            const fromPoItem  = receivedByPoItem[i.id] || 0;
+            const fromReqs    = (i.requirements || []).reduce((s, r) => s + (receivedByReq[r.id] || 0), 0);
+            const received    = fromPoItem || fromReqs;
+            const invFromPo   = invoicedByPoItem[i.id] || 0;
+            const invFromReqs = (i.requirements || []).reduce((s, r) => s + (invoicedByReq[r.id] || 0), 0);
+            const invoiced    = invFromPo || invFromReqs;
+            let state;
+            if (received <= 0.001)            state = 'pending';
+            else if (received + 0.001 < ordered) state = 'partial';
+            else                              state = 'complete';
+            const label = i.item_type === 'fabric'
+                ? `${i.fabric_type_name || 'Fabric'}${i.fabric_color_name ? ` · ${i.fabric_color_name}` : ''}`
+                : `${i.trim_item_name || 'Trim'}${i.variant_color_name ? ` · ${i.variant_color_name}` : ''}`;
+            return {
+                id: i.id, item_type: i.item_type, label, unit, ordered, received, invoiced, price,
+                state,
+                lineTotal: i.total_price != null ? parseFloat(i.total_price) : ordered * price,
+            };
+        });
+
+        const totals = lines.reduce((acc, l) => {
+            acc.lineCount   += 1;
+            acc.orderedQty  += l.ordered;
+            acc.receivedQty += l.received;
+            acc.invoicedQty += l.invoiced;
+            acc.orderedAmt  += l.lineTotal;
+            if (l.state === 'complete') acc.completeLines += 1;
+            else if (l.state === 'partial') acc.partialLines += 1;
+            else acc.pendingLines += 1;
+            return acc;
+        }, { lineCount: 0, orderedQty: 0, receivedQty: 0, invoicedQty: 0, orderedAmt: 0, completeLines: 0, partialLines: 0, pendingLines: 0 });
+
+        const invoicedAmt = invoices.reduce((s, inv) => s + parseFloat(inv.amount || 0), 0);
+        const paidAmt     = invoices
+            .filter(inv => (inv.payment_status || '').toUpperCase() === 'PAID')
+            .reduce((s, inv) => s + parseFloat(inv.amount || 0), 0);
+
+        return { lines, totals, invoicedAmt, paidAmt };
+    }, [po, inwards, invoices]);
 
     // Build connector list
     const edgeDefs = [];
@@ -300,6 +390,160 @@ export default function PurchaseFlowPage() {
                 ) : (
                     <div ref={containerRef} className="relative">
                         <FlowConnectors containerRef={containerRef} nodes={edgeDefs} refreshKey={tick} />
+
+                        {/* ── Summary panel ───────────────────────────────────────── */}
+                        {summary && (
+                            <div className="mb-8 bg-white border-2 border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 bg-slate-50 border-b border-slate-100">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Summary</span>
+                                        <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${(PO_STATUS_CFG[po.status] || PO_STATUS_CFG.DRAFT).cls}`}>
+                                            {(PO_STATUS_CFG[po.status] || PO_STATUS_CFG.DRAFT).label}
+                                        </span>
+                                        <span className="text-[10px] text-slate-400">
+                                            {summary.totals.completeLines} complete · {summary.totals.partialLines} partial · {summary.totals.pendingLines} pending
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {po.status !== 'COMPLETED' && po.status !== 'CANCELLED' && (
+                                            <button
+                                                onClick={() => { setConfirmAction('PARTIAL_RECEIPT'); setStatusErr(null); }}
+                                                disabled={statusBusy || po.status === 'PARTIAL_RECEIPT'}
+                                                className="flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-lg shadow-sm transition disabled:opacity-40"
+                                                title={po.status === 'PARTIAL_RECEIPT' ? 'Already partial' : 'Mark PO as partially received'}
+                                            >
+                                                <CheckCircle2 size={12} /> Partial
+                                            </button>
+                                        )}
+                                        {po.status !== 'COMPLETED' && po.status !== 'CANCELLED' && (
+                                            <button
+                                                onClick={() => { setConfirmAction('COMPLETED'); setStatusErr(null); }}
+                                                disabled={statusBusy}
+                                                className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 rounded-lg shadow-sm transition disabled:opacity-40"
+                                                title="Close the PO regardless of remaining qty"
+                                            >
+                                                <Lock size={12} /> Force Complete
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Confirm strip */}
+                                {confirmAction && (
+                                    <div className={`px-5 py-3 border-b ${confirmAction === 'COMPLETED' ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'}`}>
+                                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                                            <p className={`text-xs font-bold ${confirmAction === 'COMPLETED' ? 'text-emerald-800' : 'text-amber-800'}`}>
+                                                {confirmAction === 'COMPLETED'
+                                                    ? 'Force-close this PO? Remaining qty will be marked closed and no further inwards can be created.'
+                                                    : 'Mark this PO as partially received? You can still add more inwards later.'}
+                                            </p>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={() => setConfirmAction(null)}
+                                                    disabled={statusBusy}
+                                                    className="text-[11px] font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 px-3 py-1 rounded-md transition disabled:opacity-40"
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <button
+                                                    onClick={() => applyStatus(confirmAction)}
+                                                    disabled={statusBusy}
+                                                    className={`flex items-center gap-1 text-[11px] font-bold text-white px-3 py-1 rounded-md transition disabled:opacity-40 ${confirmAction === 'COMPLETED' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}`}
+                                                >
+                                                    {statusBusy && <Loader2 size={11} className="animate-spin" />}
+                                                    Confirm
+                                                </button>
+                                            </div>
+                                        </div>
+                                        {statusErr && (
+                                            <p className="mt-2 text-[11px] text-red-600 flex items-center gap-1">
+                                                <AlertTriangle size={11} /> {statusErr}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Top stats */}
+                                <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-slate-100 border-b border-slate-100">
+                                    <div className="px-4 py-3">
+                                        <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Ordered</p>
+                                        <p className="text-sm font-bold text-slate-800 tabular-nums">₹{fmtNum(summary.totals.orderedAmt)}</p>
+                                        <p className="text-[10px] text-slate-500">{summary.totals.lineCount} line{summary.totals.lineCount === 1 ? '' : 's'}</p>
+                                    </div>
+                                    <div className="px-4 py-3">
+                                        <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-600">Inwarded</p>
+                                        <p className="text-sm font-bold text-slate-800 tabular-nums">{inwards.length} GRN</p>
+                                        <p className="text-[10px] text-slate-500">{fmtNum(summary.totals.receivedQty)} units received</p>
+                                    </div>
+                                    <div className="px-4 py-3">
+                                        <p className="text-[9px] font-bold uppercase tracking-wider text-indigo-600">Invoiced</p>
+                                        <p className="text-sm font-bold text-slate-800 tabular-nums">₹{fmtNum(summary.invoicedAmt)}</p>
+                                        <p className="text-[10px] text-slate-500">{invoices.length} invoice{invoices.length === 1 ? '' : 's'}</p>
+                                    </div>
+                                    <div className="px-4 py-3">
+                                        <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-700">Paid</p>
+                                        <p className="text-sm font-bold text-slate-800 tabular-nums">₹{fmtNum(summary.paidAmt)}</p>
+                                        <p className="text-[10px] text-slate-500">{summary.invoicedAmt > 0 ? `${Math.round((summary.paidAmt / summary.invoicedAmt) * 100)}% of invoiced` : 'no invoices yet'}</p>
+                                    </div>
+                                </div>
+
+                                {/* Per-line comparison table */}
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr className="bg-slate-50 text-slate-500">
+                                                <th className="text-left px-4 py-2 text-[9px] font-bold uppercase tracking-wider">Line</th>
+                                                <th className="text-right px-4 py-2 text-[9px] font-bold uppercase tracking-wider">Ordered</th>
+                                                <th className="text-right px-4 py-2 text-[9px] font-bold uppercase tracking-wider">Received</th>
+                                                <th className="text-right px-4 py-2 text-[9px] font-bold uppercase tracking-wider">Invoiced</th>
+                                                <th className="text-right px-4 py-2 text-[9px] font-bold uppercase tracking-wider">Δ</th>
+                                                <th className="text-right px-4 py-2 text-[9px] font-bold uppercase tracking-wider">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {summary.lines.length === 0 ? (
+                                                <tr><td colSpan={6} className="text-center text-slate-400 italic py-6">No line items on this PO.</td></tr>
+                                            ) : summary.lines.map(l => {
+                                                const Icon = TYPE_ICON[l.item_type] || Tag;
+                                                const delta = l.ordered - l.received;
+                                                const stateCfg = l.state === 'complete'
+                                                    ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                                                    : l.state === 'partial'
+                                                        ? 'bg-amber-100 text-amber-700 border-amber-200'
+                                                        : 'bg-slate-100 text-slate-600 border-slate-200';
+                                                return (
+                                                    <tr key={l.id} className="hover:bg-slate-50">
+                                                        <td className="px-4 py-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <Icon size={12} className="text-slate-400 shrink-0" />
+                                                                <span className="font-bold text-slate-800 truncate">{l.label}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right tabular-nums text-slate-700">{fmtNum(l.ordered)} {l.unit}</td>
+                                                        <td className="px-4 py-2 text-right tabular-nums">
+                                                            <span className={l.received > 0 ? 'font-bold text-emerald-700' : 'text-slate-400'}>{fmtNum(l.received)} {l.unit}</span>
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right tabular-nums">
+                                                            <span className={l.invoiced > 0 ? 'font-bold text-indigo-700' : 'text-slate-400'}>{fmtNum(l.invoiced)} {l.unit}</span>
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right tabular-nums">
+                                                            <span className={delta > 0.001 ? 'text-red-600 font-bold' : 'text-emerald-600 font-bold'}>
+                                                                {delta > 0.001 ? `−${fmtNum(delta)}` : `+${fmtNum(-delta)}`}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right">
+                                                            <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${stateCfg}`}>
+                                                                {l.state}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
 
                         {/* PO row */}
                         <div className="grid grid-cols-1 mb-12">

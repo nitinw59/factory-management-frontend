@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import MatrixBrand from './MatrixBrand';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LuCircleUserRound, LuLogOut, LuChevronDown, LuMenu, LuX } from 'react-icons/lu';
+import { LuCircleUserRound, LuLogOut, LuChevronDown, LuMenu, LuX, LuSettings, LuBuilding2 } from 'react-icons/lu';
 
 // --- DESKTOP DROPDOWN (Popover style) ---
 const DesktopNavDropdown = ({ title, children }) => {
@@ -121,6 +121,12 @@ const AdminLayout = () => {
                   <NavLink to="/admin/qc-analytics" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">QC Analytics</NavLink>
                   <NavLink to="/admin/defect-code-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Defect Code Config</NavLink>
                 </DesktopNavDropdown>
+
+                <DesktopNavDropdown title={<LuSettings size={18} />}>
+                  <NavLink to="/admin/company-profile" className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                    <LuBuilding2 size={14} /> Company Profile
+                  </NavLink>
+                </DesktopNavDropdown>
               </nav>
             </div>
 
@@ -187,6 +193,12 @@ const AdminLayout = () => {
               <MobileNavDropdown title="Quality">
                 <NavLink to="/admin/qc-analytics" onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">QC Analytics</NavLink>
                 <NavLink to="/admin/defect-code-line-types" onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Defect Code Config</NavLink>
+              </MobileNavDropdown>
+
+              <MobileNavDropdown title={<span className="flex items-center gap-2"><LuSettings size={16} /> Settings</span>}>
+                <NavLink to="/admin/company-profile" onClick={closeMenu} className="flex items-center gap-2 py-2 text-sm text-gray-600 hover:text-blue-600">
+                  <LuBuilding2 size={14} /> Company Profile
+                </NavLink>
               </MobileNavDropdown>
 
               <div className="border-t border-gray-200 pt-4 mt-2">

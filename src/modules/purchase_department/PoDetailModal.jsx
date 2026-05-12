@@ -1,11 +1,13 @@
 import { useState, useMemo, useEffect } from 'react';
 import {
     X, Loader2, AlertTriangle, ShoppingCart, Building2, Calendar, Package, Scissors, Tag,
-    CheckCircle2, XCircle, Truck, Plus, Edit3, Trash2, Save,
+    CheckCircle2, XCircle, Truck, Plus, Edit3, Trash2, Save, FileText, Download,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
+import { adminApi } from '../../api/adminApi';
 import { trimsApi } from '../../api/trimsApi';
-import api from '../../utils/api';
+import api, { IMAGE_BASE_URL } from '../../utils/api';
+import { generatePoPdf } from './poPdfGenerator';
 
 const PO_STATUS_CFG = {
     DRAFT:           { cls: 'bg-slate-100 text-slate-600 border-slate-200',     label: 'Draft' },
@@ -267,9 +269,96 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
     const [editingItemId, setEditingItemId] = useState(null);  // itemId being edited
     const [adding, setAdding] = useState(false);
 
+    // PO document generation + history
+    const [documents,        setDocuments]        = useState([]);
+    const [docsLoading,      setDocsLoading]      = useState(false);
+    const [generating,       setGenerating]       = useState(false);
+    const [generationError,  setGenerationError]  = useState(null);
+
     const cfg     = PO_STATUS_CFG[po.status] || PO_STATUS_CFG.DRAFT;
     const next    = NEXT_STATUSES[po.status] || [];
     const isDraft = po.status === 'DRAFT';
+    const canGenerate = !isDraft && po.status !== 'CANCELLED';   // ISSUED, PARTIAL_RECEIPT, COMPLETED
+
+    // Pull existing PO documents from the backend whenever the modal is opened on
+    // a PO that's eligible for generation.
+    const loadDocuments = async () => {
+        if (!canGenerate) return;
+        setDocsLoading(true);
+        try {
+            const res = await purchaseDeptApi.listPoDocuments(po.id);
+            const list = res.data?.data ?? res.data ?? [];
+            setDocuments(Array.isArray(list) ? list : []);
+        } catch {
+            // Endpoint may not exist yet on the backend — fail quiet.
+            setDocuments([]);
+        } finally {
+            setDocsLoading(false);
+        }
+    };
+
+    useEffect(() => { loadDocuments(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [po.id, po.status]);
+
+    const resolveDocUrl = (d) => {
+        const url = d.file_url || d.url || d.path;
+        if (!url) return null;
+        if (url.startsWith('http')) return url;
+        const root = IMAGE_BASE_URL.replace(/\/uploads$/, '');
+        return `${root}${url}`;
+    };
+
+    const triggerBrowserDownload = (blob, filename) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+
+    const handleGeneratePoDocument = async () => {
+        setGenerating(true);
+        setGenerationError(null);
+        setMessage(null);
+        try {
+            // Pull company profile (singleton — may be null if never saved).
+            let company = null;
+            try {
+                const cr = await adminApi.getCompanyProfile();
+                company = cr.data ?? null;
+            } catch {
+                company = null;
+            }
+
+            const nextVersionNum   = (documents?.length || 0) + 1;
+            const versionLabel     = `v${nextVersionNum}`;
+            const pdfBlob = await generatePoPdf({ po, company, version: nextVersionNum });
+
+            const datestamp = new Date().toISOString().slice(0, 10);
+            const safeCode  = (po.po_code || `PO-${po.id}`).replace(/[^A-Za-z0-9._-]/g, '_');
+            const filename  = `${safeCode}-${versionLabel}-${datestamp}.pdf`;
+
+            // Push to backend; ignore failure so the user still gets the download.
+            try {
+                await purchaseDeptApi.uploadPoDocument(po.id, pdfBlob, {
+                    version: versionLabel,
+                    filename,
+                });
+                setMessage(`PO document ${versionLabel} generated and saved.`);
+            } catch (e) {
+                setMessage(`PO document ${versionLabel} downloaded. Server save unavailable: ${e?.response?.data?.error || e?.message || 'unknown error'}`);
+            }
+
+            triggerBrowserDownload(pdfBlob, filename);
+            loadDocuments();
+        } catch (e) {
+            setGenerationError(e?.message || 'Failed to generate PO document.');
+        } finally {
+            setGenerating(false);
+        }
+    };
 
     // Group requirements by purchase_order_item_id when present.
     // The backend now returns items[] explicitly; map to the shape the UI uses.
@@ -517,6 +606,91 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                                 );
                             })}
                         </div>
+
+                        {/* ── PO Document (generate + history) ─────────────── */}
+                        {canGenerate && (
+                            <div className="mt-5 bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                                <div className="flex items-center justify-between gap-3 px-4 py-3 bg-slate-50 border-b border-slate-100">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <FileText size={14} className="text-orange-500 shrink-0" />
+                                        <div className="min-w-0">
+                                            <p className="text-xs font-bold text-slate-700">Purchase Order Document</p>
+                                            <p className="text-[10px] text-slate-500 truncate">
+                                                {documents.length > 0
+                                                    ? `${documents.length} version${documents.length === 1 ? '' : 's'} on file · regenerating creates a new version`
+                                                    : 'Generate a corporate-grade PDF using the company profile and current PO data'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={handleGeneratePoDocument}
+                                        disabled={generating || busy}
+                                        className="flex items-center gap-1.5 text-xs font-bold text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-50 px-3 py-1.5 rounded-lg shadow-sm transition shrink-0"
+                                    >
+                                        {generating ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+                                        {generating ? 'Generating…' : (documents.length > 0 ? 'Generate New Version' : 'Generate & Download')}
+                                    </button>
+                                </div>
+
+                                {generationError && (
+                                    <div className="px-4 py-2 bg-red-50 border-b border-red-100 flex items-center gap-2 text-xs text-red-700">
+                                        <AlertTriangle size={12} /> {generationError}
+                                    </div>
+                                )}
+
+                                <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+                                    {docsLoading ? (
+                                        <div className="flex items-center justify-center gap-2 px-4 py-4 text-xs text-slate-400">
+                                            <Loader2 size={12} className="animate-spin" /> Loading history…
+                                        </div>
+                                    ) : documents.length === 0 ? (
+                                        <p className="px-4 py-3 text-xs text-slate-400 italic">
+                                            No previous versions yet — click "Generate & Download" to create one.
+                                        </p>
+                                    ) : documents.map((d, idx) => {
+                                        const rawVersion = d.version ?? '';
+                                        const versionLabel = String(rawVersion).startsWith('v') || !rawVersion
+                                            ? (rawVersion || `v${documents.length - idx}`)
+                                            : `v${rawVersion}`;
+                                        const ts        = d.created_at || d.generated_at;
+                                        const url       = resolveDocUrl(d);
+                                        const titleName = d.display_name || d.original_filename
+                                            || `${po.po_code || `PO-${po.id}`}-${versionLabel}.pdf`;
+                                        const downloadName = d.original_filename || titleName;
+                                        const credit    = d.uploaded_by_name || d.generated_by_name;
+                                        return (
+                                            <div key={d.id ?? `${versionLabel}-${ts}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50">
+                                                <span className="text-[10px] font-bold text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full shrink-0">
+                                                    {versionLabel}
+                                                </span>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-xs font-bold text-slate-700 truncate" title={d.description || titleName}>{titleName}</p>
+                                                    <p className="text-[10px] text-slate-500 truncate">
+                                                        {ts ? new Date(ts).toLocaleString('en', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
+                                                        {credit ? ` · by ${credit}` : ''}
+                                                        {d.file_size ? ` · ${(Number(d.file_size) / 1024).toFixed(0)} KB` : ''}
+                                                        {d.mime_type && d.mime_type !== 'application/pdf' ? ` · ${d.mime_type}` : ''}
+                                                    </p>
+                                                </div>
+                                                {url ? (
+                                                    <a
+                                                        href={url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        download={downloadName}
+                                                        className="flex items-center gap-1 text-[11px] font-bold text-orange-600 hover:bg-orange-50 border border-orange-200 px-2 py-1 rounded-md transition shrink-0"
+                                                    >
+                                                        <Download size={11} /> Download
+                                                    </a>
+                                                ) : (
+                                                    <span className="text-[10px] text-slate-400 italic shrink-0">No file</span>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
 
                         {/* Unassigned requirements (legacy / safety net) */}
                         {unassigned.length > 0 && (

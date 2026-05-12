@@ -37,6 +37,22 @@ export const purchaseDeptApi = {
             : api.patch(`/purchase-department/inwards/${id}`, data),
     deleteInward: (id) => api.delete(`/purchase-department/inwards/${id}`),
 
+    // PO documents — generated PDFs (TODO backend):
+    //   POST   /purchase-department/orders/:id/po-document   (multipart: file=<pdf>, version, generated_at)
+    //   GET    /purchase-department/orders/:id/po-documents
+    //   GET    /purchase-department/po-documents/:docId      (returns file)
+    uploadPoDocument: (poId, pdfBlob, meta = {}) => {
+        const fd = new FormData();
+        fd.append('file', pdfBlob, meta.filename || `PO-${poId}.pdf`);
+        Object.entries(meta).forEach(([k, v]) => {
+            if (v != null && k !== 'filename') fd.append(k, String(v));
+        });
+        return api.post(`/purchase-department/orders/${poId}/po-document`, fd, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+    },
+    listPoDocuments: (poId) => api.get(`/purchase-department/orders/${poId}/po-documents`),
+
     // Invoices
     getInvoices: (poId) => api.get(`/purchase-department/orders/${poId}/invoices`),
     createInvoice: (data, scanFile) =>
