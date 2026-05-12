@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import { qcApi } from '../../api/qcApi';
 import { productionManagerApi } from '../../api/productionManagerApi';
-import { Loader2, AlertCircle, Check, Save, Search, Plus, X, Pencil, Trash2 } from 'lucide-react';
+import { Loader2, AlertCircle, Check, Save, Search, Plus, X, Pencil, Trash2, FileDown } from 'lucide-react';
 
 const DefectCodeLineTypePage = () => {
     const [lineTypes, setLineTypes] = useState([]);      // [{ id, name }]
@@ -188,6 +189,69 @@ const DefectCodeLineTypePage = () => {
         }
     };
 
+    const exportToXlsx = () => {
+        const ts = new Date().toLocaleDateString('en', { day: '2-digit', month: 'short', year: 'numeric' });
+
+        // ── Sheet 1: Matrix (defect codes × line types) ──────────────────────
+        const matrixRows = defectCodes.map(dc => {
+            const row = {
+                'Code':        dc.code || '',
+                'Category':    dc.category || '',
+                'Description': dc.description || '',
+            };
+            lineTypes.forEach(lt => {
+                const linked = matrix[String(lt.id)]?.has(String(dc.id));
+                row[lt.type_name] = linked ? '✓' : '';
+            });
+            row['Linked Count'] = lineTypes.reduce(
+                (s, lt) => s + (matrix[String(lt.id)]?.has(String(dc.id)) ? 1 : 0),
+                0
+            );
+            return row;
+        });
+        const wsMatrix = XLSX.utils.json_to_sheet(matrixRows);
+        wsMatrix['!cols'] = [
+            { wch: 14 }, { wch: 14 }, { wch: 32 },
+            ...lineTypes.map(lt => ({ wch: Math.max(12, Math.min(24, lt.type_name.length + 2)) })),
+            { wch: 12 },
+        ];
+
+        // ── Sheet 2: Flat assignments (one row per defect × line type link) ──
+        const flatRows = [];
+        defectCodes.forEach(dc => {
+            lineTypes.forEach(lt => {
+                if (matrix[String(lt.id)]?.has(String(dc.id))) {
+                    flatRows.push({
+                        'Code':        dc.code || '',
+                        'Category':    dc.category || '',
+                        'Description': dc.description || '',
+                        'Line Type':   lt.type_name || '',
+                    });
+                }
+            });
+        });
+        const wsFlat = XLSX.utils.json_to_sheet(flatRows.length > 0 ? flatRows : [{ 'Code': '', 'Category': '', 'Description': '', 'Line Type': '' }]);
+        wsFlat['!cols'] = [{ wch: 14 }, { wch: 14 }, { wch: 32 }, { wch: 24 }];
+
+        // ── Sheet 3: Summary per line type ──────────────────────────────────
+        const summaryRows = lineTypes.map(lt => ({
+            'Line Type':           lt.type_name || '',
+            'Linked Defect Codes': matrix[String(lt.id)]?.size || 0,
+        }));
+        summaryRows.push({
+            'Line Type':           'GRAND TOTAL',
+            'Linked Defect Codes': lineTypes.reduce((s, lt) => s + (matrix[String(lt.id)]?.size || 0), 0),
+        });
+        const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+        wsSummary['!cols'] = [{ wch: 24 }, { wch: 18 }];
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, wsMatrix,  'Matrix');
+        XLSX.utils.book_append_sheet(wb, wsFlat,    'Assignments');
+        XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary by Line');
+        XLSX.writeFile(wb, `defect-codes-line-types-${ts.replace(/ /g, '-')}.xlsx`);
+    };
+
     const openAddModal = () => {
         setNewCategory('');
         setNewCategoryName('');
@@ -266,6 +330,14 @@ const DefectCodeLineTypePage = () => {
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
+                    <button
+                        onClick={exportToXlsx}
+                        disabled={defectCodes.length === 0}
+                        title="Export matrix, assignments, and summary as .xlsx"
+                        className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 border border-slate-300 rounded-lg text-sm font-bold shadow-sm transition-colors"
+                    >
+                        <FileDown size={15} /> Export Excel
+                    </button>
                     <button
                         onClick={openAddModal}
                         className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold shadow-sm transition-colors"
