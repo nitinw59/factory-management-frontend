@@ -435,6 +435,7 @@ function App() {
         <Route path="requirements" element={<RequirementsPage />} />
         <Route path="orders" element={<OrdersPage />} />
         <Route path="orders/:id" element={<PurchaseFlowPage />} />
+        <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
     </Route>
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}
