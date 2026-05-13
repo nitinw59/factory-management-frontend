@@ -44,6 +44,7 @@ import UnauthorizedPage from './login/UnauthorizedPage';
 // --- MODULE PAGES ---
 import AdminDashboardPage from './modules/admin/AdminDashboardPage';
 import CompanyProfilePage from './modules/admin/CompanyProfilePage';
+import TrimClustersPage from './modules/admin/TrimClustersPage';
 import DefectCodeLineTypePage from './modules/admin/DefectCodeLineTypePage';
 import QCAnalyticsDashboard from './modules/admin/QCAnalyticsDashboard';
 import UserManagementPage from './modules/users/UserManagementPage';
@@ -206,6 +207,7 @@ function App() {
           <Route path="maintenance-dashboard" element={<AdminMaintenanceDashboard />} />
           <Route path="maintenance-schedule" element={<MaintenanceSchedulePage />} />
           <Route path="company-profile" element={<CompanyProfilePage />} />
+          <Route path="trim-clusters" element={<TrimClustersPage />} />
       </Route>
 
               {/* Store Manager Portal */}

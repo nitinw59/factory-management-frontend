@@ -95,6 +95,7 @@ const AdminLayout = () => {
                 <DesktopNavDropdown title="Inventory">
                    <NavLink to="/admin/trim-management" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Trims Dashboard</NavLink>
                    <NavLink to="/admin/trim-items" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Trim Items</NavLink>
+                   <NavLink to="/admin/trim-clusters" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Trim Substitute Clusters</NavLink>
                    <NavLink to="/admin/fabric-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Fabric Types</NavLink>
                    <NavLink to="/admin/fabric-colors" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Fabric Colors</NavLink>
                 </DesktopNavDropdown>

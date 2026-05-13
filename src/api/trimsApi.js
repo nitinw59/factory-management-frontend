@@ -31,4 +31,9 @@ export const trimsApi = {
     // Manual sync: fills missing (trim_item × fabric_color) variants.
     // Empty body = whole matrix; pass { trim_item_id } and/or { fabric_color_id } to scope.
     syncVariants: (body = {}) => api.post('/trims/variants/sync', body),
+
+    // Substitute clusters — per-trim apply / unapply (factory_admin only)
+    clustersOnTrim:  (trimId)                       => api.get(`/admin/trim-items/${trimId}/clusters`),
+    applyCluster:    (trimId, clusterId, body = {}) => api.post(`/admin/trim-items/${trimId}/apply-cluster/${clusterId}`, body),
+    unapplyCluster:  (trimId, clusterId)            => api.delete(`/admin/trim-items/${trimId}/cluster/${clusterId}`),
 };

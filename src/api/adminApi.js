@@ -13,4 +13,14 @@ export const adminApi = {
         }),
     deleteCompanyProfileImage: (kind) =>
         api.delete(`/admin/company-profile/image/${kind}`),
+
+    // Trim substitute clusters (factory_admin only)
+    trimClusters: {
+        list:       (includeInactive = false) => api.get('/admin/trim-clusters', { params: { include_inactive: includeInactive } }),
+        get:        (id) => api.get(`/admin/trim-clusters/${id}`),
+        create:     (body) => api.post('/admin/trim-clusters', body),
+        update:     (id, body) => api.put(`/admin/trim-clusters/${id}`, body),
+        remove:     (id) => api.delete(`/admin/trim-clusters/${id}`),
+        setMembers: (id, fabric_color_ids) => api.put(`/admin/trim-clusters/${id}/members`, { fabric_color_ids }),
+    },
 };

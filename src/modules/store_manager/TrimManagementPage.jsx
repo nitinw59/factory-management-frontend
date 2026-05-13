@@ -4,8 +4,9 @@ import { useAuth } from '../../context/AuthContext';
 import {
     Plus, Edit2, Trash2, ChevronRight, Search, Package, Layers, Repeat,
     FileSpreadsheet, Loader2, Upload, X, Check, AlertCircle, CheckCircle2,
-    Palette, RefreshCw,
+    Palette, RefreshCw, GitMerge,
 } from 'lucide-react';
+import ApplyClusterModal from './ApplyClusterModal';
 
 // ── Stock-tone helper: emerald (healthy) / amber (low) / red (out) ────────────
 const stockTone = (stock, threshold = 0) => {
@@ -359,6 +360,10 @@ const TrimManagementPage = () => {
     const variantFilterRef     = useRef(null);
     const substituteFilterRef  = useRef(null);
     const [isSyncing,        setIsSyncing]        = useState(false);
+    // Substitute clusters
+    const [clusterModalOpen,  setClusterModalOpen]  = useState(false);
+    const [appliedClusters,   setAppliedClusters]   = useState([]);   // [{cluster_id, cluster_name, row_count, is_stale}]
+    const [unapplyBusyId,     setUnapplyBusyId]     = useState(null);
 
     const showToast = (kind, message) => {
         setToast({ kind, message });
@@ -456,6 +461,36 @@ const TrimManagementPage = () => {
             setVariants([]);
         }
     }, [selectedItem]);
+
+    // Pull applied clusters for the currently-selected trim (factory_admin only).
+    const refreshAppliedClusters = useCallback(async () => {
+        if (!selectedItem || user.role !== 'factory_admin') { setAppliedClusters([]); return; }
+        try {
+            const res = await trimsApi.clustersOnTrim(selectedItem.id);
+            setAppliedClusters(res.data?.data ?? res.data ?? []);
+        } catch {
+            setAppliedClusters([]);
+        }
+    }, [selectedItem, user.role]);
+    useEffect(() => { refreshAppliedClusters(); }, [refreshAppliedClusters]);
+
+    const handleUnapplyCluster = async (cluster) => {
+        if (!selectedItem) return;
+        if (!window.confirm(`Unapply "${cluster.cluster_name}" from ${selectedItem.name}? This removes only the substitute rows it created; manual substitutes stay.`)) return;
+        setUnapplyBusyId(cluster.cluster_id);
+        try {
+            await trimsApi.unapplyCluster(selectedItem.id, cluster.cluster_id);
+            await refreshAppliedClusters();
+            if (selectedVariant) {
+                const subs = await trimsApi.getSubstitutes(selectedVariant.id);
+                setSubstitutes(subs.data);
+            }
+        } catch (e) {
+            showToast('error', e?.response?.data?.error || 'Unapply failed.');
+        } finally {
+            setUnapplyBusyId(null);
+        }
+    };
 
     useEffect(() => {
         if (selectedVariant) {
@@ -1072,10 +1107,48 @@ const TrimManagementPage = () => {
                                     </span>
                                 )}
                             </h2>
-                            {selectedItem && (user.role === 'factory_admin' || user.role === 'store_manager') && (
-                                <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'variant' }); }} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"><Plus size={18} /></button>
-                            )}
+                            <div className="flex items-center gap-1.5">
+                                {selectedItem && user.role === 'factory_admin' && (
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); setClusterModalOpen(true); }}
+                                        title="Apply a substitute cluster to this trim"
+                                        className="flex items-center gap-1 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-md transition-colors"
+                                    >
+                                        <GitMerge size={13} /> Apply Cluster
+                                    </button>
+                                )}
+                                {selectedItem && (user.role === 'factory_admin' || user.role === 'store_manager') && (
+                                    <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'variant' }); }} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"><Plus size={18} /></button>
+                                )}
+                            </div>
                         </header>
+
+                        {/* Applied clusters strip */}
+                        {selectedItem && appliedClusters.length > 0 && (
+                            <div className="px-4 pb-2 pt-1 flex flex-wrap items-center gap-1.5 border-t border-indigo-100 bg-indigo-50/40">
+                                <span className="text-[9px] font-bold uppercase tracking-wider text-indigo-700">Applied:</span>
+                                {appliedClusters.map(c => {
+                                    const stale = !!c.is_stale;
+                                    return (
+                                        <span key={c.cluster_id}
+                                            className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${stale ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-emerald-100 text-emerald-700 border-emerald-200'}`}
+                                            title={stale ? 'Stale — re-apply to bring back in sync' : `${c.row_count} substitute row${c.row_count === 1 ? '' : 's'}`}
+                                        >
+                                            {c.cluster_name}
+                                            <span className="text-[9px] font-normal opacity-80">· {c.row_count}</span>
+                                            {stale && <span>⚠</span>}
+                                            {user.role === 'factory_admin' && (
+                                                <button onClick={(e) => { e.stopPropagation(); handleUnapplyCluster(c); }}
+                                                    disabled={unapplyBusyId === c.cluster_id}
+                                                    className="ml-0.5 hover:text-red-600 disabled:opacity-40" title="Unapply">
+                                                    {unapplyBusyId === c.cluster_id ? <Loader2 size={9} className="animate-spin" /> : <X size={9} />}
+                                                </button>
+                                            )}
+                                        </span>
+                                    );
+                                })}
+                            </div>
+                        )}
                         {/* Bulk action bar — appears when ≥1 variant is selected */}
                         {selectedVariants.size > 0 && user.role === 'factory_admin' && (
                             confirmDelete?.type === 'variant-bulk' ? (
@@ -1431,6 +1504,20 @@ const TrimManagementPage = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {clusterModalOpen && selectedItem && (
+                <ApplyClusterModal
+                    trimItem={selectedItem}
+                    onClose={() => setClusterModalOpen(false)}
+                    onApplied={async () => {
+                        await refreshAppliedClusters();
+                        if (selectedVariant) {
+                            const subs = await trimsApi.getSubstitutes(selectedVariant.id);
+                            setSubstitutes(subs.data);
+                        }
+                    }}
+                />
             )}
         </div>
     );
