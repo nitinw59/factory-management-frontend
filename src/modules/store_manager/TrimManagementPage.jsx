@@ -1218,7 +1218,11 @@ const TrimManagementPage = () => {
                             <div className="h-full flex flex-col items-center justify-center p-6 text-center opacity-60"><Package className="w-10 h-10 text-gray-300 mb-2" /><Placeholder text="Select an item to view variants." /></div>
                         ) : (
                             filteredVariants.map(variant => {
-                                const tone = stockTone(variant.main_store_stock, variant.low_stock_threshold);
+                                const stockNum     = Number(variant.main_store_stock || 0);
+                                const reservedNum  = Number(variant.quantity_reserved || 0);
+                                const netStock     = stockNum - reservedNum;
+                                const tone         = stockTone(stockNum, variant.low_stock_threshold);
+                                const netTone      = stockTone(netStock, variant.low_stock_threshold);
                                 const isEditingStock = editing?.variantId === variant.id && editing.field === 'main_store_stock';
                                 const isConfirming = confirmDelete?.type === 'variant' && confirmDelete.id === variant.id;
                                 const isPicked = selectedVariants.has(variant.id);
@@ -1288,6 +1292,21 @@ const TrimManagementPage = () => {
                                                         {tone.key !== 'ok' && <span className="ml-1 uppercase text-[9px] font-bold">{tone.key}</span>}
                                                     </button>
                                                 )}
+                                                {reservedNum > 0 && (
+                                                    <span
+                                                        className="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-200"
+                                                        title="Reserved against open plan requirements"
+                                                    >
+                                                        Reserved: <span className="font-bold">{reservedNum}</span>
+                                                    </span>
+                                                )}
+                                                <span
+                                                    className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${netTone.cls}`}
+                                                    title="Net = main_store_stock − reserved"
+                                                >
+                                                    Net: <span className="font-bold">{netStock}</span>
+                                                    {netTone.key !== 'ok' && <span className="ml-1 uppercase text-[9px] font-bold">{netTone.key}</span>}
+                                                </span>
                                                 {variant.low_stock_threshold != null && (
                                                     <span className="text-[10px] text-gray-400" title="Low-stock threshold">≥ {variant.low_stock_threshold}</span>
                                                 )}

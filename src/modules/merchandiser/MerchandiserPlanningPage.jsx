@@ -660,6 +660,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
     const [selId,      setSelId]      = useState(null);
     const [actionMode, setActionMode] = useState(null);
     const [openReqId,  setOpenReqId]  = useState(null);
+    const [expandAll,  setExpandAll]  = useState(false);
     const [addModal,   setAddModal]   = useState(false);
     const [editItem,   setEditItem]   = useState(null);
     const [busy,       setBusy]       = useState(false);
@@ -917,7 +918,38 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
             is_substitute:         !!r.is_substitute,
             exact_variant_id:      r.stock_suggestion?.exact_variant?.id || null,
             exact_variant_stock:   r.stock_suggestion?.exact_variant?.in_stock ?? null,
-            substitutes:           r.stock_suggestion?.substitutes || [],
+            // Defensive cleanup for backend join-fanout (see trim_item_substitutes — UNIQUE
+            // (original_variant_id, substitute_variant_id) guarantees no duplicate rows in the
+            // table; duplicates in the response come from SELECT-side joins).
+            //   1. Drop substitutes whose color matches the requirement's own color (degenerate).
+            //   2. Dedupe by substitute_variant_id (collapses fanned-out identical rows; keep highest in_stock).
+            //   3. Collapse same-color cross-size variants by color_number (keep highest in_stock).
+            //   4. Sort by in_stock desc so usable substitutes surface first.
+            substitutes:           (() => {
+                const reqColorNum = String(r.color_number ?? '').trim();
+                const byId = new Map();
+                (r.stock_suggestion?.substitutes || []).forEach(s => {
+                    const id = s.substitute_variant_id ?? s.id;
+                    if (id == null) return;
+                    const subColorNum = String(s.color_number ?? '').trim();
+                    if (reqColorNum && subColorNum && reqColorNum === subColorNum) return;
+                    const prev = byId.get(id);
+                    if (!prev || Number(s.in_stock ?? 0) > Number(prev.in_stock ?? 0)) {
+                        byId.set(id, s);
+                    }
+                });
+                const byColor = new Map();
+                [...byId.values()].forEach(s => {
+                    const ck = String(s.color_number ?? s.color_name ?? s.substitute_variant_id);
+                    const prev = byColor.get(ck);
+                    if (!prev || Number(s.in_stock ?? 0) > Number(prev.in_stock ?? 0)) {
+                        byColor.set(ck, s);
+                    }
+                });
+                return [...byColor.values()].sort(
+                    (a, b) => Number(b.in_stock ?? 0) - Number(a.in_stock ?? 0)
+                );
+            })(),
             quantity_required:     r.quantity_required || 0,
             quantity_reserved:     r.quantity_reserved || 0,
             calculation_breakdown: r.calculation_breakdown || null,
@@ -1545,6 +1577,14 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                         <button onClick={prevWindow} className="p-1 rounded hover:bg-slate-100 text-slate-500"><ChevronLeft size={14} /></button>
                         <button onClick={nextWindow} className="p-1 rounded hover:bg-slate-100 text-slate-500"><ChevronRight size={14} /></button>
                         <button onClick={goToday} className="text-[10px] font-bold text-violet-600 px-2 py-0.5 rounded bg-violet-50 hover:bg-violet-100 transition-colors">Today</button>
+                        <button
+                            onClick={() => setExpandAll(v => !v)}
+                            title={expandAll ? 'Collapse every row' : 'Expand every row'}
+                            className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded transition-colors ${expandAll ? 'text-white bg-violet-600 hover:bg-violet-700' : 'text-violet-600 bg-violet-50 hover:bg-violet-100'}`}
+                        >
+                            {expandAll ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                            {expandAll ? 'Collapse all' : 'Expand all'}
+                        </button>
                         <span className="text-xs text-slate-500 mr-auto">
                             {days[0].toLocaleDateString('en', { month: 'short', day: 'numeric' })}
                             {' – '}
@@ -1620,7 +1660,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                             {group.items.map(item => {
                                                 const st      = ST[item.status] || ST.pending;
                                                 const bStyle  = barStyle(item);
-                                                const isSel   = selId === item.id;
+                                                const isSel   = expandAll || selId === item.id;
                                                 const overdue = isOverdue(item);
                                                 return (
                                                     <div key={item.id}>
@@ -3381,7 +3421,7 @@ const ProductionPlanningPage = () => {
         planningApi.getFormData()
             .then(res => {
                 const data = res.data?.data ?? res.data;
-                console.log('planning ddApi. getFormData received:', data);
+                console.log('plavnning ddApi. getFormData received:', data);
                 setFormData(data);
             })
             .catch(e  => setFormErr(e?.response?.data?.error || 'Failed to load planning data'))
@@ -3404,7 +3444,11 @@ const ProductionPlanningPage = () => {
         setOrderDetail(null);
         setLoadingOrder(true);
         planningApi.getOrderDetail(orderId)
-            .then(res => setOrderDetail(res.data?.data ?? res.data))
+            .then(res => {
+                const payload = res.data?.data ?? res.data;
+                console.log('plaanningApi.getOrderDetail response:', orderId, payload);
+                setOrderDetail(payload);
+            })
             .catch(e  => console.error('Order detail fetch failed', e))
             .finally(() => setLoadingOrder(false));
     }, [selectedOrderId]);
