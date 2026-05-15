@@ -1250,7 +1250,7 @@ const TrimManagementPage = () => {
                                                 aria-hidden
                                                 className="mt-1 w-3.5 h-3.5 rounded-full border border-slate-300 shrink-0"
                                                 style={{ backgroundColor: swatchFromVariant(variant) }}
-                                                title={variant.color_name || 'Generic'}
+                                                title={`${variant.color_name || 'Generic'}${variant.color_number ? ` · ${variant.color_number}` : ''}`}
                                             />
                                             <div className="min-w-0 flex-1">
                                                 <p className={`text-sm font-semibold ${selectedVariant?.id === variant.id ? 'text-blue-900' : 'text-gray-700'}`}>
@@ -1381,6 +1381,9 @@ const TrimManagementPage = () => {
                                                 {sub.substitute_item_name}
                                                 <span className="text-gray-400 font-normal mx-1">/</span>
                                                 {sub.substitute_color_name || 'Generic'}
+                                                {sub.substitute_color_number && (
+                                                    <span className="ml-1.5 text-[10px] font-mono text-gray-400">{sub.substitute_color_number}</span>
+                                                )}
                                                 {sub.variant_size && (
                                                     <span className="ml-1.5 text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">Sz: {sub.variant_size}</span>
                                                 )}

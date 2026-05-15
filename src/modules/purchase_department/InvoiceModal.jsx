@@ -295,7 +295,7 @@ export default function InvoiceModal({
                                                                     const Icon = TYPE_ICON[itemType] || Tag;
                                                                     const label = itemType === 'fabric'
                                                                         ? `${it.fabric_type_name || 'Fabric'}${it.fabric_color_name ? ` · ${it.fabric_color_name}` : ''}${it.fabric_color_number ? ` (${it.fabric_color_number})` : ''}`
-                                                                        : `${it.trim_item_name || 'Trim'}${it.variant_color_name ? ` · ${it.variant_color_name}` : ''}${it.variant_color_number ? ` (${it.variant_color_number})` : ''}`;
+                                                                        : `${it.trim_item_name || 'Trim'}${it.variant_color_name ? ` · ${it.variant_color_name}` : ''}${it.variant_color_number ? ` (${it.variant_color_number})` : ''}${it.variant_size ? ` · Sz ${it.variant_size}` : ''}`;
                                                                     const qty   = parseFloat(it.qty_received ?? 0);
                                                                     const unit  = it.unit_of_measure || it.trim_uom || (itemType === 'fabric' ? 'm' : 'pcs');
                                                                     const price = (it.effective_unit_price ?? it.unit_price) != null

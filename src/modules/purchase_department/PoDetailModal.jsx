@@ -386,6 +386,7 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
         trim_item_code:        i.trim_item_code,
         variant_color_name:    i.variant_color_name,
         variant_color_number:  i.variant_color_number,
+        variant_size:          i.variant_size,
         variant_in_stock:      i.variant_in_stock,
         variant_last_purchase_price: i.variant_last_purchase_price,
     })), [po]);
@@ -532,7 +533,7 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                                 }
                                 const label = it.type === 'fabric'
                                     ? `${it.fabric_type_name || 'Fabric'}${it.fabric_color_name ? ` · ${it.fabric_color_name}` : ''}${it.fabric_color_number ? ` (${it.fabric_color_number})` : ''}`
-                                    : `${it.trim_item_name || 'Trim'}${it.variant_color_name ? ` · ${it.variant_color_name}` : ''}${it.variant_color_number ? ` (${it.variant_color_number})` : ''}`;
+                                    : `${it.trim_item_name || 'Trim'}${it.variant_color_name ? ` · ${it.variant_color_name}` : ''}${it.variant_color_number ? ` (${it.variant_color_number})` : ''}${it.variant_size ? ` · Sz ${it.variant_size}` : ''}`;
                                 return (
                                     <div key={it.key} className="bg-slate-50 rounded-xl p-2.5">
                                         <div className="flex items-start gap-3">
@@ -593,7 +594,7 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                                                         <div key={r.id} className="flex items-center justify-between text-[10px] text-slate-500">
                                                             <span className="truncate">
                                                                 {r.product_name || `req #${r.id}`}
-                                                                {r.is_substitute === true ? ` · 🔄 ${r.fabric_color_name || 'planned'} → ${r.variant_color_name || 'variant'}` : ''}
+                                                                {r.is_substitute === true ? ` · 🔄 ${r.fabric_color_name || 'planned'}${r.fabric_color_number ? ` · ${r.fabric_color_number}` : ''} → ${r.variant_color_name || 'variant'}${r.variant_color_number ? ` · ${r.variant_color_number}` : ''}` : ''}
                                                                 {r.urgency ? ` · ${r.urgency}` : ''}
                                                             </span>
                                                             <span className="shrink-0 ml-2 tabular-nums">{qty.toLocaleString()} {unit}</span>
@@ -709,7 +710,7 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                                             <div key={r.id} className="flex items-center justify-between text-[11px] text-amber-800">
                                                 <span className="truncate">
                                                     req #{r.id} · {r.type}
-                                                    {r.type === 'fabric' ? ` · ${r.fabric_type_name || ''} ${r.fabric_color_name || ''}` : ` · ${r.trim_item_name || ''}`}
+                                                    {r.type === 'fabric' ? ` · ${r.fabric_type_name || ''} ${r.fabric_color_name || ''}${r.fabric_color_number ? ` · ${r.fabric_color_number}` : ''}` : ` · ${r.trim_item_name || ''}${r.variant_size ? ` · Sz ${r.variant_size}` : ''}`}
                                                     {r.product_name ? ` · ${r.product_name}` : ''}
                                                 </span>
                                                 <span className="shrink-0 ml-2 tabular-nums">{qty.toLocaleString()} {unit}</span>

@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Loader2, PackageCheck, ChevronDown, ChevronUp,
-    CheckCircle2, Clock, AlertTriangle, Package, Scissors, Tag, GitBranch, Plus,
+    CheckCircle2, Clock, AlertTriangle, GitBranch, Plus, Search, Inbox,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import CreateFreshPoModal from './CreateFreshPoModal';
+import InwardModal from './InwardModal';
 
 const STATUS_CFG = {
     PENDING:     { cls: 'bg-amber-100 text-amber-700 border-amber-200',   label: 'Pending'    },
@@ -14,14 +15,7 @@ const STATUS_CFG = {
     CANCELLED:   { cls: 'bg-slate-100 text-slate-500 border-slate-200',   label: 'Cancelled'  },
 };
 
-const TYPE_CFG = {
-    fabric: { icon: Package,  label: 'Fabric' },
-    trim:   { icon: Scissors, label: 'Trim'   },
-    other:  { icon: Tag,      label: 'Other'  },
-};
-
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en', { dateStyle: 'medium' }) : '—';
-const fmt = (n, dec = 1) => Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: dec });
 
 const OrdersPage = () => {
     const navigate = useNavigate();
@@ -32,6 +26,9 @@ const OrdersPage = () => {
     const [err,               setErr]               = useState(null);
     const [showFreshPo,       setShowFreshPo]       = useState(false);
     const [completedExpanded, setCompletedExpanded] = useState(false);
+    const [search,            setSearch]            = useState('');
+    const [inwardPo,          setInwardPo]          = useState(null);  // { po, items, inwards }
+    const [openingInwardId,   setOpeningInwardId]   = useState(null);
 
     const fetchOrders = useCallback(async () => {
         setLoading(true);
@@ -59,13 +56,48 @@ const OrdersPage = () => {
         }
     };
 
-    const pending   = orders.filter(o => o.status !== 'COMPLETED' && o.status !== 'CANCELLED');
-    const completed = orders.filter(o => o.status === 'COMPLETED' || o.status === 'CANCELLED');
+    const filtered = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        if (!q) return orders;
+        return orders.filter(o => [
+            o.po_code, o.order_number, o.buyer_po_number,
+            o.supplier_name, o.customer_name, o.created_by_name,
+            String(o.id),
+        ].some(v => (v || '').toString().toLowerCase().includes(q)));
+    }, [orders, search]);
+
+    const pending   = filtered.filter(o => o.status !== 'COMPLETED' && o.status !== 'CANCELLED');
+    const completed = filtered.filter(o => o.status === 'COMPLETED' || o.status === 'CANCELLED');
+
+    const canInward = (status) => status && status !== 'COMPLETED' && status !== 'CANCELLED' && status !== 'DRAFT';
+
+    const openInward = async (order) => {
+        if (!canInward(order.status)) return;
+        setOpeningInwardId(order.id);
+        setErr(null);
+        try {
+            const [poRes, iwRes] = await Promise.all([
+                purchaseDeptApi.getOrderById(order.id),
+                purchaseDeptApi.getInwards(order.id).catch(() => ({ data: [] })),
+            ]);
+            const po      = poRes.data?.data ?? poRes.data;
+            const inwards = iwRes.data?.data ?? iwRes.data ?? [];
+            if (!po) throw new Error('Could not load PO.');
+            setInwardPo({ po, items: po.items || [], inwards });
+        } catch (e) {
+            setErr(e?.response?.data?.error || e.message || 'Failed to open inward form.');
+        } finally {
+            setOpeningInwardId(null);
+        }
+    };
 
     const renderOrder = (order) => {
         const isExpanded = expandedId === order.id;
         const scfg       = STATUS_CFG[order.status] || STATUS_CFG.PENDING;
-        const reqs       = order.requirements || [];
+        const reqCount   = Number(order.requirement_count ?? 0);
+        const fabCount   = Number(order.fabric_req_count ?? 0);
+        const trimCount  = Number(order.trim_req_count ?? 0);
+        const isCustom   = reqCount === 0 || order.order_number == null;
         const isOverdue  = order.expected_delivery_date && new Date(order.expected_delivery_date) < new Date() && order.status !== 'COMPLETED';
 
         return (
@@ -83,10 +115,15 @@ const OrdersPage = () => {
 
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-bold text-slate-800">PO #{order.id}</span>
+                            <span className="text-sm font-bold text-slate-800">{order.po_code || `PO #${order.id}`}</span>
                             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${scfg.cls}`}>
                                 {scfg.label}
                             </span>
+                            {isCustom && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                                    Custom PO
+                                </span>
+                            )}
                             {isOverdue && (
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
                                     Overdue
@@ -94,12 +131,29 @@ const OrdersPage = () => {
                             )}
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
-                            {order.supplier_name || 'No supplier'} · {reqs.length} item{reqs.length !== 1 ? 's' : ''}
+                            {order.supplier_name || 'No supplier'}
+                            {reqCount > 0 && ` · ${reqCount} requirement${reqCount !== 1 ? 's' : ''}`}
+                            {reqCount > 0 && (fabCount > 0 || trimCount > 0) && ` (${[fabCount && `${fabCount} fabric`, trimCount && `${trimCount} trim`].filter(Boolean).join(', ')})`}
+                            {order.order_number ? ` · SO ${order.order_number}` : ''}
+                            {order.customer_name ? ` · ${order.customer_name}` : ''}
                             {order.expected_delivery_date ? ` · Due ${fmtDate(order.expected_delivery_date)}` : ''}
                         </p>
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0">
+                        {canInward(order.status) && (
+                            <button
+                                onClick={e => { e.stopPropagation(); openInward(order); }}
+                                disabled={openingInwardId === order.id}
+                                className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-white hover:bg-emerald-600 border border-emerald-200 hover:border-emerald-600 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40"
+                                title="Record an inward / GRN against this PO"
+                            >
+                                {openingInwardId === order.id
+                                    ? <Loader2 size={12} className="animate-spin" />
+                                    : <Inbox size={12} />}
+                                Inward
+                            </button>
+                        )}
                         <button
                             onClick={e => { e.stopPropagation(); navigate(`/purchase-department/orders/${order.id}`); }}
                             className="flex items-center gap-1.5 text-xs font-bold text-orange-600 hover:text-white hover:bg-orange-600 border border-orange-200 hover:border-orange-600 px-3 py-1.5 rounded-lg transition-colors"
@@ -148,38 +202,9 @@ const OrdersPage = () => {
                             </div>
                         </div>
 
-                        {reqs.length > 0 && (
-                            <div>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">Requirements in this PO</p>
-                                <div className="space-y-1.5">
-                                    {reqs.map(req => {
-                                        const typeCfg  = TYPE_CFG[req.type] || TYPE_CFG.other;
-                                        const TypeIcon = typeCfg.icon;
-                                        return (
-                                            <div key={req.id} className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
-                                                <TypeIcon size={13} className="text-slate-500 shrink-0" />
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-xs font-medium text-slate-800 truncate">
-                                                        {req.description || `${typeCfg.label} requirement`}
-                                                    </p>
-                                                    <p className="text-[10px] text-slate-500">
-                                                        {req.sales_order_product_name || '—'}
-                                                    </p>
-                                                </div>
-                                                <div className="shrink-0 text-right">
-                                                    <p className="text-xs font-bold text-slate-700">
-                                                        {req.type === 'fabric'
-                                                            ? `${fmt(req.meters_required)} m`
-                                                            : `${fmt(req.quantity_required, 0)} ${req.unit_of_measure || 'pcs'}`}
-                                                    </p>
-                                                    {req.unit_price != null && (
-                                                        <p className="text-[10px] text-slate-400">@ {Number(req.unit_price).toFixed(2)}</p>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
+                        {reqCount > 0 && (
+                            <div className="text-[11px] text-slate-500 italic">
+                                {reqCount} requirement{reqCount !== 1 ? 's' : ''} linked. Open <span className="font-bold text-orange-600">View Flow</span> for the full item breakdown.
                             </div>
                         )}
                     </div>
@@ -201,6 +226,26 @@ const OrdersPage = () => {
                 >
                     <Plus size={14} /> Create PO
                 </button>
+            </div>
+
+            {/* Search */}
+            <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                    type="text"
+                    placeholder="Search PO code, supplier, SO, customer…"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    className="w-full text-sm border border-slate-200 rounded-xl pl-9 pr-3 py-2 focus:outline-none focus:border-orange-400"
+                />
+                {search && (
+                    <button
+                        onClick={() => setSearch('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-wider"
+                    >
+                        Clear
+                    </button>
+                )}
             </div>
 
             {err && (
@@ -266,6 +311,19 @@ const OrdersPage = () => {
                         fetchOrders();
                         if (data?.id) navigate(`/purchase-department/orders/${data.id}`);
                     }}
+                />
+            )}
+
+            {inwardPo && (
+                <InwardModal
+                    poId={inwardPo.po.id}
+                    poItems={inwardPo.items}
+                    allInwards={inwardPo.inwards}
+                    inward={null}
+                    initialMode="create"
+                    onClose={() => setInwardPo(null)}
+                    onSaved={() => { setInwardPo(null); fetchOrders(); }}
+                    onDeleted={() => { setInwardPo(null); fetchOrders(); }}
                 />
             )}
         </div>

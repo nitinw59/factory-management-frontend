@@ -6,28 +6,39 @@ import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { trimsApi } from '../../api/trimsApi';
 import api from '../../utils/api';
 
-const blankItem = (type = 'fabric') => ({
-    _key:                 Math.random().toString(36).slice(2),
-    type,
-    fabric_type_id:       '',
-    fabric_color_id:      '',
-    trim_item_id:         '',
-    trim_item_variant_id: '',
-    quantity:             '',
-    uom:                  type === 'fabric' ? 'meter' : 'pcs',
-    unit_price:           '',
+const rk = () => Math.random().toString(36).slice(2);
+
+const blankFabricLine = () => ({ _key: rk(), fabric_color_id: '', quantity: '' });
+const blankTrimLine   = () => ({ _key: rk(), trim_item_variant_id: '', quantity: '' });
+
+const blankFabricGroup = () => ({
+    _key:           rk(),
+    type:           'fabric',
+    fabric_type_id: '',
+    uom:            'meter',
+    unit_price:     '',
+    lines:          [blankFabricLine()],
+});
+
+const blankTrimGroup = () => ({
+    _key:         rk(),
+    type:         'trim',
+    trim_item_id: '',
+    uom:          'pcs',
+    unit_price:   '',
+    lines:        [blankTrimLine()],
 });
 
 export default function CreateFreshPoModal({ onClose, onCreated }) {
     const [supplierId,     setSupplierId]     = useState('');
     const [deliveryDate,   setDeliveryDate]   = useState('');
     const [salesOrderId,   setSalesOrderId]   = useState('');
-    const [items,          setItems]          = useState([blankItem('fabric')]);
+    const [groups,         setGroups]         = useState([blankFabricGroup()]);
     const [suppliers,      setSuppliers]      = useState([]);
     const [trimItems,      setTrimItems]      = useState([]);
     const [fabricTypes,    setFabricTypes]    = useState([]);
     const [fabricColors,   setFabricColors]   = useState([]);
-    const [variantsByTrim, setVariantsByTrim] = useState({});  // { [trim_item_id]: [{ id, color_name, color_number, ... }] }
+    const [variantsByTrim, setVariantsByTrim] = useState({});  // { [trim_item_id]: [{ id, color_name, color_number, variant_size, ... }] }
     const [busy,           setBusy]           = useState(false);
     const [err,            setErr]            = useState(null);
 
@@ -57,45 +68,90 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
         }
     };
 
-    const setItemField = (idx, field, value) => {
-        setItems(prev => prev.map((it, i) => {
-            if (i !== idx) return it;
-            const next = { ...it, [field]: value };
-            // If type changed, snap uom to a sensible default and clear cross-type ids
-            if (field === 'type') {
-                next.uom = value === 'fabric' ? 'meter' : 'pcs';
-                next.fabric_type_id = '';
-                next.fabric_color_id = '';
-                next.trim_item_id = '';
-                next.trim_item_variant_id = '';
-            }
-            // Clearing the trim resets the variant
+    // ── Group + line setters ──────────────────────────────────────────────────
+    const setGroupField = (gi, field, value) => {
+        setGroups(prev => prev.map((g, i) => {
+            if (i !== gi) return g;
+            const next = { ...g, [field]: value };
             if (field === 'trim_item_id') {
-                next.trim_item_variant_id = '';
+                // Switching the parent item: clear every variant choice underneath.
+                next.lines = g.lines.map(ln => ({ ...ln, trim_item_variant_id: '' }));
                 if (value) ensureVariants(value);
             }
             return next;
         }));
     };
 
-    const addItem    = (type = 'fabric') => setItems(prev => [...prev, blankItem(type)]);
-    const removeItem = (idx) => setItems(prev => prev.filter((_, i) => i !== idx));
+    const setLineField = (gi, li, field, value) => {
+        setGroups(prev => prev.map((g, i) => {
+            if (i !== gi) return g;
+            return { ...g, lines: g.lines.map((ln, j) => j === li ? { ...ln, [field]: value } : ln) };
+        }));
+    };
 
+    const addLine = (gi) => {
+        setGroups(prev => prev.map((g, i) => {
+            if (i !== gi) return g;
+            const blank = g.type === 'fabric' ? blankFabricLine() : blankTrimLine();
+            return { ...g, lines: [...g.lines, blank] };
+        }));
+    };
+
+    const removeLine = (gi, li) => {
+        setGroups(prev => prev.map((g, i) => {
+            if (i !== gi) return g;
+            return { ...g, lines: g.lines.filter((_, j) => j !== li) };
+        }));
+    };
+
+    const addGroup    = (type) => setGroups(prev => [...prev, type === 'fabric' ? blankFabricGroup() : blankTrimGroup()]);
+    const removeGroup = (gi)   => setGroups(prev => prev.filter((_, i) => i !== gi));
+
+    // ── Submit ────────────────────────────────────────────────────────────────
     const handleSubmit = async () => {
         setErr(null);
-        if (items.length === 0) { setErr('Add at least one item.'); return; }
-        for (const [i, it] of items.entries()) {
-            const q = parseFloat(it.quantity);
-            if (!q || q <= 0) {
-                setErr(`Item ${i + 1}: quantity must be greater than 0.`);
-                return;
-            }
-            const p = parseFloat(it.unit_price);
-            if (isNaN(p) || p < 0) {
-                setErr(`Item ${i + 1}: unit price must be ≥ 0.`);
-                return;
+        if (groups.length === 0) { setErr('Add at least one fabric or trim card.'); return; }
+
+        // Validate + flatten
+        const flat = [];
+        for (const [gi, g] of groups.entries()) {
+            const label = g.type === 'fabric' ? `Fabric card ${gi + 1}` : `Trim card ${gi + 1}`;
+            if (g.type === 'fabric' && !g.fabric_type_id) { setErr(`${label}: pick a fabric type.`); return; }
+            if (g.type === 'trim'   && !g.trim_item_id)   { setErr(`${label}: pick a trim item.`);   return; }
+            if (!g.lines || g.lines.length === 0)         { setErr(`${label}: add at least one ${g.type === 'fabric' ? 'color' : 'variant'}.`); return; }
+            const unitPrice = parseFloat(g.unit_price);
+            if (isNaN(unitPrice) || unitPrice < 0) { setErr(`${label}: unit price must be ≥ 0.`); return; }
+            const uom = (g.uom || (g.type === 'fabric' ? 'meter' : 'pcs')).trim() || (g.type === 'fabric' ? 'meter' : 'pcs');
+
+            for (const [li, ln] of g.lines.entries()) {
+                const lineLabel = `${label}, line ${li + 1}`;
+                if (g.type === 'fabric' && !ln.fabric_color_id)      { setErr(`${lineLabel}: pick a color.`); return; }
+                if (g.type === 'trim'   && !ln.trim_item_variant_id) { setErr(`${lineLabel}: pick a variant.`); return; }
+                const qty = parseFloat(ln.quantity);
+                if (!qty || qty <= 0) { setErr(`${lineLabel}: quantity must be > 0.`); return; }
+
+                const base = {
+                    type:            g.type,
+                    quantity:        qty,
+                    uom,
+                    unit_price:      unitPrice,
+                    requirement_ids: [],
+                };
+                if (g.type === 'fabric') {
+                    flat.push({
+                        ...base,
+                        fabric_type_id:  parseInt(g.fabric_type_id, 10),
+                        fabric_color_id: parseInt(ln.fabric_color_id, 10),
+                    });
+                } else {
+                    flat.push({
+                        ...base,
+                        trim_item_variant_id: parseInt(ln.trim_item_variant_id, 10),
+                    });
+                }
             }
         }
+        if (flat.length === 0) { setErr('No items to send.'); return; }
 
         setBusy(true);
         try {
@@ -103,26 +159,7 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                 supplier_id:            supplierId   ? parseInt(supplierId, 10)   : null,
                 expected_delivery_date: deliveryDate || null,
                 sales_order_id:         salesOrderId ? parseInt(salesOrderId, 10) : null,
-                items: items.map(it => {
-                    const base = {
-                        type:            it.type,
-                        quantity:        parseFloat(it.quantity),
-                        uom:             it.uom || (it.type === 'fabric' ? 'meter' : 'pcs'),
-                        unit_price:      parseFloat(it.unit_price) || 0,
-                        requirement_ids: [],
-                    };
-                    if (it.type === 'fabric') {
-                        return {
-                            ...base,
-                            fabric_type_id:  it.fabric_type_id  ? parseInt(it.fabric_type_id, 10)  : null,
-                            fabric_color_id: it.fabric_color_id ? parseInt(it.fabric_color_id, 10) : null,
-                        };
-                    }
-                    return {
-                        ...base,
-                        trim_item_variant_id: it.trim_item_variant_id ? parseInt(it.trim_item_variant_id, 10) : null,
-                    };
-                }),
+                items:                  flat,
             };
             const res = await purchaseDeptApi.createOrder(payload);
             onCreated?.(res.data);
@@ -132,6 +169,14 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
             setBusy(false);
         }
     };
+
+    // ── Totals ────────────────────────────────────────────────────────────────
+    const grandTotal = groups.reduce((sum, g) => {
+        const unitPrice = parseFloat(g.unit_price) || 0;
+        return sum + g.lines.reduce((s, ln) => s + ((parseFloat(ln.quantity) || 0) * unitPrice), 0);
+    }, 0);
+
+    const totalLines = groups.reduce((s, g) => s + (g.lines?.length || 0), 0);
 
     return (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
@@ -143,7 +188,7 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                             <ShoppingCart size={16} className="text-orange-500" />
                             New Purchase Order
                         </h2>
-                        <p className="text-xs text-slate-500 mt-0.5">Free-form PO — items don't need to reference any existing requirement.</p>
+                        <p className="text-xs text-slate-500 mt-0.5">Free-form PO — share fabric/trim header and price across multiple colors or variants.</p>
                     </div>
                     <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-full transition shrink-0">
                         <X size={16} className="text-slate-500" />
@@ -194,87 +239,67 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                         </div>
                     </div>
 
-                    {/* Items */}
+                    {/* Group cards */}
                     <div>
                         <div className="flex items-center justify-between mb-2">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Items · {items.length}</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                {groups.length} card{groups.length !== 1 ? 's' : ''} · {totalLines} line{totalLines !== 1 ? 's' : ''}
+                            </p>
                             <div className="flex gap-1.5">
-                                <button onClick={() => addItem('fabric')}
+                                <button onClick={() => addGroup('fabric')}
                                     className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:bg-violet-50 border border-violet-200 px-2 py-1 rounded-md transition">
-                                    <Plus size={11} /> Fabric
+                                    <Plus size={11} /> Fabric card
                                 </button>
-                                <button onClick={() => addItem('trim')}
+                                <button onClick={() => addGroup('trim')}
                                     className="flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-2 py-1 rounded-md transition">
-                                    <Plus size={11} /> Trim
+                                    <Plus size={11} /> Trim card
                                 </button>
                             </div>
                         </div>
-                        <div className="space-y-2">
-                            {items.map((it, idx) => {
-                                const isFabric = it.type === 'fabric';
-                                const Icon = isFabric ? Package : Scissors;
+
+                        <div className="space-y-3">
+                            {groups.map((g, gi) => {
+                                const isFabric = g.type === 'fabric';
+                                const Icon     = isFabric ? Package : Scissors;
+                                const variants = !isFabric ? (variantsByTrim[g.trim_item_id] || []) : [];
+
                                 return (
-                                    <div key={it._key} className={`border rounded-xl p-3 space-y-2 ${isFabric ? 'border-violet-100 bg-violet-50/40' : 'border-amber-100 bg-amber-50/40'}`}>
+                                    <div key={g._key} className={`border rounded-xl p-3 space-y-3 ${isFabric ? 'border-violet-100 bg-violet-50/40' : 'border-amber-100 bg-amber-50/40'}`}>
+                                        {/* Card header */}
                                         <div className="flex items-center justify-between gap-2">
                                             <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
                                                 <Icon size={13} className={isFabric ? 'text-violet-600' : 'text-amber-600'} />
-                                                <select
-                                                    value={it.type}
-                                                    onChange={e => setItemField(idx, 'type', e.target.value)}
-                                                    className="text-xs font-bold border border-slate-200 rounded px-2 py-0.5 bg-white"
-                                                >
-                                                    <option value="fabric">Fabric</option>
-                                                    <option value="trim">Trim</option>
-                                                </select>
-                                                <span className="text-slate-400 text-[10px] font-normal">Item {idx + 1}</span>
+                                                <span className="uppercase tracking-wider text-[10px]">{isFabric ? 'Fabric' : 'Trim'} card</span>
+                                                <span className="text-slate-400 text-[10px] font-normal">#{gi + 1}</span>
                                             </div>
-                                            {items.length > 1 && (
-                                                <button onClick={() => removeItem(idx)} className="text-slate-300 hover:text-red-500 transition">
+                                            {groups.length > 1 && (
+                                                <button onClick={() => removeGroup(gi)} title="Remove card" className="text-slate-300 hover:text-red-500 transition">
                                                     <Trash2 size={13} />
                                                 </button>
                                             )}
                                         </div>
 
-                                        {isFabric ? (
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <div>
-                                                    <label className="text-[9px] font-bold text-slate-400 uppercase">Fabric Type</label>
+                                        {/* Shared header fields: type/item · uom · unit price */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-[1fr_90px_120px] gap-2">
+                                            <div>
+                                                <label className="text-[9px] font-bold text-slate-400 uppercase">{isFabric ? 'Fabric Type *' : 'Trim Item *'}</label>
+                                                {isFabric ? (
                                                     <select
-                                                        value={it.fabric_type_id}
-                                                        onChange={e => setItemField(idx, 'fabric_type_id', e.target.value)}
+                                                        value={g.fabric_type_id}
+                                                        onChange={e => setGroupField(gi, 'fabric_type_id', e.target.value)}
                                                         className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-violet-400 bg-white"
                                                     >
-                                                        <option value="">— Select type —</option>
+                                                        <option value="">— Select fabric type —</option>
                                                         {fabricTypes.map(t => (
                                                             <option key={t.id} value={t.id}>
                                                                 {t.name || t.fabric_type_name || `Type #${t.id}`}
                                                             </option>
                                                         ))}
                                                     </select>
-                                                </div>
-                                                <div>
-                                                    <label className="text-[9px] font-bold text-slate-400 uppercase">Fabric Color</label>
+                                                ) : (
                                                     <select
-                                                        value={it.fabric_color_id}
-                                                        onChange={e => setItemField(idx, 'fabric_color_id', e.target.value)}
-                                                        className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-violet-400 bg-white"
-                                                    >
-                                                        <option value="">— Select color —</option>
-                                                        {fabricColors.map(c => (
-                                                            <option key={c.id} value={c.id}>
-                                                                {c.color_name || c.name || `Color #${c.id}`}{c.color_number ? ` (${c.color_number})` : ''}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <div>
-                                                    <label className="text-[9px] font-bold text-slate-400 uppercase">Trim Item</label>
-                                                    <select
-                                                        value={it.trim_item_id}
-                                                        onChange={e => setItemField(idx, 'trim_item_id', e.target.value)}
+                                                        value={g.trim_item_id}
+                                                        onChange={e => setGroupField(gi, 'trim_item_id', e.target.value)}
                                                         className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-amber-400 bg-white"
                                                     >
                                                         <option value="">— Select trim —</option>
@@ -284,44 +309,14 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                                                             </option>
                                                         ))}
                                                     </select>
-                                                </div>
-                                                <div>
-                                                    <label className="text-[9px] font-bold text-slate-400 uppercase">Variant</label>
-                                                    <select
-                                                        value={it.trim_item_variant_id}
-                                                        onChange={e => setItemField(idx, 'trim_item_variant_id', e.target.value)}
-                                                        disabled={!it.trim_item_id}
-                                                        className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-amber-400 bg-white disabled:bg-slate-100 disabled:text-slate-400"
-                                                    >
-                                                        <option value="">{it.trim_item_id ? '— Select variant —' : '— Pick a trim first —'}</option>
-                                                        {(variantsByTrim[it.trim_item_id] || []).map(v => (
-                                                            <option key={v.id} value={v.id}>
-                                                                {v.color_name || v.name || `Variant #${v.id}`}{v.color_number ? ` (${v.color_number})` : ''}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        <div className="grid grid-cols-3 gap-2">
-                                            <div>
-                                                <label className="text-[9px] font-bold text-slate-400 uppercase">Quantity *</label>
-                                                <input
-                                                    type="number"
-                                                    min="0"
-                                                    step="any"
-                                                    value={it.quantity}
-                                                    onChange={e => setItemField(idx, 'quantity', e.target.value)}
-                                                    className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400 text-right tabular-nums"
-                                                />
+                                                )}
                                             </div>
                                             <div>
                                                 <label className="text-[9px] font-bold text-slate-400 uppercase">UOM</label>
                                                 <input
                                                     type="text"
-                                                    value={it.uom}
-                                                    onChange={e => setItemField(idx, 'uom', e.target.value)}
+                                                    value={g.uom}
+                                                    onChange={e => setGroupField(gi, 'uom', e.target.value)}
                                                     className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400"
                                                 />
                                             </div>
@@ -331,18 +326,101 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                                                     type="number"
                                                     min="0"
                                                     step="any"
-                                                    value={it.unit_price}
-                                                    onChange={e => setItemField(idx, 'unit_price', e.target.value)}
+                                                    value={g.unit_price}
+                                                    onChange={e => setGroupField(gi, 'unit_price', e.target.value)}
                                                     className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400 text-right tabular-nums"
                                                 />
                                             </div>
                                         </div>
 
-                                        {(it.quantity && it.unit_price) ? (
+                                        {/* Lines */}
+                                        <div className="space-y-1.5">
+                                            <div className="flex items-center justify-between">
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                                    {isFabric ? 'Colors' : 'Variants'} · {g.lines.length}
+                                                </p>
+                                                <button
+                                                    onClick={() => addLine(gi)}
+                                                    disabled={!isFabric && !g.trim_item_id}
+                                                    title={!isFabric && !g.trim_item_id ? 'Pick a trim first' : ''}
+                                                    className={`flex items-center gap-1 text-[10px] font-bold border px-1.5 py-0.5 rounded-md transition disabled:opacity-40 ${
+                                                        isFabric
+                                                            ? 'text-violet-600 hover:bg-violet-100 border-violet-200'
+                                                            : 'text-amber-600 hover:bg-amber-100 border-amber-200'
+                                                    }`}
+                                                >
+                                                    <Plus size={10} /> {isFabric ? 'Add color' : 'Add variant'}
+                                                </button>
+                                            </div>
+
+                                            {g.lines.map((ln, li) => (
+                                                <div key={ln._key} className="flex items-end gap-2 bg-white/70 rounded-lg px-2 py-1.5 border border-white">
+                                                    <div className="flex-1 min-w-0">
+                                                        {isFabric ? (
+                                                            <select
+                                                                value={ln.fabric_color_id}
+                                                                onChange={e => setLineField(gi, li, 'fabric_color_id', e.target.value)}
+                                                                className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-violet-400 bg-white"
+                                                            >
+                                                                <option value="">— Color —</option>
+                                                                {fabricColors.map(c => (
+                                                                    <option key={c.id} value={c.id}>
+                                                                        {c.color_name || c.name || `Color #${c.id}`}{c.color_number ? ` (${c.color_number})` : ''}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        ) : (
+                                                            <select
+                                                                value={ln.trim_item_variant_id}
+                                                                onChange={e => setLineField(gi, li, 'trim_item_variant_id', e.target.value)}
+                                                                disabled={!g.trim_item_id}
+                                                                className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-amber-400 bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                                                            >
+                                                                <option value="">{g.trim_item_id ? '— Variant —' : '— Pick a trim first —'}</option>
+                                                                {variants.map(v => (
+                                                                    <option key={v.id} value={v.id}>
+                                                                        {v.color_name || v.name || `Variant #${v.id}`}{v.color_number ? ` (${v.color_number})` : ''}{v.variant_size ? ` · Sz ${v.variant_size}` : ''}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        )}
+                                                    </div>
+                                                    <div className="w-24 shrink-0">
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="any"
+                                                            placeholder="Qty"
+                                                            value={ln.quantity}
+                                                            onChange={e => setLineField(gi, li, 'quantity', e.target.value)}
+                                                            className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400 text-right tabular-nums"
+                                                        />
+                                                    </div>
+                                                    <div className="w-24 shrink-0 text-right text-[10px] tabular-nums text-slate-500">
+                                                        {(parseFloat(ln.quantity) > 0 && parseFloat(g.unit_price) >= 0)
+                                                            ? `₹${(parseFloat(ln.quantity) * (parseFloat(g.unit_price) || 0)).toFixed(2)}`
+                                                            : ''}
+                                                    </div>
+                                                    <button
+                                                        onClick={() => removeLine(gi, li)}
+                                                        disabled={g.lines.length <= 1}
+                                                        title={g.lines.length <= 1 ? 'A card must have at least one line' : 'Remove line'}
+                                                        className="shrink-0 p-1 text-slate-300 hover:text-red-500 disabled:opacity-30 disabled:hover:text-slate-300 transition"
+                                                    >
+                                                        <Trash2 size={12} />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {/* Card subtotal */}
+                                        {g.unit_price && g.lines.some(l => parseFloat(l.quantity) > 0) && (
                                             <p className="text-[10px] text-slate-500 text-right">
-                                                Subtotal: <span className="font-bold text-slate-700 tabular-nums">₹{(parseFloat(it.quantity) * parseFloat(it.unit_price) || 0).toFixed(2)}</span>
+                                                Card subtotal: <span className="font-bold text-slate-700 tabular-nums">
+                                                    ₹{g.lines.reduce((s, l) => s + ((parseFloat(l.quantity) || 0) * (parseFloat(g.unit_price) || 0)), 0).toFixed(2)}
+                                                </span>
                                             </p>
-                                        ) : null}
+                                        )}
                                     </div>
                                 );
                             })}
@@ -354,7 +432,7 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                 <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-slate-100 bg-slate-50/40">
                     <p className="text-[10px] text-slate-500 tabular-nums">
                         Total: <span className="font-bold text-slate-700">
-                            ₹{items.reduce((s, it) => s + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)), 0).toFixed(2)}
+                            ₹{grandTotal.toFixed(2)}
                         </span>
                     </p>
                     <div className="flex items-center gap-2">

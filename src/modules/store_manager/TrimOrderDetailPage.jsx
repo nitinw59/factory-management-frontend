@@ -267,7 +267,10 @@ const ReferenceDataModal = ({ isOpen, onClose, orderId }) => {
                                         {data.cutting.length > 0 ? data.cutting.map((cut, idx) => (
                                             <tr key={idx} className="hover:bg-gray-50">
                                                 <td className="py-3 px-5 font-bold text-gray-800">{cut.roll_no}</td>
-                                                <td className="py-3 px-5 text-sm text-gray-600 font-medium">{cut.color_name || 'N/A'}</td>
+                                                <td className="py-3 px-5 text-sm text-gray-600 font-medium">
+                                                    {cut.color_name || 'N/A'}
+                                                    {cut.color_number && <span className="ml-1.5 text-[10px] font-mono text-gray-400">{cut.color_number}</span>}
+                                                </td>
                                                 <td className="py-3 px-5 text-center font-bold text-blue-700">{cut.total_cut}</td>
                                                 <td className="py-3 px-5 text-sm text-gray-500 font-mono bg-gray-50">{cut.sizes || 'N/A'}</td>
                                             </tr>
@@ -333,7 +336,10 @@ const FulfillmentModal = ({ item, onClose, onSubmit }) => {
                                             )}
                                         </div>
                                         <div className="flex justify-between text-xs text-gray-600 font-medium">
-                                            <span>{option.color_name}</span>
+                                            <span>
+                                                {option.color_name}
+                                                {option.color_number && <span className="ml-1.5 text-[10px] font-mono text-gray-400">{option.color_number}</span>}
+                                            </span>
                                             <span className="bg-gray-100 px-2 rounded">Stock: {option.available_stock}</span>
                                         </div>
                                     </div>

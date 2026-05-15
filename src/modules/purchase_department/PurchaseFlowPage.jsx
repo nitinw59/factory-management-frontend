@@ -299,8 +299,8 @@ export default function PurchaseFlowPage() {
             else if (received + 0.001 < ordered) state = 'partial';
             else                              state = 'complete';
             const label = i.item_type === 'fabric'
-                ? `${i.fabric_type_name || 'Fabric'}${i.fabric_color_name ? ` · ${i.fabric_color_name}` : ''}`
-                : `${i.trim_item_name || 'Trim'}${i.variant_color_name ? ` · ${i.variant_color_name}` : ''}`;
+                ? `${i.fabric_type_name || 'Fabric'}${i.fabric_color_name ? ` · ${i.fabric_color_name}` : ''}${i.fabric_color_number ? ` (${i.fabric_color_number})` : ''}`
+                : `${i.trim_item_name || 'Trim'}${i.variant_color_name ? ` · ${i.variant_color_name}` : ''}${i.variant_color_number ? ` (${i.variant_color_number})` : ''}${i.variant_size ? ` · Sz ${i.variant_size}` : ''}`;
             return {
                 id: i.id, item_type: i.item_type, label, unit, ordered, received, invoiced, price,
                 state,
@@ -622,8 +622,8 @@ export default function PurchaseFlowPage() {
                                         const price = parseFloat(i.unit_price ?? 0);
                                         const total = i.total_price != null ? parseFloat(i.total_price) : (qty * price);
                                         const label = i.item_type === 'fabric'
-                                            ? `${i.fabric_type_name || 'Fabric'}${i.fabric_color_name ? ` · ${i.fabric_color_name}` : ''}`
-                                            : `${i.trim_item_name || 'Trim'}${i.variant_color_name ? ` · ${i.variant_color_name}` : ''}`;
+                                            ? `${i.fabric_type_name || 'Fabric'}${i.fabric_color_name ? ` · ${i.fabric_color_name}` : ''}${i.fabric_color_number ? ` (${i.fabric_color_number})` : ''}`
+                                            : `${i.trim_item_name || 'Trim'}${i.variant_color_name ? ` · ${i.variant_color_name}` : ''}${i.variant_color_number ? ` (${i.variant_color_number})` : ''}${i.variant_size ? ` · Sz ${i.variant_size}` : ''}`;
                                         return (
                                             <div key={i.id} className="flex items-center gap-3 bg-slate-50 rounded-xl p-2.5">
                                                 <Icon size={13} className="text-slate-500 shrink-0" />

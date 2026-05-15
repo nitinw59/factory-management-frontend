@@ -871,7 +871,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
             return ({
             id:                    r.ta_id,
             req_id:                r.id,
-            title:                 `${r.fabric_type_name}${r.color_name ? ' – ' + r.color_name : ''}`,
+            title:                 `${r.fabric_type_name}${r.color_name ? ' – ' + r.color_name : ''}${r.color_number ? ` · ${r.color_number}` : ''}`,
             subtitle:              `${req.toFixed(1)} m${res > 0 ? ` · Reserved ${res.toFixed(1)} m` : ''}`,
             type:                  'fabric',
             status:                r.ta_status    || 'pending',
@@ -899,7 +899,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
             return ({
             id:                    r.ta_id,
             req_id:                r.id,
-            title:                 `${r.trim_item_name}${r.color_name ? ' – ' + r.color_name : ''}`,
+            title:                 `${r.trim_item_name}${r.color_name ? ' – ' + r.color_name : ''}${r.color_number ? ` · ${r.color_number}` : ''}${r.variant_size ? ` · Sz ${r.variant_size}` : ''}`,
             subtitle:              `${reqQ.toLocaleString()} ${uom}${resQ > 0 ? ` · Reserved ${resQ.toLocaleString()} ${uom}` : ''}`,
             type:                  'trim',
             status:                r.ta_status    || 'pending',
@@ -1112,7 +1112,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
             // Requirement heading
             doc.setFontSize(10);
             doc.setFont(undefined, 'bold');
-            doc.text(`${r.fabric_type_name}${r.color_name ? ' – ' + r.color_name : ''}`, 14, y);
+            doc.text(`${r.fabric_type_name}${r.color_name ? ' – ' + r.color_name : ''}${r.color_number ? ` · ${r.color_number}` : ''}`, 14, y);
             doc.setFont(undefined, 'normal');
             doc.setFontSize(8);
             doc.setTextColor(80);
@@ -1250,6 +1250,8 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
             const variantLabel =
                 `${g.trim_item_name}` +
                 `${g.variant_color_name ? ` ${g.variant_color_name}` : ''}` +
+                `${g.variant_color_number ? ` · ${g.variant_color_number}` : ''}` +
+                `${g.variant_size ? ` · Sz ${g.variant_size}` : ''}` +
                 ` reserved for: ${requestedColors.join(', ') || '—'}` +
                 `${g.is_substitute ? '  (substitute)' : ''}`;
             const wrapped = doc.splitTextToSize(variantLabel, pageW - 28);
@@ -2500,8 +2502,8 @@ const RecalculateConfirmModal = ({ preview, sopName, onClose, onConfirm, busy, e
     const totalQty         = summary.total_quantity
         ?? trimReqs.reduce((s, r) => s + Number(r.quantity_required ?? r.quantity ?? 0), 0);
 
-    const fabLabel  = (r) => `${r.fabric_type_name || r.type || 'Fabric'}${(r.color_name || r.color) ? ' · ' + (r.color_name || r.color) : ''}`;
-    const trimLabel = (r) => `${r.trim_item_name  || r.item || 'Trim'}${(r.color_name || r.color) ? ' · ' + (r.color_name || r.color) : ''}`;
+    const fabLabel  = (r) => `${r.fabric_type_name || r.type || 'Fabric'}${(r.color_name || r.color) ? ' · ' + (r.color_name || r.color) : ''}${r.color_number ? ` · ${r.color_number}` : ''}`;
+    const trimLabel = (r) => `${r.trim_item_name  || r.item || 'Trim'}${(r.color_name || r.color) ? ' · ' + (r.color_name || r.color) : ''}${r.color_number ? ` · ${r.color_number}` : ''}${r.variant_size ? ` · Sz ${r.variant_size}` : ''}`;
     const poStatusCls = (s) =>
         s === 'received'   ? 'bg-emerald-100 text-emerald-700' :
         s === 'in-transit' ? 'bg-blue-100 text-blue-700' :

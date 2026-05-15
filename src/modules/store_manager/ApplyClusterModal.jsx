@@ -46,7 +46,10 @@ function ClusterRow({ cluster, selected, applied, onClick, disabled }) {
                         <>
                             <ArrowRight size={9} className="text-slate-300 shrink-0" />
                             <span className="w-2.5 h-2.5 rounded-full border border-slate-300 shrink-0" style={{ background: swatchHex(targetColor) }} />
-                            <span className="truncate font-bold text-slate-700">{targetColor.color_name || `#${targetColor.id}`}</span>
+                            <span className="truncate font-bold text-slate-700">
+                                {targetColor.color_name || `#${targetColor.id}`}
+                                {targetColor.color_number && <span className="ml-1 font-mono text-[9px] font-normal text-slate-400">{targetColor.color_number}</span>}
+                            </span>
                         </>
                     )}
                     {applied?.applied && (
@@ -57,7 +60,7 @@ function ClusterRow({ cluster, selected, applied, onClick, disabled }) {
             <div className="flex flex-wrap gap-0.5 max-w-[120px] shrink-0">
                 {(cluster.members || []).slice(0, 8).map(m => (
                     <span key={m.fabric_color_id}
-                        title={m.color_name}
+                        title={`${m.color_name || ''}${m.color_number ? ` · ${m.color_number}` : ''}`}
                         className="w-2.5 h-2.5 rounded-full border border-slate-300"
                         style={{ background: swatchHex(m) }} />
                 ))}
@@ -136,7 +139,10 @@ function PreviewPane({ cluster, trimId, applied }) {
                     <span className="text-[10px] text-slate-600">members</span>
                     <ArrowRight size={12} className="text-indigo-500" />
                     <span className="w-3 h-3 rounded-full border border-slate-300" style={{ background: swatchHex(targetColor) }} />
-                    <span className="text-xs font-bold text-slate-800">{targetColor.color_name || `#${targetColor.id}`}</span>
+                    <span className="text-xs font-bold text-slate-800">
+                        {targetColor.color_name || `#${targetColor.id}`}
+                        {targetColor.color_number && <span className="ml-1 font-mono text-[10px] font-normal text-slate-400">{targetColor.color_number}</span>}
+                    </span>
                     <span className="text-[10px] text-slate-500 ml-auto">target must exist as a variant on this trim and size</span>
                 </div>
             )}
@@ -200,6 +206,7 @@ function PreviewPane({ cluster, trimId, applied }) {
                                         <span className="w-2 h-2 rounded-full border border-slate-300"
                                             style={{ background: swatchHex({ color_name: v.color_name }) }} />
                                         <span className="text-slate-700">{v.color_name || `#${v.id}`}</span>
+                                        {v.color_number && <span className="text-slate-400 font-mono">· {v.color_number}</span>}
                                         {v.size_label && <span className="text-slate-400">· {v.size_label}</span>}
                                     </span>
                                 ))}

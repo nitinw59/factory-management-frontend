@@ -15,10 +15,16 @@ const reqUnit = (r) => r.unit_of_measure || (r.type === 'fabric' ? 'm' : 'pcs');
 
 const reqLabel = (r) => {
     if (r.type === 'fabric') {
-        const parts = [r.fabric_type_name, r.fabric_color_name].filter(Boolean);
+        const colorBit = (r.fabric_color_number || r.fabric_color_name)
+            ? `${r.fabric_color_number ? `${r.fabric_color_number}${r.fabric_color_name ? ' · ' : ''}` : ''}${r.fabric_color_name || ''}`
+            : null;
+        const parts = [r.fabric_type_name, colorBit].filter(Boolean);
         return parts.length ? parts.join(' · ') : 'Fabric requirement';
     }
-    if (r.type === 'trim') return r.trim_item_name || 'Trim requirement';
+    if (r.type === 'trim') {
+        const base = r.trim_item_name || 'Trim requirement';
+        return r.variant_size ? `${base} · Sz ${r.variant_size}` : base;
+    }
     return 'Requirement';
 };
 
@@ -206,30 +212,37 @@ export default function InwardModal({
         return m;
     });
 
-    // Truly free-form custom items (no requirement, no PO item link)
-    const [customItems, setCustomItems] = useState(() => {
+    // Truly free-form custom items (no requirement, no PO item link).
+    // Shape: groups of { fabric_type | trim_item, uom, unit_price, description, lines: [...] }
+    // Each line carries the color/variant + rolls (fabric) or qty (trim).
+    const rk = () => Math.random().toString(36).slice(2);
+    const [customGroups, setCustomGroups] = useState(() => {
         if (!inward) return [];
+        // Existing data is a flat per-item list with no group concept. To preserve it
+        // safely, render each existing custom item as its own single-line group; the
+        // user can manually consolidate later.
         return (inward.items || [])
             .filter(it => it.is_free_form === true && it.purchase_order_item_id == null)
             .map(it => {
                 const isFabric = (it.item_type || 'trim') === 'fabric';
+                const rolls = isFabric
+                    ? ((it.rolls || []).length > 0
+                        ? it.rolls.map(r => ({ _k: rk(), bale_no: r.bale_no || '', meter: r.meter != null ? String(r.meter) : '', uom: r.uom || 'meter' }))
+                        : [{ _k: rk(), bale_no: '', meter: it.qty_received != null ? String(it.qty_received) : '', uom: 'meter' }])
+                    : null;
                 return {
-                    _key:                  String(it.id),
-                    _k:                    String(it.id),
-                    _existingId:           it.id,
-                    item_type:             it.item_type || 'trim',
-                    trim_item_id:          '',
-                    trim_item_variant_id:  it.trim_item_variant_id ?? '',
-                    fabric_type_id:        it.fabric_type_id ?? '',
-                    fabric_color_id:       it.fabric_color_id ?? '',
-                    qty_received:          isFabric ? '' : (it.qty_received != null ? String(it.qty_received) : ''),
-                    unit_price:            it.unit_price != null ? String(it.unit_price) : '',
-                    description:           it.description || '',
-                    rolls:                 isFabric
-                        ? ((it.rolls || []).length > 0
-                            ? (it.rolls || []).map(r => ({ _k: Math.random().toString(36).slice(2), bale_no: r.bale_no || '', meter: r.meter != null ? String(r.meter) : '', uom: r.uom || 'meter' }))
-                            : [{ _k: Math.random().toString(36).slice(2), bale_no: '', meter: it.qty_received != null ? String(it.qty_received) : '', uom: 'meter' }])
-                        : [],
+                    _k:             String(it.id) + ':' + rk(),
+                    type:           isFabric ? 'fabric' : 'trim',
+                    fabric_type_id: it.fabric_type_id ?? '',
+                    trim_item_id:   '',                    // not stored on the entry
+                    uom:            isFabric ? 'meter' : 'pcs',
+                    unit_price:     it.unit_price != null ? String(it.unit_price) : '',
+                    description:    it.description || '',
+                    lines: [
+                        isFabric
+                            ? { _k: rk(), fabric_color_id: it.fabric_color_id ?? '', rolls }
+                            : { _k: rk(), trim_item_variant_id: it.trim_item_variant_id ?? '', qty_received: it.qty_received != null ? String(it.qty_received) : '' },
+                    ],
                 };
             });
     });
@@ -359,56 +372,72 @@ export default function InwardModal({
         [poItemId]: (prev[poItemId] || []).map(r => r._k === key ? { ...r, [field]: val } : r),
     }));
 
-    const addRollToCustom = (cKey) => setCustomItems(prev => prev.map(c =>
-        c._k !== cKey ? c : { ...c, rolls: [...(c.rolls || []), newRoll()] }
-    ));
-    const removeRollFromCustom = (cKey, rKey) => setCustomItems(prev => prev.map(c =>
-        c._k !== cKey ? c : { ...c, rolls: (c.rolls || []).filter(r => r._k !== rKey) }
-    ));
-    const setRollFieldOnCustom = (cKey, rKey, field, val) => setCustomItems(prev => prev.map(c =>
-        c._k !== cKey ? c : { ...c, rolls: (c.rolls || []).map(r => r._k === rKey ? { ...r, [field]: val } : r) }
-    ));
+    // ── Free-form custom group/line setters ────────────────────────────────
+    const addCustomGroup = (type) => setCustomGroups(prev => [...prev, {
+        _k:             rk(),
+        type,
+        fabric_type_id: '',
+        trim_item_id:   '',
+        uom:            type === 'fabric' ? 'meter' : 'pcs',
+        unit_price:     '',
+        description:    '',
+        lines: type === 'fabric'
+            ? [{ _k: rk(), fabric_color_id: '', rolls: [newRoll()] }]
+            : [{ _k: rk(), trim_item_variant_id: '', qty_received: '' }],
+    }]);
 
-    const addCustomItem = (item_type = 'trim') => {
-        setCustomItems(prev => [...prev, {
-            _key:                  Math.random().toString(36).slice(2),
-            _k:                    Math.random().toString(36).slice(2),
-            item_type,
-            trim_item_id:          '',
-            trim_item_variant_id:  '',
-            fabric_type_id:        '',
-            fabric_color_id:       '',
-            qty_received:          '',
-            unit_price:            '',
-            description:           '',
-            rolls:                 item_type === 'fabric' ? [newRoll()] : [],
-        }]);
-    };
-    const removeCustomItem = (key) =>
-        setCustomItems(prev => prev.filter(c => (c._k || c._key) !== key));
-    const setCustomField = (key, field, value) => {
-        setCustomItems(prev => prev.map(c => {
-            if ((c._k || c._key) !== key) return c;
-            const next = { ...c, [field]: value };
-            if (field === 'item_type') {
-                next.fabric_type_id = ''; next.fabric_color_id = '';
-                next.trim_item_id = ''; next.trim_item_variant_id = '';
-                next.rolls = value === 'fabric' ? [newRoll()] : [];
-                next.qty_received = '';
-            }
+    const removeCustomGroup = (gk) =>
+        setCustomGroups(prev => prev.filter(g => g._k !== gk));
+
+    const setCustomGroupField = (gk, field, value) => {
+        setCustomGroups(prev => prev.map(g => {
+            if (g._k !== gk) return g;
+            const next = { ...g, [field]: value };
             if (field === 'trim_item_id') {
-                next.trim_item_variant_id = '';
+                next.lines = g.lines.map(ln => ({ ...ln, trim_item_variant_id: '' }));
                 if (value) ensureVariants(value);
             }
             return next;
         }));
     };
 
-    const handleSave = async () => {
-        setErr(null);
-        if (!receivedDate) { setErr('Received date is required.'); return; }
+    const addCustomLine = (gk) => setCustomGroups(prev => prev.map(g => {
+        if (g._k !== gk) return g;
+        const ln = g.type === 'fabric'
+            ? { _k: rk(), fabric_color_id: '', rolls: [newRoll()] }
+            : { _k: rk(), trim_item_variant_id: '', qty_received: '' };
+        return { ...g, lines: [...g.lines, ln] };
+    }));
 
-        // Map a roll list to the API shape; skip empty rolls (no meter).
+    const removeCustomLine = (gk, lk) => setCustomGroups(prev => prev.map(g => {
+        if (g._k !== gk) return g;
+        return { ...g, lines: g.lines.filter(ln => ln._k !== lk) };
+    }));
+
+    const setCustomLineField = (gk, lk, field, value) => setCustomGroups(prev => prev.map(g => {
+        if (g._k !== gk) return g;
+        return { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, [field]: value } : ln) };
+    }));
+
+    const addRollToCustomLine = (gk, lk) => setCustomGroups(prev => prev.map(g => {
+        if (g._k !== gk) return g;
+        return { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: [...(ln.rolls || []), newRoll()] } : ln) };
+    }));
+
+    const removeRollFromCustomLine = (gk, lk, rKey) => setCustomGroups(prev => prev.map(g => {
+        if (g._k !== gk) return g;
+        return { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: (ln.rolls || []).filter(r => r._k !== rKey) } : ln) };
+    }));
+
+    const setRollOnCustomLine = (gk, lk, rKey, field, value) => setCustomGroups(prev => prev.map(g => {
+        if (g._k !== gk) return g;
+        return { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: (ln.rolls || []).map(r => r._k === rKey ? { ...r, [field]: value } : r) } : ln) };
+    }));
+
+    // Build the items array from current form state. Returns { items, error }.
+    // The summary screen calls this for preview; final submit re-uses the items
+    // so we never re-validate / re-build twice.
+    const buildItems = () => {
         const mapRolls = (rolls) => (rolls || [])
             .filter(r => parseFloat(r.meter) > 0)
             .map(r => ({
@@ -417,12 +446,10 @@ export default function InwardModal({
                 uom:     r.uom || 'meter',
             }));
 
-        // Trim requirement qty entries (fabric reqs come from fabricRollsByReq).
         const reqEntries = Object.entries(items)
             .filter(([, v]) => v !== '' && v != null && parseFloat(v) > 0)
             .map(([reqId, v]) => ({ requirement_id: parseInt(reqId, 10), qty_received: parseFloat(v) }));
 
-        // Fabric requirement entries — rolls + summed qty.
         const fabricReqEntries = Object.entries(fabricRollsByReq)
             .map(([reqId, rolls]) => ({ reqId: parseInt(reqId, 10), rolls: mapRolls(rolls) }))
             .filter(x => x.rolls.length > 0)
@@ -432,12 +459,10 @@ export default function InwardModal({
                 rolls:          x.rolls,
             }));
 
-        // Trim free-form PO item entries.
         const freeEntries = Object.entries(freeFormItems)
             .filter(([, v]) => v !== '' && v != null && parseFloat(v) > 0)
             .map(([poItemId, v]) => ({ purchase_order_item_id: parseInt(poItemId, 10), qty_received: parseFloat(v) }));
 
-        // Fabric free-form PO item entries — rolls + summed qty.
         const fabricFreeEntries = Object.entries(freeFormFabricRolls)
             .map(([poItemId, rolls]) => ({ poItemId: parseInt(poItemId, 10), rolls: mapRolls(rolls) }))
             .filter(x => x.rolls.length > 0)
@@ -447,52 +472,67 @@ export default function InwardModal({
                 rolls:                  x.rolls,
             }));
 
-        // Custom (truly free-form) entries — fabric uses rolls, trim keeps qty.
+        // Flatten group→line into one custom entry per line. Each line replicates
+        // its parent's unit_price + description so the API contract is unchanged.
         const customEntries = [];
-        for (const [i, c] of customItems.entries()) {
-            if (c.item_type === 'fabric') {
-                const rolls = mapRolls(c.rolls);
-                if (rolls.length === 0) continue;
-                if (!c.fabric_type_id) {
-                    setErr(`Free-form fabric item #${i + 1}: pick a fabric type.`);
-                    return;
+        for (const [gi, g] of customGroups.entries()) {
+            const groupLabel = g.type === 'fabric' ? `Free-form fabric card #${gi + 1}` : `Free-form trim card #${gi + 1}`;
+            const unitPrice = g.unit_price === '' || g.unit_price == null ? null : parseFloat(g.unit_price);
+            for (const [li, ln] of g.lines.entries()) {
+                if (g.type === 'fabric') {
+                    const rolls = mapRolls(ln.rolls);
+                    if (rolls.length === 0) continue;
+                    if (!g.fabric_type_id) return { items: null, error: `${groupLabel}: pick a fabric type.` };
+                    customEntries.push({
+                        item_type:       'fabric',
+                        fabric_type_id:  parseInt(g.fabric_type_id, 10),
+                        fabric_color_id: ln.fabric_color_id ? parseInt(ln.fabric_color_id, 10) : null,
+                        qty_received:    rolls.reduce((s, r) => s + r.meter, 0),
+                        rolls,
+                        unit_price:      unitPrice,
+                        description:     g.description || null,
+                    });
+                } else {
+                    const q = parseFloat(ln.qty_received);
+                    if (!q || q <= 0) continue;
+                    if (!g.trim_item_id)         return { items: null, error: `${groupLabel}: pick a trim item.` };
+                    if (!ln.trim_item_variant_id) return { items: null, error: `${groupLabel}, line ${li + 1}: pick a variant.` };
+                    customEntries.push({
+                        item_type:            'trim',
+                        qty_received:         q,
+                        trim_item_variant_id: parseInt(ln.trim_item_variant_id, 10),
+                        unit_price:           unitPrice,
+                        description:          g.description || null,
+                    });
                 }
-                customEntries.push({
-                    item_type:       'fabric',
-                    fabric_type_id:  parseInt(c.fabric_type_id, 10),
-                    fabric_color_id: c.fabric_color_id ? parseInt(c.fabric_color_id, 10) : null,
-                    qty_received:    rolls.reduce((s, r) => s + r.meter, 0),
-                    rolls,
-                    unit_price:      c.unit_price === '' || c.unit_price == null ? null : parseFloat(c.unit_price),
-                    description:     c.description || null,
-                });
-            } else {
-                const q = parseFloat(c.qty_received);
-                if (!q || q <= 0) continue;
-                if (!c.trim_item_variant_id) {
-                    setErr(`Free-form trim item #${i + 1}: pick a variant.`);
-                    return;
-                }
-                customEntries.push({
-                    item_type:            'trim',
-                    qty_received:         q,
-                    trim_item_variant_id: parseInt(c.trim_item_variant_id, 10),
-                    unit_price:           c.unit_price === '' || c.unit_price == null ? null : parseFloat(c.unit_price),
-                    description:          c.description || null,
-                });
             }
         }
         const itemsArr = [...reqEntries, ...fabricReqEntries, ...freeEntries, ...fabricFreeEntries, ...customEntries];
-        if (itemsArr.length === 0) { setErr('Add at least one item (rolls for fabric, qty for trim).'); return; }
+        if (itemsArr.length === 0) return { items: null, error: 'Add at least one item (rolls for fabric, qty for trim).' };
+        return { items: itemsArr, error: null };
+    };
 
+    // ── Confirm flow: form → review → submit ──────────────────────────────────
+    const [reviewItems, setReviewItems] = useState(null);  // non-null → show review screen
+
+    const handleReview = () => {
+        setErr(null);
+        if (!receivedDate) { setErr('Received date is required.'); return; }
+        const { items: built, error } = buildItems();
+        if (error) { setErr(error); return; }
+        setReviewItems(built);
+    };
+
+    const handleConfirmSave = async () => {
+        if (!reviewItems) return;
         setBusy(true);
         try {
             const payload = {
-                grn_number: grnNumber || undefined,
+                grn_number:    grnNumber || undefined,
                 received_date: receivedDate,
-                condition: condition || undefined,
-                notes: notes || undefined,
-                items: itemsArr,
+                condition:     condition || undefined,
+                notes:         notes || undefined,
+                items:         reviewItems,
             };
             const res = mode === 'create'
                 ? await purchaseDeptApi.createInward(poId, payload, scanFile)
@@ -504,6 +544,61 @@ export default function InwardModal({
             setBusy(false);
         }
     };
+
+    // Resolve each review entry to a human-readable label/qty/unit + rolls.
+    const reviewSummary = useMemo(() => {
+        if (!reviewItems) return [];
+        const variantPool = Object.values(variantsByTrim).flat();
+        return reviewItems.map((it, idx) => {
+            if (it.requirement_id != null) {
+                const req = allRequirements.find(r => r.id === it.requirement_id);
+                return {
+                    key:   `r-${idx}`,
+                    label: req ? reqLabel(req) : `Requirement #${it.requirement_id}`,
+                    qty:   it.qty_received,
+                    unit:  req ? reqUnit(req) : (it.rolls ? 'm' : 'pcs'),
+                    rolls: it.rolls || null,
+                    sub:   req?.product_name ? `SO ${req.order_number || ''}${req.product_name ? ` · ${req.product_name}` : ''}` : null,
+                };
+            }
+            if (it.purchase_order_item_id != null) {
+                const p = (poItems || []).find(x => x.id === it.purchase_order_item_id);
+                const isFabric = p?.item_type === 'fabric';
+                const label = p ? (isFabric
+                    ? `${p.fabric_type_name || 'Fabric'}${p.fabric_color_number ? ` · ${p.fabric_color_number}` : ''}${p.fabric_color_name ? ` · ${p.fabric_color_name}` : ''}`
+                    : `${p.trim_item_name || 'Trim'}${p.variant_color_number ? ` · ${p.variant_color_number}` : ''}${p.variant_color_name ? ` · ${p.variant_color_name}` : ''}${p.variant_size ? ` · Sz ${p.variant_size}` : ''}`
+                ) : `PO item #${it.purchase_order_item_id}`;
+                return {
+                    key:   `po-${idx}`,
+                    label,
+                    qty:   it.qty_received,
+                    unit:  isFabric ? 'm' : (p?.uom || 'pcs'),
+                    rolls: it.rolls || null,
+                    sub:   'Free-form (no SO)',
+                };
+            }
+            const isFabric = it.item_type === 'fabric';
+            let label = '';
+            if (isFabric) {
+                const t = fabricTypes.find(x => String(x.id) === String(it.fabric_type_id));
+                const c = fabricColors.find(x => String(x.id) === String(it.fabric_color_id));
+                label = `${t?.name || t?.fabric_type_name || 'Fabric'}${c?.color_number ? ` · ${c.color_number}` : ''}${c?.color_name ? ` · ${c.color_name}` : ''}`;
+            } else {
+                const v = variantPool.find(x => String(x.id) === String(it.trim_item_variant_id));
+                label = v
+                    ? `${v.color_number ? `${v.color_number} · ` : ''}${v.color_name || 'Trim'}${v.variant_size ? ` · Sz ${v.variant_size}` : ''}`
+                    : `Trim variant #${it.trim_item_variant_id}`;
+            }
+            return {
+                key:   `c-${idx}`,
+                label,
+                qty:   it.qty_received,
+                unit:  isFabric ? 'm' : 'pcs',
+                rolls: it.rolls || null,
+                sub:   'Custom (not on PO)',
+            };
+        });
+    }, [reviewItems, allRequirements, poItems, fabricTypes, fabricColors, variantsByTrim]);
 
     const handleDelete = async () => {
         if (!inward) return;
@@ -550,6 +645,49 @@ export default function InwardModal({
                             <AlertTriangle size={14} /> {err}
                         </div>
                     )}
+
+                    {reviewItems ? (
+                        <div className="space-y-3">
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+                                <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Review before saving</p>
+                                <p className="text-[11px] text-emerald-700/80 mt-0.5">{reviewSummary.length} line{reviewSummary.length !== 1 ? 's' : ''} will be {mode === 'create' ? 'recorded' : 'updated'} on GRN {grnNumber || '(auto)'} dated {receivedDate}.</p>
+                            </div>
+                            <div className="space-y-1.5">
+                                {reviewSummary.map(row => (
+                                    <div key={row.key} className="flex items-start gap-3 bg-white border border-slate-200 rounded-xl px-3 py-2">
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-xs font-bold text-slate-800 truncate">{row.label}</p>
+                                            {row.sub && <p className="text-[10px] text-slate-500 mt-0.5">{row.sub}</p>}
+                                            {row.rolls && row.rolls.length > 0 && (
+                                                <ul className="mt-1 text-[10px] text-slate-500 space-y-0.5">
+                                                    {row.rolls.map((r, i) => (
+                                                        <li key={i} className="font-mono">
+                                                            {r.bale_no || '—'} · {Number(r.meter).toLocaleString(undefined, { maximumFractionDigits: 2 })} {r.uom || 'm'}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            )}
+                                        </div>
+                                        <div className="shrink-0 text-right">
+                                            <p className="text-sm font-bold text-emerald-700 tabular-nums">
+                                                {Number(row.qty).toLocaleString(undefined, { maximumFractionDigits: 2 })} {row.unit}
+                                            </p>
+                                            {row.rolls && row.rolls.length > 0 && (
+                                                <p className="text-[9px] text-slate-400">{row.rolls.length} roll{row.rolls.length !== 1 ? 's' : ''}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            {notes && (
+                                <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Notes</p>
+                                    <p className="text-xs text-slate-700 mt-0.5 whitespace-pre-wrap">{notes}</p>
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                    <>
 
                     {/* Header fields */}
                     <div className="grid grid-cols-2 gap-3">
@@ -630,8 +768,8 @@ export default function InwardModal({
                             {(poItems || []).filter(g => (g.requirements || []).length > 0).map(group => {
                                 const Icon = TYPE_ICON[group.item_type] || Tag;
                                 const groupLabel = group.item_type === 'fabric'
-                                    ? `${group.fabric_type_name || 'Fabric'}${group.fabric_color_name ? ` · ${group.fabric_color_name}` : ''}${group.fabric_color_number ? ` (${group.fabric_color_number})` : ''}`
-                                    : `${group.trim_item_name || 'Trim'}${group.variant_color_name ? ` · ${group.variant_color_name}` : ''}${group.variant_color_number ? ` (${group.variant_color_number})` : ''}`;
+                                    ? `${group.fabric_type_name || 'Fabric'}${group.fabric_color_number ? ` · ${group.fabric_color_number}` : ''}${group.fabric_color_name ? ` · ${group.fabric_color_name}` : ''}`
+                                    : `${group.trim_item_name || 'Trim'}${group.variant_color_number ? ` · ${group.variant_color_number}` : ''}${group.variant_color_name ? ` · ${group.variant_color_name}` : ''}${group.variant_size ? ` · Sz ${group.variant_size}` : ''}`;
                                 const groupQty  = parseFloat(group.quantity ?? 0);
                                 const groupUom  = group.uom || (group.item_type === 'fabric' ? 'm' : 'pcs');
                                 return (
@@ -813,174 +951,190 @@ export default function InwardModal({
                                 );
                             })}
 
-                            {/* Truly free-form items (no PO link at all) */}
-                            {(customItems.length > 0 || editable) && (
+                            {/* Truly free-form items (no PO link at all) — shared-header cards */}
+                            {(customGroups.length > 0 || editable) && (
                                 <div className="border border-dashed border-slate-300 rounded-xl p-3 bg-slate-50/40">
                                     <div className="flex items-center justify-between mb-2">
                                         <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                            Free-form additions {customItems.length > 0 && `· ${customItems.length}`}
+                                            Free-form additions {customGroups.length > 0 && `· ${customGroups.length} card${customGroups.length !== 1 ? 's' : ''}`}
                                         </p>
                                         {editable && (
                                             <div className="flex gap-1.5">
-                                                <button onClick={() => addCustomItem('fabric')}
+                                                <button onClick={() => addCustomGroup('fabric')}
                                                     className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:bg-violet-50 border border-violet-200 px-2 py-1 rounded-md transition">
-                                                    <Plus size={11} /> Fabric
+                                                    <Plus size={11} /> Fabric card
                                                 </button>
-                                                <button onClick={() => addCustomItem('trim')}
+                                                <button onClick={() => addCustomGroup('trim')}
                                                     className="flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-2 py-1 rounded-md transition">
-                                                    <Plus size={11} /> Trim
+                                                    <Plus size={11} /> Trim card
                                                 </button>
                                             </div>
                                         )}
                                     </div>
-                                    {customItems.length === 0 ? (
-                                        <p className="text-[10px] text-slate-400 italic">Add a row to record items not on this PO (extras, samples, replacements).</p>
+                                    {customGroups.length === 0 ? (
+                                        <p className="text-[10px] text-slate-400 italic">Add a card to record items not on this PO. Share fabric type / trim item + price across multiple colors or variants.</p>
                                     ) : (
                                         <div className="space-y-2">
-                                            {customItems.map((c, idx) => {
-                                                const cKey = c._k || c._key;
-                                                const isFabric = c.item_type === 'fabric';
-                                                const variants = variantsByTrim[c.trim_item_id] || [];
-                                                const fabricSum = isFabric ? sumRolls(c.rolls) : 0;
+                                            {customGroups.map((g, gi) => {
+                                                const isFabric  = g.type === 'fabric';
+                                                const variants  = !isFabric ? (variantsByTrim[g.trim_item_id] || []) : [];
+                                                const groupSum  = isFabric
+                                                    ? g.lines.reduce((s, ln) => s + sumRolls(ln.rolls), 0)
+                                                    : g.lines.reduce((s, ln) => s + (parseFloat(ln.qty_received) || 0), 0);
                                                 return (
-                                                    <div key={cKey} className={`rounded-lg p-2 border ${isFabric ? 'bg-violet-50/40 border-violet-200' : 'bg-amber-50/40 border-amber-200'}`}>
+                                                    <div key={g._k} className={`rounded-lg p-2 border ${isFabric ? 'bg-violet-50/40 border-violet-200' : 'bg-amber-50/40 border-amber-200'}`}>
+                                                        {/* Card header */}
                                                         <div className="flex items-center justify-between gap-2 mb-1.5">
                                                             <div className="flex items-center gap-2 text-[11px] font-bold text-slate-700">
                                                                 {isFabric ? <Package size={11} className="text-violet-600" /> : <Scissors size={11} className="text-amber-600" />}
-                                                                <select
-                                                                    value={c.item_type}
-                                                                    onChange={e => setCustomField(cKey, 'item_type', e.target.value)}
-                                                                    disabled={!editable}
-                                                                    className="text-[11px] font-bold border border-slate-200 rounded px-1.5 py-0.5 bg-white"
-                                                                >
-                                                                    <option value="fabric">Fabric</option>
-                                                                    <option value="trim">Trim</option>
-                                                                </select>
-                                                                <span className="text-slate-400 text-[10px] font-normal">#{idx + 1}</span>
-                                                                {isFabric && (
-                                                                    <span className="text-[10px] font-bold text-violet-700">
-                                                                        · {fabricSum.toLocaleString(undefined, { maximumFractionDigits: 2 })} m total
+                                                                <span className="uppercase tracking-wider text-[10px]">{isFabric ? 'Fabric' : 'Trim'} card</span>
+                                                                <span className="text-slate-400 text-[10px] font-normal">#{gi + 1}</span>
+                                                                {groupSum > 0 && (
+                                                                    <span className={`text-[10px] font-bold ${isFabric ? 'text-violet-700' : 'text-amber-700'}`}>
+                                                                        · {groupSum.toLocaleString(undefined, { maximumFractionDigits: 2 })} {isFabric ? 'm' : (g.uom || 'pcs')} total
                                                                     </span>
                                                                 )}
                                                             </div>
                                                             {editable && (
-                                                                <button onClick={() => removeCustomItem(cKey)}
+                                                                <button onClick={() => removeCustomGroup(g._k)} title="Remove card"
                                                                     className="text-slate-300 hover:text-red-500 transition">
                                                                     <Trash2 size={11} />
                                                                 </button>
                                                             )}
                                                         </div>
 
-                                                        {isFabric ? (
-                                                            <>
-                                                                <div className="grid grid-cols-2 gap-1.5 mb-1.5">
-                                                                    <select value={c.fabric_type_id}
-                                                                        onChange={e => setCustomField(cKey, 'fabric_type_id', e.target.value)}
-                                                                        disabled={!editable}
-                                                                        className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white">
-                                                                        <option value="">— Type —</option>
-                                                                        {fabricTypes.map(t => <option key={t.id} value={t.id}>{t.name || t.fabric_type_name || `Type #${t.id}`}</option>)}
-                                                                    </select>
-                                                                    <select value={c.fabric_color_id}
-                                                                        onChange={e => setCustomField(cKey, 'fabric_color_id', e.target.value)}
-                                                                        disabled={!editable}
-                                                                        className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white">
-                                                                        <option value="">— Color —</option>
-                                                                        {fabricColors.map(co => <option key={co.id} value={co.id}>{co.color_name || `Color #${co.id}`}{co.color_number ? ` (${co.color_number})` : ''}</option>)}
-                                                                    </select>
-                                                                </div>
-                                                                <div className="space-y-1 mb-1.5">
-                                                                    <div className="flex items-center gap-2 px-1">
-                                                                        <span className="text-[9px] font-bold text-slate-400 uppercase w-24">Bale No.</span>
-                                                                        <span className="text-[9px] font-bold text-slate-400 uppercase flex-1 text-right">Meters</span>
-                                                                        <span className="text-[9px] font-bold text-slate-400 uppercase w-16 text-right">UOM</span>
-                                                                        <span className="w-5" />
-                                                                    </div>
-                                                                    {(c.rolls || []).map(roll => (
-                                                                        <div key={roll._k} className="flex items-center gap-2">
-                                                                            <input type="text" placeholder="B-001"
-                                                                                value={roll.bale_no}
-                                                                                onChange={e => setRollFieldOnCustom(cKey, roll._k, 'bale_no', e.target.value)}
-                                                                                disabled={!editable}
-                                                                                className="w-24 text-[11px] font-mono border border-slate-200 rounded px-1.5 py-1 focus:outline-none focus:border-violet-400" />
-                                                                            <input type="number" step="0.01" min="0" placeholder="0.00"
-                                                                                value={roll.meter}
-                                                                                onChange={e => setRollFieldOnCustom(cKey, roll._k, 'meter', e.target.value)}
-                                                                                disabled={!editable}
-                                                                                className="flex-1 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums focus:outline-none focus:border-violet-400" />
-                                                                            <select value={roll.uom}
-                                                                                onChange={e => setRollFieldOnCustom(cKey, roll._k, 'uom', e.target.value)}
-                                                                                disabled={!editable}
-                                                                                className="w-16 text-[11px] border border-slate-200 rounded px-1 py-1 bg-white">
-                                                                                <option value="meter">m</option>
-                                                                                <option value="yard">yd</option>
-                                                                                <option value="kg">kg</option>
+                                                        {/* Shared header fields */}
+                                                        <div className="grid grid-cols-[1fr_70px_90px] gap-1.5 mb-2">
+                                                            {isFabric ? (
+                                                                <select value={g.fabric_type_id}
+                                                                    onChange={e => setCustomGroupField(g._k, 'fabric_type_id', e.target.value)}
+                                                                    disabled={!editable}
+                                                                    className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white">
+                                                                    <option value="">— Fabric type —</option>
+                                                                    {fabricTypes.map(t => <option key={t.id} value={t.id}>{t.name || t.fabric_type_name || `Type #${t.id}`}</option>)}
+                                                                </select>
+                                                            ) : (
+                                                                <select value={g.trim_item_id}
+                                                                    onChange={e => setCustomGroupField(g._k, 'trim_item_id', e.target.value)}
+                                                                    disabled={!editable}
+                                                                    className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white">
+                                                                    <option value="">— Trim item —</option>
+                                                                    {trimItems.map(t => <option key={t.id} value={t.id}>{t.name || t.item_name || `Trim #${t.id}`}{t.item_code ? ` · ${t.item_code}` : ''}</option>)}
+                                                                </select>
+                                                            )}
+                                                            <input type="text" placeholder="UOM"
+                                                                value={g.uom}
+                                                                onChange={e => setCustomGroupField(g._k, 'uom', e.target.value)}
+                                                                disabled={!editable}
+                                                                className="text-[11px] border border-slate-200 rounded px-1.5 py-1" />
+                                                            <input type="number" min="0" step="any" placeholder="Unit price"
+                                                                value={g.unit_price}
+                                                                onChange={e => setCustomGroupField(g._k, 'unit_price', e.target.value)}
+                                                                disabled={!editable}
+                                                                className="text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums" />
+                                                        </div>
+                                                        <input type="text" placeholder="Description (optional, applies to all lines)"
+                                                            value={g.description}
+                                                            onChange={e => setCustomGroupField(g._k, 'description', e.target.value)}
+                                                            disabled={!editable}
+                                                            className="w-full mb-2 text-[11px] border border-slate-200 rounded px-1.5 py-1" />
+
+                                                        {/* Lines */}
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{isFabric ? 'Colors' : 'Variants'} · {g.lines.length}</p>
+                                                            {editable && (
+                                                                <button onClick={() => addCustomLine(g._k)}
+                                                                    disabled={!isFabric && !g.trim_item_id}
+                                                                    title={!isFabric && !g.trim_item_id ? 'Pick a trim first' : ''}
+                                                                    className={`flex items-center gap-1 text-[10px] font-bold border px-1.5 py-0.5 rounded-md transition disabled:opacity-40 ${isFabric ? 'text-violet-600 hover:bg-violet-100 border-violet-200' : 'text-amber-600 hover:bg-amber-100 border-amber-200'}`}>
+                                                                    <Plus size={10} /> Add {isFabric ? 'color' : 'variant'}
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            {g.lines.map((ln, li) => (
+                                                                <div key={ln._k} className="bg-white/70 rounded-md p-1.5 border border-white">
+                                                                    {isFabric ? (
+                                                                        <>
+                                                                            <div className="flex items-center gap-2 mb-1">
+                                                                                <select value={ln.fabric_color_id}
+                                                                                    onChange={e => setCustomLineField(g._k, ln._k, 'fabric_color_id', e.target.value)}
+                                                                                    disabled={!editable}
+                                                                                    className="flex-1 text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white">
+                                                                                    <option value="">— Color —</option>
+                                                                                    {fabricColors.map(co => <option key={co.id} value={co.id}>{co.color_number ? `${co.color_number} · ` : ''}{co.color_name || `Color #${co.id}`}</option>)}
+                                                                                </select>
+                                                                                {editable && g.lines.length > 1 && (
+                                                                                    <button onClick={() => removeCustomLine(g._k, ln._k)} title="Remove line"
+                                                                                        className="p-1 text-slate-300 hover:text-red-500 transition">
+                                                                                        <Trash2 size={11} />
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+                                                                            <div className="space-y-1">
+                                                                                {(ln.rolls || []).map(roll => (
+                                                                                    <div key={roll._k} className="flex items-center gap-1.5">
+                                                                                        <input type="text" placeholder="Bale"
+                                                                                            value={roll.bale_no}
+                                                                                            onChange={e => setRollOnCustomLine(g._k, ln._k, roll._k, 'bale_no', e.target.value)}
+                                                                                            disabled={!editable}
+                                                                                            className="w-20 text-[11px] font-mono border border-slate-200 rounded px-1.5 py-1" />
+                                                                                        <input type="number" step="0.01" min="0" placeholder="m"
+                                                                                            value={roll.meter}
+                                                                                            onChange={e => setRollOnCustomLine(g._k, ln._k, roll._k, 'meter', e.target.value)}
+                                                                                            disabled={!editable}
+                                                                                            className="flex-1 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums" />
+                                                                                        <select value={roll.uom}
+                                                                                            onChange={e => setRollOnCustomLine(g._k, ln._k, roll._k, 'uom', e.target.value)}
+                                                                                            disabled={!editable}
+                                                                                            className="w-14 text-[11px] border border-slate-200 rounded px-1 py-1 bg-white">
+                                                                                            <option value="meter">m</option>
+                                                                                            <option value="yard">yd</option>
+                                                                                            <option value="kg">kg</option>
+                                                                                        </select>
+                                                                                        {editable && (
+                                                                                            <button type="button" onClick={() => removeRollFromCustomLine(g._k, ln._k, roll._k)}
+                                                                                                className="p-0.5 text-slate-300 hover:text-red-500 transition">
+                                                                                                <Trash2 size={10} />
+                                                                                            </button>
+                                                                                        )}
+                                                                                    </div>
+                                                                                ))}
+                                                                                {editable && (
+                                                                                    <button type="button" onClick={() => addRollToCustomLine(g._k, ln._k)}
+                                                                                        className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:bg-violet-100 border border-violet-200 px-1.5 py-0.5 rounded-md transition">
+                                                                                        <Plus size={10} /> Roll
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+                                                                        </>
+                                                                    ) : (
+                                                                        <div className="flex items-center gap-2">
+                                                                            <select value={ln.trim_item_variant_id}
+                                                                                onChange={e => setCustomLineField(g._k, ln._k, 'trim_item_variant_id', e.target.value)}
+                                                                                disabled={!editable || !g.trim_item_id}
+                                                                                className="flex-1 text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white disabled:bg-slate-100 disabled:text-slate-400">
+                                                                                <option value="">{g.trim_item_id ? '— Variant —' : '— Pick trim first —'}</option>
+                                                                                {variants.map(v => <option key={v.id} value={v.id}>{v.color_number ? `${v.color_number} · ` : ''}{v.color_name || v.name || `Variant #${v.id}`}{v.variant_size ? ` · Sz ${v.variant_size}` : ''}</option>)}
                                                                             </select>
-                                                                            {editable && (
-                                                                                <button type="button" onClick={() => removeRollFromCustom(cKey, roll._k)}
-                                                                                    className="p-1 text-slate-300 hover:text-red-500 transition shrink-0">
+                                                                            <input type="number" min="0" step="any" placeholder="Qty"
+                                                                                value={ln.qty_received}
+                                                                                onChange={e => setCustomLineField(g._k, ln._k, 'qty_received', e.target.value)}
+                                                                                disabled={!editable}
+                                                                                className="w-24 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums" />
+                                                                            {editable && g.lines.length > 1 && (
+                                                                                <button onClick={() => removeCustomLine(g._k, ln._k)} title="Remove line"
+                                                                                    className="p-1 text-slate-300 hover:text-red-500 transition">
                                                                                     <Trash2 size={11} />
                                                                                 </button>
                                                                             )}
+                                                                            <span className="text-[10px] text-slate-400 w-10 text-right">{g.uom || 'pcs'}</span>
                                                                         </div>
-                                                                    ))}
-                                                                    {editable && (
-                                                                        <button type="button" onClick={() => addRollToCustom(cKey)}
-                                                                            className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:bg-violet-50 border border-violet-200 px-2 py-1 rounded-md transition">
-                                                                            <Plus size={11} /> Roll
-                                                                        </button>
                                                                     )}
+                                                                    <span className="hidden">{li}</span>
                                                                 </div>
-                                                                <div className="grid grid-cols-2 gap-1.5">
-                                                                    <input type="number" min="0" step="any" placeholder="Unit price"
-                                                                        value={c.unit_price}
-                                                                        onChange={e => setCustomField(cKey, 'unit_price', e.target.value)}
-                                                                        disabled={!editable}
-                                                                        className="text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums" />
-                                                                    <input type="text" placeholder="Description"
-                                                                        value={c.description}
-                                                                        onChange={e => setCustomField(cKey, 'description', e.target.value)}
-                                                                        disabled={!editable}
-                                                                        className="text-[11px] border border-slate-200 rounded px-1.5 py-1" />
-                                                                </div>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <div className="grid grid-cols-2 gap-1.5 mb-1.5">
-                                                                    <select value={c.trim_item_id}
-                                                                        onChange={e => setCustomField(cKey, 'trim_item_id', e.target.value)}
-                                                                        disabled={!editable}
-                                                                        className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white">
-                                                                        <option value="">— Trim —</option>
-                                                                        {trimItems.map(t => <option key={t.id} value={t.id}>{t.name || t.item_name || `Trim #${t.id}`}{t.item_code ? ` · ${t.item_code}` : ''}</option>)}
-                                                                    </select>
-                                                                    <select value={c.trim_item_variant_id}
-                                                                        onChange={e => setCustomField(cKey, 'trim_item_variant_id', e.target.value)}
-                                                                        disabled={!editable || !c.trim_item_id}
-                                                                        className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white disabled:bg-slate-100 disabled:text-slate-400">
-                                                                        <option value="">{c.trim_item_id ? '— Variant —' : '— Pick trim first —'}</option>
-                                                                        {variants.map(v => <option key={v.id} value={v.id}>{v.color_name || v.name || `Variant #${v.id}`}{v.color_number ? ` (${v.color_number})` : ''}</option>)}
-                                                                    </select>
-                                                                </div>
-                                                                <div className="grid grid-cols-3 gap-1.5">
-                                                                    <input type="number" min="0" step="any" placeholder="Qty *"
-                                                                        value={c.qty_received}
-                                                                        onChange={e => setCustomField(cKey, 'qty_received', e.target.value)}
-                                                                        disabled={!editable}
-                                                                        className="text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums" />
-                                                                    <input type="number" min="0" step="any" placeholder="Unit price"
-                                                                        value={c.unit_price}
-                                                                        onChange={e => setCustomField(cKey, 'unit_price', e.target.value)}
-                                                                        disabled={!editable}
-                                                                        className="text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums" />
-                                                                    <input type="text" placeholder="Description"
-                                                                        value={c.description}
-                                                                        onChange={e => setCustomField(cKey, 'description', e.target.value)}
-                                                                        disabled={!editable}
-                                                                        className="text-[11px] border border-slate-200 rounded px-1.5 py-1" />
-                                                                </div>
-                                                            </>
-                                                        )}
+                                                            ))}
+                                                        </div>
                                                     </div>
                                                 );
                                             })}
@@ -994,8 +1148,8 @@ export default function InwardModal({
                                 const Icon = TYPE_ICON[group.item_type] || Tag;
                                 const isFabricGroup = group.item_type === 'fabric';
                                 const groupLabel = isFabricGroup
-                                    ? `${group.fabric_type_name || 'Fabric'}${group.fabric_color_name ? ` · ${group.fabric_color_name}` : ''}${group.fabric_color_number ? ` (${group.fabric_color_number})` : ''}`
-                                    : `${group.trim_item_name || 'Trim'}${group.variant_color_name ? ` · ${group.variant_color_name}` : ''}${group.variant_color_number ? ` (${group.variant_color_number})` : ''}`;
+                                    ? `${group.fabric_type_name || 'Fabric'}${group.fabric_color_number ? ` · ${group.fabric_color_number}` : ''}${group.fabric_color_name ? ` · ${group.fabric_color_name}` : ''}`
+                                    : `${group.trim_item_name || 'Trim'}${group.variant_color_number ? ` · ${group.variant_color_number}` : ''}${group.variant_color_name ? ` · ${group.variant_color_name}` : ''}${group.variant_size ? ` · Sz ${group.variant_size}` : ''}`;
                                 const groupQty = parseFloat(group.quantity ?? 0);
                                 const groupUom = group.uom || (isFabricGroup ? 'm' : 'pcs');
                                 const pending  = pendingByPoItem[group.id] ?? 0;
@@ -1131,12 +1285,14 @@ export default function InwardModal({
                         </div>
                         )}
                     </div>
+                    </>
+                    )}
                 </div>
 
                 {/* Footer */}
                 <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-slate-100">
                     <div>
-                        {mode === 'view' && !isCreate && inward.invoice_id == null && (
+                        {!reviewItems && mode === 'view' && !isCreate && inward.invoice_id == null && (
                             <button
                                 onClick={handleDelete}
                                 disabled={busy}
@@ -1145,12 +1301,12 @@ export default function InwardModal({
                                 <Trash2 size={12} /> Delete
                             </button>
                         )}
-                        {mode === 'view' && !isCreate && inward.invoice_id != null && (
+                        {!reviewItems && mode === 'view' && !isCreate && inward.invoice_id != null && (
                             <p className="text-[10px] text-slate-400 italic">Linked to an invoice — unlink first to delete.</p>
                         )}
                     </div>
                     <div className="flex items-center gap-2">
-                        {mode === 'view' && (
+                        {!reviewItems && mode === 'view' && (
                             <button
                                 onClick={() => setMode('edit')}
                                 className="flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-emerald-600 border border-slate-200 hover:border-emerald-300 px-3 py-1.5 rounded-lg transition"
@@ -1158,7 +1314,7 @@ export default function InwardModal({
                                 <Edit3 size={12} /> Edit
                             </button>
                         )}
-                        {editable && (
+                        {!reviewItems && editable && (
                             <>
                                 <button
                                     onClick={onClose}
@@ -1168,12 +1324,30 @@ export default function InwardModal({
                                     Cancel
                                 </button>
                                 <button
-                                    onClick={handleSave}
+                                    onClick={handleReview}
+                                    disabled={busy}
+                                    className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 px-4 py-1.5 rounded-lg transition shadow-sm"
+                                >
+                                    {mode === 'create' ? 'Review & Create' : 'Review changes'}
+                                </button>
+                            </>
+                        )}
+                        {reviewItems && (
+                            <>
+                                <button
+                                    onClick={() => { setReviewItems(null); setErr(null); }}
+                                    disabled={busy}
+                                    className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition disabled:opacity-40"
+                                >
+                                    Back to edit
+                                </button>
+                                <button
+                                    onClick={handleConfirmSave}
                                     disabled={busy}
                                     className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 px-4 py-1.5 rounded-lg transition shadow-sm"
                                 >
                                     {busy && <Loader2 size={12} className="animate-spin" />}
-                                    {mode === 'create' ? 'Create Inward' : 'Save Changes'}
+                                    {mode === 'create' ? 'Confirm & Save' : 'Confirm changes'}
                                 </button>
                             </>
                         )}

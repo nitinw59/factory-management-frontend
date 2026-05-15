@@ -246,21 +246,89 @@ export async function generatePoPdf({ po, company, version = 1 }) {
 
     // ── Items table ──────────────────────────────────────────────────────────
     const items = po.items || [];
-    const tableBody = items.map((it, idx) => {
-        const label = it.item_type === 'fabric'
-            ? `${it.fabric_type_name || 'Fabric'}${it.fabric_color_name ? ` · ${it.fabric_color_name}` : ''}${it.fabric_color_number ? ` (${it.fabric_color_number})` : ''}`
-            : `${it.trim_item_name || 'Trim'}${it.variant_color_name ? ` · ${it.variant_color_name}` : ''}${it.variant_color_number ? ` (${it.variant_color_number})` : ''}`;
-        const qty   = parseFloat(it.quantity || 0);
-        const price = parseFloat(it.unit_price || 0);
-        const total = it.total_price != null ? parseFloat(it.total_price) : qty * price;
-        return [
-            String(idx + 1),
-            label,
-            it.item_code || it.trim_item_code || '—',
-            `${fmtQty(qty)} ${it.uom || (it.item_type === 'fabric' ? 'm' : 'pcs')}`,
-            fmtMoney(price),
-            fmtMoney(total),
-        ];
+
+    // Group items by parent: fabric_type for fabric items, trim_item for trim items.
+    // The PDF prints one bold "parent" row per group with shared UOM + price + group totals,
+    // followed by indented sub-rows for each color / variant.
+    const groups = (() => {
+        const fabricMap = new Map();
+        const trimMap   = new Map();
+        items.forEach(it => {
+            if (it.item_type === 'fabric') {
+                const key = it.fabric_type_id ?? it.fabric_type_name ?? `f-${it.id}`;
+                if (!fabricMap.has(key)) {
+                    fabricMap.set(key, {
+                        type:       'fabric',
+                        parentName: it.fabric_type_name || 'Fabric',
+                        code:       '',
+                        items:      [],
+                    });
+                }
+                fabricMap.get(key).items.push(it);
+            } else {
+                const key = it.trim_item_id ?? it.trim_item_name ?? `t-${it.id}`;
+                if (!trimMap.has(key)) {
+                    trimMap.set(key, {
+                        type:       'trim',
+                        parentName: it.trim_item_name || 'Trim',
+                        code:       it.trim_item_code || it.item_code || '',
+                        items:      [],
+                    });
+                }
+                trimMap.get(key).items.push(it);
+            }
+        });
+        return [...fabricMap.values(), ...trimMap.values()];
+    })();
+
+    const HEADER_FILL = [241, 245, 249];      // slate-100
+    const SUB_LABEL_INDENT = '   · ';
+    const tableBody = [];
+    groups.forEach((g, gi) => {
+        const groupQty = g.items.reduce((s, it) => s + parseFloat(it.quantity || 0), 0);
+        const groupTotal = g.items.reduce((s, it) => {
+            const t = it.total_price != null ? parseFloat(it.total_price) : (parseFloat(it.quantity || 0) * parseFloat(it.unit_price || 0));
+            return s + t;
+        }, 0);
+        const uoms   = new Set(g.items.map(it => it.uom || (it.item_type === 'fabric' ? 'm' : 'pcs')));
+        const prices = new Set(g.items.map(it => Number(parseFloat(it.unit_price || 0).toFixed(2))));
+        const sharedUom   = uoms.size === 1 ? [...uoms][0] : null;
+        const sharedPrice = prices.size === 1 ? [...prices][0] : null;
+
+        const sharedSuffixParts = [];
+        if (sharedUom)               sharedSuffixParts.push(`per ${sharedUom}`);
+        if (sharedPrice != null)     sharedSuffixParts.push(`@ ${fmtMoney(sharedPrice)}`);
+        const headerLabel = sharedSuffixParts.length
+            ? `${g.parentName}  ·  ${sharedSuffixParts.join('  ·  ')}`
+            : g.parentName;
+
+        const headerCellStyle = { fontStyle: 'bold', fillColor: HEADER_FILL };
+        tableBody.push([
+            { content: String(gi + 1), styles: { ...headerCellStyle, halign: 'center' } },
+            { content: headerLabel,    styles: headerCellStyle },
+            { content: g.code || '',   styles: headerCellStyle },
+            { content: `${fmtQty(groupQty)}${sharedUom ? ' ' + sharedUom : ''}`, styles: { ...headerCellStyle, halign: 'right' } },
+            { content: sharedPrice != null ? fmtMoney(sharedPrice) : '', styles: { ...headerCellStyle, halign: 'right' } },
+            { content: fmtMoney(groupTotal), styles: { ...headerCellStyle, halign: 'right' } },
+        ]);
+
+        g.items.forEach(it => {
+            const subLabel = it.item_type === 'fabric'
+                ? `${SUB_LABEL_INDENT}${it.fabric_color_name || 'No color'}${it.fabric_color_number ? ` (${it.fabric_color_number})` : ''}`
+                : `${SUB_LABEL_INDENT}${it.variant_color_name || 'No variant'}${it.variant_color_number ? ` (${it.variant_color_number})` : ''}${it.variant_size ? ` · Sz ${it.variant_size}` : ''}`;
+            const qty   = parseFloat(it.quantity || 0);
+            const price = parseFloat(it.unit_price || 0);
+            const total = it.total_price != null ? parseFloat(it.total_price) : qty * price;
+            const uom   = it.uom || (it.item_type === 'fabric' ? 'm' : 'pcs');
+            tableBody.push([
+                '',
+                subLabel,
+                '',
+                `${fmtQty(qty)} ${uom}`,
+                fmtMoney(price),
+                fmtMoney(total),
+            ]);
+        });
     });
 
     const subtotal = items.reduce((s, it) => {
@@ -281,7 +349,6 @@ export async function generatePoPdf({ po, company, version = 1 }) {
             fontSize: 8.5,
             halign: 'left',
         },
-        alternateRowStyles: { fillColor: [248, 250, 252] },
         columnStyles: {
             0: { cellWidth: 24, halign: 'center' },
             1: { cellWidth: 'auto' },
