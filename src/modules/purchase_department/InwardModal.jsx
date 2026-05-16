@@ -96,10 +96,12 @@ export default function InwardModal({
         return map;
     }, [poItems, allInwards, inward]);
 
-    // Helpers for fabric-roll style entries (mirrors FabricIntakeForm)
-    const rollKeyRef = (() => { let c = 0; return () => `r${++c}`; })();
+    // Helpers for fabric-roll style entries (mirrors FabricIntakeForm).
+    // Keys must be globally unique — using a render-scoped counter restarts on
+    // every render and produces stale-key collisions where two rolls share `_k`,
+    // which makes every onChange write to both.
     const newRoll = (init = {}) => ({
-        _k: rollKeyRef(),
+        _k:      Math.random().toString(36).slice(2),
         bale_no: init.bale_no ?? '',
         meter:   init.meter   != null ? String(init.meter) : '',
         uom:     init.uom     ?? 'meter',

@@ -347,6 +347,7 @@ function App() {
           <Route path="line-staff" element={<LineStaffCostingPage />} />
           <Route path="production-logs" element={<OutputLogsPage />} />
           <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
+          <Route path="scorecard" element={<ScoreboardPage />} />
       </Route>
 
       <Route path="/preparation-unload-portal" element={<PreparationUnloadProtectedRoute><PreparationUnloadLayout /></PreparationUnloadProtectedRoute>}>
