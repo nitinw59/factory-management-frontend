@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import CreateFreshPoModal from './CreateFreshPoModal';
-import InwardModal from './InwardModal';
+import InwardCreateModal from './InwardCreateModal';
+import InwardReviewModal from './InwardReviewModal';
 
 const STATUS_CFG = {
     PENDING:     { cls: 'bg-amber-100 text-amber-700 border-amber-200',   label: 'Pending'    },
@@ -27,7 +28,11 @@ const OrdersPage = () => {
     const [showFreshPo,       setShowFreshPo]       = useState(false);
     const [completedExpanded, setCompletedExpanded] = useState(false);
     const [search,            setSearch]            = useState('');
-    const [inwardPo,          setInwardPo]          = useState(null);  // { po, items, inwards }
+    // Inward flow: 'create' shows InwardCreateModal, 'review' shows InwardReviewModal,
+    // and inwardCtx carries everything both modals need + the form snapshot so we
+    // can preserve state if the user clicks Back from review.
+    const [inwardStep,        setInwardStep]        = useState(null);   // null | 'create' | 'review'
+    const [inwardCtx,         setInwardCtx]         = useState(null);   // { po, items, inwards, snapshot?, payload?, lookups }
     const [openingInwardId,   setOpeningInwardId]   = useState(null);
 
     const fetchOrders = useCallback(async () => {
@@ -83,13 +88,16 @@ const OrdersPage = () => {
             const po      = poRes.data?.data ?? poRes.data;
             const inwards = iwRes.data?.data ?? iwRes.data ?? [];
             if (!po) throw new Error('Could not load PO.');
-            setInwardPo({ po, items: po.items || [], inwards });
+            setInwardCtx({ po, items: po.items || [], inwards, snapshot: null, payload: null });
+            setInwardStep('create');
         } catch (e) {
             setErr(e?.response?.data?.error || e.message || 'Failed to open inward form.');
         } finally {
             setOpeningInwardId(null);
         }
     };
+
+    const closeInward = () => { setInwardStep(null); setInwardCtx(null); };
 
     const renderOrder = (order) => {
         const isExpanded = expandedId === order.id;
@@ -314,16 +322,28 @@ const OrdersPage = () => {
                 />
             )}
 
-            {inwardPo && (
-                <InwardModal
-                    poId={inwardPo.po.id}
-                    poItems={inwardPo.items}
-                    allInwards={inwardPo.inwards}
-                    inward={null}
-                    initialMode="create"
-                    onClose={() => setInwardPo(null)}
-                    onSaved={() => { setInwardPo(null); fetchOrders(); }}
-                    onDeleted={() => { setInwardPo(null); fetchOrders(); }}
+            {inwardStep === 'create' && inwardCtx && (
+                <InwardCreateModal
+                    poId={inwardCtx.po.id}
+                    poItems={inwardCtx.items}
+                    allInwards={inwardCtx.inwards}
+                    initialSnapshot={inwardCtx.snapshot}
+                    onClose={closeInward}
+                    onReview={({ payload, snapshot }) => {
+                        setInwardCtx(prev => ({ ...prev, payload, snapshot }));
+                        setInwardStep('review');
+                    }}
+                />
+            )}
+
+            {inwardStep === 'review' && inwardCtx?.payload && (
+                <InwardReviewModal
+                    poId={inwardCtx.po.id}
+                    payload={inwardCtx.payload}
+                    poItems={inwardCtx.items}
+                    onClose={closeInward}
+                    onBack={() => setInwardStep('create')}
+                    onConfirmed={() => { closeInward(); fetchOrders(); }}
                 />
             )}
         </div>

@@ -5,7 +5,9 @@ import {
     Package, Scissors, Tag, Calendar, Building2, ShoppingCart, CheckCircle2, Lock,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
-import InwardModal from './InwardModal';
+import InwardCreateModal from './InwardCreateModal';
+import InwardReviewModal from './InwardReviewModal';
+import InwardDisplayModal from './InwardDisplayModal';
 import InvoiceModal, { PaymentPill } from './InvoiceModal';
 import PoDetailModal from './PoDetailModal';
 
@@ -191,10 +193,15 @@ export default function PurchaseFlowPage() {
     const [err,      setErr]      = useState(null);
     const [tick,     setTick]     = useState(0);  // forces connector recompute
 
-    const [openInward,  setOpenInward]  = useState(null);  // existing inward
+    const [openInward,  setOpenInward]  = useState(null);  // existing inward — display modal
     const [openInvoice, setOpenInvoice] = useState(null);  // existing invoice
     const [openPo,      setOpenPo]      = useState(false);
     const [creatingInward,  setCreatingInward]  = useState(false);
+    // Inward create flow: snapshot + built payload travel between create and review
+    // so the user can Back out of review without losing what they typed.
+    const [inwardSnapshot,  setInwardSnapshot]  = useState(null);
+    const [inwardPayload,   setInwardPayload]   = useState(null);
+    const [inwardStep,      setInwardStep]      = useState('create');   // 'create' | 'review'
     const [creatingInvoice, setCreatingInvoice] = useState(false);
     const [statusBusy,   setStatusBusy]   = useState(false);
     const [confirmAction, setConfirmAction] = useState(null);   // 'PARTIAL_RECEIPT' | 'COMPLETED' | null
@@ -663,26 +670,41 @@ export default function PurchaseFlowPage() {
 
             {/* Modals */}
             {openInward && (
-                <InwardModal
-                    poId={po.id}
-                    poItems={po.items || []}
-                    allInwards={inwards}
+                <InwardDisplayModal
                     inward={openInward}
-                    initialMode="view"
+                    poItems={po?.items || []}
                     onClose={() => setOpenInward(null)}
-                    onSaved={handleSavedInward}
-                    onDeleted={handleSavedInward}
+                    onDeleted={() => { setOpenInward(null); handleSavedInward?.(); }}
                 />
             )}
-            {creatingInward && po && (
-                <InwardModal
+            {creatingInward && po && inwardStep === 'create' && (
+                <InwardCreateModal
                     poId={po.id}
                     poItems={po.items || []}
                     allInwards={inwards}
-                    inward={null}
-                    initialMode="create"
-                    onClose={() => setCreatingInward(false)}
-                    onSaved={handleSavedInward}
+                    initialSnapshot={inwardSnapshot}
+                    onClose={() => { setCreatingInward(false); setInwardSnapshot(null); setInwardPayload(null); setInwardStep('create'); }}
+                    onReview={({ payload, snapshot }) => {
+                        setInwardPayload(payload);
+                        setInwardSnapshot(snapshot);
+                        setInwardStep('review');
+                    }}
+                />
+            )}
+            {creatingInward && po && inwardStep === 'review' && inwardPayload && (
+                <InwardReviewModal
+                    poId={po.id}
+                    payload={inwardPayload}
+                    poItems={po.items || []}
+                    onClose={() => { setCreatingInward(false); setInwardSnapshot(null); setInwardPayload(null); setInwardStep('create'); }}
+                    onBack={() => setInwardStep('create')}
+                    onConfirmed={(saved) => {
+                        setCreatingInward(false);
+                        setInwardSnapshot(null);
+                        setInwardPayload(null);
+                        setInwardStep('create');
+                        handleSavedInward?.(saved);
+                    }}
                 />
             )}
             {openInvoice && (

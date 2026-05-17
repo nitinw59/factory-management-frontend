@@ -36,4 +36,11 @@ export const trimsApi = {
     clustersOnTrim:  (trimId)                       => api.get(`/admin/trim-items/${trimId}/clusters`),
     applyCluster:    (trimId, clusterId, body = {}) => api.post(`/admin/trim-items/${trimId}/apply-cluster/${clusterId}`, body),
     unapplyCluster:  (trimId, clusterId)            => api.delete(`/admin/trim-items/${trimId}/cluster/${clusterId}`),
+
+    // Stock ledger — per-variant or for every variant of a trim item.
+    // Supports source_kind / limit / offset query params.
+    getVariantStockLedger: (variantId, params = {}) =>
+        api.get(`/trims/variants/${variantId}/stock-ledger`, { params }),
+    getItemStockLedger: (itemId, params = {}) =>
+        api.get(`/trims/items/${itemId}/stock-ledger`, { params }),
 };

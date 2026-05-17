@@ -130,6 +130,7 @@ import PurchaseDepartmentProtectedRoute from './shared/PurchaseDepartmentProtect
 import PurchaseDepartmentLayout from './shared/PurchaseDepartmentLayout';
 import RequirementsPage from './modules/purchase_department/RequirementsPage';
 import OrdersPage from './modules/purchase_department/OrdersPage';
+import TrimsLedgerPage from './modules/purchase_department/TrimsLedgerPage';
 import PurchaseFlowPage from './modules/purchase_department/PurchaseFlowPage';
 
 
@@ -441,6 +442,7 @@ function App() {
         <Route path="orders" element={<OrdersPage />} />
         <Route path="orders/:id" element={<PurchaseFlowPage />} />
         <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
+        <Route path="trims-ledger" element={<TrimsLedgerPage />} />
     </Route>
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}

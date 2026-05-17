@@ -22,8 +22,11 @@ const reqLabel = (r) => {
         return parts.length ? parts.join(' · ') : 'Fabric requirement';
     }
     if (r.type === 'trim') {
-        const base = r.trim_item_name || 'Trim requirement';
-        return r.variant_size ? `${base} · Sz ${r.variant_size}` : base;
+        const parts = [r.trim_item_name || 'Trim requirement'];
+        if (r.variant_color_number) parts.push(r.variant_color_number);
+        if (r.variant_color_name)   parts.push(r.variant_color_name);
+        if (r.variant_size)         parts.push(`Sz ${r.variant_size}`);
+        return parts.join(' · ');
     }
     return 'Requirement';
 };
@@ -213,6 +216,11 @@ export default function InwardModal({
         });
         return m;
     });
+
+    // Rows the user explicitly removed from this inward. They stop rendering
+    // and their data is cleared so buildItems doesn't pick them up.
+    const [removedReqIds,    setRemovedReqIds]    = useState(new Set());
+    const [removedPoItemIds, setRemovedPoItemIds] = useState(new Set());
 
     // Truly free-form custom items (no requirement, no PO item link).
     // Shape: groups of { fabric_type | trim_item, uom, unit_price, description, lines: [...] }
@@ -547,60 +555,100 @@ export default function InwardModal({
         }
     };
 
-    // Resolve each review entry to a human-readable label/qty/unit + rolls.
+    // Map each requirement id back to its parent PO item so we can read the
+    // joined fabric / trim names from the group (the req row itself often lacks
+    // them — backend joins are on the PO item).
+    const reqIdToPoGroup = useMemo(() => {
+        const m = new Map();
+        (poItems || []).forEach(g => (g.requirements || []).forEach(r => m.set(r.id, g)));
+        return m;
+    }, [poItems]);
+
+    const labelFromGroup = (g) => {
+        if (!g) return { name: '', details: '' };
+        if (g.item_type === 'fabric') {
+            const detailParts = [];
+            if (g.fabric_color_number) detailParts.push(g.fabric_color_number);
+            if (g.fabric_color_name)   detailParts.push(g.fabric_color_name);
+            return { name: g.fabric_type_name || 'Fabric', details: detailParts.join(' · ') };
+        }
+        const detailParts = [];
+        if (g.variant_color_number) detailParts.push(g.variant_color_number);
+        if (g.variant_color_name)   detailParts.push(g.variant_color_name);
+        if (g.variant_size)         detailParts.push(`Sz ${g.variant_size}`);
+        return { name: g.trim_item_name || 'Trim', details: detailParts.join(' · ') };
+    };
+
+    // Resolve each review entry to the inward item itself — fabric type + color
+    // (with number), or trim item + variant color (with number) + size. We
+    // intentionally suppress requirement / SO context here so the review reads
+    // as "what's being received" rather than "what was requested".
     const reviewSummary = useMemo(() => {
         if (!reviewItems) return [];
         const variantPool = Object.values(variantsByTrim).flat();
         return reviewItems.map((it, idx) => {
             if (it.requirement_id != null) {
-                const req = allRequirements.find(r => r.id === it.requirement_id);
+                const g = reqIdToPoGroup.get(it.requirement_id);
+                const isFabric = g?.item_type === 'fabric';
+                const { name, details } = labelFromGroup(g);
                 return {
-                    key:   `r-${idx}`,
-                    label: req ? reqLabel(req) : `Requirement #${it.requirement_id}`,
-                    qty:   it.qty_received,
-                    unit:  req ? reqUnit(req) : (it.rolls ? 'm' : 'pcs'),
-                    rolls: it.rolls || null,
-                    sub:   req?.product_name ? `SO ${req.order_number || ''}${req.product_name ? ` · ${req.product_name}` : ''}` : null,
+                    key:     `r-${idx}`,
+                    name:    name || `Requirement #${it.requirement_id}`,
+                    details,
+                    qty:     it.qty_received,
+                    unit:    isFabric ? 'm' : (g?.uom || 'pcs'),
+                    rolls:   it.rolls || null,
                 };
             }
             if (it.purchase_order_item_id != null) {
                 const p = (poItems || []).find(x => x.id === it.purchase_order_item_id);
                 const isFabric = p?.item_type === 'fabric';
-                const label = p ? (isFabric
-                    ? `${p.fabric_type_name || 'Fabric'}${p.fabric_color_number ? ` · ${p.fabric_color_number}` : ''}${p.fabric_color_name ? ` · ${p.fabric_color_name}` : ''}`
-                    : `${p.trim_item_name || 'Trim'}${p.variant_color_number ? ` · ${p.variant_color_number}` : ''}${p.variant_color_name ? ` · ${p.variant_color_name}` : ''}${p.variant_size ? ` · Sz ${p.variant_size}` : ''}`
-                ) : `PO item #${it.purchase_order_item_id}`;
+                const { name, details } = labelFromGroup(p);
                 return {
-                    key:   `po-${idx}`,
-                    label,
-                    qty:   it.qty_received,
-                    unit:  isFabric ? 'm' : (p?.uom || 'pcs'),
-                    rolls: it.rolls || null,
-                    sub:   'Free-form (no SO)',
+                    key:     `po-${idx}`,
+                    name:    name || `PO item #${it.purchase_order_item_id}`,
+                    details,
+                    qty:     it.qty_received,
+                    unit:    isFabric ? 'm' : (p?.uom || 'pcs'),
+                    rolls:   it.rolls || null,
                 };
             }
             const isFabric = it.item_type === 'fabric';
-            let label = '';
+            let name = '';
+            let details = '';
             if (isFabric) {
                 const t = fabricTypes.find(x => String(x.id) === String(it.fabric_type_id));
                 const c = fabricColors.find(x => String(x.id) === String(it.fabric_color_id));
-                label = `${t?.name || t?.fabric_type_name || 'Fabric'}${c?.color_number ? ` · ${c.color_number}` : ''}${c?.color_name ? ` · ${c.color_name}` : ''}`;
+                name = t?.name || t?.fabric_type_name || 'Fabric';
+                const parts = [];
+                if (c?.color_number) parts.push(c.color_number);
+                if (c?.color_name)   parts.push(c.color_name);
+                details = parts.join(' · ');
             } else {
                 const v = variantPool.find(x => String(x.id) === String(it.trim_item_variant_id));
-                label = v
-                    ? `${v.color_number ? `${v.color_number} · ` : ''}${v.color_name || 'Trim'}${v.variant_size ? ` · Sz ${v.variant_size}` : ''}`
-                    : `Trim variant #${it.trim_item_variant_id}`;
+                // Find the parent trim_item name from trimItems via the variant
+                const trimParent = v ? trimItems.find(t => String(t.id) === String(v.trim_item_id)) : null;
+                name = trimParent?.name || trimParent?.item_name || 'Trim';
+                if (v) {
+                    const parts = [];
+                    if (v.color_number)  parts.push(v.color_number);
+                    if (v.color_name)    parts.push(v.color_name);
+                    if (v.variant_size)  parts.push(`Sz ${v.variant_size}`);
+                    details = parts.join(' · ');
+                } else {
+                    details = `Variant #${it.trim_item_variant_id}`;
+                }
             }
             return {
-                key:   `c-${idx}`,
-                label,
-                qty:   it.qty_received,
-                unit:  isFabric ? 'm' : 'pcs',
-                rolls: it.rolls || null,
-                sub:   'Custom (not on PO)',
+                key:     `c-${idx}`,
+                name,
+                details,
+                qty:     it.qty_received,
+                unit:    isFabric ? 'm' : 'pcs',
+                rolls:   it.rolls || null,
             };
         });
-    }, [reviewItems, allRequirements, poItems, fabricTypes, fabricColors, variantsByTrim]);
+    }, [reviewItems, reqIdToPoGroup, poItems, fabricTypes, fabricColors, variantsByTrim, trimItems]);
 
     const handleDelete = async () => {
         if (!inward) return;
@@ -651,15 +699,17 @@ export default function InwardModal({
                     {reviewItems ? (
                         <div className="space-y-3">
                             <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
-                                <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Review before saving</p>
+                                <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Review beforee saving</p>
                                 <p className="text-[11px] text-emerald-700/80 mt-0.5">{reviewSummary.length} line{reviewSummary.length !== 1 ? 's' : ''} will be {mode === 'create' ? 'recorded' : 'updated'} on GRN {grnNumber || '(auto)'} dated {receivedDate}.</p>
                             </div>
                             <div className="space-y-1.5">
                                 {reviewSummary.map(row => (
                                     <div key={row.key} className="flex items-start gap-3 bg-white border border-slate-200 rounded-xl px-3 py-2">
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-xs font-bold text-slate-800 truncate">{row.label}</p>
-                                            {row.sub && <p className="text-[10px] text-slate-500 mt-0.5">{row.sub}</p>}
+                                            <p className="text-xs font-bold text-slate-800">{row.name}</p>
+                                            {row.details && (
+                                                <p className="text-[11px] text-slate-600 mt-0.5">{row.details}</p>
+                                            )}
                                             {row.rolls && row.rolls.length > 0 && (
                                                 <ul className="mt-1 text-[10px] text-slate-500 space-y-0.5">
                                                     {row.rolls.map((r, i) => (
@@ -767,7 +817,7 @@ export default function InwardModal({
                             <p className="text-sm text-slate-400 italic">No items on this PO.</p>
                         ) : (
                         <div className="space-y-3">
-                            {(poItems || []).filter(g => (g.requirements || []).length > 0).map(group => {
+                            {(poItems || []).filter(g => (g.requirements || []).length > 0 && (g.requirements || []).some(r => !removedReqIds.has(r.id))).map(group => {
                                 const Icon = TYPE_ICON[group.item_type] || Tag;
                                 const groupLabel = group.item_type === 'fabric'
                                     ? `${group.fabric_type_name || 'Fabric'}${group.fabric_color_number ? ` · ${group.fabric_color_number}` : ''}${group.fabric_color_name ? ` · ${group.fabric_color_name}` : ''}`
@@ -826,7 +876,7 @@ export default function InwardModal({
                                         })()}
 
                                         <div className="p-2 space-y-1.5">
-                                            {(group.requirements || []).map(r => {
+                                            {(group.requirements || []).filter(r => !removedReqIds.has(r.id)).map(r => {
                                                 const isFabricReq = group.item_type === 'fabric';
                                                 const total   = reqTotal(r);
                                                 const unit    = reqUnit(r);
@@ -852,13 +902,26 @@ export default function InwardModal({
                                                                     </p>
                                                                 </div>
                                                                 {editable && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => addRollToReq(r.id)}
-                                                                        className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:bg-violet-50 border border-violet-200 px-2 py-1 rounded-md transition shrink-0"
-                                                                    >
-                                                                        <Plus size={11} /> Roll
-                                                                    </button>
+                                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => addRollToReq(r.id)}
+                                                                            className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:bg-violet-50 border border-violet-200 px-2 py-1 rounded-md transition"
+                                                                        >
+                                                                            <Plus size={11} /> Roll
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setFabricRollsByReq(prev => ({ ...prev, [r.id]: [] }));
+                                                                                setRemovedReqIds(prev => new Set(prev).add(r.id));
+                                                                            }}
+                                                                            title="Remove from this inward"
+                                                                            className="p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                                                        >
+                                                                            <Trash2 size={12} />
+                                                                        </button>
+                                                                    </div>
                                                                 )}
                                                             </div>
                                                             <div className="space-y-1">
@@ -945,6 +1008,19 @@ export default function InwardModal({
                                                             />
                                                             <p className="text-[9px] text-slate-400 text-right mt-0.5">{unit}</p>
                                                         </div>
+                                                        {editable && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setItemQty(r.id, '');
+                                                                    setRemovedReqIds(prev => new Set(prev).add(r.id));
+                                                                }}
+                                                                title="Remove from this inward"
+                                                                className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                                            >
+                                                                <Trash2 size={12} />
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 );
                                             })}
@@ -1146,7 +1222,7 @@ export default function InwardModal({
                             )}
 
                             {/* Free-form PO items (no linked requirements) */}
-                            {(poItems || []).filter(g => (g.requirements || []).length === 0).map(group => {
+                            {(poItems || []).filter(g => (g.requirements || []).length === 0 && !removedPoItemIds.has(g.id)).map(group => {
                                 const Icon = TYPE_ICON[group.item_type] || Tag;
                                 const isFabricGroup = group.item_type === 'fabric';
                                 const groupLabel = isFabricGroup
@@ -1177,13 +1253,26 @@ export default function InwardModal({
                                                     </p>
                                                 </div>
                                                 {editable && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => addRollToPoItem(group.id)}
-                                                        className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:bg-violet-50 border border-violet-200 px-2 py-1 rounded-md transition shrink-0"
-                                                    >
-                                                        <Plus size={11} /> Roll
-                                                    </button>
+                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => addRollToPoItem(group.id)}
+                                                            className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:bg-violet-50 border border-violet-200 px-2 py-1 rounded-md transition"
+                                                        >
+                                                            <Plus size={11} /> Roll
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setFreeFormFabricRolls(prev => ({ ...prev, [group.id]: [] }));
+                                                                setRemovedPoItemIds(prev => new Set(prev).add(group.id));
+                                                            }}
+                                                            title="Remove from this inward"
+                                                            className="p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                                        >
+                                                            <Trash2 size={12} />
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </div>
                                             <div className="p-2 space-y-1">
@@ -1279,6 +1368,19 @@ export default function InwardModal({
                                                     />
                                                     <p className="text-[9px] text-slate-400 text-right mt-0.5">{groupUom}</p>
                                                 </div>
+                                                {editable && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setFreeFormQty(group.id, '');
+                                                            setRemovedPoItemIds(prev => new Set(prev).add(group.id));
+                                                        }}
+                                                        title="Remove from this inward"
+                                                        className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                                    >
+                                                        <Trash2 size={12} />
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
