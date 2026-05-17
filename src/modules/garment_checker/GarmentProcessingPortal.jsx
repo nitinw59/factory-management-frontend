@@ -811,6 +811,25 @@ const AssemblyProcessingPortal = () => {
                                                     <h2 className="text-4xl font-black tracking-tighter">{garment.garment_uid}</h2>
                                                 </div>
                                                 <p className="text-slate-400 font-bold text-lg">{garment.product_name}</p>
+                                                {(garment.fabric_color_number || garment.fabric_color_name || garment.fabric_roll_id != null || garment.fabric_color_id != null) && (
+                                                    <div className="flex items-center gap-2 mt-3 flex-wrap text-[11px] font-mono">
+                                                        {(garment.fabric_color_number || garment.fabric_color_name) && (
+                                                            <span className="bg-white/10 px-2.5 py-1 rounded-lg text-white font-bold">
+                                                                {[garment.fabric_color_number, garment.fabric_color_name].filter(Boolean).join(' · ')}
+                                                            </span>
+                                                        )}
+                                                        {garment.fabric_roll_id != null && (
+                                                            <span className="bg-white/5 px-2.5 py-1 rounded-lg text-slate-400">
+                                                                Roll #{garment.fabric_roll_id}
+                                                            </span>
+                                                        )}
+                                                        {garment.fabric_color_id != null && (
+                                                            <span className="bg-white/5 px-2.5 py-1 rounded-lg text-slate-400">
+                                                                FC {garment.fabric_color_id}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="bg-white/10 px-6 py-3 rounded-2xl text-right">
                                                 <span className="block text-[10px] font-bold opacity-50 mb-1">SIZE</span>
@@ -1103,6 +1122,15 @@ const AssemblyProcessingPortal = () => {
                                                 Size {garment.size}
                                                 {garment.current_active_location && <span className="ml-2 text-indigo-400">· {garment.current_active_location}</span>}
                                             </p>
+                                            {(garment.fabric_color_number || garment.fabric_color_name || garment.fabric_roll_id != null || garment.fabric_color_id != null) && (
+                                                <p className="mt-1 text-[10px] font-mono text-slate-400 flex flex-wrap gap-x-2">
+                                                    {(garment.fabric_color_number || garment.fabric_color_name) && (
+                                                        <span className="text-slate-600 font-bold">{[garment.fabric_color_number, garment.fabric_color_name].filter(Boolean).join(' · ')}</span>
+                                                    )}
+                                                    {garment.fabric_roll_id != null && <span>· Roll #{garment.fabric_roll_id}</span>}
+                                                    {garment.fabric_color_id != null && <span>· FC {garment.fabric_color_id}</span>}
+                                                </p>
+                                            )}
                                         </div>
                                         <button onClick={() => { setGarment(null); setSelectedPiece(null); }}
                                             className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-95 transition-all ml-4 shrink-0">
