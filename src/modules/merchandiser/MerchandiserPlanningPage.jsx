@@ -660,6 +660,7 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
     const [selId,      setSelId]      = useState(null);
     const [actionMode, setActionMode] = useState(null);
     const [openReqId,  setOpenReqId]  = useState(null);
+    const [reservationsItem, setReservationsItem] = useState(null);  // null = closed; item = show its reservations modal
     const [expandAll,  setExpandAll]  = useState(false);
     const [addModal,   setAddModal]   = useState(false);
     const [editItem,   setEditItem]   = useState(null);
@@ -691,7 +692,6 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
             .finally(() => setLoadingLocal(false));
     }, [sop.id]);
 
-    console.log('Local reqs:', localReqs);
     const today = new Date(); today.setHours(0, 0, 0, 0);
 
     const days = Array.from({ length: DAYS }, (_, i) => {
@@ -1697,6 +1697,18 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                         PR {item.purchase_requirements.length}
                                                                     </span>
                                                                 )}
+                                                                {(() => {
+                                                                    const cancelled = (item.purchase_requirements || []).filter(pr => (pr.status || '').toString().toUpperCase() === 'CANCELLED');
+                                                                    if (cancelled.length === 0) return null;
+                                                                    return (
+                                                                        <span
+                                                                            title={`${cancelled.length} cancelled purchase requirement${cancelled.length === 1 ? '' : 's'} — click to view`}
+                                                                            className="text-[8px] font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5 shrink-0"
+                                                                        >
+                                                                            ✕ {cancelled.length}
+                                                                        </span>
+                                                                    );
+                                                                })()}
                                                             </div>
 
                                                             {/* Bar track */}
@@ -1785,11 +1797,14 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                                 const poCode    = pr.po_code || pr.purchase_order_code;
                                                                                 const supplier  = pr.supplier_name;
                                                                                 const expected  = pr.expected_date;
-                                                                                const statusCls = status.toUpperCase().includes('FULFIL') || status.toUpperCase().includes('RECEIV')
-                                                                                    ? 'bg-emerald-100 text-emerald-700'
-                                                                                    : status.toUpperCase().includes('ORDER') || status.toUpperCase().includes('PARTIAL')
-                                                                                        ? 'bg-amber-100 text-amber-700'
-                                                                                        : 'bg-slate-100 text-slate-600';
+                                                                                const statusUp = status.toUpperCase();
+                                                                                const statusCls = statusUp === 'CANCELLED' || statusUp === 'CANCELED'
+                                                                                    ? 'bg-red-100 text-red-700'
+                                                                                    : statusUp.includes('FULFIL') || statusUp.includes('RECEIV')
+                                                                                        ? 'bg-emerald-100 text-emerald-700'
+                                                                                        : statusUp.includes('ORDER') || statusUp.includes('PARTIAL')
+                                                                                            ? 'bg-amber-100 text-amber-700'
+                                                                                            : 'bg-slate-100 text-slate-600';
                                                                                 return (
                                                                                     <div key={prId}>
                                                                                         <button
@@ -1838,65 +1853,6 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                     </div>
                                                                 )}
 
-                                                                {/* Reservations list */}
-                                                                {(item.reservations?.length || 0) > 0 && (() => {
-                                                                    const unit = item.type === 'fabric' ? 'm' : (item.unit || 'pcs');
-                                                                    const totalReserved = item.reservations.reduce(
-                                                                        (s, rs) => s + Number(rs.meters_reserved ?? rs.quantity_reserved ?? 0),
-                                                                        0
-                                                                    );
-                                                                    return (
-                                                                        <div className="bg-white border-2 border-emerald-200 rounded-lg overflow-hidden">
-                                                                            <div className="flex items-center justify-between px-3 py-2 bg-emerald-50 border-b border-emerald-200">
-                                                                                <p className="text-sm font-bold text-emerald-800">
-                                                                                    {item.reservations.length} Reservation{item.reservations.length === 1 ? '' : 's'}
-                                                                                </p>
-                                                                                <p className="text-sm font-bold text-emerald-700 tabular-nums">
-                                                                                    {totalReserved.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit} reserved
-                                                                                </p>
-                                                                            </div>
-                                                                            <div className="divide-y divide-slate-100 max-h-48 overflow-y-auto">
-                                                                                {item.reservations.map(rs => {
-                                                                                    const reservedAmount = Number(rs.meters_reserved ?? rs.quantity_reserved ?? 0);
-                                                                                    const rollTotal      = Number(rs.roll_total_meters ?? rs.roll_total ?? 0);
-                                                                                    const rollStatus     = rs.roll_status || rs.status;
-                                                                                    const rollId         = rs.fabric_roll_id ?? rs.trim_inventory_id ?? rs.roll_id;
-                                                                                    const reservedAt     = rs.reserved_at;
-                                                                                    return (
-                                                                                        <div key={rs.id} className="flex items-center gap-3 px-3 py-2 text-xs hover:bg-slate-50">
-                                                                                            {rollId != null && (
-                                                                                                <span className="font-mono font-bold text-emerald-700 shrink-0">R-{rollId}</span>
-                                                                                            )}
-                                                                                            <div className="flex-1 min-w-0">
-                                                                                                <p className="font-bold text-slate-800 tabular-nums">
-                                                                                                    {reservedAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
-                                                                                                    {rollTotal > 0 && (
-                                                                                                        <span className="font-normal text-slate-400 ml-1">
-                                                                                                            of {rollTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
-                                                                                                        </span>
-                                                                                                    )}
-                                                                                                </p>
-                                                                                                {reservedAt && (
-                                                                                                    <p className="text-[10px] text-slate-400">Reserved {fmtD(reservedAt)}</p>
-                                                                                                )}
-                                                                                            </div>
-                                                                                            {rollStatus && (
-                                                                                                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                                                                                                    rollStatus === 'IN_STOCK'
-                                                                                                        ? 'bg-emerald-100 text-emerald-700'
-                                                                                                        : 'bg-blue-100 text-blue-700'
-                                                                                                }`}>
-                                                                                                    {String(rollStatus).replace(/_/g, ' ')}
-                                                                                                </span>
-                                                                                            )}
-                                                                                        </div>
-                                                                                    );
-                                                                                })}
-                                                                            </div>
-                                                                        </div>
-                                                                    );
-                                                                })()}
-
                                                                 {/* Red alert: trim req with no procurement option */}
                                                                 {item.type === 'trim' && item.isReq && !item.exact_variant_id && (!item.substitutes || item.substitutes.length === 0) && (
                                                                     <div className="bg-red-50 border-2 border-red-300 rounded-lg px-3 py-2.5 flex items-start gap-2">
@@ -1923,69 +1879,37 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                             )}
                                                                             {item.notes && <p className="text-[30px] leading-snug text-slate-700 italic mt-0.5">{item.notes}</p>}
                                                                         </div>
-                                                                        {/* Calculation breakdown */}
+                                                                        {/* Calculation breakdown — always 4 columns. Reserved opens the reservations modal. */}
                                                                         {item.type === 'fabric' && (() => {
-                                                                            const isCompleted    = item.status === 'completed';
-                                                                            const fullyReserved  = (item.meters_reserved || 0) >= (item.meters_required || 0);
-                                                                            const partlyReserved = (item.meters_reserved || 0) > 0 && !fullyReserved;
-
-                                                                            // Case A: completed + fully reserved → only Required + Reserved (stock/shortfall irrelevant).
-                                                                            if (isCompleted && fullyReserved) {
-                                                                                return (
-                                                                                    <div className="grid grid-cols-2 gap-2 text-center bg-white border border-emerald-200 rounded-lg p-2">
-                                                                                        <div>
-                                                                                            <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Required</p>
-                                                                                            <p className="text-3xl font-bold text-slate-900">{item.meters_required.toFixed(1)} m</p>
-                                                                                        </div>
-                                                                                        <div>
-                                                                                            <p className="text-[24px] leading-tight font-bold text-emerald-700 uppercase">Reserved</p>
-                                                                                            <p className="text-3xl font-bold text-emerald-700">{item.meters_reserved.toFixed(1)} m</p>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                );
-                                                                            }
-
-                                                                            // Case B: completed + partially reserved → Required + Reserved + In Stock + Surplus/Shortfall.
-                                                                            if (isCompleted && partlyReserved) {
-                                                                                const surplus = item.meters_available - (item.meters_required - item.meters_reserved);
-                                                                                const hasSurplus = surplus >= 0;
-                                                                                return (
-                                                                                    <div className="grid grid-cols-4 gap-2 text-center bg-white border border-amber-200 rounded-lg p-2">
-                                                                                        <div>
-                                                                                            <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Required</p>
-                                                                                            <p className="text-3xl font-bold text-slate-900">{item.meters_required.toFixed(1)} m</p>
-                                                                                        </div>
-                                                                                        <div>
-                                                                                            <p className="text-[24px] leading-tight font-bold text-amber-700 uppercase">Reserved</p>
-                                                                                            <p className="text-3xl font-bold text-amber-700">{item.meters_reserved.toFixed(1)} m</p>
-                                                                                        </div>
-                                                                                        <div>
-                                                                                            <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">In Stock</p>
-                                                                                            <p className={`text-3xl font-bold ${item.meters_available > 0 ? 'text-emerald-700' : 'text-slate-900'}`}>{item.meters_available.toFixed(1)} m</p>
-                                                                                        </div>
-                                                                                        <div>
-                                                                                            <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">{hasSurplus ? 'Surplus' : 'Shortfall'}</p>
-                                                                                            <p className={`text-3xl font-bold ${hasSurplus ? 'text-emerald-700' : 'text-red-600'}`}>
-                                                                                                {hasSurplus ? `+${surplus.toFixed(1)} m` : `−${(-surplus).toFixed(1)} m`}
-                                                                                            </p>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                );
-                                                                            }
-
-                                                                            // Default: shortfall/surplus always accounts for what's already reserved.
-                                                                            const remaining  = (item.meters_required || 0) - (item.meters_reserved || 0);
-                                                                            const surplus    = (item.meters_available || 0) - remaining;
+                                                                            const required = Number(item.meters_required || 0);
+                                                                            const reserved = Number(item.meters_reserved || 0);
+                                                                            const inStock  = Number(item.meters_available || 0);
+                                                                            const remaining  = required - reserved;
+                                                                            const surplus    = inStock - remaining;
                                                                             const hasSurplus = surplus >= 0;
+                                                                            const resCount   = item.reservations?.length || 0;
                                                                             return (
-                                                                                <div className="grid grid-cols-3 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
+                                                                                <div className="grid grid-cols-4 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
                                                                                     <div>
                                                                                         <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Required</p>
-                                                                                        <p className="text-3xl font-bold text-slate-900">{item.meters_required.toFixed(1)} m</p>
+                                                                                        <p className="text-3xl font-bold text-slate-900">{required.toFixed(1)} m</p>
                                                                                     </div>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={e => { e.stopPropagation(); setReservationsItem(item); }}
+                                                                                        title={resCount > 0 ? 'View reservations' : 'No reservations yet'}
+                                                                                        className="rounded-lg hover:bg-emerald-50 transition-colors cursor-pointer text-center px-1 py-1 -m-1"
+                                                                                    >
+                                                                                        <p className="text-[24px] leading-tight font-bold text-emerald-700 uppercase">
+                                                                                            Reserved{resCount > 0 ? <span className="ml-1 text-emerald-500">({resCount})</span> : ''}
+                                                                                        </p>
+                                                                                        <p className={`text-3xl font-bold ${reserved > 0 ? 'text-emerald-700' : 'text-slate-900'} underline decoration-dotted underline-offset-4`}>
+                                                                                            {reserved.toFixed(1)} m
+                                                                                        </p>
+                                                                                    </button>
                                                                                     <div>
                                                                                         <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">In Stock</p>
-                                                                                        <p className={`text-3xl font-bold ${item.meters_available > 0 ? 'text-emerald-700' : 'text-slate-900'}`}>{item.meters_available.toFixed(1)} m</p>
+                                                                                        <p className={`text-3xl font-bold ${inStock > 0 ? 'text-emerald-700' : 'text-slate-900'}`}>{inStock.toFixed(1)} m</p>
                                                                                     </div>
                                                                                     <div>
                                                                                         <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">{hasSurplus ? 'Surplus' : 'Shortfall'}</p>
@@ -1996,16 +1920,25 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                                 </div>
                                                                             );
                                                                         })()}
-                                                                        {item.type === 'trim' && (
+                                                                        {item.type === 'trim' && (() => {
+                                                                            const resCount = item.reservations?.length || 0;
+                                                                            return (
                                                                             <div className="grid grid-cols-4 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
                                                                                 <div>
                                                                                     <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Required</p>
                                                                                     <p className="text-3xl font-bold text-slate-900">{item.quantity_required.toLocaleString()} {item.unit}</p>
                                                                                 </div>
-                                                                                <div>
-                                                                                    <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Reserved</p>
-                                                                                    <p className={`text-3xl font-bold ${item.inStock ? 'text-emerald-700' : 'text-slate-900'}`}>{item.quantity_reserved.toLocaleString()} {item.unit}</p>
-                                                                                </div>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={e => { e.stopPropagation(); setReservationsItem(item); }}
+                                                                                    title={resCount > 0 ? 'View reservations' : 'No reservations yet'}
+                                                                                    className="rounded-lg hover:bg-emerald-50 transition-colors cursor-pointer text-center px-1 py-1 -m-1"
+                                                                                >
+                                                                                    <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">
+                                                                                        Reserved{resCount > 0 ? <span className="ml-1 text-emerald-500">({resCount})</span> : ''}
+                                                                                    </p>
+                                                                                    <p className={`text-3xl font-bold ${item.inStock ? 'text-emerald-700' : 'text-slate-900'} underline decoration-dotted underline-offset-4`}>{item.quantity_reserved.toLocaleString()} {item.unit}</p>
+                                                                                </button>
                                                                                 <div>
                                                                                     <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">In Stock</p>
                                                                                     <p className={`text-3xl font-bold ${(item.exact_variant_stock ?? 0) > 0 ? 'text-emerald-700' : 'text-slate-900'}`}>
@@ -2023,7 +1956,8 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                                     </p>
                                                                                 </div>
                                                                             </div>
-                                                                        )}
+                                                                            );
+                                                                        })()}
                                                                         {/* Substitutes for trim not in stock */}
                                                                         {item.type === 'trim' && !item.inStock && item.substitutes?.length > 0 && (
                                                                             <div className="bg-amber-50 border border-amber-100 rounded-lg p-2 space-y-1.5">
@@ -2063,17 +1997,26 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                     <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{err}</p>
                                                                 )}
 
-                                                                {/* Action buttons */}
-                                                                {actionMode !== 'req' && (
+                                                                {/* Action buttons. Buttons stay visible while there is still a shortfall,
+                                                                    even after a force-complete — items may become available again later. */}
+                                                                {actionMode !== 'req' && (() => {
+                                                                    const required     = item.type === 'fabric' ? Number(item.meters_required || 0) : Number(item.quantity_required || 0);
+                                                                    const reserved     = item.type === 'fabric' ? Number(item.meters_reserved || 0) : Number(item.quantity_reserved || 0);
+                                                                    const fullyReserved = required > 0 ? reserved >= required : true;
+                                                                    // Show the badge only when the item is completed AND there's no shortfall.
+                                                                    const showBadgeOnly = item.status === 'completed' && fullyReserved;
+                                                                    return (
                                                                     <div className="flex items-center gap-2 flex-wrap">
-                                                                        {item.status !== 'completed' ? (
+                                                                        {!showBadgeOnly ? (
                                                                             <>
-                                                                                <button
-                                                                                    onClick={() => item.isReq && item.req_id ? setReserveItem(item) : handleMarkAvailable(item)}
-                                                                                    disabled={busy}
-                                                                                    className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors">
-                                                                                    <CheckCircle2 size={13} /> Mark Available
-                                                                                </button>
+                                                                                {!fullyReserved && (
+                                                                                    <button
+                                                                                        onClick={() => item.isReq && item.req_id ? setReserveItem(item) : handleMarkAvailable(item)}
+                                                                                        disabled={busy}
+                                                                                        className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors">
+                                                                                        <CheckCircle2 size={13} /> Reserve
+                                                                                    </button>
+                                                                                )}
                                                                                 {item.isReq && (
                                                                                     <button
                                                                                         onClick={() => {
@@ -2098,6 +2041,31 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                                         {(item.purchase_requirements?.length || 0) > 0 ? 'Raise Another' : 'Raise Requirement'}
                                                                                     </button>
                                                                                 )}
+                                                                                {(() => {
+                                                                                    // Complete button — visible when reserved is fully covered OR within 10% of required.
+                                                                                    const required = item.type === 'fabric' ? Number(item.meters_required || 0) : Number(item.quantity_required || 0);
+                                                                                    const reserved = item.type === 'fabric' ? Number(item.meters_reserved || 0) : Number(item.quantity_reserved || 0);
+                                                                                    if (required <= 0) return null;
+                                                                                    const shortfall = Math.max(0, required - reserved);
+                                                                                    const withinTolerance = shortfall < required * 0.10;
+                                                                                    if (!withinTolerance) return null;
+                                                                                    const shortfallTxt = shortfall > 0
+                                                                                        ? `${shortfall.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${item.type === 'fabric' ? 'm' : (item.unit || 'pcs')} short`
+                                                                                        : 'fully reserved';
+                                                                                    return (
+                                                                                        <button
+                                                                                            onClick={async () => {
+                                                                                                if (shortfall > 0 && !window.confirm(`Mark this item as completed with ${shortfallTxt}?`)) return;
+                                                                                                try { await taApi.updateTimelineItem(item.id, { status: 'completed' }); refetchLocal(); onRefresh(); setSelId(null); }
+                                                                                                catch(e) { setErr(e?.response?.data?.error || 'Failed'); }
+                                                                                            }}
+                                                                                            disabled={busy}
+                                                                                            title={`Complete this milestone (${shortfallTxt})`}
+                                                                                            className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors">
+                                                                                            <CheckCircle2 size={13} /> Complete
+                                                                                        </button>
+                                                                                    );
+                                                                                })()}
                                                                                 {item.status !== 'delayed' && (
                                                                                     <button onClick={async () => {
                                                                                             try { await taApi.updateTimelineItem(item.id, { status: 'delayed' }); refetchLocal(); onRefresh(); }
@@ -2114,7 +2082,8 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                             </span>
                                                                         )}
                                                                     </div>
-                                                                )}
+                                                                    );
+                                                                })()}
 
                                                                 {/* Raise Requirement form */}
                                                                 {actionMode === 'req' && (
@@ -2267,6 +2236,82 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                     onSaved={() => { setAddModal(false); setEditItem(null); onRefresh(); }}
                 />
             )}
+
+            {reservationsItem && (() => {
+                const item = reservationsItem;
+                const unit = item.type === 'fabric' ? 'm' : (item.unit || 'pcs');
+                const list = item.reservations || [];
+                const total = list.reduce((s, rs) => s + Number(rs.meters_reserved ?? rs.quantity_reserved ?? 0), 0);
+                return (
+                    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setReservationsItem(null)}>
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+                                <div>
+                                    <h2 className="text-base font-black text-slate-800">
+                                        Reservations · {item.title}
+                                    </h2>
+                                    <p className="text-xs text-slate-500 mt-0.5 tabular-nums">
+                                        {list.length} reservation{list.length === 1 ? '' : 's'} · {total.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit} reserved
+                                    </p>
+                                </div>
+                                <button onClick={() => setReservationsItem(null)} className="p-1.5 hover:bg-slate-100 rounded-full transition shrink-0">
+                                    <X size={16} className="text-slate-500" />
+                                </button>
+                            </div>
+                            <div className="overflow-auto flex-1 px-5 py-4">
+                                {list.length === 0 ? (
+                                    <p className="text-sm text-slate-400 italic text-center py-8">No reservations recorded yet.</p>
+                                ) : (
+                                    <div className="divide-y divide-slate-100">
+                                        {list.map(rs => {
+                                            const reservedAmount = Number(rs.meters_reserved ?? rs.quantity_reserved ?? 0);
+                                            const rollTotal      = Number(rs.roll_total_meters ?? rs.roll_total ?? 0);
+                                            const rollStatus     = rs.roll_status || rs.status;
+                                            const rollId         = rs.fabric_roll_id ?? rs.trim_inventory_id ?? rs.roll_id;
+                                            const reservedAt     = rs.reserved_at;
+                                            return (
+                                                <div key={rs.id} className="flex items-center gap-3 px-1 py-2.5 text-xs">
+                                                    {rollId != null && (
+                                                        <span className="font-mono font-bold text-emerald-700 shrink-0">R-{rollId}</span>
+                                                    )}
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-bold text-slate-800 tabular-nums">
+                                                            {reservedAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
+                                                            {rollTotal > 0 && (
+                                                                <span className="font-normal text-slate-400 ml-1">
+                                                                    of {rollTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
+                                                                </span>
+                                                            )}
+                                                        </p>
+                                                        {reservedAt && (
+                                                            <p className="text-[10px] text-slate-400">Reserved {fmtD(reservedAt)}</p>
+                                                        )}
+                                                    </div>
+                                                    {rollStatus && (
+                                                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                                                            rollStatus === 'IN_STOCK'
+                                                                ? 'bg-emerald-100 text-emerald-700'
+                                                                : 'bg-blue-100 text-blue-700'
+                                                        }`}>
+                                                            {String(rollStatus).replace(/_/g, ' ')}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex justify-end px-5 py-3 border-t border-slate-100">
+                                <button onClick={() => setReservationsItem(null)}
+                                    className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition">
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 };
