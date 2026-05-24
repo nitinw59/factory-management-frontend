@@ -97,25 +97,32 @@ export default function ProductionCostingDashboard() {
                                     <th className="p-4">Date</th>
                                     <th className="p-4 text-center">Total Strength</th>
                                     <th className="p-4 text-center">Total Prod (Pcs)</th>
+                                    <th className="p-4 text-right text-emerald-200">Regular Cost</th>
+                                    <th className="p-4 text-right text-amber-200">OT Cost</th>
                                     <th className="p-4 text-right">Total Cost</th>
                                     <th className="p-4 text-right text-indigo-200">Cost / Piece</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200">
-                                {reports.map((dayReport) => (
+                                {reports.map((dayReport) => {
+                                    const dayRegular = (dayReport.departments || []).reduce((s, d) => s + (parseFloat(d.regular_cost) || 0), 0);
+                                    const dayOt      = (dayReport.departments || []).reduce((s, d) => s + (parseFloat(d.ot_cost) || 0), 0);
+                                    return (
                                     <React.Fragment key={dayReport.date}>
                                         <tr onClick={() => toggleDay(dayReport.date)} className={`cursor-pointer transition-colors ${expandedDays[dayReport.date] ? 'bg-indigo-50/50' : 'hover:bg-slate-50'}`}>
                                             <td className="p-4 text-slate-400">{expandedDays[dayReport.date] ? <ChevronDown size={20}/> : <ChevronRight size={20}/>}</td>
                                             <td className="p-4 font-black text-slate-800 text-base">{dayReport.date}</td>
                                             <td className="p-4 text-center font-bold text-slate-600"><Users size={14} className="inline mr-1"/>{dayReport.kpis.totalStrength}</td>
                                             <td className="p-4 text-center font-bold text-blue-600"><Package size={14} className="inline mr-1"/>{dayReport.kpis.totalPieces}</td>
+                                            <td className="p-4 text-right font-bold text-emerald-700">{formatMoney(dayRegular)}</td>
+                                            <td className="p-4 text-right font-bold text-amber-700">{dayOt > 0 ? formatMoney(dayOt) : '-'}</td>
                                             <td className="p-4 text-right font-black text-slate-800">{formatMoney(dayReport.kpis.totalCost)}</td>
                                             <td className="p-4 text-right font-black text-indigo-600 text-lg bg-indigo-50/50">₹{dayReport.kpis.costPerPiece}</td>
                                         </tr>
 
                                         {expandedDays[dayReport.date] && (
                                             <tr>
-                                                <td colSpan="6" className="p-0 bg-slate-50 border-b-2 border-indigo-100">
+                                                <td colSpan="8" className="p-0 bg-slate-50 border-b-2 border-indigo-100">
                                                     <div className="p-4 md:pl-16 md:pr-4">
                                                         {(() => {
                                                             const directDepts = dayReport.departments.filter(d => !d.is_overhead);
@@ -214,7 +221,8 @@ export default function ProductionCostingDashboard() {
                                             </tr>
                                         )}
                                     </React.Fragment>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
