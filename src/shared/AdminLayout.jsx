@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import MatrixBrand from './MatrixBrand';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LuCircleUserRound, LuLogOut, LuChevronDown, LuMenu, LuX, LuSettings, LuBuilding2 } from 'react-icons/lu';
+import { LuCircleUserRound, LuLogOut, LuChevronDown, LuMenu, LuX, LuSettings, LuBuilding2, LuChartLine, LuPackage } from 'react-icons/lu';
 
 // --- DESKTOP DROPDOWN (Popover style) ---
 const DesktopNavDropdown = ({ title, children }) => {
@@ -118,6 +118,12 @@ const AdminLayout = () => {
                   Line Config
                 </NavLink>
 
+                <DesktopNavDropdown title="Spares">
+                  <NavLink to="/admin/spares-analytics" className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                    <LuChartLine size={14} /> Spares Analytics
+                  </NavLink>
+                </DesktopNavDropdown>
+
                 <DesktopNavDropdown title="Quality">
                   <NavLink to="/admin/qc-analytics" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">QC Analytics</NavLink>
                   <NavLink to="/admin/defect-code-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Defect Code Config</NavLink>
@@ -190,6 +196,12 @@ const AdminLayout = () => {
               <NavLink to="/admin/asset-management" onClick={closeMenu} className={({ isActive }) => `block py-2 text-base font-medium ${isActive ? 'text-blue-600' : 'text-gray-700'}`}>
                 Asset Management
               </NavLink>
+
+              <MobileNavDropdown title={<span className="flex items-center gap-2"><LuPackage size={16} /> Spares</span>}>
+                <NavLink to="/admin/spares-analytics" onClick={closeMenu} className="flex items-center gap-2 py-2 text-sm text-gray-600 hover:text-blue-600">
+                  <LuChartLine size={14} /> Spares Analytics
+                </NavLink>
+              </MobileNavDropdown>
 
               <MobileNavDropdown title="Quality">
                 <NavLink to="/admin/qc-analytics" onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">QC Analytics</NavLink>

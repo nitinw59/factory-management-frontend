@@ -110,6 +110,7 @@ import TrimBillingPage from './modules/store_manager/TrimBillingPage';
 import AdminMaintenanceDashboard from './modules/admin/AdminMaintenanceDashboard';
 import MaintenanceSchedulePage from './modules/maintenance/MaintenanceSchedulePage';
 import SparePartsPage from './modules/store_manager/SparePartsPage';
+import SparesAnalyticsPage from './modules/store_manager/SparesAnalyticsPage';
 
 
 import DispatchLayout from './shared/DispatchLayout';
@@ -209,6 +210,7 @@ function App() {
           <Route path="maintenance-schedule" element={<MaintenanceSchedulePage />} />
           <Route path="company-profile" element={<CompanyProfilePage />} />
           <Route path="trim-clusters" element={<TrimClustersPage />} />
+          <Route path="spares-analytics" element={<SparesAnalyticsPage />} />
       </Route>
 
               {/* Store Manager Portal */}
@@ -230,6 +232,7 @@ function App() {
 
           <Route path="spare-parts" element={<SparePartsPage />} />
           <Route path="spare-parts-issuance" element={<SparesIssuanceDashboard />} />
+          <Route path="spares-analytics" element={<SparesAnalyticsPage />} />
           <Route path="planning" element={<MerchandiserPlanningPage />} />
           <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
         </Route>

@@ -56,5 +56,17 @@ export const sparesApi = {
     issueSpares: async (requestId, data) => {
         const response = await api.post(`/spares/requests/${requestId}/issue`, data);
         return response.data;
-    }
+    },
+
+    // --- ANALYTICS (store_manager + factory_admin) ---
+    getSparesAnalyticsSummary: (days = 30) =>
+        api.get('/spares/analytics/summary', { params: { days } }),
+    getSparesConsumption: (params) =>
+        api.get('/spares/analytics/consumption', { params }),
+    getSparesTopConsumed: (params) =>
+        api.get('/spares/analytics/top-consumed', { params }),
+    getSpareDrilldown: (spareId, params) =>
+        api.get(`/spares/${spareId}/drilldown`, { params }),
+    getSparesLedger: (params) =>
+        api.get('/spares/ledger', { params }),
 };

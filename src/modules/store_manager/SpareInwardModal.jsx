@@ -9,8 +9,10 @@ import { storeManagerApi } from '../../api/storeManagerApi';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 
 // --- SearchableDropdown (copy of UnifiedIntakeForm pattern; extract to shared in a separate PR) ---
+const DROPDOWN_HEIGHT = 280; // approx max-h-60 panel + search header
 const SearchableDropdown = ({ options = [], value, onChange, placeholder, disabled, labelKey = 'name' }) => {
     const [isOpen, setIsOpen] = useState(false);
+    const [openUp, setOpenUp] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const wrapperRef = useRef(null);
 
@@ -33,11 +35,22 @@ const SearchableDropdown = ({ options = [], value, onChange, placeholder, disabl
         setSearchTerm('');
     };
 
+    const handleToggle = () => {
+        if (disabled) return;
+        if (!isOpen && wrapperRef.current) {
+            const rect = wrapperRef.current.getBoundingClientRect();
+            const spaceBelow = window.innerHeight - rect.bottom;
+            const spaceAbove = rect.top;
+            setOpenUp(spaceBelow < DROPDOWN_HEIGHT && spaceAbove > spaceBelow);
+        }
+        setIsOpen(!isOpen);
+    };
+
     return (
         <div className="relative w-full" ref={wrapperRef}>
             <button
                 type="button"
-                onClick={() => !disabled && setIsOpen(!isOpen)}
+                onClick={handleToggle}
                 disabled={disabled}
                 className={`w-full p-2 border rounded-lg bg-white text-left flex justify-between items-center text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all ${disabled ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : 'hover:border-gray-400 border-gray-300'}`}
             >
@@ -47,7 +60,7 @@ const SearchableDropdown = ({ options = [], value, onChange, placeholder, disabl
                 <ChevronDown size={16} className="text-gray-400 shrink-0 ml-2" />
             </button>
             {isOpen && (
-                <div className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-hidden flex flex-col">
+                <div className={`absolute z-30 w-full bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-hidden flex flex-col ${openUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
                     <div className="p-2 border-b border-gray-100 bg-gray-50 sticky top-0">
                         <div className="relative">
                             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
@@ -288,24 +301,21 @@ const SpareInwardModal = ({ spares = [], prefilledPartId = null, onClose, onSucc
     );
 
     return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex justify-center items-start md:items-center p-4 overflow-y-auto" onClick={onClose}>
-            <div
-                className="bg-white rounded-xl shadow-2xl w-full max-w-4xl my-4 overflow-hidden flex flex-col"
-                onClick={e => e.stopPropagation()}
-            >
-                {/* Header */}
-                <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                        <Truck className="w-5 h-5 text-indigo-600" />
-                        <h3 className="font-bold text-gray-900 text-lg">Receive Stock — Spares</h3>
-                    </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-700 transition-colors" type="button">
-                        <X size={20} />
-                    </button>
+        <div className="fixed inset-0 z-50 bg-gray-50 flex flex-col">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-200 bg-white flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-3">
+                    <Truck className="w-5 h-5 text-indigo-600" />
+                    <h3 className="font-bold text-gray-900 text-lg">Receive Stock — Spares</h3>
                 </div>
+                <button onClick={onClose} className="text-gray-400 hover:text-gray-700 transition-colors flex items-center gap-1.5 text-sm font-medium" type="button">
+                    <X size={18} /> Close
+                </button>
+            </div>
 
-                <form onSubmit={handleSubmit} className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 12rem)' }}>
-                    <div className="p-6 space-y-5">
+            <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0">
+                <div className="flex-1 overflow-y-auto">
+                    <div className="max-w-5xl mx-auto p-6 space-y-5">
                         {/* Mode toggle */}
                         <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
                             <button
@@ -579,27 +589,27 @@ const SpareInwardModal = ({ spares = [], prefilledPartId = null, onClose, onSucc
                             </div>
                         )}
                     </div>
+                </div>
 
-                    {/* Footer */}
-                    <div className="px-6 py-4 border-t bg-gray-50 flex justify-end gap-3 sticky bottom-0">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-300 hover:bg-gray-100 rounded-lg transition-colors"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={submitDisabled}
-                            className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                        >
-                            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
-                            {submitting ? 'Submitting...' : 'Receive Stock'}
-                        </button>
-                    </div>
-                </form>
-            </div>
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-gray-200 bg-white flex justify-end gap-3 shrink-0">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-300 hover:bg-gray-100 rounded-lg transition-colors"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        disabled={submitDisabled}
+                        className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                    >
+                        {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
+                        {submitting ? 'Submitting...' : 'Receive Stock'}
+                    </button>
+                </div>
+            </form>
         </div>
     );
 };

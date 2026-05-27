@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
 // Added LuMenu for the hamburger icon
-import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX, LuCalendarClock } from 'react-icons/lu';
+import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX, LuCalendarClock, LuChartLine } from 'react-icons/lu';
 import { notificationApi } from '../api/notificationApi';
 
 // No changes to NavDropdown component
@@ -116,6 +116,9 @@ const StoreManagerLayout = () => {
                             <NavLink to="/store-manager/spare-parts-issuance" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                 <LuPackage className="mr-2" /> Spare Billing
                             </NavLink>
+                            <NavLink to="/store-manager/spares-analytics" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <LuChartLine className="mr-2" /> Spares Analytics
+                            </NavLink>
                             </NavDropdown>
                             <NavLink to="/store-manager/planning" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
                                 <LuCalendarClock className="mr-1" /> Production Planning
@@ -179,6 +182,9 @@ const StoreManagerLayout = () => {
                             </NavLink>
                             <NavLink to="/store-manager/spare-parts" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuPackage className="mr-2" /> Spare Parts
+                            </NavLink>
+                            <NavLink to="/store-manager/spares-analytics" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuChartLine className="mr-2" /> Spares Analytics
                             </NavLink>
                             <NavLink to="/store-manager/planning" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuCalendarClock className="mr-2" /> Production Planning
