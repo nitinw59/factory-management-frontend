@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { cuttingPortalApi } from '../../api/cuttingPortalApi';
-import { Save, AlertTriangle, Layers, Calculator, Loader2 } from 'lucide-react';
+import { Save, AlertTriangle, Layers, Calculator, Loader2, Lock } from 'lucide-react';
 
 const Spinner = () => <div className="flex justify-center items-center p-4"><Loader2 className="animate-spin h-6 w-6 text-blue-600" /></div>;
 
@@ -83,9 +83,26 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
 
     if (isLoading) return <Spinner />;
 
+    // EndBit re-edit guard from backend — render a distinct "locked" banner so
+    // the user understands the cut is no longer editable (rather than thinking
+    // they did something wrong).
+    const isEndBitLocked = !!error && /endBit.*(merged|consumed)/i.test(error);
+
     return (
         <div className="flex flex-col h-full max-h-[80vh]">
-            {error && <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg shrink-0">{error}</div>}
+            {error && (
+                isEndBitLocked ? (
+                    <div className="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg shrink-0 flex items-start gap-2">
+                        <Lock size={16} className="shrink-0 mt-0.5 text-amber-600" />
+                        <div>
+                            <p className="font-bold text-sm">Cut is locked</p>
+                            <p className="text-xs mt-0.5">{error} You can still cancel and re-open after the downstream batch is reset.</p>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg shrink-0">{error}</div>
+                )
+            )}
 
             <div className="flex-1 overflow-y-auto px-1 pb-2">
                 {/* Context Header */}

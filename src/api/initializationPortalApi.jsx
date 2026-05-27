@@ -34,6 +34,14 @@ export const initializationPortalApi = {
 
     getRollsReadyForNextCycle: () => api.get('/initialization-portal/rolls-ready-for-next-cycle'),
 
+    // EndBit inventory — list available + merge into a virtual fabric roll.
+    // Optional query params on the list: { fabric_type_id?, fabric_color_id?, source_batch_id? }
+    // Merge requires both endbit_ids and the sales_order_product_id the new
+    // virtual roll should be reserved for.
+    getAvailableEndBits: (params = {}) => api.get('/initialization-portal/endbits/available', { params }),
+    mergeEndBits:        (endbit_ids, sales_order_product_id) =>
+        api.post('/initialization-portal/endbits/merge', { endbit_ids, sales_order_product_id }),
+
     getInterliningTemplates: () => api.get('/initialization-portal/interlining/templates'),
     createInterliningTemplate: (templateData) => api.post('/initialization-portal/interlining/templates', templateData),
     updateInterliningTemplate: (templateId, templateData) => api.put(`/initialization-portal/interlining/templates/${templateId}`, templateData),

@@ -223,6 +223,7 @@ const CreateProductionBatchForm = () => {
 
     const prefillSalesOrderId        = searchParams.get('salesOrderId');
     const prefillSalesOrderProductId = searchParams.get('salesOrderProductId');
+    const prefillFabricRollId        = searchParams.get('prefillFabricRollId');
     const isEditMode = Boolean(batchId);
 
     const isInitPortal = location.pathname.includes('/initialization-portal');
@@ -348,7 +349,9 @@ const CreateProductionBatchForm = () => {
                     setNotes('');
                     setSelectedTemplateId('');
                     setInterliningConfirmed(false);
-                    setSelectedShellRolls([]);
+                    // Seed selection from ?prefillFabricRollId=<id> when arriving from the
+                    // EndBit-merge flow; otherwise start with no rolls selected.
+                    setSelectedShellRolls(prefillFabricRollId ? [parseInt(prefillFabricRollId, 10)] : []);
 
                     setOptions({
                         ...commonOptions,
@@ -363,7 +366,7 @@ const CreateProductionBatchForm = () => {
             } finally { setIsLoading(false); }
         };
         loadData();
-    }, [batchId, isEditMode, SIZES, prefillSalesOrderId, prefillSalesOrderProductId]);
+    }, [batchId, isEditMode, SIZES, prefillSalesOrderId, prefillSalesOrderProductId, prefillFabricRollId]);
 
     // ── 3. Derived values ─────────────────────────────────────────────────
     const productIsLocked     = !isEditMode && !!sopContext?.sales_order_product;

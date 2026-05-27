@@ -1,11 +1,13 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-    Package, Search, Plus, AlertTriangle, DollarSign, 
-    Filter, ShoppingCart, ArrowUpRight, X, Loader2 
+import {
+    Package, Search, Plus, AlertTriangle,
+    Filter, ShoppingCart, X, Loader2, Truck, CheckCircle2,
 } from 'lucide-react';
 
 import { sparesApi } from '../../api/sparesApi';
+import { useAuth } from '../../context/AuthContext';
+import SpareInwardModal from './SpareInwardModal';
 // --- SHARED COMPONENTS ---
 const Spinner = () => <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-indigo-600" /></div>;
 
@@ -87,98 +89,28 @@ const CreatePartForm = ({ categories, onSave, onCancel }) => {
     );
 };
 
-// --- SUB-COMPONENT: Restock Form ---
-const RestockForm = ({ part, onSave, onCancel }) => {
-    const [qty, setQty] = useState('');
-    const [newCost, setNewCost] = useState(part.unit_cost);
-    const [isSubmitting, setIsSubmitting] = useState(false);
-
-    // Calculate projected stats
-    const projectedQty = parseInt(part.current_stock) + (parseInt(qty) || 0);
-    const projectedCost = useMemo(() => {
-        const q = parseInt(qty) || 0;
-        const c = parseFloat(newCost) || 0;
-        if (q <= 0) return part.unit_cost;
-        // Weighted Average Formula
-        const totalValue = (part.current_stock * part.unit_cost) + (q * c);
-        return (totalValue / projectedQty).toFixed(2);
-    }, [qty, newCost, part.current_stock, part.unit_cost, projectedQty]);
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setIsSubmitting(true);
-        try {
-            await onSave({ spare_id: part.id, qty: parseInt(qty), new_unit_cost: parseFloat(newCost) });
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
-
-    return (
-        <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 flex items-center justify-between">
-                <div>
-                    <p className="text-xs font-bold text-blue-500 uppercase">Current Stock</p>
-                    <p className="text-xl font-bold text-blue-900">{part.current_stock} <span className="text-sm font-normal text-blue-700">units</span></p>
-                </div>
-                <div className="text-right">
-                    <p className="text-xs font-bold text-blue-500 uppercase">Avg Cost</p>
-                    <p className="text-xl font-bold text-blue-900">${parseFloat(part.unit_cost).toFixed(2)}</p>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Qty Received</label>
-                    <input 
-                        type="number" min="1" required autoFocus
-                        className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-green-500 font-mono text-lg" 
-                        value={qty} onChange={e => setQty(e.target.value)} 
-                    />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">New Unit Price ($)</label>
-                    <input 
-                        type="number" step="0.01" required
-                        className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-green-500 font-mono text-lg" 
-                        value={newCost} onChange={e => setNewCost(e.target.value)} 
-                    />
-                </div>
-            </div>
-
-            {/* Projection / Preview */}
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200 text-sm">
-                <span className="text-gray-600">Projected New Avg Cost:</span>
-                <span className="font-bold text-gray-800 flex items-center">
-                    ${projectedCost} 
-                    {parseFloat(projectedCost) !== parseFloat(part.unit_cost) && (
-                        <ArrowUpRight size={14} className="ml-1 text-gray-400"/>
-                    )}
-                </span>
-            </div>
-
-            <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={onCancel} className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-                <button type="submit" disabled={isSubmitting || !qty} className="px-4 py-2 text-sm font-bold text-white bg-green-600 hover:bg-green-700 rounded-lg shadow-sm disabled:opacity-70">
-                    {isSubmitting ? 'Updating...' : 'Confirm Purchase'}
-                </button>
-            </div>
-        </form>
-    );
-};
-
-
 // --- MAIN PAGE COMPONENT ---
 const SparePartsPage = () => {
+    const { user } = useAuth();
+    const isStoreManager = user?.role === 'store_manager';
+
     const [spares, setSpares] = useState([]);
     const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterCategory, setFilterCategory] = useState('');
-    
+
     // Modal States
-    const [activeModal, setActiveModal] = useState(null); // 'create', 'restock'
+    const [activeModal, setActiveModal] = useState(null); // 'create' | 'inward'
     const [selectedPart, setSelectedPart] = useState(null);
+
+    // Toast
+    const [toast, setToast] = useState(null); // { kind: 'success' | 'error', message }
+    useEffect(() => {
+        if (!toast) return undefined;
+        const t = setTimeout(() => setToast(null), 3000);
+        return () => clearTimeout(t);
+    }, [toast]);
 
     // Load Data
     const fetchData = async () => {
@@ -207,10 +139,11 @@ const SparePartsPage = () => {
         setActiveModal(null);
     };
 
-    const handleRestock = async (data) => {
-        await sparesApi.restockSparePart(data);
-        fetchData();
+    const handleInwardSuccess = (payload) => {
         setActiveModal(null);
+        setSelectedPart(null);
+        setToast({ kind: 'success', message: `Stock received${payload?.id ? ` (#${payload.id})` : ''}` });
+        fetchData();
     };
 
     // Filtering
@@ -235,12 +168,22 @@ const SparePartsPage = () => {
                         </h1>
                         <p className="text-gray-500 text-sm mt-1">Manage spare parts, stock levels, and purchases.</p>
                     </div>
-                    <button 
-                        onClick={() => setActiveModal('create')}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg shadow-md font-bold flex items-center transition-all"
-                    >
-                        <Plus size={18} className="mr-2"/> Add New Part
-                    </button>
+                    <div className="flex items-center gap-3">
+                        {isStoreManager && (
+                            <button
+                                onClick={() => { setSelectedPart(null); setActiveModal('inward'); }}
+                                className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg shadow-md font-bold flex items-center transition-all"
+                            >
+                                <Truck size={18} className="mr-2"/> Receive Stock
+                            </button>
+                        )}
+                        <button
+                            onClick={() => setActiveModal('create')}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg shadow-md font-bold flex items-center transition-all"
+                        >
+                            <Plus size={18} className="mr-2"/> Add New Part
+                        </button>
+                    </div>
                 </div>
 
                 {/* Filters */}
@@ -310,11 +253,13 @@ const SparePartsPage = () => {
                                                 <div className="text-xs text-gray-400">per unit</div>
                                             </td>
                                             <td className="px-6 py-3 text-center">
-                                                <button 
-                                                    onClick={() => { setSelectedPart(part); setActiveModal('restock'); }}
-                                                    className="bg-white border border-gray-300 text-gray-700 hover:bg-green-50 hover:text-green-700 hover:border-green-200 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center justify-center mx-auto"
+                                                <button
+                                                    onClick={() => { setSelectedPart(part); setActiveModal('inward'); }}
+                                                    disabled={!isStoreManager}
+                                                    className="bg-white border border-gray-300 text-gray-700 hover:bg-green-50 hover:text-green-700 hover:border-green-200 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center justify-center mx-auto disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:text-gray-700 disabled:hover:border-gray-300"
+                                                    title={isStoreManager ? 'Receive stock for this part' : 'Only store managers can receive stock'}
                                                 >
-                                                    <ShoppingCart size={14} className="mr-1.5"/> Purchase
+                                                    <ShoppingCart size={14} className="mr-1.5"/> Receive
                                                 </button>
                                             </td>
                                         </tr>
@@ -333,10 +278,21 @@ const SparePartsPage = () => {
                 </Modal>
             )}
 
-            {activeModal === 'restock' && selectedPart && (
-                <Modal title={`Restock: ${selectedPart.name}`} onClose={() => setActiveModal(null)}>
-                    <RestockForm part={selectedPart} onSave={handleRestock} onCancel={() => setActiveModal(null)} />
-                </Modal>
+            {activeModal === 'inward' && (
+                <SpareInwardModal
+                    spares={spares}
+                    prefilledPartId={selectedPart?.id}
+                    onClose={() => { setActiveModal(null); setSelectedPart(null); }}
+                    onSuccess={handleInwardSuccess}
+                />
+            )}
+
+            {/* Toast */}
+            {toast && (
+                <div className={`fixed bottom-4 right-4 z-[60] flex items-center gap-2 px-4 py-3 rounded-lg shadow-xl text-sm font-bold ${toast.kind === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
+                    {toast.kind === 'error' ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+                    <span>{toast.message}</span>
+                </div>
             )}
         </div>
     );

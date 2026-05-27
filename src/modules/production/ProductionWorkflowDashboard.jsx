@@ -16,6 +16,7 @@ import autoTable from 'jspdf-autotable';
 import FabricIntakeForm from '../accounts/purchase/FabricIntakeForm';
 import BatchDrilldownModal from './BatchDrilldownModal';
 import BatchDispatchModal from '../depatch_portal/BatchDispatchModal';
+import EndBitBatchModal from '../initialisation_portal/EndBitBatchModal';
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
 
@@ -142,9 +143,14 @@ const StagePipelineChip = ({ stage, onClick }) => {
 
 // ─── NODE COMPONENTS ──────────────────────────────────────────────────────────
 
-const SalesOrderNode = ({ data, x, y, poCount, onAddPO, onEditSO }) => (
+const SalesOrderNode = ({ data, x, y, poCount, onAddPO, onEditSO, onShowDetails }) => (
     <div
-        className="absolute bg-white rounded-lg shadow-sm border border-l-4 border-l-blue-500 border-slate-200 p-2.5 flex flex-col"
+        role={onShowDetails ? 'button' : undefined}
+        tabIndex={onShowDetails ? 0 : undefined}
+        onClick={onShowDetails ? () => onShowDetails(data.sales_order_id) : undefined}
+        onKeyDown={onShowDetails ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onShowDetails(data.sales_order_id); } } : undefined}
+        title={onShowDetails ? 'Click for sales order details' : undefined}
+        className={`absolute bg-white rounded-lg shadow-sm border border-l-4 border-l-blue-500 border-slate-200 p-2.5 flex flex-col ${onShowDetails ? 'cursor-pointer hover:shadow-md hover:border-blue-300 hover:bg-blue-50/30 transition-all' : ''}`}
         style={{ width: NODE_W_SO, height: NODE_H_SO, left: x, top: y }}
     >
         <div className="flex items-center gap-1.5 mb-1.5">
@@ -369,9 +375,36 @@ const CreateBatchCircleNode = ({ x, y, so, onCreateBatch }) => (
     </button>
 );
 
+// ─── CREATE END-BIT BATCH CIRCLE NODE ─────────────────────────────────────────
+// Sibling to CreateBatchCircleNode. Opens the EndBit pool modal where the user
+// merges available endbits into a virtual fabric roll for this SOP.
+const CreateEndBitBatchCircleNode = ({ x, y, so, onOpenEndBitBatch }) => (
+    <button
+        className="absolute flex flex-col items-center justify-center gap-1
+                   bg-amber-50 border-2 border-dashed border-amber-300 rounded-full
+                   hover:bg-amber-100 hover:border-amber-400 transition-colors"
+        style={{ width: NODE_W_CB, height: NODE_H_CB, left: x, top: y }}
+        onClick={e => {
+            e.stopPropagation();
+            const firstSop = so?.products?.[0] ?? null;
+            if (!firstSop) return;
+            onOpenEndBitBatch && onOpenEndBitBatch({
+                ...firstSop,
+                sales_order_id: so?.sales_order_id ?? null,
+            });
+        }}
+        title="Pool endbits from cut batches into a virtual fabric roll"
+    >
+        <Scissors size={14} className="text-amber-600" />
+        <span className="text-[9px] font-bold text-amber-700 text-center leading-tight">
+            EndBit<br />Batch
+        </span>
+    </button>
+);
+
 // ─── SOP NODE ─────────────────────────────────────────────────────────────────
 
-const SopNode = ({ data, x, y, pos = [], sopH, onAddPO, onInward }) => {
+const SopNode = ({ data, x, y, pos = [], sopH, onAddPO, onInward, onShowDetails }) => {
     const bomLinked   = data.bom_linked || !!data.bom_id;
     const colorsCount = (data.colors || []).length;
     const totalQty    = (data.colors || []).reduce((s, c) => s + (c.quantity || c.total_quantity || 0), 0);
@@ -379,8 +412,12 @@ const SopNode = ({ data, x, y, pos = [], sopH, onAddPO, onInward }) => {
 
     return (
         <div
-            className={`absolute bg-white rounded-lg shadow-sm border border-l-4 border-slate-200 p-2.5 flex flex-col
-                ${bomLinked ? 'border-l-violet-500' : 'border-l-amber-400'}`}
+            role={onShowDetails ? 'button' : undefined}
+            tabIndex={onShowDetails ? 0 : undefined}
+            onClick={onShowDetails ? () => onShowDetails({ ...data, purchase_orders: pos }) : undefined}
+            onKeyDown={onShowDetails ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onShowDetails({ ...data, purchase_orders: pos }); } } : undefined}
+            title={onShowDetails ? 'Click for product details' : undefined}
+            className={`absolute bg-white rounded-lg shadow-sm border border-l-4 border-slate-200 p-2.5 flex flex-col ${bomLinked ? 'border-l-violet-500' : 'border-l-amber-400'} ${onShowDetails ? 'cursor-pointer hover:shadow-md hover:bg-violet-50/20 transition-all' : ''}`}
             style={{ width: NODE_W_SOP, height: nodeH, left: x, top: y }}
         >
             {/* Product name + BOM badge */}
@@ -449,7 +486,7 @@ const SopNode = ({ data, x, y, pos = [], sopH, onAddPO, onInward }) => {
 
 // ─── WORKFLOW GRAPH ───────────────────────────────────────────────────────────
 
-const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders }) => {
+const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onOpenEndBitBatch, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders, onShowSODetails, onShowSopDetails }) => {
     const { nodes, connectors, height, totalWidth, totalPoCount } = useMemo(() => {
         const nodesList  = [];
         const connList   = [];
@@ -530,6 +567,9 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
                 start: { x: sopBottomX,             y: sopBottomY, side: 'bottom' },
                 end:   { x: cbX + NODE_W_CB / 2,    y: cbY,        side: 'top' },
             });
+            // EndBit-batch sibling — same row, just to the right of CreateBatch.
+            const ebX = cbX + NODE_W_CB + 12;
+            nodesList.push({ type: 'CREATE_ENDBIT_BATCH_CIRCLE', x: ebX, y: cbY });
         }
 
         // ── Batch nodes ───────────────────────────────────────────────────────
@@ -600,9 +640,10 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
                 {connectors.map((c, i) => <Connector key={i} start={c.start} end={c.end} />)}
             </svg>
             {nodes.map((node, i) => {
-                if (node.type === 'SO')                  return <SalesOrderNode       key={i} {...node} poCount={totalPoCount} onAddPO={onAddPO} onEditSO={onEditSO} />;
-                if (node.type === 'SOP')                 return <SopNode              key={i} {...node} onAddPO={onAddSopPO} onInward={onInward} />;
-                if (node.type === 'CREATE_BATCH_CIRCLE') return <CreateBatchCircleNode key={i} {...node} so={so} onCreateBatch={onCreateBatch} />;
+                if (node.type === 'SO')                  return <SalesOrderNode       key={i} {...node} poCount={totalPoCount} onAddPO={onAddPO} onEditSO={onEditSO} onShowDetails={onShowSODetails} />;
+                if (node.type === 'SOP')                 return <SopNode              key={i} {...node} onAddPO={onAddSopPO} onInward={onInward} onShowDetails={onShowSopDetails} />;
+                if (node.type === 'CREATE_BATCH_CIRCLE')         return <CreateBatchCircleNode       key={i} {...node} so={so} onCreateBatch={onCreateBatch} />;
+                if (node.type === 'CREATE_ENDBIT_BATCH_CIRCLE')  return <CreateEndBitBatchCircleNode key={i} {...node} so={so} onOpenEndBitBatch={onOpenEndBitBatch} />;
                 if (node.type === 'BATCH')               return <BatchNode            key={i} {...node} onStageClick={onStageClick} onDrilldown={onDrilldown} onTrimOrders={onTrimOrders} />;
                 if (node.type === 'DISPATCH')            return <DispatchNode         key={i} {...node} onDispatch={onDispatch} />;
                 return null;
@@ -613,7 +654,7 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
 
 // ─── TABLE ROW ────────────────────────────────────────────────────────────────
 
-const SalesOrderTableRow = ({ so, onSODetails, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders }) => {
+const SalesOrderTableRow = ({ so, onSODetails, onSopDetails, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onOpenEndBitBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders }) => {
     const [expanded, setExpanded] = useState(false);
 
     const pos         = allPosOf(so);
@@ -674,12 +715,15 @@ const SalesOrderTableRow = ({ so, onSODetails, onStageClick, onAddPO, onAddSopPO
                                 onAddPO={onAddPO ? () => onAddPO(so.sales_order_id) : null}
                                 onAddSopPO={onAddSopPO}
                                 onCreateBatch={onCreateBatch}
+                                onOpenEndBitBatch={onOpenEndBitBatch}
                                 onViewPODetails={onViewPODetails}
                                 onInward={onInward}
                                 onEditSO={onEditSO}
                                 onDrilldown={onDrilldown}
                                 onDispatch={onDispatch}
                                 onTrimOrders={onTrimOrders}
+                                onShowSODetails={onSODetails}
+                                onShowSopDetails={onSopDetails}
                             />
                         </div>
                     </td>
@@ -956,6 +1000,142 @@ const RollsAccordion = ({ rolls }) => {
                 </div>
             </div>
         </div>
+    );
+};
+
+// ─── SOP DETAILS MODAL ────────────────────────────────────────────────────────
+// Renders product-level detail from data already on the SOP record (no fetch).
+// Surfaces: BOM info, colors + qty, linked POs, linked batches.
+
+const SopDetailsModal = ({ sop, onClose, onViewPO, onViewBatch }) => {
+    if (!sop) return null;
+    const colors  = sop.colors || [];
+    const pos     = sop.purchase_orders || [];
+    const batches = sop.batches || [];
+    const totalQty = colors.reduce((s, c) => s + Number(c.quantity || c.total_quantity || 0), 0);
+    const bomLinked = sop.bom_linked || !!sop.bom_id;
+
+    return (
+        <Modal title={`Product: ${sop.product_name}`} onClose={onClose} size="max-w-4xl">
+            <div className="space-y-6">
+                {/* Summary band */}
+                <div className="bg-violet-50/50 p-5 rounded-xl border border-violet-100 grid grid-cols-2 md:grid-cols-4 gap-6 text-sm">
+                    <div>
+                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">BOM</span>
+                        {bomLinked ? (
+                            <>
+                                <p className="font-bold text-violet-700 text-base flex items-center gap-1.5"><span className="text-[10px] bg-violet-100 text-violet-700 border border-violet-200 px-1.5 py-0.5 rounded font-bold">✓ Linked</span></p>
+                                {sop.bom_name && <p className="text-xs text-gray-600 mt-1 truncate" title={sop.bom_name}>{sop.bom_name}</p>}
+                            </>
+                        ) : (
+                            <p className="font-bold text-amber-700 text-base flex items-center gap-1.5"><span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-bold">No BOM</span></p>
+                        )}
+                    </div>
+                    <div>
+                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Readiness</span>
+                        <StatusBadge status={sop.production_readiness || 'in_planning'} />
+                    </div>
+                    <div>
+                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Colors</span>
+                        <p className="font-bold text-gray-800 text-base">{colors.length}</p>
+                    </div>
+                    <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-100 text-center flex flex-col justify-center">
+                        <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Total Qty</span>
+                        <p className="font-extrabold text-emerald-600 text-xl">{totalQty.toLocaleString()} <span className="text-sm text-gray-400 font-normal">pcs</span></p>
+                    </div>
+                </div>
+
+                {/* Colors */}
+                <div>
+                    <h3 className="text-base font-bold text-gray-800 mb-3 flex items-center">
+                        <Palette size={18} className="mr-2 text-violet-500" /> Colors & Quantities
+                    </h3>
+                    {colors.length === 0 ? (
+                        <p className="text-sm text-gray-400 italic px-2">No colors configured for this product.</p>
+                    ) : (
+                        <div className="overflow-x-auto border border-gray-200 rounded-xl">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-gray-100 text-gray-600 border-b border-gray-200">
+                                    <tr>
+                                        <th className="px-4 py-2.5 font-semibold uppercase text-xs tracking-wider">Color</th>
+                                        <th className="px-4 py-2.5 font-semibold uppercase text-xs tracking-wider">Number</th>
+                                        <th className="px-4 py-2.5 font-semibold uppercase text-xs tracking-wider">Fabric</th>
+                                        <th className="px-4 py-2.5 font-semibold uppercase text-xs tracking-wider text-right w-24">Qty</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 bg-white">
+                                    {colors.map((c, i) => (
+                                        <tr key={c.id ?? i} className="hover:bg-gray-50/50">
+                                            <td className="px-4 py-3 font-bold text-gray-900">{c.color_name || '—'}</td>
+                                            <td className="px-4 py-3 text-gray-500 font-mono text-xs">{c.color_number || '—'}</td>
+                                            <td className="px-4 py-3 text-gray-600 text-xs">{c.fabric_type || c.fabric_type_name || '—'}</td>
+                                            <td className="px-4 py-3 text-right font-bold text-gray-800 tabular-nums">{Number(c.quantity || c.total_quantity || 0).toLocaleString()}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+
+                {/* Linked POs */}
+                <div>
+                    <h3 className="text-base font-bold text-gray-800 mb-3 flex items-center">
+                        <Package size={18} className="mr-2 text-amber-500" /> Purchase Orders · {pos.length}
+                    </h3>
+                    {pos.length === 0 ? (
+                        <p className="text-sm text-gray-400 italic px-2">No purchase orders linked to this product yet.</p>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {pos.map(po => (
+                                <button
+                                    key={po.po_id}
+                                    type="button"
+                                    onClick={() => onViewPO && onViewPO(po.po_id)}
+                                    className="text-left bg-amber-50/40 border border-amber-100 rounded-lg p-3 hover:bg-amber-50 hover:border-amber-300 transition-colors"
+                                >
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="font-mono text-xs font-bold text-slate-700 truncate">{po.po_code}</span>
+                                        <StatusBadge status={po.po_status} />
+                                    </div>
+                                    <p className="text-xs text-slate-500 mt-1 truncate">{po.supplier_name || 'No supplier'}</p>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Linked batches */}
+                <div>
+                    <h3 className="text-base font-bold text-gray-800 mb-3 flex items-center">
+                        <Layers size={18} className="mr-2 text-blue-500" /> Production Batches · {batches.length}
+                    </h3>
+                    {batches.length === 0 ? (
+                        <p className="text-sm text-gray-400 italic px-2">No production batches created for this product yet.</p>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {batches.map(b => (
+                                <button
+                                    key={b.batch_id}
+                                    type="button"
+                                    onClick={() => onViewBatch && onViewBatch(b.batch_id, b.batch_code)}
+                                    className="text-left bg-blue-50/40 border border-blue-100 rounded-lg p-3 hover:bg-blue-50 hover:border-blue-300 transition-colors"
+                                >
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="font-bold text-slate-700 text-sm truncate">Batch #{b.batch_id}</span>
+                                        <StatusBadge status={b.batch_status} />
+                                    </div>
+                                    <p className="text-xs text-slate-500 mt-1 truncate">
+                                        {b.batch_code || '—'}
+                                        {b.total_quantity != null && <span className="ml-1.5 text-slate-400">· {Number(b.total_quantity).toLocaleString()} pcs</span>}
+                                    </p>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </Modal>
     );
 };
 
@@ -2038,6 +2218,8 @@ const ProductionWorkflowDashboard = () => {
     const [drilldownTarget, setDrilldownTarget] = useState(null);
     const [batchDrilldown, setBatchDrilldown]   = useState(null);
     const [dispatchBatch, setDispatchBatch]     = useState(null);
+    const [endBitModalSop, setEndBitModalSop]   = useState(null);
+    const [detailsSop,     setDetailsSop]       = useState(null);
     const [inwardPO, setInwardPO]               = useState(null);
     const [trimOrdersBatch, setTrimOrdersBatch] = useState(null);
 
@@ -2214,6 +2396,8 @@ const ProductionWorkflowDashboard = () => {
                                         onAddPO={canManage ? handleAddPO : null}
                                         onAddSopPO={canManage ? (sop) => console.log('Add PO for SOP:', sop) : null}
                                         onCreateBatch={canProduction ? handleCreateBatch : null}
+                                        onOpenEndBitBatch={canProduction ? setEndBitModalSop : null}
+                                        onSopDetails={setDetailsSop}
                                         onViewPODetails={setSelectedPOId}
                                         onInward={canInward ? handleInward : null}
                                         onEditSO={canManage ? handleEditSO : null}
@@ -2241,6 +2425,10 @@ const ProductionWorkflowDashboard = () => {
             {batchDrilldown  && <BatchDrilldownModal       batchId={batchDrilldown.batchId}         batchCode={batchDrilldown.batchCode}    onClose={() => setBatchDrilldown(null)} />}
             {dispatchBatch   && <BatchDispatchModal        batchId={dispatchBatch.batchId}          batchCode={dispatchBatch.batchCode}     onClose={() => setDispatchBatch(null)} canCreateDispatch={canInward} canCloseBatch={canInward} />}
             {trimOrdersBatch && <BatchTrimOrdersModal batchId={trimOrdersBatch} onClose={() => setTrimOrdersBatch(null)} />}
+            {endBitModalSop  && <EndBitBatchModal     salesOrderProduct={endBitModalSop}       onClose={() => setEndBitModalSop(null)} />}
+            {detailsSop      && <SopDetailsModal      sop={detailsSop}                          onClose={() => setDetailsSop(null)}
+                                                       onViewPO={(poId) => { setDetailsSop(null); setSelectedPOId(poId); }}
+                                                       onViewBatch={(batchId, batchCode) => { setDetailsSop(null); setBatchDrilldown({ batchId, batchCode }); }} />}
             {inwardPO && (
                 <Modal title={`Goods Inward — ${inwardPO.po_code}`} onClose={() => setInwardPO(null)} size="max-w-4xl">
                     <FabricIntakeForm

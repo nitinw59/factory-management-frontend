@@ -79,16 +79,35 @@ export default function BaseManagerLayout({ portalName, basePath, customLinks = 
                         
                         {/* Desktop Navigation */}
                         <nav className="hidden lg:flex items-center gap-2">
-                            {/* 1. Portal Specific Links */}
+                            {/* 1. Portal Specific Links — supports both flat NavLink
+                                  items ({ to, label, icon }) and dropdown groups
+                                  ({ label, icon?, children: [...] }). Mixing is fine. */}
                             {customLinks.map((link, idx) => {
                                 const Icon = link.icon;
+                                if (Array.isArray(link.children)) {
+                                    return (
+                                        <NavDropdown
+                                            key={idx}
+                                            title={<span className="flex items-center">{Icon && <Icon className="mr-2" size={16} />}{link.label}</span>}
+                                        >
+                                            {link.children.map((child, cIdx) => {
+                                                const CIcon = child.icon;
+                                                return (
+                                                    <NavLink key={cIdx} to={child.to} className={({ isActive }) => `flex items-center px-4 py-2.5 text-sm transition-colors ${isActive ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-slate-700 hover:bg-slate-50'}`}>
+                                                        {CIcon && <CIcon className="mr-3 text-slate-400" size={16} />} {child.label}
+                                                    </NavLink>
+                                                );
+                                            })}
+                                        </NavDropdown>
+                                    );
+                                }
                                 return (
                                     <NavLink key={idx} to={link.to} className={getNavLinkClass}>
                                         {Icon && <Icon className="mr-2" size={16} />} {link.label}
                                     </NavLink>
                                 );
                             })}
-                            
+
                             {/* 2. Common Operations Dropdown */}
                             <div className="ml-4 pl-4 border-l border-slate-200">
                                 <NavDropdown title="Line Operations">
@@ -132,6 +151,23 @@ export default function BaseManagerLayout({ portalName, basePath, customLinks = 
                             <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-3">Portal Tasks</div>
                             {customLinks.map((link, idx) => {
                                 const Icon = link.icon;
+                                if (Array.isArray(link.children)) {
+                                    return (
+                                        <div key={idx} className="mt-1">
+                                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 mt-2 mb-1 flex items-center gap-1.5">
+                                                {Icon && <Icon size={12} />} {link.label}
+                                            </div>
+                                            {link.children.map((child, cIdx) => {
+                                                const CIcon = child.icon;
+                                                return (
+                                                    <NavLink key={cIdx} to={child.to} onClick={closeMobileMenu} className={getNavLinkClass}>
+                                                        {CIcon && <CIcon className="mr-3 text-indigo-500" size={18} />} {child.label}
+                                                    </NavLink>
+                                                );
+                                            })}
+                                        </div>
+                                    );
+                                }
                                 return (
                                     <NavLink key={idx} to={link.to} onClick={closeMobileMenu} className={getNavLinkClass}>
                                         {Icon && <Icon className="mr-3 text-indigo-500" size={18} />} {link.label}

@@ -1,5 +1,15 @@
 import api from '../utils/api';
 
+const buildFormData = (data, fileField, file) => {
+    const fd = new FormData();
+    Object.entries(data || {}).forEach(([k, v]) => {
+        if (v == null) return;
+        fd.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+    });
+    if (file) fd.append(fileField, file);
+    return fd;
+};
+
 export const sparesApi = {
     // --- GLOBAL STORE METHODS ---
     getAllSpares: async () => {
@@ -14,10 +24,13 @@ export const sparesApi = {
         const response = await api.post('/spares/', data);
         return response.data;
     },
-    restockSparePart: async (data) => {
-        const response = await api.post('/spares/restock', data);
-        return response.data;
-    },
+    // Spare inward (replaces the removed /spares/restock).
+    // Free-form payload: { received_date, supplier_id?, grn_number?, condition?, notes?, items: [{ spare_part_id, qty_received, unit_price?, description? }] }
+    // PO-linked payload: { purchase_order_id, received_date, grn_number?, condition?, notes?, items: [{ purchase_order_item_id, qty_received, unit_price? }] }
+    createSpareInward: (data, scanFile) =>
+        scanFile
+            ? api.post('/purchase-department/spare-inwards', buildFormData(data, 'scan', scanFile))
+            : api.post('/purchase-department/spare-inwards', data),
 
     // --- NEW: USER / MECHANIC INVENTORY METHODS ---
     
