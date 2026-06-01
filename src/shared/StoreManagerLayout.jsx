@@ -109,6 +109,10 @@ const StoreManagerLayout = () => {
 
 
 
+                            <NavLink to="/store-manager/orders" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
+                                <LuClipboardList className="mr-1" /> Orders
+                            </NavLink>
+
                               <NavDropdown title="Spares">
                             <NavLink to="/store-manager/spare-parts" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                 <LuPackage className="mr-2" /> Spare Inventory
@@ -179,6 +183,9 @@ const StoreManagerLayout = () => {
                             </NavLink> */}
                             <NavLink to="/store-manager/trim-orders" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuClipboardList className="mr-2" /> Trim Orders
+                            </NavLink>
+                            <NavLink to="/store-manager/orders" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuClipboardList className="mr-2" /> Orders
                             </NavLink>
                             <NavLink to="/store-manager/spare-parts" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuPackage className="mr-2" /> Spare Parts

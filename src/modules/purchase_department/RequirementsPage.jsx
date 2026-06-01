@@ -25,6 +25,15 @@ const STATUS_CFG = {
     CANCELLED: { cls: 'bg-slate-100 text-slate-500 border-slate-200',          label: 'Cancelled'  },
 };
 
+// Top tab strip — keys map to statusFilter; `''` means "All active" (PENDING + PO_RAISED mix).
+const STATUS_TABS = [
+    { key: 'PENDING',   label: 'New',       chip: 'bg-amber-100 text-amber-700'     },
+    { key: 'PO_RAISED', label: 'On Order',  chip: 'bg-blue-100 text-blue-700'        },
+    { key: 'FULFILLED', label: 'Fulfilled', chip: 'bg-emerald-100 text-emerald-700'  },
+    { key: 'CANCELLED', label: 'Cancelled', chip: 'bg-red-100 text-red-700'          },
+    { key: '',          label: 'All',       chip: 'bg-slate-100 text-slate-700'      },
+];
+
 const TYPE_CFG = {
     fabric: { icon: Package,  cls: 'bg-violet-100 text-violet-700', label: 'Fabric' },
     trim:   { icon: Scissors, cls: 'bg-amber-100 text-amber-700',   label: 'Trim'   },
@@ -455,6 +464,47 @@ const RequirementsPage = () => {
     const [viewingPo,    setViewingPo]      = useState(null);
     const [loadingPoCode, setLoadingPoCode] = useState(null);
     const [hideFullyOrdered, setHideFullyOrdered] = useState(true);
+    const [statusCounts, setStatusCounts] = useState({ PENDING: 0, PO_RAISED: 0, FULFILLED: 0, CANCELLED: 0, '': 0 });
+
+    // Lazy count-fetch — fires on mount and whenever the type filter changes.
+    // Pulls all statuses in parallel + custom-PO summaries so the tab counts
+    // reflect the active queue (including free-form POs aggregated into PO_RAISED).
+    useEffect(() => {
+        let cancelled = false;
+        const baseParams = {};
+        if (typeFilter) baseParams.type = typeFilter;
+        const statusList = ['PENDING', 'PO_RAISED', 'FULFILLED', 'CANCELLED'];
+        const reqPromises = statusList.map(s =>
+            purchaseDeptApi.getRequirements({ ...baseParams, status: s })
+                .then(r => (r.data?.data ?? r.data ?? []).length)
+                .catch(() => 0)
+        );
+        const customPoPromise = Promise.all(['ISSUED', 'PARTIAL_RECEIPT'].map(s =>
+            purchaseDeptApi.getOrders({ status: s })
+                .then(r => r.data?.data ?? r.data ?? [])
+                .catch(() => [])
+        )).then(arrs => {
+            const seen = new Set();
+            return arrs.flat().filter(po => {
+                if (!po || po.requirement_count !== 0) return false;
+                if (seen.has(po.id)) return false;
+                seen.add(po.id);
+                return true;
+            }).length;
+        });
+        Promise.all([...reqPromises, customPoPromise]).then(([p, po, f, c, freeForm]) => {
+            if (cancelled) return;
+            const counts = {
+                PENDING:   p,
+                PO_RAISED: po + freeForm,
+                FULFILLED: f,
+                CANCELLED: c,
+            };
+            counts[''] = counts.PENDING + counts.PO_RAISED;  // "All" = active queue (no history)
+            setStatusCounts(counts);
+        });
+        return () => { cancelled = true; };
+    }, [typeFilter, requirements.length]);
 
     const fetchRequirements = useCallback(async () => {
         setLoading(true);
@@ -462,12 +512,12 @@ const RequirementsPage = () => {
             const baseParams = {};
             if (typeFilter) baseParams.type = typeFilter;
 
-            // Grouped view always needs both PENDING and PO_RAISED to compute
-            // "needed" + "on order" bucket-level signals. The status filter
-            // chips are hidden in grouped mode, so the user is not surprised.
-            const statuses = viewMode === 'grouped'
-                ? ['PENDING', 'PO_RAISED']
-                : (statusFilter ? [statusFilter] : ['']);
+            // Status filter is now the source of truth for both views. Empty
+            // string means the "All" tab — show the active queue (PENDING +
+            // PO_RAISED side-by-side, never auto-dumping FULFILLED/CANCELLED).
+            const statuses = statusFilter
+                ? [statusFilter]
+                : ['PENDING', 'PO_RAISED'];
 
             const reqsPromise = Promise.all(statuses.map(s => {
                 const params = { ...baseParams };
@@ -476,10 +526,10 @@ const RequirementsPage = () => {
             }));
 
             // Custom POs (no SO) produce no requirement rows of their own.
-            // Two-step: list active POs (cheap summary), filter to ones with
-            // requirement_count === 0, then fetch each's full items so we can
-            // synthesize PO_RAISED-shaped rows into the bucket aggregation.
-            const customPosPromise = viewMode === 'grouped'
+            // Synthesize them only when the active tab actually shows on-order
+            // material (PO_RAISED or "All"). Skip on PENDING/FULFILLED/CANCELLED.
+            const includeFreeForm = statusFilter === '' || statusFilter === 'PO_RAISED';
+            const customPosPromise = includeFreeForm
                 ? Promise.all(['ISSUED', 'PARTIAL_RECEIPT'].map(s =>
                     purchaseDeptApi.getOrders({ status: s })
                         .then(r => r.data?.data ?? r.data ?? [])
@@ -721,11 +771,15 @@ const RequirementsPage = () => {
         });
     };
 
-    const visibleBuckets = useMemo(() => (
-        hideFullyOrdered
-            ? materialBuckets.filter(b => b.stats.pendingCount > 0)
-            : materialBuckets
-    ), [materialBuckets, hideFullyOrdered]);
+    const visibleBuckets = useMemo(() => {
+        // The "Hide fully-ordered" toggle is only meaningful under the All tab
+        // (where buckets carry both PENDING + PO_RAISED rows). When a specific
+        // status tab is active, the bucket has already been narrowed by fetch.
+        if (statusFilter === '' && hideFullyOrdered) {
+            return materialBuckets.filter(b => b.stats.pendingCount > 0);
+        }
+        return materialBuckets;
+    }, [materialBuckets, hideFullyOrdered, statusFilter]);
 
     const hiddenBucketCount = materialBuckets.length - visibleBuckets.length;
 
@@ -831,6 +885,30 @@ const RequirementsPage = () => {
                 )}
             </div>
 
+            {/* Status tabs — primary split between new (PENDING) and on-order (PO_RAISED) work. */}
+            <div className="flex items-center gap-1 border-b border-slate-200 -mb-px overflow-x-auto">
+                {STATUS_TABS.map(t => {
+                    const active = statusFilter === t.key;
+                    const count = statusCounts[t.key] ?? 0;
+                    return (
+                        <button
+                            key={t.key || 'all'}
+                            onClick={() => setStatusFilter(t.key)}
+                            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${
+                                active
+                                    ? 'border-orange-500 text-slate-900'
+                                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                            }`}
+                        >
+                            {t.label}
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${t.chip}`}>
+                                {count}
+                            </span>
+                        </button>
+                    );
+                })}
+            </div>
+
             {/* Filters */}
             <div className="flex flex-wrap items-center gap-3">
                 <div className="relative flex-1 min-w-48">
@@ -855,19 +933,6 @@ const RequirementsPage = () => {
                         </button>
                     ))}
                 </div>
-                {viewMode === 'flat' && (
-                    <div className="flex items-center gap-1.5 text-sm">
-                        {['PENDING', 'PO_RAISED', 'FULFILLED', 'CANCELLED'].map(s => (
-                            <button
-                                key={s}
-                                onClick={() => setStatusFilter(prev => prev === s ? '' : s)}
-                                className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${statusFilter === s ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                            >
-                                {STATUS_CFG[s]?.label || s}
-                            </button>
-                        ))}
-                    </div>
-                )}
                 <div className="flex items-center gap-1 text-sm bg-slate-100 rounded-lg p-0.5">
                     <button
                         onClick={() => setViewMode('grouped')}
@@ -886,16 +951,18 @@ const RequirementsPage = () => {
                 </div>
                 {viewMode === 'grouped' && materialBuckets.length > 0 && (
                     <>
-                        <button
-                            onClick={() => setHideFullyOrdered(v => !v)}
-                            className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md ${hideFullyOrdered ? 'text-slate-500 hover:bg-slate-100 hover:text-slate-700' : 'text-blue-700 bg-blue-50 hover:bg-blue-100'}`}
-                            title={hideFullyOrdered ? 'Currently hiding buckets where everything is on order' : 'Currently showing all buckets including fully ordered'}
-                        >
-                            {hideFullyOrdered ? 'Active only' : 'Including fully ordered'}
-                            {hiddenBucketCount > 0 && hideFullyOrdered && (
-                                <span className="text-[10px] font-bold text-slate-400">· {hiddenBucketCount} hidden</span>
-                            )}
-                        </button>
+                        {statusFilter === '' && (
+                            <button
+                                onClick={() => setHideFullyOrdered(v => !v)}
+                                className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md ${hideFullyOrdered ? 'text-slate-500 hover:bg-slate-100 hover:text-slate-700' : 'text-blue-700 bg-blue-50 hover:bg-blue-100'}`}
+                                title={hideFullyOrdered ? 'Currently hiding buckets where everything is on order' : 'Currently showing all buckets including fully ordered'}
+                            >
+                                {hideFullyOrdered ? 'Active only' : 'Including fully ordered'}
+                                {hiddenBucketCount > 0 && hideFullyOrdered && (
+                                    <span className="text-[10px] font-bold text-slate-400">· {hiddenBucketCount} hidden</span>
+                                )}
+                            </button>
+                        )}
                         <button
                             onClick={toggleExpandAll}
                             className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 px-2 py-1 rounded-md hover:bg-slate-100"
@@ -1016,11 +1083,11 @@ const RequirementsPage = () => {
                                             )}
                                         </div>
                                         <p className="text-xs text-slate-500 mt-0.5">
-                                            {bucket.stats.pendingCount > 0 && (
+                                            {bucket.stats.pendingCount > 0 && statusFilter !== 'PO_RAISED' && (
                                                 <span>{bucket.stats.pendingCount} pending</span>
                                             )}
-                                            {bucket.stats.onOrderCount > 0 && (
-                                                <span>{bucket.stats.pendingCount > 0 ? ' · ' : ''}<span className="text-blue-600">{bucket.stats.onOrderCount} on order</span></span>
+                                            {bucket.stats.onOrderCount > 0 && statusFilter !== 'PENDING' && (
+                                                <span>{bucket.stats.pendingCount > 0 && statusFilter !== 'PO_RAISED' ? ' · ' : ''}<span className="text-blue-600">{bucket.stats.onOrderCount} on order</span></span>
                                             )}
                                             {' · '}{bucket.stats.soCount} SO{bucket.stats.soCount !== 1 ? 's' : ''}
                                             {bucket.stats.customerCount > 1 ? ` · ${bucket.stats.customerCount} customers` : ''}

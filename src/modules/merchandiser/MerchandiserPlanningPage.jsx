@@ -3,7 +3,7 @@ import {
     Loader2, Link2, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
     AlertTriangle, CheckCircle2, Search,
     Calculator, ShoppingBag, X, Eye, Plus, Pencil,
-    ShieldCheck, ShieldOff, RotateCw, Component,
+    ShieldCheck, ShieldOff, RotateCw, Component, Calendar,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { planningApi } from '../../api/planningApi';
@@ -652,7 +652,7 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
 };
 // ─── PRODUCTION TRACKING MODAL ──────────────────────────────────────────────────
 
-const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
+const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh }) => {
     const DAYS = 60;
     const [weekOf,     setWeekOf]     = useState(() => {
         const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 7); return d;
@@ -1327,6 +1327,12 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                     <div className="min-w-0">
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                             Production Tracking · {sop.product_name}
+                            {salesOrder?.order_number && (
+                                <span className="ml-1.5 text-slate-300 normal-case">
+                                    · Order #{salesOrder.order_number}
+                                    {salesOrder.customer_name ? ` · ${salesOrder.customer_name}` : ''}
+                                </span>
+                            )}
                         </p>
                         <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                             {[
@@ -1706,6 +1712,41 @@ const ProductionTrackingModal = ({ sop, sopReqs, onClose, onRefresh }) => {
                                                                             className="text-[8px] font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5 shrink-0"
                                                                         >
                                                                             ✕ {cancelled.length}
+                                                                        </span>
+                                                                    );
+                                                                })()}
+                                                                {item.end_date && (
+                                                                    <span
+                                                                        title={`Due ${fmtD(item.end_date)}`}
+                                                                        className={`text-[8px] font-bold rounded-full px-1.5 py-0.5 shrink-0 border flex items-center gap-1 ${
+                                                                            overdue
+                                                                                ? 'bg-red-50 text-red-700 border-red-200'
+                                                                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                                                                        }`}
+                                                                    >
+                                                                        <Calendar size={8} /> {fmtD(item.end_date)}
+                                                                    </span>
+                                                                )}
+                                                                {(() => {
+                                                                    const req = item.type === 'fabric'
+                                                                        ? Number(item.meters_required || 0)
+                                                                        : Number(item.quantity_required || 0);
+                                                                    const res = item.type === 'fabric'
+                                                                        ? Number(item.meters_reserved || 0)
+                                                                        : Number(item.quantity_reserved || 0);
+                                                                    if (req <= 0) return null;
+                                                                    const pct = Math.min(100, Math.round((res / req) * 100));
+                                                                    const cls = pct >= 100
+                                                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                                        : pct > 0
+                                                                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                                                            : 'bg-slate-50 text-slate-500 border-slate-200';
+                                                                    return (
+                                                                        <span
+                                                                            title={`${res.toLocaleString()} of ${req.toLocaleString()} ${item.unit || ''} reserved (${pct}%)`}
+                                                                            className={`text-[8px] font-bold rounded-full px-1.5 py-0.5 shrink-0 border ${cls}`}
+                                                                        >
+                                                                            {res.toLocaleString()}/{req.toLocaleString()} {item.unit || ''}
                                                                         </span>
                                                                     );
                                                                 })()}
@@ -2710,7 +2751,7 @@ const RecalculateConfirmModal = ({ preview, sopName, onClose, onConfirm, busy, e
     );
 };
 
-const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onReadinessChange, onTAChange }) => {
+const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isLinking, onReadinessChange, onTAChange }) => {
     const { user } = useAuth();
     const [showPicker,       setShowPicker]       = useState(false);
     const [pickedBomId,      setPickedBomId]      = useState('');
@@ -3355,7 +3396,6 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onRe
                 const overdue = (sop.timeline || []).filter(it =>
                     it.end_date && new Date(it.end_date) < new Date() && it.status !== 'completed'
                 ).length;
-                console.log('Production tracking status:', { sop , compl, overdue, fabReqs, trimReqs });
                 const fabShort = fabReqs.filter(fr =>
                     Math.max(0, (fr.meters_required || 0) - (fr.stock_suggestion?.total_meters_available ?? 0)) > 0
                 ).length;
@@ -3367,7 +3407,15 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onRe
                             className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-50 transition-colors cursor-pointer"
                         >
                             <div className="flex items-center gap-2 flex-wrap min-w-0">
-                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Production Tracking</p>
+                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                    Production Tracking
+                                    {salesOrder?.order_number && (
+                                        <span className="ml-2 text-[10px] font-normal text-slate-400 normal-case">
+                                            · #{salesOrder.order_number}
+                                            {salesOrder.customer_name ? ` · ${salesOrder.customer_name}` : ''}
+                                        </span>
+                                    )}
+                                </p>
                                 {total > 0 && (
                                     <span className="text-[10px] font-bold bg-violet-50 text-violet-600 border border-violet-100 px-1.5 py-0.5 rounded-full">
                                         {compl}/{total} done
@@ -3397,6 +3445,7 @@ const SopCard = ({ sop, bomOptions, onLink, onUnlink, onPreview, isLinking, onRe
             {showTrackingModal && (
                 <ProductionTrackingModal
                     sop={sop}
+                    salesOrder={salesOrder}
                     sopReqs={sopReqs}
                     onClose={() => setShowTrackingModal(false)}
                     onRefresh={onTAChange}
@@ -3658,6 +3707,7 @@ const ProductionPlanningPage = () => {
                                             <SopCard
                                                 key={sop.id}
                                                 sop={sop}
+                                                salesOrder={orderDetail}
                                                 bomOptions={bomsByProduct[String(sop.product_id)] || bomsByProduct[sop.product_id] || []}
                                                 onLink={handleLink}
                                                 onUnlink={handleUnlink}

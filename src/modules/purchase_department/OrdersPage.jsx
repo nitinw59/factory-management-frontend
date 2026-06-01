@@ -163,7 +163,7 @@ const OrdersPage = () => {
                             </button>
                         )}
                         <button
-                            onClick={e => { e.stopPropagation(); navigate(`/purchase-department/orders/${order.id}`); }}
+                            onClick={e => { e.stopPropagation(); navigate(String(order.id)); }}
                             className="flex items-center gap-1.5 text-xs font-bold text-orange-600 hover:text-white hover:bg-orange-600 border border-orange-200 hover:border-orange-600 px-3 py-1.5 rounded-lg transition-colors"
                             title="Open purchase flow"
                         >
@@ -317,7 +317,7 @@ const OrdersPage = () => {
                     onCreated={(data) => {
                         setShowFreshPo(false);
                         fetchOrders();
-                        if (data?.id) navigate(`/purchase-department/orders/${data.id}`);
+                        if (data?.id) navigate(String(data.id));
                     }}
                 />
             )}

@@ -1,11 +1,12 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
     X, Loader2, AlertTriangle, ShoppingCart, Building2, Calendar, Package, Scissors, Tag,
-    CheckCircle2, XCircle, Truck, Plus, Edit3, Trash2, Save, FileText, Download,
+    CheckCircle2, XCircle, Truck, Plus, Edit3, Trash2, Save, FileText, Download, Link2,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { adminApi } from '../../api/adminApi';
 import { trimsApi } from '../../api/trimsApi';
+import { taApi } from '../../api/taApi';
 import api, { IMAGE_BASE_URL } from '../../utils/api';
 import { generatePoPdf } from './poPdfGenerator';
 
@@ -122,13 +123,14 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
                 body.fabric_type_id  = null;
                 body.fabric_color_id = null;
             }
+            let res;
             if (isEdit) {
-                await purchaseDeptApi.updateOrderItem(poId, item.itemId, body);
+                res = await purchaseDeptApi.updateOrderItem(poId, item.itemId, body);
             } else {
                 body.requirement_ids = [];
-                await purchaseDeptApi.addOrderItem(poId, body);
+                res = await purchaseDeptApi.addOrderItem(poId, body);
             }
-            onSaved?.();
+            onSaved?.(res?.data);
         } catch (e) {
             setErr(e?.response?.data?.error || e.message || 'Failed to save item.');
         } finally {
@@ -260,6 +262,46 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
     );
 }
 
+// ── Inline end_date editor for a requirement row ──────────────────────────────
+// One ta_timeline_item can back multiple requirements (when procurement is
+// split across POs), so edits are keyed by the TA item id and propagate to
+// every requirement sharing it.
+function RequirementEndDateCell({ taItem, currentValue, onSave, saving, error }) {
+    const [draft, setDraft] = useState(currentValue || '');
+    useEffect(() => { setDraft(currentValue || ''); }, [currentValue]);
+
+    if (!taItem) {
+        return (
+            <span className="text-[10px] text-slate-300 italic shrink-0" title="No T&A item linked">
+                no T&amp;A
+            </span>
+        );
+    }
+
+    const commit = () => {
+        const next = draft || null;
+        if (next === (currentValue || null)) return;
+        onSave(next);
+    };
+
+    return (
+        <span className="flex items-center gap-1 shrink-0">
+            <Calendar size={10} className={error ? 'text-red-500' : 'text-slate-400'} />
+            <input
+                type="date"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={commit}
+                disabled={saving}
+                className={`text-[10px] px-1 py-0.5 rounded border bg-white tabular-nums focus:outline-none focus:ring-1 focus:ring-orange-300 disabled:opacity-50 ${error ? 'border-red-300 text-red-700' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}
+                style={{ width: 120 }}
+                title={error || `T&A item #${taItem.id} · "${taItem.title || ''}" — changing this updates every PO fulfilling the same requirement.`}
+            />
+            {saving && <Loader2 size={10} className="animate-spin text-orange-500" />}
+        </span>
+    );
+}
+
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 export default function PoDetailModal({ po, onClose, onUpdated }) {
@@ -268,6 +310,126 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
     const [message, setMessage] = useState(null);
     const [editingItemId, setEditingItemId] = useState(null);  // itemId being edited
     const [adding, setAdding] = useState(false);
+
+    // Per-TA-item end_date overrides. Once the user edits a date here, we keep
+    // the change in local state so the row reflects it even without refetching
+    // the PO; keyed by ta_timeline_item.id since one TA item can back many PRs.
+    const [endDateOverrides, setEndDateOverrides] = useState({});
+    const [savingTaIds,      setSavingTaIds]      = useState(new Set());
+    const [endDateErrors,    setEndDateErrors]    = useState({});
+
+    const handleSaveEndDate = useCallback(async (taId, value) => {
+        setSavingTaIds(prev => { const n = new Set(prev); n.add(taId); return n; });
+        setEndDateErrors(prev => { const n = { ...prev }; delete n[taId]; return n; });
+        try {
+            await taApi.updateTimelineItem(taId, { end_date: value });
+            setEndDateOverrides(prev => ({ ...prev, [taId]: value }));
+        } catch (e) {
+            setEndDateErrors(prev => ({ ...prev, [taId]: e.response?.data?.error || e.message || 'Save failed' }));
+        } finally {
+            setSavingTaIds(prev => { const n = new Set(prev); n.delete(taId); return n; });
+        }
+    }, []);
+
+    const effectiveEndDate = (req) => {
+        const ta = req?.ta_timeline_item;
+        if (!ta) return null;
+        return ta.id in endDateOverrides ? endDateOverrides[ta.id] : (ta.end_date || null);
+    };
+
+    // ── Matching PRs cascade ────────────────────────────────────────────────
+    // For each line item on this PO, find unattached (PENDING) PRs in the
+    // system that target the same variant / fabric_type+color. Editing the
+    // line-item's ETA propagates the date to every matched PR's TA item.
+    const [pendingPrs,         setPendingPrs]         = useState([]);
+    const [pendingPrsLoading,  setPendingPrsLoading]  = useState(true);
+    const [lineItemDates,      setLineItemDates]      = useState({});  // { [poItemId]: 'YYYY-MM-DD' | '' }
+    const [lineItemSaving,     setLineItemSaving]     = useState(new Set());
+    const [lineItemErrors,     setLineItemErrors]     = useState({});  // { [poItemId]: string }
+    const [expandedMatched,    setExpandedMatched]    = useState(new Set());
+
+    useEffect(() => {
+        let cancelled = false;
+        setPendingPrsLoading(true);
+        purchaseDeptApi.getRequirements({ status: 'PENDING' })
+            .then(r => {
+                if (cancelled) return;
+                setPendingPrs(r.data?.data ?? r.data ?? []);
+            })
+            .catch(() => { if (!cancelled) setPendingPrs([]); })
+            .finally(() => { if (!cancelled) setPendingPrsLoading(false); });
+        return () => { cancelled = true; };
+    }, []);
+
+    // Build a lookup: poItemId -> matched PRs (only those with a ta_timeline_item)
+    const matchedPrsByItem = useMemo(() => {
+        const out = {};
+        (po.items || []).forEach(i => {
+            const matches = pendingPrs.filter(pr => {
+                if (!pr.ta_timeline_item) return false;
+                if (i.item_type === 'fabric') {
+                    return pr.type === 'fabric'
+                        && String(pr.fabric_type_id) === String(i.fabric_type_id)
+                        && String(pr.fabric_color_id) === String(i.fabric_color_id);
+                }
+                if (i.item_type === 'trim') {
+                    return pr.type === 'trim'
+                        && String(pr.trim_item_variant_id) === String(i.trim_item_variant_id);
+                }
+                return false;
+            });
+            out[i.id] = matches;
+        });
+        return out;
+    }, [po.items, pendingPrs]);
+
+    // Default each line item's date editor to po.expected_delivery_date once
+    // the PO loads. Don't overwrite if user already typed something.
+    useEffect(() => {
+        if (!po.expected_delivery_date) return;
+        const isoDefault = String(po.expected_delivery_date).slice(0, 10);
+        setLineItemDates(prev => {
+            const next = { ...prev };
+            (po.items || []).forEach(i => {
+                if (next[i.id] === undefined) next[i.id] = isoDefault;
+            });
+            return next;
+        });
+    }, [po.items, po.expected_delivery_date]);
+
+    const toggleExpandedMatched = (itemId) => {
+        setExpandedMatched(prev => {
+            const next = new Set(prev);
+            if (next.has(itemId)) next.delete(itemId); else next.add(itemId);
+            return next;
+        });
+    };
+
+    const handleApplyToMatched = useCallback(async (poItemId) => {
+        const matches = matchedPrsByItem[poItemId] || [];
+        const date = lineItemDates[poItemId] || null;
+        // De-dupe by ta_timeline_item.id since one TA item can back many PRs.
+        const taIds = Array.from(new Set(matches.map(m => m.ta_timeline_item?.id).filter(Boolean)));
+        if (taIds.length === 0) {
+            setLineItemErrors(prev => ({ ...prev, [poItemId]: 'No matching PRs with T&A items.' }));
+            return;
+        }
+        setLineItemSaving(prev => { const n = new Set(prev); n.add(poItemId); return n; });
+        setLineItemErrors(prev => { const n = { ...prev }; delete n[poItemId]; return n; });
+        try {
+            await Promise.all(taIds.map(id => taApi.updateTimelineItem(id, { end_date: date })));
+            // Seed overrides so the on-screen rows immediately reflect the new date.
+            setEndDateOverrides(prev => {
+                const n = { ...prev };
+                taIds.forEach(id => { n[id] = date; });
+                return n;
+            });
+        } catch (e) {
+            setLineItemErrors(prev => ({ ...prev, [poItemId]: e.response?.data?.error || e.message || 'Bulk update failed' }));
+        } finally {
+            setLineItemSaving(prev => { const n = new Set(prev); n.delete(poItemId); return n; });
+        }
+    }, [matchedPrsByItem, lineItemDates]);
 
     // PO document generation + history
     const [documents,        setDocuments]        = useState([]);
@@ -402,10 +564,30 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
         setBusy(true); setErr(null); setMessage(null);
         try {
             const res = await purchaseDeptApi.updateOrderStatus(po.id, newStatus);
-            setMessage(res.data?.message || `Status updated to ${newStatus}.`);
+            const base = res.data?.message || `Status updated to ${newStatus}.`;
+            const linked = res.data?.auto_linked?.count || 0;
+            setMessage(linked > 0
+                ? `${base} ${linked} pending requirement${linked === 1 ? '' : 's'} auto-linked.`
+                : base);
             onUpdated?.(newStatus);
         } catch (e) {
             setErr(e?.response?.data?.error || 'Failed to update status.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const handleAutoLinkRescan = async () => {
+        setBusy(true); setErr(null); setMessage(null);
+        try {
+            const res = await purchaseDeptApi.autoLinkPRs(po.id);
+            const linked = res.data?.auto_linked?.count || 0;
+            setMessage(linked > 0
+                ? `Re-linked ${linked} pending requirement${linked === 1 ? '' : 's'}.`
+                : 'No matching pending requirements found.');
+            if (linked > 0) onUpdated?.();
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Re-link failed.');
         } finally {
             setBusy(false);
         }
@@ -507,7 +689,14 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                                 <ItemEditor
                                     poId={po.id}
                                     onCancel={() => setAdding(false)}
-                                    onSaved={() => { setAdding(false); onUpdated?.(); }}
+                                    onSaved={(data) => {
+                                        setAdding(false);
+                                        const linked = data?.auto_linked?.count || 0;
+                                        if (linked > 0) {
+                                            setMessage(`Item added. ${linked} pending requirement${linked === 1 ? '' : 's'} auto-linked.`);
+                                        }
+                                        onUpdated?.();
+                                    }}
                                 />
                             </div>
                         )}
@@ -586,23 +775,112 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
 
                                         {/* Linked requirements (sub-list) */}
                                         {it.requirements.length > 0 && (
-                                            <div className="pl-6 mt-2 space-y-0.5">
+                                            <div className="pl-6 mt-2 space-y-1">
                                                 {it.requirements.map(r => {
                                                     const qty = parseFloat(r.meters_required ?? r.quantity_required ?? 0);
                                                     const unit = r.unit_of_measure || r.trim_uom || (r.type === 'fabric' ? 'm' : 'pcs');
+                                                    const ta = r.ta_timeline_item;
                                                     return (
-                                                        <div key={r.id} className="flex items-center justify-between text-[10px] text-slate-500">
-                                                            <span className="truncate">
+                                                        <div key={r.id} className="flex items-center justify-between gap-2 text-[10px] text-slate-500">
+                                                            <span className="truncate min-w-0">
                                                                 {r.product_name || `req #${r.id}`}
                                                                 {r.is_substitute === true ? ` · 🔄 ${r.fabric_color_name || 'planned'}${r.fabric_color_number ? ` · ${r.fabric_color_number}` : ''} → ${r.variant_color_name || 'variant'}${r.variant_color_number ? ` · ${r.variant_color_number}` : ''}` : ''}
                                                                 {r.urgency ? ` · ${r.urgency}` : ''}
                                                             </span>
-                                                            <span className="shrink-0 ml-2 tabular-nums">{qty.toLocaleString()} {unit}</span>
+                                                            <RequirementEndDateCell
+                                                                taItem={ta}
+                                                                currentValue={effectiveEndDate(r)}
+                                                                onSave={(value) => handleSaveEndDate(ta.id, value)}
+                                                                saving={ta ? savingTaIds.has(ta.id) : false}
+                                                                error={ta ? endDateErrors[ta.id] : null}
+                                                            />
+                                                            <span className="shrink-0 tabular-nums">{qty.toLocaleString()} {unit}</span>
                                                         </div>
                                                     );
                                                 })}
                                             </div>
                                         )}
+
+                                        {/* PO ETA → matching PRs cascade */}
+                                        {(() => {
+                                            const matched = matchedPrsByItem[it.itemId] || [];
+                                            const date = lineItemDates[it.itemId] ?? '';
+                                            const saving = lineItemSaving.has(it.itemId);
+                                            const expanded = expandedMatched.has(it.itemId);
+                                            const error = lineItemErrors[it.itemId];
+                                            // Hide the panel only if backend gave us a definitive empty list AND it's still loading isn't the case.
+                                            if (pendingPrsLoading) {
+                                                return (
+                                                    <div className="pl-6 mt-2 text-[10px] text-slate-400 italic flex items-center gap-1">
+                                                        <Loader2 size={10} className="animate-spin" /> Scanning unattached PRs…
+                                                    </div>
+                                                );
+                                            }
+                                            if (matched.length === 0) return null;
+                                            return (
+                                                <div className="pl-6 mt-2 border-t border-slate-100 pt-2 space-y-1.5">
+                                                    <div className="flex items-center justify-between gap-2 text-[10px]">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => toggleExpandedMatched(it.itemId)}
+                                                            className="flex items-center gap-1 font-bold text-slate-600 hover:text-orange-600 transition-colors"
+                                                        >
+                                                            <Calendar size={11} />
+                                                            Apply ETA to {matched.length} matching PR{matched.length === 1 ? '' : 's'}
+                                                            <span className="text-slate-400 font-normal">{expanded ? '▾' : '▸'}</span>
+                                                        </button>
+                                                        <span className="flex items-center gap-1.5 shrink-0">
+                                                            <input
+                                                                type="date"
+                                                                value={date}
+                                                                onChange={(e) => setLineItemDates(prev => ({ ...prev, [it.itemId]: e.target.value }))}
+                                                                disabled={saving}
+                                                                className="text-[10px] px-1 py-0.5 rounded border bg-white tabular-nums focus:outline-none focus:ring-1 focus:ring-orange-300 disabled:opacity-50 border-slate-200 text-slate-700 hover:border-slate-300"
+                                                                style={{ width: 120 }}
+                                                                title="Default = PO expected delivery date; edit to commit a different ETA to all matching PRs"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleApplyToMatched(it.itemId)}
+                                                                disabled={saving || !date}
+                                                                className="flex items-center gap-1 text-[10px] font-bold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-40 px-2 py-0.5 rounded shadow-sm"
+                                                                title={date ? `Set end_date = ${date} on all matching PRs' T&A items` : 'Pick a date first'}
+                                                            >
+                                                                {saving ? <Loader2 size={10} className="animate-spin" /> : <Save size={10} />}
+                                                                Apply
+                                                            </button>
+                                                        </span>
+                                                    </div>
+                                                    {error && (
+                                                        <div className="text-[10px] text-red-600 flex items-center gap-1">
+                                                            <AlertTriangle size={10} /> {error}
+                                                        </div>
+                                                    )}
+                                                    {expanded && (
+                                                        <div className="space-y-0.5 text-[10px] text-slate-500">
+                                                            {matched.map(pr => {
+                                                                const ta = pr.ta_timeline_item;
+                                                                const current = ta?.id != null && ta.id in endDateOverrides
+                                                                    ? endDateOverrides[ta.id]
+                                                                    : (ta?.end_date || null);
+                                                                return (
+                                                                    <div key={pr.id} className="flex items-center justify-between gap-2 bg-slate-50 px-2 py-0.5 rounded">
+                                                                        <span className="truncate min-w-0">
+                                                                            PR #{pr.id}
+                                                                            {pr.product_name ? ` · ${pr.product_name}` : ''}
+                                                                            {pr.urgency ? ` · ${pr.urgency}` : ''}
+                                                                        </span>
+                                                                        <span className="shrink-0 text-slate-400 tabular-nums">
+                                                                            current: {current ? fmtDate(current) : '—'}
+                                                                        </span>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 );
                             })}
@@ -738,6 +1016,17 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                         >
                             Close
                         </button>
+                        {(po.status === 'ISSUED' || po.status === 'PARTIAL_RECEIPT') && (
+                            <button
+                                onClick={handleAutoLinkRescan}
+                                disabled={busy}
+                                className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-lg disabled:opacity-40 transition"
+                                title="Find pending requirements matching this PO's line items and attach them"
+                            >
+                                {busy ? <Loader2 size={12} className="animate-spin" /> : <Link2 size={12} />}
+                                Re-link matching PRs
+                            </button>
+                        )}
                         {next.map(s => {
                             const a = STATUS_ACTIONS[s];
                             if (!a) return null;

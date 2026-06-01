@@ -24,6 +24,7 @@ export const purchaseDeptApi = {
     getOrderById: (id) => api.get(`/purchase-department/orders/${id}`),
     createOrder: (data) => api.post('/purchase-department/orders', data),
     updateOrderStatus: (id, status) => api.patch(`/purchase-department/orders/${id}/status`, { status }),
+    autoLinkPRs: (id) => api.post(`/purchase-department/orders/${id}/auto-link-prs`),
 
     // Inwards
     getInwards: (poId) => api.get(`/purchase-department/orders/${poId}/inwards`),

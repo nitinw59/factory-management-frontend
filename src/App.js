@@ -233,6 +233,8 @@ function App() {
           <Route path="spare-parts" element={<SparePartsPage />} />
           <Route path="spare-parts-issuance" element={<SparesIssuanceDashboard />} />
           <Route path="spares-analytics" element={<SparesAnalyticsPage />} />
+          <Route path="orders" element={<OrdersPage />} />
+          <Route path="orders/:id" element={<PurchaseFlowPage />} />
           <Route path="planning" element={<MerchandiserPlanningPage />} />
           <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
         </Route>
