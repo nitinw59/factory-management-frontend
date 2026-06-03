@@ -33,6 +33,7 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
     const [supplierId,     setSupplierId]     = useState('');
     const [deliveryDate,   setDeliveryDate]   = useState('');
     const [salesOrderId,   setSalesOrderId]   = useState('');
+    const [notes,          setNotes]          = useState('');
     const [groups,         setGroups]         = useState([blankFabricGroup()]);
     const [suppliers,      setSuppliers]      = useState([]);
     const [trimItems,      setTrimItems]      = useState([]);
@@ -159,6 +160,7 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                 supplier_id:            supplierId   ? parseInt(supplierId, 10)   : null,
                 expected_delivery_date: deliveryDate || null,
                 sales_order_id:         salesOrderId ? parseInt(salesOrderId, 10) : null,
+                notes:                  notes.trim() || null,
                 items:                  flat,
             };
             const res = await purchaseDeptApi.createOrder(payload);
@@ -237,6 +239,20 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                                 className="w-full mt-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-orange-400"
                             />
                         </div>
+                    </div>
+
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                            <span>Notes (optional)</span>
+                            <span className="text-slate-300 normal-case">{notes.length}/2000</span>
+                        </label>
+                        <textarea
+                            value={notes}
+                            onChange={e => { if (e.target.value.length <= 2000) setNotes(e.target.value); }}
+                            rows={2}
+                            placeholder="Delivery instructions, vendor remarks, special handling…"
+                            className="w-full mt-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-orange-400 resize-y"
+                        />
                     </div>
 
                     {/* Group cards */}

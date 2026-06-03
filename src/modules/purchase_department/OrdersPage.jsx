@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Loader2, PackageCheck, ChevronDown, ChevronUp,
-    CheckCircle2, Clock, AlertTriangle, GitBranch, Plus, Search, Inbox,
+    CheckCircle2, Clock, AlertTriangle, GitBranch, Plus, Search, Inbox, StickyNote,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import CreateFreshPoModal from './CreateFreshPoModal';
@@ -135,6 +135,14 @@ const OrdersPage = () => {
                             {isOverdue && (
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
                                     Overdue
+                                </span>
+                            )}
+                            {order.notes && (
+                                <span
+                                    title={order.notes}
+                                    className="text-amber-600 inline-flex items-center"
+                                >
+                                    <StickyNote size={12} />
                                 </span>
                             )}
                         </div>

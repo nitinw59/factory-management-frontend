@@ -47,8 +47,19 @@ const transcodeToPng = (dataUrl) => new Promise(resolve => {
 const loadImage = async (url) => {
     const abs = resolveAssetUrl(url);
     if (!abs) return null;
+    return fetchImage(abs);
+};
+
+// Load an image from the frontend's own origin (e.g. `/matrix_logo.png` in /public).
+// Skips the backend asset-url resolution.
+const loadPublicImage = async (path) => {
+    if (!path) return null;
+    return fetchImage(path);
+};
+
+const fetchImage = async (url) => {
     try {
-        const res = await fetch(abs);
+        const res = await fetch(url);
         if (!res.ok) return null;
         const blob = await res.blob();
         const mime = (blob.type || '').toLowerCase();
@@ -81,9 +92,12 @@ export async function generatePoPdf({ po, company, version = 1 }) {
     const muted  = [100, 116, 139];   // slate-500
     const line   = [203, 213, 225];   // slate-300
 
-    // Preload images (logo + signature + seal). None of these is required.
+    // Preload images (logo + signature + seal). Logo defaults to the in-repo
+    // matrix_logo.png in /public when the company hasn't uploaded a custom one.
     const [logoImg, signatureImg, sealImg] = await Promise.all([
-        loadImage(company?.logo_url),
+        company?.logo_url
+            ? loadImage(company.logo_url)
+            : loadPublicImage('/matrix_logo.png'),
         loadImage(company?.signature_url),
         loadImage(company?.seal_url),
     ]);
@@ -136,20 +150,39 @@ export async function generatePoPdf({ po, company, version = 1 }) {
     doc.setFontSize(9);
     doc.setTextColor(...muted);
     const metaRows = [
-        ['PO Number',      po.po_code || `PO-${po.id}`],
-        ['PO Date',        fmtDate(po.created_at)],
-        ['Expected',       fmtDate(po.expected_delivery_date)],
-        ['Status',         (po.status || '').replace(/_/g, ' ')],
+        { k: 'PO Number', v: po.po_code || `PO-${po.id}`, highlight: false },
+        { k: 'PO Date',   v: fmtDate(po.created_at), highlight: false },
+        { k: 'Expected',  v: fmtDate(po.expected_delivery_date), highlight: true },
+        { k: 'Status',    v: (po.status || '').replace(/_/g, ' '), highlight: false },
     ];
     let metaY = y + 32;
-    metaRows.forEach(([k, v]) => {
-        doc.setTextColor(...muted);
-        doc.text(`${k}:`, COL_R - 130, metaY);
-        doc.setTextColor(...accent);
-        doc.setFont('helvetica', 'bold');
-        doc.text(String(v ?? '—'), COL_R, metaY, { align: 'right' });
-        doc.setFont('helvetica', 'normal');
-        metaY += 12;
+    metaRows.forEach(({ k, v, highlight }) => {
+        if (highlight) {
+            // Amber-tinted band behind the row to draw the eye to the expected date.
+            const bandX = COL_R - 152;
+            const bandW = 152;
+            doc.setFillColor(254, 243, 199);   // amber-100
+            doc.setDrawColor(252, 211, 77);    // amber-300
+            doc.setLineWidth(0.4);
+            doc.roundedRect(bandX, metaY - 9, bandW, 14, 2, 2, 'FD');
+            doc.setTextColor(146, 64, 14);     // amber-800
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8.5);
+            doc.text(`${k}:`, COL_R - 130, metaY);
+            doc.setFontSize(10);
+            doc.text(String(v ?? '—'), COL_R - 4, metaY, { align: 'right' });
+            doc.setFontSize(9);
+            doc.setFont('helvetica', 'normal');
+            metaY += 16;
+        } else {
+            doc.setTextColor(...muted);
+            doc.text(`${k}:`, COL_R - 130, metaY);
+            doc.setTextColor(...accent);
+            doc.setFont('helvetica', 'bold');
+            doc.text(String(v ?? '—'), COL_R, metaY, { align: 'right' });
+            doc.setFont('helvetica', 'normal');
+            metaY += 12;
+        }
     });
 
     y = Math.max(headerStartY + 90, metaY, idTextY) + 6;
@@ -243,6 +276,40 @@ export async function generatePoPdf({ po, company, version = 1 }) {
     const vendorH  = drawBox('VENDOR',  MARGIN,  vendorEntries);
     const shipToH  = drawBox('SHIP TO', shipToX, shipToEntries);
     y = boxStartY + Math.max(vendorH, shipToH) + 16;
+
+    // ── Notes block (optional) ───────────────────────────────────────────────
+    if (po.notes && String(po.notes).trim()) {
+        const noteText = String(po.notes).trim();
+        const noteWidth = PAGE_W - MARGIN * 2;
+        const innerPad = 8;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        const lines = doc.splitTextToSize(noteText, noteWidth - innerPad * 2);
+        const labelHeight = 14;
+        const lineHeight = 11;
+        const boxHeight = labelHeight + lines.length * lineHeight + innerPad;
+
+        doc.setFillColor(252, 247, 230);   // very light amber
+        doc.setDrawColor(...line);
+        doc.setLineWidth(0.4);
+        doc.rect(MARGIN, y, noteWidth, boxHeight, 'FD');
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(...muted);
+        doc.text('NOTES', MARGIN + innerPad, y + 10);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(...accent);
+        let lineY = y + labelHeight + 4;
+        lines.forEach(ln => {
+            doc.text(ln, MARGIN + innerPad, lineY);
+            lineY += lineHeight;
+        });
+
+        y += boxHeight + 14;
+    }
 
     // ── Items table ──────────────────────────────────────────────────────────
     const items = po.items || [];
@@ -409,34 +476,41 @@ export async function generatePoPdf({ po, company, version = 1 }) {
         termsY += 11;
     });
 
-    let bankY = y + 16;
-    const bankRows = [
-        company?.bank_account_holder && ['Account Holder', company.bank_account_holder],
-        company?.bank_name           && ['Bank',           company.bank_name],
-        company?.bank_branch         && ['Branch',         company.bank_branch],
-        company?.bank_account_no     && ['Account No.',    company.bank_account_no],
-        company?.bank_ifsc           && ['IFSC',           company.bank_ifsc],
-        company?.upi_id              && ['UPI',            company.upi_id],
-    ].filter(Boolean);
-    if (bankRows.length === 0) {
-        doc.setTextColor(...muted);
+    // REMIT TO — company identity + address (no bank details on a PO).
+    let remitY = y + 16;
+    const remitLines = [];
+    if (company?.legal_name)    remitLines.push({ text: company.legal_name, bold: true });
+    if (company?.address_line1) remitLines.push({ text: company.address_line1 });
+    if (company?.address_line2) remitLines.push({ text: company.address_line2 });
+    const remitCityLine = [company?.city, company?.state, company?.pin_code].filter(Boolean).join(' ');
+    if (remitCityLine) {
+        remitLines.push({ text: `${remitCityLine}${company?.country ? `, ${company.country}` : ''}` });
+    }
+    const remitContact = [company?.phone, company?.email].filter(Boolean).join('  ·  ');
+    if (remitContact)   remitLines.push({ text: remitContact });
+    if (company?.gstin) remitLines.push({ text: `GSTIN: ${company.gstin}` });
+    if (company?.pan)   remitLines.push({ text: `PAN: ${company.pan}` });
+
+    if (remitLines.length === 0) {
         doc.setFont('helvetica', 'italic');
         doc.setFontSize(8.5);
-        doc.text('Bank details on request.', MARGIN + colW + 12, bankY);
+        doc.setTextColor(...muted);
+        doc.text('Remit-to details on request.', MARGIN + colW + 12, remitY);
+        remitY += 12;
     } else {
-        bankRows.forEach(([k, v]) => {
-            doc.setFont('helvetica', 'normal');
+        const remitMaxWidth = COL_R - (MARGIN + colW + 12);
+        remitLines.forEach(({ text, bold }) => {
+            doc.setFont('helvetica', bold ? 'bold' : 'normal');
             doc.setFontSize(8.5);
-            doc.setTextColor(...muted);
-            doc.text(`${k}:`, MARGIN + colW + 12, bankY);
-            doc.setFont('helvetica', 'bold');
             doc.setTextColor(...accent);
-            doc.text(String(v), MARGIN + colW + 92, bankY);
-            bankY += 12;
+            doc.splitTextToSize(text, remitMaxWidth).forEach(ln => {
+                doc.text(ln, MARGIN + colW + 12, remitY);
+                remitY += 11;
+            });
         });
     }
 
-    y = Math.max(termsY, bankY) + 14;
+    y = Math.max(termsY, remitY) + 14;
 
     // ── Authorized signatory (bottom-right) ──────────────────────────────────
     const sigBoxW = 200;
