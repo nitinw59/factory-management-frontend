@@ -111,6 +111,7 @@ import AdminMaintenanceDashboard from './modules/admin/AdminMaintenanceDashboard
 import MaintenanceSchedulePage from './modules/maintenance/MaintenanceSchedulePage';
 import SparePartsPage from './modules/store_manager/SparePartsPage';
 import SparesAnalyticsPage from './modules/store_manager/SparesAnalyticsPage';
+import TrimReservationsPage from './modules/store_manager/TrimReservationsPage';
 
 
 import DispatchLayout from './shared/DispatchLayout';
@@ -229,6 +230,7 @@ function App() {
           <Route path="record-trim-purchase" element={<UnifiedIntakeForm />} />
           <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} /> 
           <Route path="trim-orders/:orderId/billing" element={<TrimBillingPage />} />
+          <Route path="trim-reservations" element={<TrimReservationsPage />} />
 
           <Route path="spare-parts" element={<SparePartsPage />} />
           <Route path="spare-parts-issuance" element={<SparesIssuanceDashboard />} />

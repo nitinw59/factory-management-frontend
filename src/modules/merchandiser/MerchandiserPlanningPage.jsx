@@ -417,12 +417,40 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
     const needed        = (item.meters_required || 0) - (item.meters_reserved || 0);
     const overReserving = totalSelected > item.meters_required + 0.001;
 
+    // ── Trim: what stock does the currently-selected source actually have? ──
+    const trimAvailable = useMemo(() => {
+        if (item.type !== 'trim') return Infinity;
+        if (sourceId === 'exact') return Number(item.exact_variant_stock ?? 0);
+        const sub = (item.substitutes || []).find(s => String(s.substitute_variant_id) === sourceId);
+        return Number(sub?.in_stock ?? 0);
+    }, [item, sourceId]);
+    const trimQtyNum = parseFloat(trimQty) || 0;
+    const trimOver   = item.type === 'trim' && trimQtyNum > trimAvailable;
+
+    // ── Fabric: which rolls have been over-reserved past their free meters? ──
+    const fabricOverRolls = useMemo(() => {
+        if (item.type !== 'fabric') return [];
+        const offenders = [];
+        for (const roll of (item.available_rolls || [])) {
+            const v = parseFloat(rollSel[roll.roll_id] ?? 0);
+            const free = parseFloat(roll.free_meters ?? roll.meter ?? 0);
+            if (v > free + 0.001) offenders.push({ rollId: roll.roll_id, free, v });
+        }
+        return offenders;
+    }, [item, rollSel]);
+    const fabricOver = item.type === 'fabric' && fabricOverRolls.length > 0;
+
     const handleConfirm = async () => {
         setBusy(true); setErr(null);
         try {
             if (item.type === 'fabric') {
                 const entries = Object.entries(rollSel).filter(([, v]) => parseFloat(v) > 0);
                 if (entries.length === 0) { setErr('Select at least one roll and enter meters'); setBusy(false); return; }
+                if (fabricOverRolls.length > 0) {
+                    setErr('One or more rolls exceed available meters. Reduce before saving.');
+                    setBusy(false);
+                    return;
+                }
                 for (const [rollId, v] of entries) {
                     await planningApi.reserveFabric(item.req_id, {
                         fabric_roll_id:  parseInt(rollId),
@@ -432,6 +460,11 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
             } else if (item.type === 'trim') {
                 const q = parseFloat(trimQty);
                 if (!q || q <= 0) { setErr('Enter a quantity greater than 0'); setBusy(false); return; }
+                if (q > trimAvailable) {
+                    setErr(`Only ${trimAvailable.toLocaleString()} ${item.unit} available from the selected source.`);
+                    setBusy(false);
+                    return;
+                }
                 const body = { quantity_reserved: q };
                 if (sourceId !== 'exact') body.trim_item_variant_id = parseInt(sourceId);
                 else if (item.exact_variant_id) body.trim_item_variant_id = parseInt(item.exact_variant_id);
@@ -555,6 +588,12 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                                         }
                                     </span>
                                 </div>
+
+                                {fabricOverRolls.length > 0 && (
+                                    <p className="mt-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-semibold">
+                                        {fabricOverRolls.length} roll{fabricOverRolls.length === 1 ? '' : 's'} exceed{fabricOverRolls.length === 1 ? 's' : ''} available meters — reduce before saving.
+                                    </p>
+                                )}
                             </div>
                         )}
                     </>)}
@@ -624,12 +663,20 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                         <div>
                             <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">
                                 Quantity to Reserve ({item.unit})
+                                <span className="ml-2 text-slate-400 normal-case font-semibold">
+                                    max {Number.isFinite(trimAvailable) ? trimAvailable.toLocaleString() : '∞'} {item.unit}
+                                </span>
                             </label>
                             <input
-                                type="number" min={0} step="any"
+                                type="number" min={0} step="any" max={trimAvailable}
                                 value={trimQty} onChange={e => setTrimQty(e.target.value)}
-                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400"
+                                className={`w-full text-sm border rounded-lg px-3 py-2 focus:outline-none ${trimOver ? 'border-red-300 focus:border-red-400 bg-red-50/40' : 'border-slate-200 focus:border-violet-400'}`}
                             />
+                            {trimOver && (
+                                <p className="text-[11px] text-red-600 mt-1.5 font-semibold">
+                                    Cannot reserve {trimQtyNum.toLocaleString()} {item.unit} — only {trimAvailable.toLocaleString()} available from the selected source.
+                                </p>
+                            )}
                         </div>
                     </>)}
 
@@ -640,8 +687,14 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                     <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-4 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
                         Cancel
                     </button>
-                    <button onClick={handleConfirm} disabled={busy}
-                        className="flex items-center gap-1.5 text-sm font-bold text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 px-5 py-1.5 rounded-lg transition-colors">
+                    <button onClick={handleConfirm}
+                        disabled={busy || trimOver || fabricOver}
+                        title={trimOver
+                            ? `Quantity exceeds the ${trimAvailable.toLocaleString()} ${item.unit} available from this source.`
+                            : fabricOver
+                                ? 'One or more rolls exceed available meters.'
+                                : undefined}
+                        className="flex items-center gap-1.5 text-sm font-bold text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-1.5 rounded-lg transition-colors">
                         {busy && <Loader2 size={13} className="animate-spin" />}
                         Reserve & Mark Complete
                     </button>
@@ -1681,10 +1734,10 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                             className={`flex items-center cursor-pointer rounded-lg transition-all ${isSel ? 'bg-violet-50 ring-1 ring-violet-200' : 'hover:bg-slate-50'}`}
                                                         >
                                                             {/* Label */}
-                                                            <div className="w-44 shrink-0 flex items-center gap-2 px-2 py-2">
+                                                            <div className="w-72 shrink-0 flex items-center gap-2 px-2 py-2">
                                                                 <span className={`w-2 h-2 rounded-full shrink-0 ${overdue ? 'bg-red-500' : st.bg}`} />
                                                                 <div className="min-w-0 flex-1">
-                                                                    <p className="text-[10px] font-bold text-slate-700 truncate">{item.title}</p>
+                                                                    <p className="text-[10px] font-bold text-slate-700 break-words leading-tight">{item.title}</p>
                                                                     <p className="text-[8px] text-slate-400 truncate">{item.subtitle}</p>
                                                                 </div>
                                                                 {(item.reservations?.length || 0) > 0 && (

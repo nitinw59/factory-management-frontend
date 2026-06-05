@@ -55,6 +55,9 @@ export const storeManagerApi = {
     saveTrimBill: (orderId, data) => api.post(`/store-manager/trim-orders/${orderId}/bills`, data),
 
 
+    // Trim reservations browser (store-manager scope; release uses planningApi.deleteTrimReservation)
+    getTrimReservations: (params) => api.get('/store-manager/trim-reservations', { params }),
+
     // Barcode
     markBatchBarcodePrinted: (data) => api.post('/store-manager/batch-barcode-printed', data),
 

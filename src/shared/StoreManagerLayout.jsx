@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
 // Added LuMenu for the hamburger icon
-import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX, LuCalendarClock, LuChartLine } from 'react-icons/lu';
+import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark } from 'react-icons/lu';
 import { notificationApi } from '../api/notificationApi';
 
 // No changes to NavDropdown component
@@ -92,6 +92,9 @@ const StoreManagerLayout = () => {
                                 </NavLink>
                                 <NavLink to="/store-manager/trim-orders" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuClipboardList className="mr-2" /> Trim Orders
+                                </NavLink>
+                                <NavLink to="/store-manager/trim-reservations" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuBookmark className="mr-2" /> My Reservations
                                 </NavLink>
                             </NavDropdown>
                             
@@ -183,6 +186,9 @@ const StoreManagerLayout = () => {
                             </NavLink> */}
                             <NavLink to="/store-manager/trim-orders" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuClipboardList className="mr-2" /> Trim Orders
+                            </NavLink>
+                            <NavLink to="/store-manager/trim-reservations" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuBookmark className="mr-2" /> My Reservations
                             </NavLink>
                             <NavLink to="/store-manager/orders" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuClipboardList className="mr-2" /> Orders
