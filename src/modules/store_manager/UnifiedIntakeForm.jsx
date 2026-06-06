@@ -478,7 +478,7 @@ export default function UnifiedIntakeForm() {
                                         <input type="number" min="0" placeholder="0" value={item.units_per_pack} onChange={e => handleTrimChange(index, 'units_per_pack', e.target.value)} required className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono" />
                                     </div>
                                     <div className="md:col-span-2 relative">
-                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5 block">Price/Unit ($)</label>
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5 block">Price/Unit (₹)</label>
                                         <input type="number" min="0" step="0.01" placeholder="0.00" value={item.unit_price} onChange={e => handleTrimChange(index, 'unit_price', e.target.value)} required className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono font-bold text-blue-700 bg-white" />
                                     </div>
                                     
@@ -522,7 +522,7 @@ export default function UnifiedIntakeForm() {
                                         <input type="number" min="0" placeholder="0" value={item.quantity} onChange={e => handleSpareChange(index, 'quantity', e.target.value)} required className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none font-mono" />
                                     </div>
                                     <div className="md:col-span-3">
-                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5 block">Price/Unit ($)</label>
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5 block">Price/Unit (₹)</label>
                                         <input type="number" min="0" step="0.01" placeholder="0.00" value={item.unit_price} onChange={e => handleSpareChange(index, 'unit_price', e.target.value)} required className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none font-mono font-bold text-orange-700 bg-white" />
                                     </div>
                                     

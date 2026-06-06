@@ -5,6 +5,7 @@ import {
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { trimsApi } from '../../api/trimsApi';
 import api from '../../utils/api';
+import SupplierCodePill from './SupplierCodePill';
 
 const rk = () => Math.random().toString(36).slice(2);
 
@@ -179,6 +180,8 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
     }, 0);
 
     const totalLines = groups.reduce((s, g) => s + (g.lines?.length || 0), 0);
+
+    const supplierName = suppliers.find(s => String(s.id) === String(supplierId))?.name || '';
 
     return (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
@@ -370,61 +373,72 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                                             </div>
 
                                             {g.lines.map((ln, li) => (
-                                                <div key={ln._key} className="flex items-end gap-2 bg-white/70 rounded-lg px-2 py-1.5 border border-white">
-                                                    <div className="flex-1 min-w-0">
-                                                        {isFabric ? (
-                                                            <select
-                                                                value={ln.fabric_color_id}
-                                                                onChange={e => setLineField(gi, li, 'fabric_color_id', e.target.value)}
-                                                                className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-violet-400 bg-white"
-                                                            >
-                                                                <option value="">— Color —</option>
-                                                                {fabricColors.map(c => (
-                                                                    <option key={c.id} value={c.id}>
-                                                                        {c.color_name || c.name || `Color #${c.id}`}{c.color_number ? ` (${c.color_number})` : ''}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                        ) : (
-                                                            <select
-                                                                value={ln.trim_item_variant_id}
-                                                                onChange={e => setLineField(gi, li, 'trim_item_variant_id', e.target.value)}
-                                                                disabled={!g.trim_item_id}
-                                                                className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-amber-400 bg-white disabled:bg-slate-100 disabled:text-slate-400"
-                                                            >
-                                                                <option value="">{g.trim_item_id ? '— Variant —' : '— Pick a trim first —'}</option>
-                                                                {variants.map(v => (
-                                                                    <option key={v.id} value={v.id}>
-                                                                        {v.color_name || v.name || `Variant #${v.id}`}{v.color_number ? ` (${v.color_number})` : ''}{v.variant_size ? ` · Sz ${v.variant_size}` : ''}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                        )}
+                                                <div key={ln._key} className="bg-white/70 rounded-lg px-2 py-1.5 border border-white">
+                                                    <div className="flex items-end gap-2">
+                                                        <div className="flex-1 min-w-0">
+                                                            {isFabric ? (
+                                                                <select
+                                                                    value={ln.fabric_color_id}
+                                                                    onChange={e => setLineField(gi, li, 'fabric_color_id', e.target.value)}
+                                                                    className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-violet-400 bg-white"
+                                                                >
+                                                                    <option value="">— Color —</option>
+                                                                    {fabricColors.map(c => (
+                                                                        <option key={c.id} value={c.id}>
+                                                                            {c.color_name || c.name || `Color #${c.id}`}{c.color_number ? ` (${c.color_number})` : ''}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            ) : (
+                                                                <select
+                                                                    value={ln.trim_item_variant_id}
+                                                                    onChange={e => setLineField(gi, li, 'trim_item_variant_id', e.target.value)}
+                                                                    disabled={!g.trim_item_id}
+                                                                    className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-amber-400 bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                                                                >
+                                                                    <option value="">{g.trim_item_id ? '— Variant —' : '— Pick a trim first —'}</option>
+                                                                    {variants.map(v => (
+                                                                        <option key={v.id} value={v.id}>
+                                                                            {v.color_name || v.name || `Variant #${v.id}`}{v.color_number ? ` (${v.color_number})` : ''}{v.variant_size ? ` · Sz ${v.variant_size}` : ''}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            )}
+                                                        </div>
+                                                        <div className="w-24 shrink-0">
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                step="any"
+                                                                placeholder="Qty"
+                                                                value={ln.quantity}
+                                                                onChange={e => setLineField(gi, li, 'quantity', e.target.value)}
+                                                                className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400 text-right tabular-nums"
+                                                            />
+                                                        </div>
+                                                        <div className="w-24 shrink-0 text-right text-[10px] tabular-nums text-slate-500">
+                                                            {(parseFloat(ln.quantity) > 0 && parseFloat(g.unit_price) >= 0)
+                                                                ? `₹${(parseFloat(ln.quantity) * (parseFloat(g.unit_price) || 0)).toFixed(2)}`
+                                                                : ''}
+                                                        </div>
+                                                        <button
+                                                            onClick={() => removeLine(gi, li)}
+                                                            disabled={g.lines.length <= 1}
+                                                            title={g.lines.length <= 1 ? 'A card must have at least one line' : 'Remove line'}
+                                                            className="shrink-0 p-1 text-slate-300 hover:text-red-500 disabled:opacity-30 disabled:hover:text-slate-300 transition"
+                                                        >
+                                                            <Trash2 size={12} />
+                                                        </button>
                                                     </div>
-                                                    <div className="w-24 shrink-0">
-                                                        <input
-                                                            type="number"
-                                                            min="0"
-                                                            step="any"
-                                                            placeholder="Qty"
-                                                            value={ln.quantity}
-                                                            onChange={e => setLineField(gi, li, 'quantity', e.target.value)}
-                                                            className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400 text-right tabular-nums"
-                                                        />
-                                                    </div>
-                                                    <div className="w-24 shrink-0 text-right text-[10px] tabular-nums text-slate-500">
-                                                        {(parseFloat(ln.quantity) > 0 && parseFloat(g.unit_price) >= 0)
-                                                            ? `₹${(parseFloat(ln.quantity) * (parseFloat(g.unit_price) || 0)).toFixed(2)}`
-                                                            : ''}
-                                                    </div>
-                                                    <button
-                                                        onClick={() => removeLine(gi, li)}
-                                                        disabled={g.lines.length <= 1}
-                                                        title={g.lines.length <= 1 ? 'A card must have at least one line' : 'Remove line'}
-                                                        className="shrink-0 p-1 text-slate-300 hover:text-red-500 disabled:opacity-30 disabled:hover:text-slate-300 transition"
-                                                    >
-                                                        <Trash2 size={12} />
-                                                    </button>
+                                                    {!isFabric && supplierId && ln.trim_item_variant_id && (
+                                                        <div className="mt-1 pl-1">
+                                                            <SupplierCodePill
+                                                                supplierId={supplierId}
+                                                                supplierName={supplierName}
+                                                                variantId={ln.trim_item_variant_id}
+                                                            />
+                                                        </div>
+                                                    )}
                                                 </div>
                                             ))}
                                         </div>

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { accountingApi } from '../../../api/accountingApi';
 import { storeManagerApi } from '../../../api/storeManagerApi';
+import SupplierCodePill from '../../purchase_department/SupplierCodePill';
 
 // ─── SHARED ───────────────────────────────────────────────────────────────────
 
@@ -117,6 +118,8 @@ const CreatePOModal = ({ so, fabricReqs, trimReqs, onClose, onSuccess }) => {
 
     const droppedFabricCount = fabricReqs.length - activeFabric.length;
     const droppedTrimCount   = trimReqs.length   - activeTrim.length;
+
+    const supplierName = suppliers.find(s => String(s.id) === String(supplierId))?.name || '';
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
@@ -285,8 +288,9 @@ const CreatePOModal = ({ so, fabricReqs, trimReqs, onClose, onSuccess }) => {
                                     return (
                                         <div
                                             key={r.id}
-                                            className={`grid grid-cols-12 gap-1 px-3 py-2.5 border-b border-slate-100 last:border-b-0 items-center transition-colors ${dropped ? 'bg-slate-50 opacity-50' : 'hover:bg-slate-50/50'}`}
+                                            className={`px-3 py-2.5 border-b border-slate-100 last:border-b-0 transition-colors ${dropped ? 'bg-slate-50 opacity-50' : 'hover:bg-slate-50/50'}`}
                                         >
+                                        <div className="grid grid-cols-12 gap-1 items-center">
                                             <div className="col-span-3">
                                                 <p className={`text-sm font-semibold ${dropped ? 'line-through text-slate-400' : 'text-slate-700'}`}>
                                                     {r.trim_item_name}
@@ -351,6 +355,16 @@ const CreatePOModal = ({ so, fabricReqs, trimReqs, onClose, onSuccess }) => {
                                                     </button>
                                                 )}
                                             </div>
+                                        </div>
+                                        {!dropped && supplierId && d?.variant_id && (
+                                            <div className="mt-1.5 pl-1">
+                                                <SupplierCodePill
+                                                    supplierId={supplierId}
+                                                    supplierName={supplierName}
+                                                    variantId={d.variant_id}
+                                                />
+                                            </div>
+                                        )}
                                         </div>
                                     );
                                 })}

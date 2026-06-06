@@ -81,7 +81,7 @@ const fmtDate  = (d) => d ? new Date(d).toLocaleDateString('en', { dateStyle: 'm
 
 // ── Generator ────────────────────────────────────────────────────────────────
 
-export async function generatePoPdf({ po, company, version = 1 }) {
+export async function generatePoPdf({ po, company, version = 1, supplierCodes = new Map() }) {
     const doc = new jsPDF({ unit: 'pt', format: 'a4' });
     const PAGE_W = doc.internal.pageSize.getWidth();
     const PAGE_H = doc.internal.pageSize.getHeight();
@@ -387,10 +387,13 @@ export async function generatePoPdf({ po, company, version = 1 }) {
             const price = parseFloat(it.unit_price || 0);
             const total = it.total_price != null ? parseFloat(it.total_price) : qty * price;
             const uom   = it.uom || (it.item_type === 'fabric' ? 'm' : 'pcs');
+            const supplierCode = it.item_type !== 'fabric' && it.trim_item_variant_id
+                ? (supplierCodes.get(String(it.trim_item_variant_id)) || '')
+                : '';
             tableBody.push([
                 '',
                 subLabel,
-                '',
+                supplierCode,
                 `${fmtQty(qty)} ${uom}`,
                 fmtMoney(price),
                 fmtMoney(total),

@@ -3,6 +3,7 @@ import { X, Loader2, AlertTriangle, Trash2, FileText, ExternalLink } from 'lucid
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { IMAGE_BASE_URL } from '../../utils/api';
 import { labelFromGroup } from './inwardShared';
+import SupplierCodePill from './SupplierCodePill';
 
 /**
  * InwardDisplayModal — read-only view of an existing inward (GRN).
@@ -16,6 +17,8 @@ import { labelFromGroup } from './inwardShared';
 export default function InwardDisplayModal({
     inward,
     poItems = [],
+    supplierId,
+    supplierName,
     onClose,
     onDeleted,
 }) {
@@ -36,12 +39,14 @@ export default function InwardDisplayModal({
                 const isFabric = g?.item_type === 'fabric';
                 const { name, details } = labelFromGroup(g);
                 return {
-                    key:   `r-${idx}`,
-                    name:  name || `Requirement #${it.purchase_requirement_id}`,
+                    key:      `r-${idx}`,
+                    name:     name || `Requirement #${it.purchase_requirement_id}`,
                     details,
-                    qty:   parseFloat(it.qty_received || 0),
-                    unit:  isFabric ? 'm' : (g?.uom || it.uom || 'pcs'),
-                    rolls: it.rolls || null,
+                    qty:      parseFloat(it.qty_received || 0),
+                    unit:     isFabric ? 'm' : (g?.uom || it.uom || 'pcs'),
+                    rolls:    it.rolls || null,
+                    isTrim:   !isFabric,
+                    variantId: g?.trim_item_variant_id ?? null,
                 };
             }
             if (it.purchase_order_item_id != null) {
@@ -49,12 +54,14 @@ export default function InwardDisplayModal({
                 const isFabric = p?.item_type === 'fabric';
                 const { name, details } = labelFromGroup(p);
                 return {
-                    key:   `po-${idx}`,
-                    name:  name || `PO item #${it.purchase_order_item_id}`,
+                    key:      `po-${idx}`,
+                    name:     name || `PO item #${it.purchase_order_item_id}`,
                     details,
-                    qty:   parseFloat(it.qty_received || 0),
-                    unit:  isFabric ? 'm' : (p?.uom || it.uom || 'pcs'),
-                    rolls: it.rolls || null,
+                    qty:      parseFloat(it.qty_received || 0),
+                    unit:     isFabric ? 'm' : (p?.uom || it.uom || 'pcs'),
+                    rolls:    it.rolls || null,
+                    isTrim:   !isFabric,
+                    variantId: p?.trim_item_variant_id ?? null,
                 };
             }
             // Custom (no PO/req link) — stored joined names should already be on the item.
@@ -72,12 +79,14 @@ export default function InwardDisplayModal({
                 if (it.variant_size)         parts.push(`Sz ${it.variant_size}`);
             }
             return {
-                key:   `c-${idx}`,
+                key:      `c-${idx}`,
                 name,
-                details: parts.join(' · ') || (it.description || ''),
-                qty:   parseFloat(it.qty_received || 0),
-                unit:  isFabric ? 'm' : (it.uom || 'pcs'),
-                rolls: it.rolls || null,
+                details:  parts.join(' · ') || (it.description || ''),
+                qty:      parseFloat(it.qty_received || 0),
+                unit:     isFabric ? 'm' : (it.uom || 'pcs'),
+                rolls:    it.rolls || null,
+                isTrim:   !isFabric,
+                variantId: it.trim_item_variant_id ?? null,
             };
         });
         return all;
@@ -157,6 +166,9 @@ export default function InwardDisplayModal({
                                     <p className="text-xs font-bold text-slate-800">{row.name}</p>
                                     {row.details && (
                                         <p className="text-[11px] text-slate-600 mt-0.5">{row.details}</p>
+                                    )}
+                                    {row.isTrim && row.variantId && (
+                                        <SupplierCodePill supplierId={supplierId} supplierName={supplierName} variantId={row.variantId} className="mt-0.5" />
                                     )}
                                     {row.rolls && row.rolls.length > 0 && (
                                         <ul className="mt-1 text-[10px] text-slate-500 space-y-0.5">

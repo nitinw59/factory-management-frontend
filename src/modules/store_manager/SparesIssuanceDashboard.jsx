@@ -251,7 +251,7 @@ export default function SparesIssuanceDashboard() {
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-center justify-between pt-4 border-t border-gray-100 gap-4">
-                    <p className="text-sm text-gray-500 font-medium">Estimated Value: <span className="text-lg font-black text-gray-900">${totalCost.toFixed(2)}</span></p>
+                    <p className="text-sm text-gray-500 font-medium">Estimated Value: <span className="text-lg font-black text-gray-900">₹{totalCost.toFixed(2)}</span></p>
                     <div className="flex gap-3 w-full sm:w-auto">
                         <button onClick={onClose} className="flex-1 sm:flex-none px-5 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Cancel</button>
                         <button onClick={handleIssue} disabled={processing} className="flex-1 sm:flex-none px-6 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 flex items-center justify-center shadow-md transition-colors disabled:opacity-70">
@@ -357,8 +357,8 @@ export default function SparesIssuanceDashboard() {
                 i.part_name, 
                 i.part_number, 
                 i.quantity, 
-                `$${parseFloat(i.unit_price).toFixed(2)}`, 
-                `$${parseFloat(i.total_price).toFixed(2)}`
+                `₹${parseFloat(i.unit_price).toFixed(2)}`,
+                `₹${parseFloat(i.total_price).toFixed(2)}`
             ]),
             theme: 'grid',
             headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], lineColor: [0, 0, 0], lineWidth: 0.5 },
@@ -368,7 +368,7 @@ export default function SparesIssuanceDashboard() {
             columnStyles: { 2: { halign: 'center' }, 3: { halign: 'right' }, 4: { halign: 'right', fontStyle: 'bold' } },
             foot: [[
                 { content: 'Grand Total', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold', fillColor: [255, 255, 255], textColor: [0, 0, 0] } },
-                { content: `$${parseFloat(invoice.total_amount).toFixed(2)}`, styles: { halign: 'right', fontStyle: 'bold', fillColor: [255, 255, 255], textColor: [0, 0, 0] } }
+                { content: `₹${parseFloat(invoice.total_amount).toFixed(2)}`, styles: { halign: 'right', fontStyle: 'bold', fillColor: [255, 255, 255], textColor: [0, 0, 0] } }
             ]],
             footStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.5 }
         });
@@ -575,7 +575,7 @@ export default function SparesIssuanceDashboard() {
                                             <td className="p-5 font-bold text-indigo-900">{inv.invoice_number}</td>
                                             <td className="p-5 text-gray-600 font-medium text-sm">{new Date(inv.created_at).toLocaleString()}</td>
                                             <td className="p-5 font-bold text-gray-800">{inv.issued_to}</td>
-                                            <td className="p-5 text-right font-black text-emerald-600 text-lg">${parseFloat(inv.total_amount).toFixed(2)}</td>
+                                            <td className="p-5 text-right font-black text-emerald-600 text-lg">₹{parseFloat(inv.total_amount).toFixed(2)}</td>
                                             <td className="p-5 text-right">
                                                 <button onClick={() => setInvoiceToView(inv)} className="bg-white border border-gray-300 hover:border-indigo-400 text-gray-700 hover:text-indigo-700 px-4 py-2.5 rounded-lg text-sm font-bold shadow-sm inline-flex items-center transition-colors active:scale-95">
                                                     <Printer size={16} className="mr-2 opacity-70"/> Print View
@@ -603,7 +603,7 @@ export default function SparesIssuanceDashboard() {
                         </div>
                         <div className="sm:text-right">
                             <p className="text-xs font-bold text-gray-400 uppercase mb-1 tracking-wider">Total Value</p>
-                            <p className="text-2xl font-black text-emerald-600">${parseFloat(invoiceToView.total_amount).toFixed(2)}</p>
+                            <p className="text-2xl font-black text-emerald-600">₹{parseFloat(invoiceToView.total_amount).toFixed(2)}</p>
                         </div>
                     </div>
                     
@@ -624,7 +624,7 @@ export default function SparesIssuanceDashboard() {
                                             <p className="text-xs text-gray-500 font-mono mt-0.5">{it.part_number}</p>
                                         </td>
                                         <td className="p-3 text-center font-black text-gray-700">{it.quantity}</td>
-                                        <td className="p-3 text-right font-bold text-gray-900 font-mono">${parseFloat(it.total_price).toFixed(2)}</td>
+                                        <td className="p-3 text-right font-bold text-gray-900 font-mono">₹{parseFloat(it.total_price).toFixed(2)}</td>
                                     </tr>
                                 ))}
                             </tbody>

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { 
-    ArrowLeft, Package, Calendar, User, Layers, 
-    Clock, CheckCircle, AlertCircle, Box, Download, Receipt
+import {
+    ArrowLeft, Package, Calendar, User, Layers,
+    Clock, CheckCircle, AlertCircle, Box, Download, Receipt, TriangleAlert, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { storeManagerApi } from '../../api/storeManagerApi'; 
 import jsPDF from 'jspdf';
@@ -23,6 +23,7 @@ const TrimOrderSummaryPage = () => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [alertExpanded, setAlertExpanded] = useState(false);
 
     useEffect(() => {
         const fetchSummary = async () => {
@@ -41,26 +42,70 @@ const TrimOrderSummaryPage = () => {
     }, [orderId]);
 
     const handleDownloadPDF = () => {
-        console.log("Generating PDF report for order:", data?.order?.id);
         if (!data) return;
         const { order, items, consumption_report } = data;
         const doc = new jsPDF();
+        const pendingItems = items.filter(item => item.quantity_fulfilled < item.quantity_required);
+
+        let startY = 20;
+
+        // ── High-alert block for pending items ──────────────────────────────────
+        if (pendingItems.length > 0) {
+            // Red alert header
+            doc.setFillColor(254, 226, 226);   // red-100
+            doc.setDrawColor(239, 68, 68);     // red-500
+            doc.setLineWidth(0.8);
+            doc.rect(14, 14, 182, 12, 'FD');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(11);
+            doc.setTextColor(153, 27, 27);     // red-800
+            doc.text(`⚠  ACTION REQUIRED — ${pendingItems.length} item${pendingItems.length > 1 ? 's' : ''} NOT FULLY ALLOCATED`, 105, 22, { align: 'center' });
+
+            autoTable(doc, {
+                startY: 28,
+                head: [['Item / Brand', 'Color', 'Required', 'Fulfilled', 'Pending Qty']],
+                body: pendingItems.map(item => [
+                    `${item.item_name}\n${item.brand}`,
+                    item.color_name + (item.color_number ? ` (${item.color_number})` : ''),
+                    item.quantity_required,
+                    item.quantity_fulfilled,
+                    item.quantity_required - item.quantity_fulfilled,
+                ]),
+                theme: 'grid',
+                headStyles: { fillColor: [220, 38, 38], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+                bodyStyles: { textColor: [127, 29, 29], fontSize: 9 },
+                columnStyles: {
+                    2: { halign: 'right' },
+                    3: { halign: 'right' },
+                    4: { halign: 'right', fontStyle: 'bold', textColor: [185, 28, 28] },
+                },
+            });
+
+            startY = doc.lastAutoTable.finalY + 10;
+
+            // Separator line
+            doc.setDrawColor(239, 68, 68);
+            doc.setLineWidth(0.4);
+            doc.line(14, startY, 196, startY);
+            startY += 8;
+        }
 
         doc.setFontSize(18);
         doc.setTextColor(0, 0, 0);
-        doc.text(`Trim Order Summary #${order.id}`, 14, 20);
+        doc.text(`Trim Order Summary #${order.id}`, 14, startY + 6);
 
         doc.setFontSize(10);
-        doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 26);
+        doc.text(`Generated: ${new Date().toLocaleString()}`, 14, startY + 12);
+        startY += 12;
 
         autoTable(doc, {
-            startY: 32,
+            startY: startY + 8,
             head: [['Batch Information', 'Order Information']],
             body: [[
                 `Batch Code: ${order.batch_code}\nBatch ID: ${order.batch_id}\nProduct: ${order.product_name}`,
                 `Status: ${order.status}\nRequested By: ${order.requested_by}\nDate: ${new Date(order.created_at).toLocaleDateString()}`
             ]],
-            theme: 'grid', 
+            theme: 'grid',
             headStyles: { fillColor: 255, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold' },
             styles: { textColor: 0, lineWidth: 0.1, lineColor: 0, cellPadding: 4, fontSize: 10 },
         });
@@ -94,31 +139,6 @@ const TrimOrderSummaryPage = () => {
             columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } }
         });
 
-        const pendingItems = items.filter(item => item.quantity_fulfilled < item.quantity_required);
-
-        if (pendingItems.length > 0) {
-            if (doc.lastAutoTable.finalY > 250) { doc.addPage(); doc.lastAutoTable.finalY = 20; }
-            doc.setFontSize(14);
-            doc.text("Pending Items (Action Required)", 14, doc.lastAutoTable.finalY + 15);
-
-            const pendingRows = pendingItems.map(item => [
-                `${item.item_name}\n${item.brand}`,
-                item.color_name + (item.color_number ? ` (${item.color_number})` : ''),
-                item.quantity_required,
-                item.quantity_fulfilled,
-                (item.quantity_required - item.quantity_fulfilled)
-            ]);
-
-            autoTable(doc, {
-                startY: doc.lastAutoTable.finalY + 20,
-                head: [['Item / Brand', 'Color', 'Required', 'Fulfilled', 'Pending Qty']],
-                body: pendingRows,
-                theme: 'grid',
-                headStyles: { fillColor: 255, textColor: 0, lineWidth: 0.1, lineColor: 0, fontStyle: 'bold' },
-                styles: { textColor: 0, lineWidth: 0.1, lineColor: 0 },
-                columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right', fontStyle: 'bold' } }
-            });
-        }
         doc.save(`Trim_Order_${order.id}_Summary.pdf`);
     };
 
@@ -174,6 +194,63 @@ const TrimOrderSummaryPage = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Pending items alert */}
+            {(() => {
+                const pending = items.filter(i => i.quantity_fulfilled < i.quantity_required);
+                if (!pending.length) return null;
+                const totalPending = pending.reduce((s, i) => s + (i.quantity_required - i.quantity_fulfilled), 0);
+                const Chevron = alertExpanded ? ChevronUp : ChevronDown;
+                return (
+                    <div className="mb-6 rounded-xl border-2 border-red-400 bg-red-50 overflow-hidden shadow-sm">
+                        <button
+                            type="button"
+                            onClick={() => setAlertExpanded(x => !x)}
+                            className="w-full flex items-center justify-between gap-3 px-5 py-3 bg-red-500 hover:bg-red-600 transition-colors text-left"
+                        >
+                            <div className="flex items-center gap-3">
+                                <TriangleAlert className="w-5 h-5 text-white shrink-0" />
+                                <p className="text-white font-bold text-sm">
+                                    ACTION REQUIRED — {pending.length} item{pending.length > 1 ? 's' : ''} not fully allocated &nbsp;·&nbsp; {totalPending} unit{totalPending > 1 ? 's' : ''} still pending
+                                </p>
+                            </div>
+                            <Chevron className="w-4 h-4 text-white shrink-0" />
+                        </button>
+                        {alertExpanded && (
+                            <div className="divide-y divide-red-100">
+                                {pending.map(item => {
+                                    const gap = item.quantity_required - item.quantity_fulfilled;
+                                    const pct = Math.round((item.quantity_fulfilled / item.quantity_required) * 100);
+                                    return (
+                                        <div key={item.order_item_id} className="flex items-center justify-between gap-4 px-5 py-3">
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-bold text-red-900 truncate">{item.item_name}</p>
+                                                <p className="text-xs text-red-700">{item.brand} · {item.color_name}{item.color_number ? ` (${item.color_number})` : ''}</p>
+                                            </div>
+                                            <div className="flex items-center gap-4 shrink-0">
+                                                <div className="text-right">
+                                                    <p className="text-[10px] text-red-500 uppercase font-bold tracking-wide">Fulfilled / Required</p>
+                                                    <p className="text-sm font-mono font-bold text-red-800">{item.quantity_fulfilled} / {item.quantity_required}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-[10px] text-red-500 uppercase font-bold tracking-wide">Pending</p>
+                                                    <p className="text-lg font-black text-red-600">−{gap}</p>
+                                                </div>
+                                                <div className="w-20">
+                                                    <div className="h-2 bg-red-200 rounded-full overflow-hidden">
+                                                        <div className="h-2 bg-red-500 rounded-full" style={{ width: `${pct}%` }} />
+                                                    </div>
+                                                    <p className="text-[10px] text-red-500 text-right mt-0.5">{pct}%</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                );
+            })()}
 
             {/* Consumption Report */}
             <div className="mb-8">

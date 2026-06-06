@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { X, Loader2, AlertTriangle, ArrowLeft, CheckCircle2, Link2, ChevronDown, ChevronUp, Zap } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { labelFromGroup } from './inwardShared';
+import SupplierCodePill from './SupplierCodePill';
 
 /**
  * InwardReviewModal — shows the prepared items, lets the user confirm or go back.
@@ -21,6 +22,8 @@ export default function InwardReviewModal({
     inward = null,
     payload,
     poItems = [],
+    supplierId,
+    supplierName,
     trimItems = [],
     fabricTypes = [],
     fabricColors = [],
@@ -143,13 +146,15 @@ export default function InwardReviewModal({
             // If the Create modal already stamped a label, prefer it — no lookup needed.
             if (it._label) {
                 return {
-                    key:     `r-${idx}`,
+                    key:      `r-${idx}`,
                     idx,
-                    name:    it._label.name || 'Item',
-                    details: it._label.details || '',
-                    qty:     it.qty_received,
-                    unit:    it._label.unit || 'pcs',
-                    rolls:   it.rolls || null,
+                    name:     it._label.name || 'Item',
+                    details:  it._label.details || '',
+                    qty:      it.qty_received,
+                    unit:     it._label.unit || 'pcs',
+                    rolls:    it.rolls || null,
+                    isTrim:   it.item_type !== 'fabric',
+                    variantId: it.trim_item_variant_id ?? null,
                 };
             }
             if (it.requirement_id != null) {
@@ -157,13 +162,15 @@ export default function InwardReviewModal({
                 const isFabric = g?.item_type === 'fabric';
                 const { name, details } = labelFromGroup(g);
                 return {
-                    key:     `r-${idx}`,
+                    key:      `r-${idx}`,
                     idx,
-                    name:    name || `Requirement #${it.requirement_id}`,
+                    name:     name || `Requirement #${it.requirement_id}`,
                     details,
-                    qty:     it.qty_received,
-                    unit:    isFabric ? 'm' : (g?.uom || 'pcs'),
-                    rolls:   it.rolls || null,
+                    qty:      it.qty_received,
+                    unit:     isFabric ? 'm' : (g?.uom || 'pcs'),
+                    rolls:    it.rolls || null,
+                    isTrim:   !isFabric,
+                    variantId: g?.trim_item_variant_id ?? null,
                 };
             }
             if (it.purchase_order_item_id != null) {
@@ -172,13 +179,15 @@ export default function InwardReviewModal({
                 const isFabric = p?.item_type === 'fabric';
                 const { name, details } = labelFromGroup(p);
                 return {
-                    key:     `po-${idx}`,
+                    key:      `po-${idx}`,
                     idx,
-                    name:    name || `PO item #${it.purchase_order_item_id}`,
+                    name:     name || `PO item #${it.purchase_order_item_id}`,
                     details,
-                    qty:     it.qty_received,
-                    unit:    isFabric ? 'm' : (p?.uom || 'pcs'),
-                    rolls:   it.rolls || null,
+                    qty:      it.qty_received,
+                    unit:     isFabric ? 'm' : (p?.uom || 'pcs'),
+                    rolls:    it.rolls || null,
+                    isTrim:   !isFabric,
+                    variantId: p?.trim_item_variant_id ?? null,
                 };
             }
             const isFabric = it.item_type === 'fabric';
@@ -207,13 +216,15 @@ export default function InwardReviewModal({
                 }
             }
             return {
-                key:     `c-${idx}`,
+                key:      `c-${idx}`,
                 idx,
                 name,
                 details,
-                qty:     it.qty_received,
-                unit:    isFabric ? 'm' : 'pcs',
-                rolls:   it.rolls || null,
+                qty:      it.qty_received,
+                unit:     isFabric ? 'm' : 'pcs',
+                rolls:    it.rolls || null,
+                isTrim:   !isFabric,
+                variantId: it.trim_item_variant_id ?? null,
             };
         });
     }, [payload, reqIdToPoGroup, poItems, fabricTypes, fabricColors, variantsByTrim, trimItems]);
@@ -323,6 +334,9 @@ export default function InwardReviewModal({
                                             <p className="text-xs font-bold text-slate-800">{row.name}</p>
                                             {row.details && (
                                                 <p className="text-[11px] text-slate-600 mt-0.5">{row.details}</p>
+                                            )}
+                                            {row.isTrim && row.variantId && (
+                                                <SupplierCodePill supplierId={supplierId} supplierName={supplierName} variantId={row.variantId} className="mt-0.5" />
                                             )}
                                             {row.rolls && row.rolls.length > 0 && (
                                                 <ul className="mt-1 text-[10px] text-slate-500 space-y-0.5">

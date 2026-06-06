@@ -105,8 +105,8 @@ const DetailView = ({ intake, onClose }) => {
                                             {isTrims && <td className="px-4 py-3 text-right text-gray-600 font-mono">{item.units_per_pack}</td>}
                                             
                                             <td className="px-4 py-3 text-right font-black text-gray-800">{qty}</td>
-                                            <td className="px-4 py-3 text-right text-gray-600 font-mono">${cost.toFixed(2)}</td>
-                                            <td className="px-4 py-3 text-right font-bold text-emerald-600 font-mono">${total.toFixed(2)}</td>
+                                            <td className="px-4 py-3 text-right text-gray-600 font-mono">₹{cost.toFixed(2)}</td>
+                                            <td className="px-4 py-3 text-right font-bold text-emerald-600 font-mono">₹{total.toFixed(2)}</td>
                                         </tr>
                                     );
                                 })}

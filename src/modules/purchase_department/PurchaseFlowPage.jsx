@@ -5,6 +5,7 @@ import {
     Package, Scissors, Tag, Calendar, Building2, ShoppingCart, CheckCircle2, Lock,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
+import SupplierCodePill from './SupplierCodePill';
 import InwardCreateModal from './InwardCreateModal';
 import InwardReviewModal from './InwardReviewModal';
 import InwardDisplayModal from './InwardDisplayModal';
@@ -357,7 +358,7 @@ export default function PurchaseFlowPage() {
                 <div className="flex items-start justify-between gap-3 mb-5">
                     <div className="flex items-start gap-3">
                         <button
-                            onClick={() => navigate('/purchase-department/orders')}
+                            onClick={() => navigate('..')}
                             className="p-2 hover:bg-slate-100 rounded-lg transition shrink-0 mt-0.5"
                             title="Back to orders"
                         >
@@ -643,6 +644,9 @@ export default function PurchaseFlowPage() {
                                                             </span>
                                                         )}
                                                     </div>
+                                                    {i.item_type === 'trim' && i.trim_item_variant_id && (
+                                                        <SupplierCodePill supplierId={po.supplier_id} supplierName={po.supplier_name} variantId={i.trim_item_variant_id} className="mt-0.5" />
+                                                    )}
                                                     <p className="text-[10px] text-slate-500">
                                                         {i.fabric_color_number ? `${i.fabric_color_number} · ` : ''}
                                                         {i.variant_color_number ? `${i.variant_color_number} · ` : ''}
@@ -673,6 +677,8 @@ export default function PurchaseFlowPage() {
                 <InwardDisplayModal
                     inward={openInward}
                     poItems={po?.items || []}
+                    supplierId={po?.supplier_id}
+                    supplierName={po?.supplier_name}
                     onClose={() => setOpenInward(null)}
                     onDeleted={() => { setOpenInward(null); handleSavedInward?.(); }}
                 />
@@ -681,6 +687,8 @@ export default function PurchaseFlowPage() {
                 <InwardCreateModal
                     poId={po.id}
                     poItems={po.items || []}
+                    supplierId={po.supplier_id}
+                    supplierName={po.supplier_name}
                     allInwards={inwards}
                     initialSnapshot={inwardSnapshot}
                     onClose={() => { setCreatingInward(false); setInwardSnapshot(null); setInwardPayload(null); setInwardStep('create'); }}
@@ -696,6 +704,8 @@ export default function PurchaseFlowPage() {
                     poId={po.id}
                     payload={inwardPayload}
                     poItems={po.items || []}
+                    supplierId={po.supplier_id}
+                    supplierName={po.supplier_name}
                     onClose={() => { setCreatingInward(false); setInwardSnapshot(null); setInwardPayload(null); setInwardStep('create'); }}
                     onBack={() => setInwardStep('create')}
                     onConfirmed={(saved) => {

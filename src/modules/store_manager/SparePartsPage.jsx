@@ -249,7 +249,7 @@ const SparePartsPage = () => {
                                                 {isLowStock && <span className="text-[10px] font-bold text-red-500 uppercase flex items-center justify-end"><AlertTriangle size={10} className="mr-1"/> Low Stock</span>}
                                             </td>
                                             <td className="px-6 py-3 text-right">
-                                                <div className="font-medium text-gray-900">${parseFloat(part.unit_cost).toFixed(2)}</div>
+                                                <div className="font-medium text-gray-900">₹{parseFloat(part.unit_cost).toFixed(2)}</div>
                                                 <div className="text-xs text-gray-400">per unit</div>
                                             </td>
                                             <td className="px-6 py-3 text-center">

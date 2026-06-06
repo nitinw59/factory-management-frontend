@@ -43,4 +43,15 @@ export const trimsApi = {
         api.get(`/trims/variants/${variantId}/stock-ledger`, { params }),
     getItemStockLedger: (itemId, params = {}) =>
         api.get(`/trims/items/${itemId}/stock-ledger`, { params }),
+
+    // Supplier color code mappings — per-variant CRUD and per-supplier reverse lookup.
+    // Optional ?supplier_id= filters down to a single supplier's mapping for the variant.
+    getVariantSupplierCodes: (variantId, params = {}) =>
+        api.get(`/trims/variants/${variantId}/supplier-codes`, { params }),
+    upsertVariantSupplierCode: (variantId, body) =>
+        api.post(`/trims/variants/${variantId}/supplier-codes`, body),
+    deleteVariantSupplierCode: (variantId, id) =>
+        api.delete(`/trims/variants/${variantId}/supplier-codes/${id}`),
+    getSupplierVariantCodes: (supplierId) =>
+        api.get(`/trims/suppliers/${supplierId}/variant-codes`),
 };

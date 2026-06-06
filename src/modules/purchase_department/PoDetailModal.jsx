@@ -4,6 +4,7 @@ import {
     CheckCircle2, XCircle, Truck, Plus, Edit3, Trash2, Save, FileText, Download, Link2,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
+import SupplierCodePill from './SupplierCodePill';
 import { adminApi } from '../../api/adminApi';
 import { trimsApi } from '../../api/trimsApi';
 import { taApi } from '../../api/taApi';
@@ -569,9 +570,22 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                 company = null;
             }
 
+            // Fetch all supplier codes for this PO's supplier so they appear in the PDF.
+            let supplierCodes = new Map();
+            if (po.supplier_id) {
+                try {
+                    const scRes = await trimsApi.getSupplierVariantCodes(po.supplier_id);
+                    (scRes.data || []).forEach(r => {
+                        if (r.trim_item_variant_id && r.supplier_color_code) {
+                            supplierCodes.set(String(r.trim_item_variant_id), r.supplier_color_code);
+                        }
+                    });
+                } catch { /* proceed without codes */ }
+            }
+
             const nextVersionNum   = (documents?.length || 0) + 1;
             const versionLabel     = `v${nextVersionNum}`;
-            const pdfBlob = await generatePoPdf({ po, company, version: nextVersionNum });
+            const pdfBlob = await generatePoPdf({ po, company, version: nextVersionNum, supplierCodes });
 
             const datestamp = new Date().toISOString().slice(0, 10);
             const safeCode  = (po.po_code || `PO-${po.id}`).replace(/[^A-Za-z0-9._-]/g, '_');
@@ -942,6 +956,9 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                                                         <span className="ml-1">· last @ {parseFloat(it.variant_last_purchase_price).toFixed(2)}</span>
                                                     )}
                                                 </p>
+                                                {it.type === 'trim' && it.trim_item_variant_id && (
+                                                    <SupplierCodePill supplierId={po.supplier_id} supplierName={po.supplier_name} variantId={it.trim_item_variant_id} className="mt-1" />
+                                                )}
                                             </div>
                                             <div className="text-right shrink-0">
                                                 <p className="text-xs font-bold text-slate-700 tabular-nums">

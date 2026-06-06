@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { trimsApi } from '../../api/trimsApi';
 import api from '../../utils/api';
+import SupplierCodePill from './SupplierCodePill';
 import {
     TYPE_ICON,
     reqTotal, reqUnit, reqLabel,
@@ -31,6 +32,8 @@ import {
 export default function InwardCreateModal({
     poId,                            // eslint-disable-line no-unused-vars
     poItems = [],
+    supplierId,
+    supplierName,
     allInwards = [],
     initialSnapshot = null,
     onReview,
@@ -349,6 +352,9 @@ export default function InwardCreateModal({
                                     <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
                                         <Icon size={13} className="text-slate-500 shrink-0" />
                                         <p className="text-xs font-bold text-slate-700 truncate flex-1">{groupLabel}</p>
+                                        {!isFabricGroup && group.trim_item_variant_id && (
+                                            <SupplierCodePill supplierId={supplierId} supplierName={supplierName} variantId={group.trim_item_variant_id} className="shrink-0" />
+                                        )}
                                         <span className="text-[9px] text-slate-400 shrink-0">item #{group.id}</span>
                                     </div>
                                     <div className="p-2 space-y-1.5">
@@ -525,6 +531,9 @@ export default function InwardCreateModal({
                                 <Icon size={13} className="text-slate-500 shrink-0" />
                                 <div className="flex-1 min-w-0">
                                     <p className="text-xs font-bold text-slate-700">{groupLabel} <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 ml-1">Free-form</span></p>
+                                    {!isFabricGroup && group.trim_item_variant_id && (
+                                        <SupplierCodePill supplierId={supplierId} supplierName={supplierName} variantId={group.trim_item_variant_id} className="mt-0.5" />
+                                    )}
                                     <p className="text-[10px] text-slate-500">Pending {pending.toLocaleString()} {groupUom}</p>
                                 </div>
                                 <div className="shrink-0">
