@@ -107,8 +107,10 @@ const blankFreeRow = (prefill = {}) => ({
 });
 
 // --- Main Modal ---
-const SpareInwardModal = ({ spares = [], prefilledPartId = null, onClose, onSuccess }) => {
-    const [mode, setMode] = useState('free'); // 'free' | 'po'
+const SpareInwardModal = ({ spares = [], prefilledPartId = null, prefilledPoId = null, onClose, onSuccess }) => {
+    // When invoked with a pre-selected PO (e.g. from the OrdersPage Inward
+    // button for a store_manager), open directly in PO-linked mode.
+    const [mode, setMode] = useState(prefilledPoId ? 'po' : 'free'); // 'free' | 'po'
 
     // Common fields
     const [receivedDate, setReceivedDate] = useState(today());
@@ -130,7 +132,7 @@ const SpareInwardModal = ({ spares = [], prefilledPartId = null, onClose, onSucc
 
     // PO-linked
     const [availablePOs, setAvailablePOs] = useState([]);
-    const [selectedPOId, setSelectedPOId] = useState('');
+    const [selectedPOId, setSelectedPOId] = useState(prefilledPoId ? String(prefilledPoId) : '');
     const [poDetail, setPoDetail] = useState(null);
     const [loadingPos, setLoadingPos] = useState(false);
     const [loadingPoDetail, setLoadingPoDetail] = useState(false);

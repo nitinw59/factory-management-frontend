@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Loader2, PackageCheck, ChevronDown, ChevronUp,
-    CheckCircle2, Clock, AlertTriangle, GitBranch, Plus, Search, Inbox, StickyNote,
+    CheckCircle2, Clock, AlertTriangle, GitBranch, Plus, Search, Inbox, StickyNote, XCircle,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
+import { useAuth } from '../../context/AuthContext';
 import CreateFreshPoModal from './CreateFreshPoModal';
 import InwardCreateModal from './InwardCreateModal';
 import InwardReviewModal from './InwardReviewModal';
@@ -20,6 +21,11 @@ const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en', { dateStyle: 'me
 
 const OrdersPage = () => {
     const navigate = useNavigate();
+    const { user } = useAuth();
+    // Lifecycle actions (Mark Received / Cancel) are reserved for buyers and
+    // admins. The store_manager has read access + can record inwards, but
+    // can't change the PO's lifecycle.
+    const canChangeLifecycle = user?.role === 'purchase_manager' || user?.role === 'factory_admin';
     const [orders,            setOrders]            = useState([]);
     const [loading,           setLoading]           = useState(true);
     const [expandedId,        setExpandedId]        = useState(null);
@@ -35,6 +41,16 @@ const OrdersPage = () => {
     const [inwardCtx,         setInwardCtx]         = useState(null);   // { po, items, inwards, snapshot?, payload?, lookups }
     const [openingInwardId,   setOpeningInwardId]   = useState(null);
 
+    // Cache of getOrderById detail per PO. Loaded eagerly for all orders on
+    // the list so we can read items.length (for the inline-chip threshold)
+    // and render the expanded body without a per-row click.
+    const [detailsByPoId, setDetailsByPoId] = useState({});
+    // Cache of inwards per PO. Loaded lazily when a row is expanded so we can
+    // render a "received vs ordered" fulfilment summary without forcing the
+    // user into the View Flow page.
+    const [inwardsByPoId, setInwardsByPoId] = useState({});
+
+
     const fetchOrders = useCallback(async () => {
         setLoading(true);
         try {
@@ -49,6 +65,49 @@ const OrdersPage = () => {
 
     useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
+    // Eager-fetch detail for every order on the list so we know items.length
+    // (the gate for the inline-chip preview) and have the items ready for the
+    // expanded body. Skips rows we've already cached; errors per row swallowed.
+    useEffect(() => {
+        if (!orders.length) return;
+        const toFetch = orders.filter(o => !detailsByPoId[o.id]);
+        if (toFetch.length === 0) return;
+        let cancelled = false;
+        Promise.all(toFetch.map(o =>
+            purchaseDeptApi.getOrderById(o.id)
+                .then(r => [o.id, r.data?.data ?? r.data ?? null])
+                .catch(() => [o.id, null])
+        )).then(pairs => {
+            if (cancelled) return;
+            setDetailsByPoId(prev => {
+                const next = { ...prev };
+                pairs.forEach(([id, detail]) => { if (detail) next[id] = detail; });
+                return next;
+            });
+        });
+        return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [orders]);
+
+    // Lazy-fetch inwards when a row gets expanded. Caches per PO; never
+    // re-fetches once we have data, since the expand body re-uses the cache
+    // on subsequent expansions of the same row.
+    useEffect(() => {
+        if (expandedId == null || inwardsByPoId[expandedId] !== undefined) return;
+        let cancelled = false;
+        purchaseDeptApi.getInwards(expandedId)
+            .then(r => {
+                if (cancelled) return;
+                setInwardsByPoId(prev => ({ ...prev, [expandedId]: r.data?.data ?? r.data ?? [] }));
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setInwardsByPoId(prev => ({ ...prev, [expandedId]: [] }));
+            });
+        return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [expandedId]);
+
     const handleMarkReceived = async (orderId) => {
         setBusy(orderId); setErr(null);
         try {
@@ -59,6 +118,38 @@ const OrdersPage = () => {
         } finally {
             setBusy(null);
         }
+    };
+
+    const handleCancelOrder = async (order) => {
+        const label = order.po_code || `PO #${order.id}`;
+        if (!window.confirm(`Cancel ${label}?\n\nLinked requirements revert to PENDING and re-enter the queue.`)) return;
+        setBusy(order.id); setErr(null);
+        try {
+            await purchaseDeptApi.updateOrderStatus(order.id, 'CANCELLED');
+            setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'CANCELLED' } : o));
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Failed to cancel order');
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    // Build a compact label for a single PO line item chip.
+    const itemChipLabel = (it) => {
+        const qtyTxt = it.quantity != null
+            ? ` · ${Number(it.quantity).toLocaleString()} ${it.uom || (it.item_type === 'fabric' ? 'm' : 'pcs')}`
+            : '';
+        if (it.item_type === 'fabric') {
+            const type  = it.fabric_type_name || 'Fabric';
+            const color = it.fabric_color_name ? ` · ${it.fabric_color_name}` : '';
+            const num   = it.fabric_color_number ? ` (${it.fabric_color_number})` : '';
+            return `${type}${color}${num}${qtyTxt}`;
+        }
+        const name    = it.trim_item_name || 'Trim';
+        const variant = it.variant_color_name ? ` · ${it.variant_color_name}` : '';
+        const num     = it.variant_color_number ? ` (${it.variant_color_number})` : '';
+        const sz      = it.variant_size ? ` · Sz ${it.variant_size}` : '';
+        return `${name}${variant}${num}${sz}${qtyTxt}`;
     };
 
     const filtered = useMemo(() => {
@@ -154,6 +245,30 @@ const OrdersPage = () => {
                             {order.customer_name ? ` · ${order.customer_name}` : ''}
                             {order.expected_delivery_date ? ` · Due ${fmtDate(order.expected_delivery_date)}` : ''}
                         </p>
+
+                        {/* Inline item chips — only shown when the PO has 1-2 line items. */}
+                        {(() => {
+                            const detail = detailsByPoId[order.id];
+                            const itemCount = detail ? (detail.items || []).length : null;
+                            if (!detail || itemCount === 0 || itemCount >= 3) return null;
+                            return (
+                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                    {(detail.items || []).map((it, ix) => (
+                                        <span
+                                            key={it.id ?? ix}
+                                            className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md border ${
+                                                it.item_type === 'fabric'
+                                                    ? 'bg-violet-50 text-violet-700 border-violet-100'
+                                                    : 'bg-amber-50 text-amber-700 border-amber-100'
+                                            }`}
+                                            title={itemChipLabel(it)}
+                                        >
+                                            {itemChipLabel(it)}
+                                        </span>
+                                    ))}
+                                </div>
+                            );
+                        })()}
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0">
@@ -178,7 +293,7 @@ const OrdersPage = () => {
                             <GitBranch size={12} />
                             View Flow
                         </button>
-                        {order.status !== 'COMPLETED' && order.status !== 'CANCELLED' && (
+                        {canChangeLifecycle && order.status !== 'COMPLETED' && order.status !== 'CANCELLED' && (
                             <button
                                 onClick={e => { e.stopPropagation(); handleMarkReceived(order.id); }}
                                 disabled={busy === order.id}
@@ -189,6 +304,20 @@ const OrdersPage = () => {
                                     : <CheckCircle2 size={12} />
                                 }
                                 Mark Received
+                            </button>
+                        )}
+                        {canChangeLifecycle && order.status !== 'COMPLETED' && order.status !== 'CANCELLED' && (
+                            <button
+                                onClick={e => { e.stopPropagation(); handleCancelOrder(order); }}
+                                disabled={busy === order.id}
+                                title="Cancel this PO — linked requirements revert to PENDING"
+                                className="flex items-center gap-1.5 text-xs font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40"
+                            >
+                                {busy === order.id
+                                    ? <Loader2 size={12} className="animate-spin" />
+                                    : <XCircle size={12} />
+                                }
+                                Cancel
                             </button>
                         )}
                         {isExpanded ? <ChevronUp size={15} className="text-slate-400" /> : <ChevronDown size={15} className="text-slate-400" />}
@@ -218,11 +347,112 @@ const OrdersPage = () => {
                             </div>
                         </div>
 
-                        {reqCount > 0 && (
-                            <div className="text-[11px] text-slate-500 italic">
-                                {reqCount} requirement{reqCount !== 1 ? 's' : ''} linked. Open <span className="font-bold text-orange-600">View Flow</span> for the full item breakdown.
-                            </div>
-                        )}
+                        {/* Items table + fulfilment summary */}
+                        {(() => {
+                            const detail = detailsByPoId[order.id];
+                            const inwards = inwardsByPoId[order.id];
+                            if (!detail) {
+                                return (
+                                    <p className="text-[11px] text-slate-400 italic flex items-center gap-1.5">
+                                        <Loader2 size={11} className="animate-spin" /> Loading items…
+                                    </p>
+                                );
+                            }
+                            const items = detail.items || [];
+                            if (items.length === 0) {
+                                return <p className="text-[11px] text-slate-400 italic">No line items on this PO.</p>;
+                            }
+                            // Aggregate received qty per po_item_id from inwards.
+                            const receivedById = {};
+                            (inwards || []).forEach(iw => {
+                                (iw.items || []).forEach(line => {
+                                    const id = line.purchase_order_item_id;
+                                    if (id == null) return;
+                                    receivedById[id] = (receivedById[id] || 0) + (Number(line.qty_received) || 0);
+                                });
+                            });
+                            let totalOrdered = 0;
+                            let totalReceived = 0;
+                            let fullyReceivedCount = 0;
+                            items.forEach(it => {
+                                const ord = Number(it.quantity) || 0;
+                                const rec = receivedById[it.id] || 0;
+                                totalOrdered  += ord;
+                                totalReceived += Math.min(rec, ord || rec);
+                                if (ord > 0 && rec >= ord) fullyReceivedCount += 1;
+                            });
+                            const pctTotal = totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0;
+
+                            return (
+                                <>
+                                    <div className="overflow-hidden rounded-lg border border-slate-200">
+                                        <table className="w-full text-[11px]">
+                                            <thead className="bg-slate-50 text-slate-500 uppercase">
+                                                <tr>
+                                                    <th className="px-3 py-1.5 text-left font-bold">Item</th>
+                                                    <th className="px-3 py-1.5 text-right font-bold w-24">Ordered</th>
+                                                    <th className="px-3 py-1.5 text-right font-bold w-24">Received</th>
+                                                    <th className="px-3 py-1.5 text-right font-bold w-24">Unit ₹</th>
+                                                    <th className="px-3 py-1.5 text-right font-bold w-28">Line ₹</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {items.map(it => {
+                                                    const ord = Number(it.quantity) || 0;
+                                                    const rec = receivedById[it.id] || 0;
+                                                    const full = ord > 0 && rec >= ord;
+                                                    const partial = rec > 0 && !full;
+                                                    const total = Number(it.total_price ?? (ord * (Number(it.unit_price) || 0)));
+                                                    return (
+                                                        <tr key={it.id} className="hover:bg-slate-50/60">
+                                                            <td className="px-3 py-1.5 text-slate-700">{itemChipLabel(it)}</td>
+                                                            <td className="px-3 py-1.5 text-right font-mono text-slate-700 tabular-nums">
+                                                                {ord.toLocaleString()} {it.uom || (it.item_type === 'fabric' ? 'm' : 'pcs')}
+                                                            </td>
+                                                            <td className={`px-3 py-1.5 text-right font-mono tabular-nums ${full ? 'text-emerald-700 font-bold' : partial ? 'text-amber-700 font-bold' : 'text-slate-400'}`}>
+                                                                {inwards == null ? '…' : rec.toLocaleString()}
+                                                            </td>
+                                                            <td className="px-3 py-1.5 text-right font-mono text-slate-600 tabular-nums">
+                                                                {Number(it.unit_price ?? 0).toFixed(2)}
+                                                            </td>
+                                                            <td className="px-3 py-1.5 text-right font-mono font-bold text-slate-800 tabular-nums">
+                                                                ₹{total.toFixed(2)}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    {/* Fulfilment summary */}
+                                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 px-1">
+                                        <div className="flex items-center gap-2 text-[11px] text-slate-600">
+                                            <CheckCircle2 size={13} className={pctTotal >= 100 ? 'text-emerald-600' : 'text-slate-400'} />
+                                            <span className="font-bold">{fullyReceivedCount} / {items.length}</span>
+                                            <span>line{items.length === 1 ? '' : 's'} fully received</span>
+                                            <span className="text-slate-300">·</span>
+                                            <span className={pctTotal >= 100 ? 'text-emerald-700 font-bold' : 'text-slate-700 font-bold'}>
+                                                {pctTotal}%
+                                            </span>
+                                            <span>by qty</span>
+                                            {inwards != null && (
+                                                <>
+                                                    <span className="text-slate-300">·</span>
+                                                    <span>{inwards.length} inward{inwards.length === 1 ? '' : 's'} logged</span>
+                                                </>
+                                            )}
+                                        </div>
+                                        <button
+                                            onClick={() => navigate(String(order.id))}
+                                            className="text-[11px] font-bold text-orange-600 hover:text-orange-800 transition-colors"
+                                        >
+                                            Open View Flow →
+                                        </button>
+                                    </div>
+                                </>
+                            );
+                        })()}
                     </div>
                 )}
             </div>
@@ -354,6 +584,7 @@ const OrdersPage = () => {
                     onConfirmed={() => { closeInward(); fetchOrders(); }}
                 />
             )}
+
         </div>
     );
 };
