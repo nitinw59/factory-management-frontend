@@ -715,6 +715,10 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
     const [openReqId,  setOpenReqId]  = useState(null);
     const [reservationsItem, setReservationsItem] = useState(null);  // null = closed; item = show its reservations modal
     const [expandAll,  setExpandAll]  = useState(false);
+    const [expandedTrimGroups, setExpandedTrimGroups] = useState(new Set());
+    const toggleTrimGroup = useCallback((tid) => setExpandedTrimGroups(s => {
+        const n = new Set(s); n.has(tid) ? n.delete(tid) : n.add(tid); return n;
+    }), []);
     const [addModal,   setAddModal]   = useState(false);
     const [editItem,   setEditItem]   = useState(null);
     const [busy,       setBusy]       = useState(false);
@@ -1043,9 +1047,58 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
         { key: 'pending',     label: 'Pending',     dot: 'bg-amber-400',   filter: it => !isOverdue(it) && it.status === 'pending'      },
         { key: 'completed',   label: 'Complete',    dot: 'bg-emerald-500', filter: it => !isOverdue(it) && it.status === 'completed'    },
     ];
-    const groups = STATUS_GROUPS
-        .map(g => ({ ...g, items: filteredItems.filter(g.filter) }))
-        .filter(g => g.items.length > 0);
+    const trimFilteredItems    = filteredItems.filter(it => it.type === 'trim');
+    const nonTrimFilteredItems = filteredItems.filter(it => it.type !== 'trim');
+
+    const trimItemGroups = (() => {
+        const map = new Map();
+        trimFilteredItems.forEach(item => {
+            const key = item.trim_item_id;
+            if (!map.has(key)) map.set(key, { trim_item_id: key, trim_item_name: item.trim_item_name, unit: item.unit, variants: [] });
+            map.get(key).variants.push(item);
+        });
+        return [...map.values()].map(g => {
+            const startDates = g.variants.map(v => v.start_date).filter(Boolean);
+            const endDates   = g.variants.map(v => v.end_date).filter(Boolean);
+            const hasOverdue = g.variants.some(v => isOverdue(v));
+            const dominant   = hasOverdue ? 'pending'
+                : g.variants.some(v => v.status === 'delayed')     ? 'delayed'
+                : g.variants.some(v => v.status === 'in-progress') ? 'in-progress'
+                : g.variants.some(v => v.status === 'pending')     ? 'pending'
+                : 'completed';
+            return {
+                ...g,
+                type: 'trim_group',
+                id: `tg-${g.trim_item_id}`,
+                total_required: g.variants.reduce((s, v) => s + Number(v.quantity_required || 0), 0),
+                total_reserved: g.variants.reduce((s, v) => s + Number(v.quantity_reserved || 0), 0),
+                start_date: startDates.length ? startDates.reduce((a, b) => a < b ? a : b) : null,
+                end_date:   endDates.length   ? endDates.reduce((a, b)   => a > b ? a : b) : null,
+                status: dominant,
+                overdue: hasOverdue,
+                reservations: g.variants.flatMap(v => v.reservations || []),
+                purchase_requirements: g.variants.flatMap(v => v.purchase_requirements || []),
+                procurement_events: g.variants.flatMap(v => v.procurement_events || []),
+            };
+        });
+    })();
+
+    const groups = STATUS_GROUPS.map(g => {
+        const regular = nonTrimFilteredItems.filter(g.filter);
+        const trimGroupsInStatus = trimItemGroups.filter(tg =>
+            g.key === 'overdue'     ? tg.overdue :
+            g.key === 'delayed'     ? !tg.overdue && tg.status === 'delayed'     :
+            g.key === 'in-progress' ? !tg.overdue && tg.status === 'in-progress' :
+            g.key === 'pending'     ? !tg.overdue && tg.status === 'pending'     :
+            g.key === 'completed'   ? !tg.overdue && tg.status === 'completed'   : false
+        );
+        // Flatten: header row followed by its variant child rows
+        const trimFlat = trimGroupsInStatus.flatMap(tg => [
+            tg,
+            ...tg.variants.map(v => ({ ...v, parentTrimGroupId: tg.trim_item_id })),
+        ]);
+        return { ...g, items: [...regular, ...trimFlat] };
+    }).filter(g => g.items.length > 0);
 
 
     const prevWindow = () => setWeekOf(p => { const n = new Date(p); n.setDate(n.getDate() - 14); return n; });
@@ -1715,16 +1768,85 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                         <div className="flex items-center gap-2 mb-1.5 px-1">
                                             <span className={`w-2 h-2 rounded-full ${group.dot}`} />
                                             <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{group.label}</span>
-                                            <span className="text-[9px] font-bold text-slate-300">{group.items.length}</span>
+                                            <span className="text-[9px] font-bold text-slate-300">{group.items.filter(it => it.parentTrimGroupId == null).length}</span>
                                         </div>
                                         <div className="space-y-0.5">
                                             {group.items.map(item => {
+                                                // ── TRIM GROUP HEADER ─────────────────────────────────
+                                                if (item.type === 'trim_group') {
+                                                    const isExpanded = expandAll || expandedTrimGroups.has(item.trim_item_id);
+                                                    const groupSt = ST[item.status] || ST.pending;
+                                                    const gBStyle = barStyle(item);
+                                                    const totalReq = item.total_required;
+                                                    const totalRes = item.total_reserved;
+                                                    const pct = totalReq > 0 ? Math.min(100, Math.round((totalRes / totalReq) * 100)) : 0;
+                                                    const pctCls = pct >= 100 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                        : pct > 0 ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                                        : 'bg-slate-50 text-slate-500 border-slate-200';
+                                                    const multiVariant = item.variants.length > 1;
+                                                    return (
+                                                        <div
+                                                            key={item.id}
+                                                            onClick={() => {
+                                                                if (multiVariant) { toggleTrimGroup(item.trim_item_id); }
+                                                                else { const v = item.variants[0]; if (v) { setSelId(selId === v.id ? null : v.id); setActionMode(null); setErr(null); } }
+                                                            }}
+                                                            className={`flex items-center cursor-pointer rounded-lg transition-all hover:bg-slate-50 ${item.overdue ? 'bg-red-50/30' : ''}`}
+                                                        >
+                                                            <div className="w-72 shrink-0 flex items-center gap-2 px-2 py-2">
+                                                                <span className={`w-2 h-2 rounded-full shrink-0 ${item.overdue ? 'bg-red-500' : groupSt.bg}`} />
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className="text-[10px] font-bold text-slate-700 break-words leading-tight">{item.trim_item_name}</p>
+                                                                    <p className="text-[8px] text-slate-400">{item.variants.length} color{item.variants.length !== 1 ? 's' : ''}</p>
+                                                                </div>
+                                                                {totalReq > 0 && (
+                                                                    <span title={`${totalRes.toLocaleString()} of ${totalReq.toLocaleString()} ${item.unit || ''} reserved (${pct}%)`}
+                                                                        className={`text-[8px] font-bold rounded-full px-1.5 py-0.5 shrink-0 border ${pctCls}`}>
+                                                                        {totalRes.toLocaleString()}/{totalReq.toLocaleString()} {item.unit || ''}
+                                                                    </span>
+                                                                )}
+                                                                {multiVariant && (
+                                                                    <ChevronRight size={12} className={`shrink-0 text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                                                                )}
+                                                            </div>
+                                                            <div className="flex-1 relative h-7">
+                                                                {days.map((d, i) => (d.getDay() === 0 || d.getDay() === 6) && (
+                                                                    <div key={i} className="absolute top-0 bottom-0 bg-slate-50/80 pointer-events-none"
+                                                                        style={{ left: `${(i / DAYS) * 100}%`, width: `${(1 / DAYS) * 100}%` }} />
+                                                                ))}
+                                                                {todayPct >= 0 && todayPct <= 100 && (
+                                                                    <div className="absolute top-0 bottom-0 w-px bg-violet-400/60 z-10 pointer-events-none"
+                                                                        style={{ left: `${todayPct}%` }} />
+                                                                )}
+                                                                {gBStyle ? (
+                                                                    <div className={`absolute top-1.5 bottom-1.5 rounded-full ${item.overdue ? 'bg-red-500' : groupSt.bg} opacity-60`}
+                                                                        style={gBStyle} />
+                                                                ) : (
+                                                                    <div className="absolute inset-0 flex items-center px-2 pointer-events-none">
+                                                                        <div className="flex-1 border-t border-dashed border-slate-200" />
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <div className="w-20 shrink-0 flex justify-end pr-2">
+                                                                <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full text-white ${item.overdue ? 'bg-red-500' : groupSt.bg}`}>
+                                                                    {item.overdue ? 'Overdue' : groupSt.label}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                // ── TRIM VARIANT CHILD — hide when parent collapsed ───
+                                                if (item.parentTrimGroupId != null) {
+                                                    const parentExpanded = expandAll || expandedTrimGroups.has(item.parentTrimGroupId);
+                                                    if (!parentExpanded) return null;
+                                                }
+                                                // ── REGULAR ITEM (fabric / manual / expanded variant) ─
                                                 const st      = ST[item.status] || ST.pending;
                                                 const bStyle  = barStyle(item);
                                                 const isSel   = expandAll || selId === item.id;
                                                 const overdue = isOverdue(item);
                                                 return (
-                                                    <div key={item.id}>
+                                                    <div key={item.id} className={item.parentTrimGroupId != null ? 'ml-5 border-l border-slate-200' : ''}>
                                                         <div
                                                             onClick={() => {
                                                                 setSelId(isSel ? null : item.id);
@@ -1748,6 +1870,25 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                                         {item.reservations.length}×
                                                                     </span>
                                                                 )}
+                                                                {item.type === 'trim' && (() => {
+                                                                    const subRes = (item.reservations || []).filter(r => r.is_substitute);
+                                                                    if (subRes.length === 0) return null;
+                                                                    const unique = [...new Map(subRes.map(r => [r.trim_item_variant_id, r])).values()];
+                                                                    const label = unique.length === 1
+                                                                        ? `SUB · ${unique[0].color_name || unique[0].color_number || 'variant'}`
+                                                                        : `SUB · ${unique.length} variants`;
+                                                                    const tip = unique.map(r =>
+                                                                        `${r.color_name || ''}${r.color_number ? ` (${r.color_number})` : ''}`.trim() || `variant #${r.trim_item_variant_id}`
+                                                                    ).join(', ');
+                                                                    return (
+                                                                        <span
+                                                                            title={`Reserved with substitute: ${tip}`}
+                                                                            className="text-[8px] font-bold text-purple-700 bg-purple-50 border border-purple-200 rounded-full px-1.5 py-0.5 shrink-0"
+                                                                        >
+                                                                            {label}
+                                                                        </span>
+                                                                    );
+                                                                })()}
                                                                 {(item.purchase_requirements?.length || 0) > 0 && (
                                                                     <span
                                                                         title={`${item.purchase_requirements.length} purchase requirement${item.purchase_requirements.length === 1 ? '' : 's'} — click to view`}
@@ -2730,9 +2871,21 @@ const RecalculateConfirmModal = ({ preview, sopName, onClose, onConfirm, busy, e
                                     ? `${Number(r.meters_reserved ?? r.reserved ?? r.meters ?? 0).toFixed(1)} m reserved`
                                     : `${Number(r.quantity_reserved ?? r.reserved ?? r.quantity ?? 0).toLocaleString()} ${r.unit_of_measure ?? r.unit ?? 'pcs'} reserved`;
                                 return (
-                                    <li key={r.id ?? `rs-${i}`} className="flex items-center justify-between text-xs py-1.5 px-3 bg-emerald-50/40">
-                                        <span className="truncate">{label}</span>
-                                        <span className="font-bold text-emerald-700 shrink-0 ml-2">{amount}</span>
+                                    <li key={r.id ?? `rs-${i}`} className={`flex items-center justify-between text-xs py-1.5 px-3 gap-2 ${r.is_substitute ? 'bg-purple-50/50' : 'bg-emerald-50/40'}`}>
+                                        <span className="truncate flex-1 min-w-0">
+                                            {r.is_substitute && (
+                                                <span className="inline-flex items-center mr-1.5 text-[9px] font-bold text-purple-700 bg-purple-100 border border-purple-200 px-1.5 py-0.5 rounded-full">
+                                                    SUB
+                                                </span>
+                                            )}
+                                            {label}
+                                            {r.is_substitute && (r.color_name || r.color_number) && (
+                                                <span className="ml-1 text-purple-600 font-semibold">
+                                                    · {r.color_name}{r.color_number ? ` (${r.color_number})` : ''}
+                                                </span>
+                                            )}
+                                        </span>
+                                        <span className="font-bold text-emerald-700 shrink-0">{amount}</span>
                                     </li>
                                 );
                             })}

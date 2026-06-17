@@ -176,8 +176,12 @@ const TrimReservationsPage = () => {
     });
 
     const handleRelease = async (reservation, variantUom) => {
-        const qty = Number(reservation.quantity_reserved || 0);
-        const msg = `Release ${fmtNum(qty)} ${variantUom || 'pcs'} reserved for ${reservation.sales_order_code || 'this SO'}?\n\nStock returns to the pool.`;
+        const qty      = Number(reservation.quantity_reserved || 0);
+        const consumed = Number(reservation.quantity_consumed || 0);
+        const msg = `Release ${fmtNum(qty)} ${variantUom || 'pcs'} reserved for ${reservation.sales_order_code || 'this SO'}?`
+            + (consumed > 0
+                ? `\n\n⚠ ${fmtNum(consumed)} units already consumed.`
+                : '\n\nStock returns to the pool.');
         if (!window.confirm(msg)) return;
         setReleasingId(reservation.id);
         setRowErrors(prev => { const n = { ...prev }; delete n[reservation.id]; return n; });
@@ -220,15 +224,17 @@ const TrimReservationsPage = () => {
                 {loading && !data ? (
                     <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-emerald-600" /></div>
                 ) : (
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                         <KpiCard label="Trim items"    value={fmtNum(totals.trim_item_count)}
                             icon={Package}       colorClass="text-indigo-700"  bgClass="bg-indigo-50" />
                         <KpiCard label="Variants"      value={fmtNum(totals.variant_count)}
                             icon={Layers}        colorClass="text-slate-700"   bgClass="bg-slate-100" />
                         <KpiCard label="Reservations"  value={fmtNum(totals.reservation_count)}
                             icon={Bookmark}      colorClass="text-emerald-700" bgClass="bg-emerald-50" />
-                        <KpiCard label="Total units"   value={fmtNum(totals.total_units_reserved)}
+                        <KpiCard label="Total reserved" value={fmtNum(totals.total_units_reserved)}
                             icon={Boxes}         colorClass="text-slate-700"   bgClass="bg-slate-100" />
+                        <KpiCard label="Active units"  value={fmtNum(totals.total_units_active)}
+                            icon={Boxes}         colorClass="text-blue-700"    bgClass="bg-blue-50" />
                         <KpiCard label="SOs covered"   value={fmtNum(totals.sales_orders_covered)}
                             icon={ClipboardList} colorClass="text-amber-700"   bgClass="bg-amber-50" />
                     </div>
@@ -338,7 +344,9 @@ const TrimReservationsPage = () => {
                                         )}
                                     </div>
                                     <div className="text-xs text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
-                                        <span className="font-bold text-emerald-700">{fmtNum(group.total_reserved)} {group.uom || 'pcs'}</span>
+                                        <span className="font-bold text-emerald-700">{fmtNum(group.total_reserved)} reserved</span>
+                                        <span>·</span>
+                                        <span className="font-bold text-blue-700">{fmtNum(group.total_active)} active</span>
                                         <span>·</span>
                                         <span>{(group.variants || []).length} variant{(group.variants || []).length === 1 ? '' : 's'}</span>
                                     </div>
@@ -350,7 +358,7 @@ const TrimReservationsPage = () => {
                                     {(group.variants || []).map(variant => {
                                         const vExpanded = expandedVariants.has(variant.trim_item_variant_id);
                                         const inStock = Number(variant.in_stock ?? 0);
-                                        const stockShort = variant.in_stock != null && inStock < Number(variant.total_reserved || 0);
+                                        const stockShort = variant.in_stock != null && inStock < Number(variant.total_active ?? variant.total_reserved ?? 0);
                                         return (
                                             <div key={variant.trim_item_variant_id}>
                                                 <button
@@ -376,6 +384,8 @@ const TrimReservationsPage = () => {
                                                         </div>
                                                         <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
                                                             <span className="font-bold text-emerald-700">{fmtNum(variant.total_reserved)} reserved</span>
+                                                            <span>·</span>
+                                                            <span className="font-bold text-blue-700">{fmtNum(variant.total_active)} active</span>
                                                             {variant.in_stock != null && (
                                                                 <>
                                                                     <span>·</span>
@@ -423,13 +433,18 @@ const TrimReservationsPage = () => {
                                                                     </div>
                                                                     <div className="text-right shrink-0">
                                                                         <p className="text-sm font-bold text-emerald-700 tabular-nums">{fmtNum(r.quantity_reserved)} {group.uom || 'pcs'}</p>
+                                                                        {(r.quantity_consumed > 0 || r.quantity_active != null) && (
+                                                                            <p className="text-[10px] text-slate-400 tabular-nums">
+                                                                                {fmtNum(r.quantity_consumed || 0)} used · {fmtNum(r.quantity_active ?? (r.quantity_reserved - (r.quantity_consumed || 0)))} active
+                                                                            </p>
+                                                                        )}
                                                                     </div>
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => handleRelease(r, group.uom)}
-                                                                        disabled={releasing}
+                                                                        disabled={releasing || Number(r.quantity_consumed || 0) > 0}
                                                                         className="shrink-0 flex items-center gap-1 text-[11px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-2 py-1 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                                                                        title="Release this reservation"
+                                                                        title={Number(r.quantity_consumed || 0) > 0 ? 'Already partially consumed — cannot release' : 'Release this reservation'}
                                                                     >
                                                                         {releasing
                                                                             ? <Loader2 size={11} className="animate-spin" />

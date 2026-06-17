@@ -289,7 +289,7 @@ const ReferenceDataModal = ({ isOpen, onClose, orderId }) => {
 };
 
 // --- Fulfillment Modal ---
-const FulfillmentModal = ({ item, onClose, onSubmit }) => {
+const FulfillmentModal = ({ item, sopId, onClose, onSubmit, apiError }) => {
     const fulfillmentOptions = [
         ...(item.available_stock > 0 ? [{ ...item, id: item.trim_item_variant_id, is_substitute: false }] : []),
         ...(item.substitutes || []).map(sub => ({ ...sub, id: sub.substitute_variant_id, is_substitute: true }))
@@ -299,14 +299,48 @@ const FulfillmentModal = ({ item, onClose, onSubmit }) => {
     const [selectedVariantId, setSelectedVariantId] = useState(fulfillmentOptions[0]?.id || '');
     const [quantity, setQuantity] = useState(remainingRequired);
 
+    const [reservationInfo, setReservationInfo] = useState(null);
+    const [reservationLoading, setReservationLoading] = useState(false);
+
+    useEffect(() => {
+        if (!selectedVariantId) { setReservationInfo(null); return; }
+        const params = { trim_item_variant_id: selectedVariantId };
+        if (sopId) params.sales_order_product_id = sopId;
+        console.log('[FulfillmentModal] fetching reservation', params);
+        setReservationLoading(true);
+        storeManagerApi.getTrimReservations(params)
+            .then(res => {
+                const body    = res.data?.data ?? res.data ?? {};
+                const variant = body.groups?.[0]?.variants?.[0] ?? null;
+                const info = variant ? {
+                    reserved: Number(variant.total_reserved || 0),
+                    active:   Number(variant.total_active   || 0),
+                    consumed: Number(variant.total_reserved || 0) - Number(variant.total_active || 0),
+                    scopedToSop: !!sopId,
+                } : null;
+                console.log('[FulfillmentModal] reservation result', info ?? 'none found');
+                setReservationInfo(info);
+            })
+            .catch(err => { console.log('[FulfillmentModal] reservation fetch failed', err); setReservationInfo(null); })
+            .finally(() => setReservationLoading(false));
+    }, [sopId, selectedVariantId]);
+
     const selectedOption = fulfillmentOptions.find(opt => opt.id === selectedVariantId);
     const maxAllowed = selectedOption ? Math.min(remainingRequired, selectedOption.available_stock) : 0;
 
+    const [validationErr, setValidationErr] = useState(null);
     const handleSubmit = () => {
-        if (!selectedOption) return alert("Please select an item to fulfill with.");
-        if (isNaN(quantity) || quantity <= 0) return alert("Invalid quantity. Please enter a number greater than 0.");
-        if (quantity > maxAllowed) return alert(`Error: Quantity cannot be greater than the available stock (${selectedOption.available_stock}) or remaining required (${remainingRequired}).`);
-        
+        if (!selectedOption) { setValidationErr("Please select an item to fulfill with."); return; }
+        if (isNaN(quantity) || quantity <= 0) { setValidationErr("Invalid quantity. Please enter a number greater than 0."); return; }
+        if (quantity > maxAllowed) { setValidationErr(`Quantity cannot exceed available stock (${selectedOption.available_stock}) or remaining required (${remainingRequired}).`); return; }
+        setValidationErr(null);
+        console.log('[FulfillmentModal] submitting allocation', {
+            orderItemId: item.id,
+            variantId: selectedVariantId,
+            quantity,
+            reservationActive: reservationInfo?.active ?? 'unknown',
+            reservationReserved: reservationInfo?.reserved ?? 'unknown',
+        });
         onSubmit({
             orderItemId: item.id,
             quantityToFulfill: quantity,
@@ -347,14 +381,58 @@ const FulfillmentModal = ({ item, onClose, onSubmit }) => {
                             ))}
                         </div>
                     </div>
+                    {/* Reservation status for selected variant */}
+                    {selectedVariantId && (
+                        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs">
+                            <p className="font-bold text-blue-700 mb-1.5 uppercase tracking-wider text-[10px]">
+                                Buyer reservation for this variant
+                                {reservationInfo && !reservationInfo.scopedToSop && (
+                                    <span className="ml-1.5 normal-case font-normal text-blue-400">(all orders combined)</span>
+                                )}
+                            </p>
+                            {reservationLoading ? (
+                                <p className="text-blue-400 flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Checking…</p>
+                            ) : reservationInfo ? (
+                                <div className="flex items-center gap-4">
+                                    <span className="text-slate-600"><span className="font-bold text-blue-800">{reservationInfo.reserved.toLocaleString('en-IN')}</span> reserved</span>
+                                    <span className="text-slate-600"><span className="font-bold text-orange-700">{reservationInfo.consumed.toLocaleString('en-IN')}</span> already used</span>
+                                    <span className="text-slate-600"><span className={`font-bold ${reservationInfo.active > 0 ? 'text-emerald-700' : 'text-red-600'}`}>{reservationInfo.active.toLocaleString('en-IN')}</span> available to allocate</span>
+                                </div>
+                            ) : (
+                                <p className="text-amber-700 flex items-center gap-1"><LuTriangleAlert size={11} /> No reservation found — ask buyer to reserve first.</p>
+                            )}
+                        </div>
+                    )}
                     <div>
                         <label htmlFor="fulfill-quantity" className="block text-sm font-medium text-gray-700 mb-1">Quantity to Fulfill (Remaining: {remainingRequired})</label>
                         <input type="number" id="fulfill-quantity" value={quantity} onChange={e => setQuantity(parseInt(e.target.value, 10) || 0)} className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none font-bold" min="1" max={maxAllowed} />
                     </div>
+                    {apiError && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 text-sm text-red-700">
+                            <p className="font-semibold flex items-center gap-1.5"><LuTriangleAlert size={14} /> {apiError.message}</p>
+                            {apiError.sopId && apiError.trimId && (
+                                <a
+                                    href="/merchandiser/planning"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="mt-1.5 inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline"
+                                >
+                                    Ask buyer to reserve on the planning page →
+                                </a>
+                            )}
+                        </div>
+                    )}
                 </div>
-                <div className="px-6 py-4 bg-white border-t flex justify-end space-x-3">
-                    <button onClick={onClose} className="px-5 py-2.5 bg-gray-100 text-gray-800 rounded-lg font-bold hover:bg-gray-200 transition-colors">Cancel</button>
-                    <button onClick={handleSubmit} className="px-5 py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Confirm Fulfillment</button>
+                <div className="px-6 py-4 bg-white border-t space-y-3">
+                    {validationErr && (
+                        <p className="text-sm text-red-600 flex items-center gap-1.5 font-medium">
+                            <LuTriangleAlert size={14} /> {validationErr}
+                        </p>
+                    )}
+                    <div className="flex justify-end space-x-3">
+                        <button onClick={onClose} className="px-5 py-2.5 bg-gray-100 text-gray-800 rounded-lg font-bold hover:bg-gray-200 transition-colors">Cancel</button>
+                        <button onClick={handleSubmit} className="px-5 py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Confirm Fulfillment</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -373,6 +451,24 @@ const STATUS_STYLES = {
     amber:   { text: 'text-amber-700',   bg: 'bg-amber-100',   border: 'border-amber-200',   barBg: 'bg-amber-500'   },
     emerald: { text: 'text-emerald-700', bg: 'bg-emerald-100', border: 'border-emerald-200', barBg: 'bg-emerald-500' },
     indigo:  { text: 'text-indigo-700',  bg: 'bg-indigo-100',  border: 'border-indigo-200',  barBg: 'bg-indigo-500'  },
+};
+
+// Auto-dismiss toast notification
+const Toast = ({ kind, message, onDismiss }) => {
+    useEffect(() => {
+        if (!message) return undefined;
+        const t = setTimeout(onDismiss, 4000);
+        return () => clearTimeout(t);
+    }, [message, onDismiss]);
+    if (!message) return null;
+    const cls = kind === 'error' ? 'bg-red-600' : 'bg-emerald-600';
+    return (
+        <div className={`fixed bottom-5 right-5 z-[70] flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl text-sm font-bold text-white ${cls}`}>
+            {kind === 'error' ? <LuTriangleAlert className="w-4 h-4 shrink-0" /> : <LuCircleCheck className="w-4 h-4 shrink-0" />}
+            <span className="max-w-xs">{message}</span>
+            <button onClick={onDismiss} className="ml-2 opacity-70 hover:opacity-100"><LuX className="w-3.5 h-3.5" /></button>
+        </div>
+    );
 };
 
 // Raw stock (available_stock / main_store_stock) minus reservations. Defensive — works on
@@ -412,8 +508,17 @@ const TrimOrderDetailPage = () => {
 
     // Modals state
     const [modalState, setModalState] = useState({ isOpen: false, item: null });
+    const [fulfillErr, setFulfillErr] = useState(null);
     const [refModalOpen, setRefModalOpen] = useState(false);
     const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
+
+    // Toast
+    const [toast, setToast] = useState(null);
+    const showToast = useCallback((kind, message) => setToast({ kind, message }), []);
+
+    // Reservation info for the currently selected trim item
+    const [trimReservation, setTrimReservation] = useState(null);
+    const [trimResLoading, setTrimResLoading] = useState(false);
 
     // Master-detail + intent grouping
     const [selectedTrimName, setSelectedTrimName] = useState(null);
@@ -451,6 +556,11 @@ const TrimOrderDetailPage = () => {
         try {
             const response = await storeManagerApi.getTrimOrderDetails(orderId);
             console.log("Order Details Response:", response.data);
+            console.log('[TrimOrderDetail] key fields from API:', {
+                sales_order_product_id: response.data.sales_order_product_id,
+                trim_item_id_on_first_item: response.data.items?.[0]?.trim_item_id,
+                first_item_keys: response.data.items?.[0] ? Object.keys(response.data.items[0]) : [],
+            });
             const sanitizedItems = (response.data.items || []).map(item => ({
                 ...item,
                 quantity_fulfilled: parseInt(item.quantity_fulfilled) || 0,
@@ -463,6 +573,7 @@ const TrimOrderDetailPage = () => {
                 status: response.data.status,
                 batchId: response.data.production_batch_id,
                 batch_code: response.data.batch_code,
+                sopId: response.data.sales_order_product_id ?? null,
             });
         } catch (err) {
             setError('Could not load order details.');
@@ -498,10 +609,10 @@ const TrimOrderDetailPage = () => {
         setIsFulfillingAll(true);
         try {
             const res = await storeManagerApi.autoFulfillOrder(orderId);
-            alert(res.data.message);
+            showToast('success', res.data.message || 'Auto-fulfill complete.');
             fetchDetails();
         } catch (err) {
-            alert(`Failed: ${err.response?.data?.error || 'Server error'}`);
+            showToast('error', `Failed: ${err.response?.data?.error || 'Server error'}`);
         } finally {
             setIsFulfillingAll(false);
         }
@@ -512,10 +623,10 @@ const TrimOrderDetailPage = () => {
         setIsFulfillingAll(true);
         try {
             const res = await storeManagerApi.autoFulfillSubstitutes(orderId);
-            alert(res.data.message);
+            showToast('success', res.data.message || 'Substitute auto-fulfill complete.');
             fetchDetails();
         } catch (err) {
-            alert(`Failed: ${err.response?.data?.error || 'Server error'}`);
+            showToast('error', `Failed: ${err.response?.data?.error || 'Server error'}`);
         } finally {
             setIsFulfillingAll(false);
         }
@@ -577,8 +688,38 @@ const TrimOrderDetailPage = () => {
         }
     }, [visibleTrimItemGroups, selectedTrimName]);
 
-    // Selected trim item → group its variants by fulfillment intent
+    // Fetch reservation summary whenever the selected trim group or SOP changes.
+    // Filters by sales_order_product_id + each trim_item_variant_id in the group; no trim_item_id needed.
     const selectedTrimGroup = trimItemGroups.find(g => g.name === selectedTrimName) || null;
+    useEffect(() => {
+        const sopId = orderInfo?.sopId;
+        if (!sopId || !selectedTrimGroup) {
+            console.log('[TrimOrderDetail] skipping panel reservation fetch — missing sopId or no selected group', { sopId, group: selectedTrimGroup?.name });
+            setTrimReservation(null);
+            return;
+        }
+        const variantIds = new Set(selectedTrimGroup.items.map(it => String(it.trim_item_variant_id)));
+        console.log('[TrimOrderDetail] fetching panel reservations', { sopId, trimName: selectedTrimGroup.name, variantIds: [...variantIds] });
+        setTrimResLoading(true);
+        storeManagerApi.getTrimReservations({ sales_order_product_id: sopId })
+            .then(res => {
+                const body = res.data?.data ?? res.data ?? {};
+                let reserved = 0, active = 0;
+                (body.groups || []).forEach(g =>
+                    (g.variants || []).forEach(v => {
+                        if (variantIds.has(String(v.trim_item_variant_id))) {
+                            reserved += Number(v.total_reserved || 0);
+                            active   += Number(v.total_active   || 0);
+                        }
+                    })
+                );
+                const info = reserved > 0 ? { reserved, active, consumed: reserved - active } : null;
+                console.log('[TrimOrderDetail] panel reservation result', info ?? 'none found');
+                setTrimReservation(info);
+            })
+            .catch(err => { console.log('[TrimOrderDetail] panel reservation fetch failed', err); setTrimReservation(null); })
+            .finally(() => setTrimResLoading(false));
+    }, [selectedTrimGroup?.name, orderInfo?.sopId]);
     const intentGroups = useMemo(() => {
         if (!selectedTrimGroup) return [];
         const groups = new Map();
@@ -689,7 +830,7 @@ const TrimOrderDetailPage = () => {
     // Bulk fulfill every row in one intent group, committing each row's effective plan.
     const handleBulkFulfillGroup = async (group) => {
         const fulfillable = group.rows.filter(r => r.plan.decision !== 'fulfilled' && r.plan.fulfilling_variant_id && r.plan.quantity_to_fulfill > 0);
-        if (fulfillable.length === 0) { alert('Nothing to fulfill in this group.'); return; }
+        if (fulfillable.length === 0) { showToast('error', 'Nothing to fulfill in this group.'); return; }
 
         // Detect rows whose planned qty exceeds the net-of-reservations stock of the variant
         // they're pulling from. Surface them so the user explicitly confirms the over-allocation.
@@ -742,7 +883,7 @@ const TrimOrderDetailPage = () => {
                 fulfillable.forEach(({ item }) => delete next[item.id]);
                 return next;
             });
-            if (failures > 0) alert(`Completed with ${failures} failure${failures === 1 ? '' : 's'}. Check the console for details.`);
+            if (failures > 0) showToast('error', `Completed with ${failures} failure${failures === 1 ? '' : 's'} — some rows blocked by missing reservations.`);
             await fetchDetails();
         } finally {
             setBulkBusyKey(null);
@@ -754,12 +895,18 @@ const TrimOrderDetailPage = () => {
 
     const handleFulfillmentSubmit = async (fulfillmentData) => {
         setIsFulfillingAll(true);   // keep the page-level spinner off so scroll position survives the refresh
+        setFulfillErr(null);
         try {
             await storeManagerApi.fulfillWithVariant(fulfillmentData);
             setModalState({ isOpen: false, item: null });
             await fetchDetails();
         } catch (err) {
-            alert(`Fulfillment failed: ${err.response?.data?.error || 'Server error'}`);
+            const d = err?.response?.data || {};
+            setFulfillErr({
+                message: d.error || 'Fulfillment failed.',
+                sopId:   d.sales_order_product_id ?? null,
+                trimId:  d.trim_item_id ?? null,
+            });
         } finally {
             setIsFulfillingAll(false);
         }
@@ -772,20 +919,20 @@ const TrimOrderDetailPage = () => {
             await storeManagerApi.revertFulfillment(logId);
             fetchDetails();
         } catch (err) {
-            alert(`Failed to revert: ${err.response?.data?.error || 'Server error'}`);
+            showToast('error', `Failed to revert: ${err.response?.data?.error || 'Server error'}`);
         } finally {
             setIsReverting(false);
         }
     };
-    
+
     const handleRecheck = async () => {
         setIsFulfillingAll(true);   // keep page-level spinner off so scroll position survives
         try {
             const response = await storeManagerApi.recheckMissingItems(orderId);
-            alert(response.data.message);
+            showToast('success', response.data.message || 'Re-check complete.');
             await fetchDetails();
         } catch (err) {
-            alert(`Re-check failed: ${err.response?.data?.error || 'Server error'}`);
+            showToast('error', `Re-check failed: ${err.response?.data?.error || 'Server error'}`);
         } finally {
             setIsFulfillingAll(false);
         }
@@ -830,7 +977,7 @@ const TrimOrderDetailPage = () => {
                                 className="px-5 py-2.5 bg-white text-gray-700 hover:bg-gray-100 border border-gray-300 hover:border-gray-400 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center"
                             >
                                 <Info className="mr-2 h-5 w-5 text-gray-500" /> 
-                                View Ref & BOM
+                                View Ref & BOMm
                             </button>
 
                             <Link
@@ -1047,6 +1194,35 @@ const TrimOrderDetailPage = () => {
                                                 );
                                             })()}
 
+                                            {/* Buyer reservation status for this trim item */}
+                                            {orderInfo?.sopId && (
+                                                <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+                                                    <p className="text-[9px] font-bold uppercase tracking-wider text-blue-600 mb-1.5">Buyer reservation · this trim item</p>
+                                                    {trimResLoading ? (
+                                                        <p className="text-xs text-blue-400 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Checking…</p>
+                                                    ) : trimReservation ? (
+                                                        <div className="grid grid-cols-3 gap-2">
+                                                            <div className="bg-white border border-blue-100 rounded-lg px-2 py-1.5 text-center">
+                                                                <p className="text-[9px] font-bold uppercase tracking-wider text-blue-500">Reserved</p>
+                                                                <p className="text-base font-extrabold text-blue-800 tabular-nums">{trimReservation.reserved.toLocaleString('en-IN')}</p>
+                                                            </div>
+                                                            <div className="bg-white border border-orange-100 rounded-lg px-2 py-1.5 text-center">
+                                                                <p className="text-[9px] font-bold uppercase tracking-wider text-orange-500">Already used</p>
+                                                                <p className="text-base font-extrabold text-orange-700 tabular-nums">{trimReservation.consumed.toLocaleString('en-IN')}</p>
+                                                            </div>
+                                                            <div className={`bg-white rounded-lg px-2 py-1.5 text-center border ${trimReservation.active > 0 ? 'border-emerald-100' : 'border-red-100'}`}>
+                                                                <p className={`text-[9px] font-bold uppercase tracking-wider ${trimReservation.active > 0 ? 'text-emerald-600' : 'text-red-500'}`}>Allocatable</p>
+                                                                <p className={`text-base font-extrabold tabular-nums ${trimReservation.active > 0 ? 'text-emerald-700' : 'text-red-600'}`}>{trimReservation.active.toLocaleString('en-IN')}</p>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-xs text-amber-700 flex items-center gap-1.5">
+                                                            <LuTriangleAlert size={12} /> No reservation found — ask buyer to reserve before allocating.
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            )}
+
                                             {/* Per-trim-item "fulfilled by color" breakdown */}
                                             {fulfilledByColor.length > 0 && (
                                                 <div className="mt-3">
@@ -1202,11 +1378,12 @@ const TrimOrderDetailPage = () => {
             
             {/* Existing Fulfillment Modal */}
             {modalState.isOpen && (
-                <FulfillmentModal item={modalState.item} onClose={() => setModalState({ isOpen: false, item: null })} onSubmit={handleFulfillmentSubmit} />
+                <FulfillmentModal item={modalState.item} sopId={orderInfo?.sopId} onClose={() => { setModalState({ isOpen: false, item: null }); setFulfillErr(null); }} onSubmit={handleFulfillmentSubmit} apiError={fulfillErr} />
             )}
 
             <ReferenceDataModal isOpen={refModalOpen} onClose={() => setRefModalOpen(false)} orderId={orderId} />
             <BarcodePrintModal isOpen={barcodeModalOpen} onClose={() => setBarcodeModalOpen(false)} batchId={orderInfo?.batchId} />
+            <Toast kind={toast?.kind} message={toast?.message} onDismiss={() => setToast(null)} />
 
             {/* Portal-rendered override popover — escapes intent-card overflow-hidden and right-pane overflow-auto */}
             {popoverAnchor && (() => {
