@@ -90,6 +90,7 @@ const AdminLayout = () => {
                 <DesktopNavDropdown title="User & Supplier">
                   <NavLink to="/admin/users" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">User Management</NavLink>
                   <NavLink to="/admin/suppliers" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Supplier Management</NavLink>
+                  <NavLink to="/admin/customers" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Customer Management</NavLink>
                 </DesktopNavDropdown>
                 
                 <DesktopNavDropdown title="Inventory">
@@ -179,6 +180,7 @@ const AdminLayout = () => {
               <MobileNavDropdown title="User & Supplier">
                 <NavLink to="/admin/users" onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">User Management</NavLink>
                 <NavLink to="/admin/suppliers" onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Supplier Management</NavLink>
+                <NavLink to="/admin/customers" onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Customer Management</NavLink>
               </MobileNavDropdown>
 
               <MobileNavDropdown title="Inventory">

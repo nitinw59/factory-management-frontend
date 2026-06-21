@@ -49,6 +49,7 @@ import DefectCodeLineTypePage from './modules/admin/DefectCodeLineTypePage';
 import QCAnalyticsDashboard from './modules/admin/QCAnalyticsDashboard';
 import UserManagementPage from './modules/users/UserManagementPage';
 import SupplierManagementPage from './modules/suppliers/SupplierManagementPage';
+import CustomerManagementPage from './modules/admin/CustomerManagementPage';
 import TrimsDashboardPage from './modules/trims/TrimsDashboardPage';
 import ProductionLinesPage from './modules/production/ProductionLinesPage';
 import FabricColorsPage from './modules/colors/FabricColorsPage';
@@ -191,6 +192,7 @@ function App() {
           <Route path="dashboard" element={<AdminDashboardPage />} />
           <Route path="users" element={<UserManagementPage />} />
           <Route path="suppliers" element={<SupplierManagementPage />} />
+          <Route path="customers" element={<CustomerManagementPage />} />
           <Route path="inventory" element={<TrimsDashboardPage />} />
           <Route path="trim-items" element={<TrimItemsPage />} />
           <Route path="trim-item-variants" element={<TrimItemVariantsPage />} />
