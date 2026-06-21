@@ -3,7 +3,10 @@ import api from '../utils/api';
 export const customerApi = {
     getCustomers: () => api.get('/customer/customers'),
     createCustomer: (data) => api.post('/customer/customers', data),
-    
+    getCustomerById: (id) => api.get(`/customers/${id}`),
+    updateCustomer: (id, data) => api.patch(`/customers/${id}`, data),
+    deleteCustomer: (id) => api.delete(`/customers/${id}`),
+
     getSalesOrders: () => api.get('/customer/sales-orders'),
     getSalesOrderDetails: (id) => api.get(`/customer/sales-orders/${id}`),
     createSalesOrder: (data) => api.post('/customer/sales-orders', data),

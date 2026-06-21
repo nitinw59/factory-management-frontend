@@ -2,40 +2,74 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 
-const NAV = [
-    { to: '/accounts/sales/orders',          label: 'All Sales Orders'       },
-    { to: '/accounts/sales/new',             label: 'Create Order'           },
-    { to: '/accounts/purchase-requirements', label: 'Purchase Requirements'  },
-    { to: '/accounts/fabric-rolls',          label: 'Fabric Rolls'           },
+const SALES_NAV = [
+    { to: '/accounts/sales/orders', label: 'Sales Orders' },
+    { to: '/accounts/sales/new',    label: 'Create Order' },
+];
+
+const PURCHASE_NAV = [
+    { to: '/accounts/purchase/requirements',         label: 'Requirements'   },
+    { to: '/accounts/purchase/orders',               label: 'Orders'         },
+    { to: '/accounts/fabric-rolls',                  label: 'Fabric Rolls'   },
+    { to: '/accounts/purchase/trims-ledger',         label: 'Trims Ledger'   },
+    { to: '/accounts/purchase/supplier-color-codes', label: 'Supplier Codes' },
 ];
 
 const AccountsLayout = () => {
     const { pathname } = useLocation();
 
+    const activeClass = (to) => {
+        const isActive = pathname === to || (to === '/accounts/purchase/orders' && pathname.startsWith('/accounts/purchase/orders/'));
+        if (!isActive) return 'text-gray-600 hover:bg-gray-50';
+        return to.startsWith('/accounts/sales')
+            ? 'bg-indigo-50 text-indigo-700 border border-indigo-100'
+            : 'bg-orange-50 text-orange-700 border border-orange-100';
+    };
+
     return (
         <div className="flex flex-col h-screen bg-gray-100">
             <header className="bg-white shadow-sm border-b border-gray-200 flex-shrink-0">
-                <div className="flex items-center gap-6 px-6 h-14">
+                <div className="flex items-center gap-3 px-6 h-14">
                     <Link
                         to="/accounts/production-workflow"
-                        className="flex items-center gap-1.5 text-sm font-semibold text-gray-400 hover:text-gray-600 transition-colors mr-2"
+                        className="flex items-center gap-1.5 text-sm font-semibold text-gray-400 hover:text-gray-600 transition-colors"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="15 18 9 12 15 6"/>
                         </svg>
                         Production
                     </Link>
+
+                    <span className="w-px h-5 bg-gray-200" />
+
                     <span className="font-black text-lg text-indigo-600 tracking-tight">Accounts</span>
-                    <nav className="flex items-center gap-1 ml-4">
-                        {NAV.map(({ to, label }) => (
+
+                    <span className="w-px h-5 bg-gray-200 mx-1" />
+
+                    {/* Sales group */}
+                    <span className="text-xs font-bold uppercase tracking-widest text-indigo-400 shrink-0">Sales</span>
+                    <nav className="flex items-center gap-1">
+                        {SALES_NAV.map(({ to, label }) => (
                             <Link
                                 key={to}
                                 to={to}
-                                className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-                                    pathname === to
-                                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-100'
-                                        : 'text-gray-600 hover:bg-gray-50'
-                                }`}
+                                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${activeClass(to)}`}
+                            >
+                                {label}
+                            </Link>
+                        ))}
+                    </nav>
+
+                    <span className="w-px h-5 bg-gray-200 mx-1" />
+
+                    {/* Purchase group */}
+                    <span className="text-xs font-bold uppercase tracking-widest text-orange-400 shrink-0">Purchase</span>
+                    <nav className="flex items-center gap-1">
+                        {PURCHASE_NAV.map(({ to, label }) => (
+                            <Link
+                                key={to}
+                                to={to}
+                                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${activeClass(to)}`}
                             >
                                 {label}
                             </Link>

@@ -291,7 +291,7 @@ const StageDetailModal = ({ stage, progress, onClose, onAssign, readyRolls }) =>
 // ============================================================================
 // STAGE NODE
 // ============================================================================
-const StageNode = ({ stage, progress, totalRolls, readyRolls, wipMap, isFirst, onActivate, onCheckComplete, isCheckingComplete }) => {
+const StageNode = ({ stage, progress, totalRolls, readyRolls, processingMode, wipMap, isFirst, onActivate, onCheckComplete, isCheckingComplete }) => {
     // completed_roll_ids: finished at this stage, ready to move forward
     // dispatched_roll_ids: finished here AND already assigned to next stage
     const completedIds = progress?.completed_roll_ids ?? [];
@@ -300,7 +300,8 @@ const StageNode = ({ stage, progress, totalRolls, readyRolls, wipMap, isFirst, o
     const rollsDispatched = dispatchedIds.length;
     const isComplete = progress?.status === 'COMPLETED';
     const isActive = !isComplete && !!progress;
-    const canActivate = isFirst ? true : readyRolls > 0;
+    const canActivate = isFirst || processingMode === 'SERIALIZED' || readyRolls > 0;
+    console.log('[StageNode]', stage.line_type_name, { isFirst, processingMode, readyRolls, canActivate, isActive, isComplete });
 
     let state;
     if (isComplete) state = 'COMPLETE';
@@ -335,8 +336,15 @@ const StageNode = ({ stage, progress, totalRolls, readyRolls, wipMap, isFirst, o
         >
             {/* Header */}
             <div className={`${cfg.header} ${cfg.headerText} px-3 py-2 flex justify-between items-center`}>
-                <span className="font-black text-xs uppercase tracking-widest truncate">{stage.line_type_name}</span>
-                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${cfg.labelBg}`}>{cfg.label}</span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="font-black text-xs uppercase tracking-widest truncate">{stage.line_type_name}</span>
+                    {processingMode === 'SERIALIZED' && (
+                        <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 shrink-0">
+                            Serial
+                        </span>
+                    )}
+                </div>
+                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${cfg.labelBg} shrink-0`}>{cfg.label}</span>
             </div>
 
             {/* Body */}
@@ -539,6 +547,7 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                                         progress={progressMap[stage.id] ?? null}
                                         totalRolls={batch.total_rolls || 0}
                                         readyRolls={readyRolls.length}
+                                        processingMode={stage.processing_mode}
                                         wipMap={wipMap}
                                         isFirst={i === 0}
                                         onActivate={() => handleOpenDetail(i)}

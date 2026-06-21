@@ -180,6 +180,48 @@ function InvoiceNode({ invoice, onClick }) {
     );
 }
 
+function InvoiceSlotNode({ invoice, inwardId, onClick }) {
+    return (
+        <div
+            data-flow-node={`invoice-slot-${inwardId}`}
+            onClick={onClick}
+            className="relative z-10 bg-white border-2 border-emerald-300 hover:border-emerald-400 rounded-2xl shadow-sm hover:shadow-md cursor-pointer transition-all px-4 py-3 w-full"
+        >
+            <div className="flex items-start gap-3">
+                <div className="p-2 bg-emerald-50 rounded-lg shrink-0">
+                    <Receipt size={16} className="text-emerald-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-600">Invoice</span>
+                    <p className="text-sm font-black text-slate-800 truncate">{invoice.invoice_number}</p>
+                    <p className="text-xs font-bold text-emerald-700 tabular-nums mt-0.5">
+                        ₹{fmtNum(invoice.amount)}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                        <PaymentPill status={invoice.payment_status} />
+                        <span className="text-[10px] text-slate-400">{fmtDate(invoice.invoice_date)}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function NoInvoiceNode({ inwardId, onClick }) {
+    return (
+        <div
+            data-flow-node={`invoice-slot-${inwardId}`}
+            onClick={onClick}
+            className="relative z-10 bg-red-50 border-2 border-red-300 hover:border-red-400 rounded-2xl shadow-sm hover:shadow-md cursor-pointer transition-all px-4 py-3 w-full flex flex-col items-center justify-center text-center"
+            style={{ minHeight: '80px' }}
+        >
+            <Receipt size={16} className="text-red-400 mb-1" />
+            <p className="text-xs font-bold text-red-600">No Invoice</p>
+            <p className="text-[10px] text-red-400 mt-0.5">Click to create</p>
+        </div>
+    );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function PurchaseFlowPage() {
@@ -203,7 +245,7 @@ export default function PurchaseFlowPage() {
     const [inwardSnapshot,  setInwardSnapshot]  = useState(null);
     const [inwardPayload,   setInwardPayload]   = useState(null);
     const [inwardStep,      setInwardStep]      = useState('create');   // 'create' | 'review'
-    const [creatingInvoice, setCreatingInvoice] = useState(false);
+    const [creatingInvoiceForInwardId, setCreatingInvoiceForInwardId] = useState(null);
     const [statusBusy,   setStatusBusy]   = useState(false);
     const [confirmAction, setConfirmAction] = useState(null);   // 'PARTIAL_RECEIPT' | 'COMPLETED' | null
     const [statusErr,    setStatusErr]    = useState(null);
@@ -245,7 +287,7 @@ export default function PurchaseFlowPage() {
 
     const handleSavedInvoice = () => {
         setOpenInvoice(null);
-        setCreatingInvoice(false);
+        setCreatingInvoiceForInwardId(null);
         loadAll();
     };
 
@@ -336,16 +378,21 @@ export default function PurchaseFlowPage() {
         return { lines, totals, invoicedAmt, paidAmt };
     }, [po, inwards, invoices]);
 
-    // Build connector list
+    // Map each inward id → its invoice (one invoice can cover multiple inwards)
+    const inwardInvoiceMap = useMemo(() => {
+        const map = {};
+        invoices.forEach(inv => {
+            (inv.inwards || []).forEach(iw => { map[iw.id] = inv; });
+        });
+        return map;
+    }, [invoices]);
+
+    // Build connector list: PO→GRN (emerald), GRN→InvoiceSlot (indigo)
     const edgeDefs = [];
     if (po) {
         inwards.forEach(iw => {
-            edgeDefs.push({ from: 'po', to: `inward-${iw.id}`, color: '#10b981' });
-        });
-        invoices.forEach(inv => {
-            (inv.inwards || []).forEach(iw => {
-                edgeDefs.push({ from: `inward-${iw.id}`, to: `invoice-${inv.id}`, color: '#6366f1' });
-            });
+            edgeDefs.push({ from: 'po',             to: `inward-${iw.id}`,       color: '#10b981' });
+            edgeDefs.push({ from: `inward-${iw.id}`, to: `invoice-slot-${iw.id}`, color: '#6366f1' });
         });
     }
 
@@ -558,11 +605,17 @@ export default function PurchaseFlowPage() {
                             <PoNode po={po} total={total} onClick={() => setOpenPo(true)} />
                         </div>
 
-                        {/* Inward row + Add button */}
+                        {/* GRN + Invoice paired rows */}
                         <div className="mb-3 flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Inwards</span>
-                                <span className="text-xs text-slate-400 tabular-nums">{inwards.length}</span>
+                            <div className="flex items-center gap-6">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Inwards</span>
+                                    <span className="text-xs text-slate-400 tabular-nums">{inwards.length}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-500">Invoices</span>
+                                    <span className="text-xs text-slate-400 tabular-nums">{invoices.length}</span>
+                                </div>
                             </div>
                             <button
                                 onClick={() => setCreatingInward(true)}
@@ -572,49 +625,23 @@ export default function PurchaseFlowPage() {
                             </button>
                         </div>
                         {inwards.length === 0 ? (
-                            <div className="bg-white border-2 border-dashed border-slate-200 rounded-2xl px-4 py-8 text-center text-sm text-slate-400 mb-12">
+                            <div className="bg-white border-2 border-dashed border-slate-200 rounded-2xl px-4 py-8 text-center text-sm text-slate-400">
                                 No inwards yet. Click "Add Inward" to record the first GRN.
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-12">
-                                {inwards.map(iw => (
-                                    <InwardNode
-                                        key={iw.id}
-                                        inward={iw}
-                                        onClick={() => setOpenInward(iw)}
-                                    />
-                                ))}
-                            </div>
-                        )}
-
-                        {/* Invoice row + Add button */}
-                        <div className="mb-3 flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-600">Invoices</span>
-                                <span className="text-xs text-slate-400 tabular-nums">{invoices.length}</span>
-                            </div>
-                            <button
-                                onClick={() => setCreatingInvoice(true)}
-                                disabled={inwards.filter(i => i.invoice_id == null).length === 0}
-                                className="flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 px-3 py-1.5 rounded-lg shadow-sm transition"
-                                title={inwards.filter(i => i.invoice_id == null).length === 0 ? 'No unlinked inwards' : 'Add invoice'}
-                            >
-                                <Plus size={12} /> Add Invoice
-                            </button>
-                        </div>
-                        {invoices.length === 0 ? (
-                            <div className="bg-white border-2 border-dashed border-slate-200 rounded-2xl px-4 py-8 text-center text-sm text-slate-400">
-                                No invoices yet. Add inwards first, then create an invoice and link one or more inwards to it.
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {invoices.map(inv => (
-                                    <InvoiceNode
-                                        key={inv.id}
-                                        invoice={inv}
-                                        onClick={() => setOpenInvoice(inv)}
-                                    />
-                                ))}
+                            <div className="space-y-4 max-w-3xl mx-auto">
+                                {inwards.map(iw => {
+                                    const invoice = inwardInvoiceMap[iw.id];
+                                    return (
+                                        <div key={iw.id} className="grid grid-cols-2 gap-6 items-start">
+                                            <InwardNode inward={iw} onClick={() => setOpenInward(iw)} />
+                                            {invoice
+                                                ? <InvoiceSlotNode invoice={invoice} inwardId={iw.id} onClick={() => setOpenInvoice(invoice)} />
+                                                : <NoInvoiceNode inwardId={iw.id} onClick={() => setCreatingInvoiceForInwardId(iw.id)} />
+                                            }
+                                        </div>
+                                    );
+                                })}
                             </div>
                         )}
 
@@ -727,13 +754,15 @@ export default function PurchaseFlowPage() {
                     onDeleted={handleSavedInvoice}
                 />
             )}
-            {creatingInvoice && (
+            {creatingInvoiceForInwardId != null && (
                 <InvoiceModal
                     inwards={inwards}
                     invoice={null}
                     initialMode="create"
-                    onClose={() => setCreatingInvoice(false)}
+                    defaultSelectedIds={new Set([creatingInvoiceForInwardId])}
+                    onClose={() => setCreatingInvoiceForInwardId(null)}
                     onSaved={handleSavedInvoice}
+                    onDeleted={handleSavedInvoice}
                 />
             )}
             {openPo && po && (

@@ -48,7 +48,8 @@ const OrdersPage = () => {
     // Cache of inwards per PO. Loaded lazily when a row is expanded so we can
     // render a "received vs ordered" fulfilment summary without forcing the
     // user into the View Flow page.
-    const [inwardsByPoId, setInwardsByPoId] = useState({});
+    const [inwardsByPoId, setInwardsByPoId]   = useState({});
+    const [invoicesByPoId, setInvoicesByPoId] = useState({});
 
 
     const fetchOrders = useCallback(async () => {
@@ -89,21 +90,24 @@ const OrdersPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [orders]);
 
-    // Lazy-fetch inwards when a row gets expanded. Caches per PO; never
-    // re-fetches once we have data, since the expand body re-uses the cache
-    // on subsequent expansions of the same row.
+    // Lazy-fetch inwards + invoices when a row gets expanded. Caches per PO;
+    // never re-fetches once we have data for a given PO.
     useEffect(() => {
-        if (expandedId == null || inwardsByPoId[expandedId] !== undefined) return;
+        if (expandedId == null) return;
         let cancelled = false;
-        purchaseDeptApi.getInwards(expandedId)
-            .then(r => {
-                if (cancelled) return;
-                setInwardsByPoId(prev => ({ ...prev, [expandedId]: r.data?.data ?? r.data ?? [] }));
-            })
-            .catch(() => {
-                if (cancelled) return;
-                setInwardsByPoId(prev => ({ ...prev, [expandedId]: [] }));
-            });
+
+        if (inwardsByPoId[expandedId] === undefined) {
+            purchaseDeptApi.getInwards(expandedId)
+                .then(r => { if (!cancelled) setInwardsByPoId(prev => ({ ...prev, [expandedId]: r.data?.data ?? r.data ?? [] })); })
+                .catch(() => { if (!cancelled) setInwardsByPoId(prev => ({ ...prev, [expandedId]: [] })); });
+        }
+
+        if (invoicesByPoId[expandedId] === undefined) {
+            purchaseDeptApi.getInvoices(expandedId)
+                .then(r => { if (!cancelled) setInvoicesByPoId(prev => ({ ...prev, [expandedId]: r.data?.data ?? r.data ?? [] })); })
+                .catch(() => { if (!cancelled) setInvoicesByPoId(prev => ({ ...prev, [expandedId]: [] })); });
+        }
+
         return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [expandedId]);
@@ -351,6 +355,11 @@ const OrdersPage = () => {
                         {(() => {
                             const detail = detailsByPoId[order.id];
                             const inwards = inwardsByPoId[order.id];
+                            const invoices = invoicesByPoId[order.id] || [];
+                            const inwardInvoiceMap = {};
+                            invoices.forEach(inv => {
+                                (inv.inwards || []).forEach(iw => { inwardInvoiceMap[iw.id] = inv; });
+                            });
                             if (!detail) {
                                 return (
                                     <p className="text-[11px] text-slate-400 italic flex items-center gap-1.5">
@@ -450,6 +459,49 @@ const OrdersPage = () => {
                                             Open View Flow →
                                         </button>
                                     </div>
+
+                                    {/* GRN · Invoice Status nodes */}
+                                    {inwards && inwards.length > 0 && (
+                                        <div className="mt-4">
+                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">
+                                                GRN · Invoice Status
+                                            </p>
+                                            <div className="space-y-2">
+                                                {inwards.map(iw => {
+                                                    const invoice = inwardInvoiceMap[iw.id];
+                                                    const pmtCls = {
+                                                        PAID:           'text-emerald-700',
+                                                        PARTIALLY_PAID: 'text-blue-600',
+                                                        UNPAID:         'text-amber-600',
+                                                        OVERDUE:        'text-red-600',
+                                                    }[invoice?.payment_status] ?? 'text-slate-500';
+                                                    return (
+                                                        <div key={iw.id} className="flex items-stretch gap-2">
+                                                            <div className="flex-1 border border-slate-200 rounded-xl bg-slate-50 px-3 py-2 text-[11px]">
+                                                                <p className="font-bold text-slate-700">{iw.grn_number || `GRN #${iw.id}`}</p>
+                                                                <p className="text-slate-400">{fmtDate(iw.received_date)}</p>
+                                                            </div>
+                                                            <div className="flex items-center text-slate-300 text-sm px-1">→</div>
+                                                            {invoice ? (
+                                                                <div className="flex-1 border border-emerald-300 rounded-xl bg-emerald-50 px-3 py-2 text-[11px]">
+                                                                    <p className="font-bold text-emerald-800">{invoice.invoice_number}</p>
+                                                                    <p className={`font-medium ${pmtCls}`}>
+                                                                        ₹{Number(invoice.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                                                        {' · '}{invoice.payment_status?.replace(/_/g, ' ')}
+                                                                    </p>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex-1 border border-red-300 rounded-xl bg-red-50 px-3 py-2 text-[11px]">
+                                                                    <p className="font-bold text-red-600">No Invoice</p>
+                                                                    <p className="text-red-400 text-[10px]">Invoice not yet created</p>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
                                 </>
                             );
                         })()}

@@ -292,6 +292,12 @@ function App() {
             <Route path="sales/orders" element={<SalesOrderListPage />} />
             <Route path="purchase-requirements" element={<PlanPurchaseRequirementsPage />} />
             <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
+            {/* Purchase Department pages rendered inside AccountsLayout */}
+            <Route path="purchase/requirements" element={<RequirementsPage />} />
+            <Route path="purchase/orders" element={<OrdersPage />} />
+            <Route path="purchase/orders/:id" element={<PurchaseFlowPage />} />
+            <Route path="purchase/trims-ledger" element={<TrimsLedgerPage />} />
+            <Route path="purchase/supplier-color-codes" element={<SupplierColorCodesPage />} />
         </Route>
 
       <Route path="/cutting-portal" element={<CuttingOperatorProtectedRoute><CuttingPortalLayout /></CuttingOperatorProtectedRoute>}>

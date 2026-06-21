@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 const PurchaseDepartmentProtectedRoute = ({ children }) => {
     const { user } = useAuth();
     if (!user) return <Navigate to="/login" replace />;
-    if (user.role !== 'purchase_manager' && user.role !== 'factory_admin') {
+    if (user.role !== 'purchase_manager' && user.role !== 'factory_admin' && user.role !== 'accountant') {
         return <Navigate to="/unauthorized" replace />;
     }
     return children;

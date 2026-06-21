@@ -28,6 +28,7 @@ export default function InvoiceModal({
     inwards = [],            // all inwards on this PO
     invoice = null,
     initialMode = 'view',
+    defaultSelectedIds = new Set(),
     onClose,
     onSaved,
     onDeleted,
@@ -45,7 +46,7 @@ export default function InvoiceModal({
     const [scanFile,    setScanFile]    = useState(null);
     const [selectedIds, setSelectedIds] = useState(() => {
         if (invoice) return new Set((invoice.inwards || []).map(iw => iw.id));
-        return new Set();
+        return new Set(defaultSelectedIds);
     });
     const [expandedInwardId, setExpandedInwardId] = useState(null);
 
