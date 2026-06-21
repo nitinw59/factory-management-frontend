@@ -224,6 +224,96 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
     );
 };
 
+// ─── Searchable trim select ───────────────────────────────────────────────────
+
+const TrimSearchSelect = ({ value, trimItems, onChange, onCreateNew }) => {
+    const [open, setOpen]     = useState(false);
+    const [query, setQuery]   = useState('');
+    const containerRef        = useRef(null);
+    const inputRef            = useRef(null);
+
+    const selected = trimItems.find(t => String(t.id) === String(value));
+
+    useEffect(() => {
+        if (!open) return;
+        inputRef.current?.focus();
+        const handler = (e) => {
+            if (containerRef.current && !containerRef.current.contains(e.target)) {
+                setOpen(false); setQuery('');
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [open]);
+
+    const filtered = trimItems.filter(t => {
+        const q = query.toLowerCase();
+        return !q || t.name?.toLowerCase().includes(q) || t.item_code?.toLowerCase().includes(q);
+    });
+
+    const pick = (id) => { onChange(id); setOpen(false); setQuery(''); };
+
+    return (
+        <div className="relative" ref={containerRef}>
+            <button
+                type="button"
+                onClick={() => setOpen(o => !o)}
+                className="w-full mt-0.5 flex items-center justify-between border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 bg-white text-left"
+            >
+                <span className={selected ? 'text-slate-800' : 'text-slate-400'}>
+                    {selected
+                        ? `${selected.name}${selected.item_code ? ` · ${selected.item_code}` : ''}${selected.unit_of_measure ? ` (${selected.unit_of_measure})` : ''}`
+                        : '— Select trim item —'}
+                </span>
+                <ChevronDown size={13} className={`text-slate-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+            </button>
+
+            {open && (
+                <div className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+                    <div className="px-2 py-1.5 border-b border-slate-100">
+                        <input
+                            ref={inputRef}
+                            type="text"
+                            value={query}
+                            onChange={e => setQuery(e.target.value)}
+                            placeholder="Search by name or code…"
+                            className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-violet-300"
+                        />
+                    </div>
+                    <ul className="max-h-48 overflow-y-auto text-sm">
+                        {filtered.length === 0 && (
+                            <li className="px-3 py-2 text-xs text-slate-400 italic">No results</li>
+                        )}
+                        {filtered.map(t => (
+                            <li key={t.id}>
+                                <button
+                                    type="button"
+                                    onClick={() => pick(String(t.id))}
+                                    className={`w-full text-left px-3 py-2 hover:bg-violet-50 transition-colors flex items-center justify-between gap-2 ${String(t.id) === String(value) ? 'bg-violet-50 text-violet-700 font-bold' : 'text-slate-700'}`}
+                                >
+                                    <span className="truncate">{t.name}{t.item_code ? ` · ${t.item_code}` : ''}</span>
+                                    {t.unit_of_measure && (
+                                        <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold shrink-0">{t.unit_of_measure}</span>
+                                    )}
+                                </button>
+                            </li>
+                        ))}
+                        <li className="border-t border-slate-100">
+                            <button
+                                type="button"
+                                onClick={() => { setOpen(false); setQuery(''); onCreateNew(); }}
+                                className="w-full text-left px-3 py-2 text-violet-600 hover:bg-violet-50 font-bold text-xs flex items-center gap-1 transition-colors"
+                            >
+                                <Plus size={11} /> Create new trim…
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+            )}
+        </div>
+    );
+};
+
 // ─── Quick-create trim modal ──────────────────────────────────────────────────
 
 const UOM_OPTIONS = ['pieces', 'meters', 'spools', 'packets'];
@@ -355,9 +445,9 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
     };
 
     return (
-        <div className="border border-slate-200 rounded-xl overflow-hidden">
+        <div className="border border-slate-200 rounded-xl">
             <button onClick={onToggle}
-                className="w-full flex items-center gap-2 px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left">
+                className="w-full flex items-center gap-2 px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left rounded-t-xl">
                 {expanded
                     ? <ChevronDown size={13} className="text-slate-400 shrink-0" />
                     : <ChevronRight size={13} className="text-slate-400 shrink-0" />}
@@ -408,21 +498,12 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase">Trim Item</label>
-                            <select
+                            <TrimSearchSelect
                                 value={mc.trim_item_id}
-                                onChange={e => {
-                                    if (e.target.value === '__create_new__') { setCreateTrimOpen(true); }
-                                    else { upd('trim_item_id', e.target.value); }
-                                }}
-                                className="w-full mt-0.5 border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 bg-white">
-                                <option value="">— Select trim item —</option>
-                                <option value="__create_new__">+ Create new trim…</option>
-                                {trimItems.map(t => (
-                                    <option key={t.id} value={t.id}>
-                                        {t.name}{t.item_code ? ` · ${t.item_code}` : ''}{t.unit_of_measure ? ` (${t.unit_of_measure})` : ''}
-                                    </option>
-                                ))}
-                            </select>
+                                trimItems={trimItems}
+                                onChange={id => upd('trim_item_id', id)}
+                                onCreateNew={() => setCreateTrimOpen(true)}
+                            />
                         </div>
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase">Calculation</label>
