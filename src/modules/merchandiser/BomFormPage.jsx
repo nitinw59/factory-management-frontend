@@ -868,7 +868,7 @@ export default function BomFormPage() {
                 </Section>
 
                 {/* Material Consumptions */}
-                <Section title="Trim / Material Consumptions" action={<AddBtn onClick={addMaterial} label="Add Material" />}>
+                <Section title="Trim / Material Consumptions">
                     <div className="space-y-2">
                         {form.material_consumptions.length === 0 && (
                             <p className="text-slate-400 text-sm italic text-center py-4">No materials added. Add trim items required for this product.</p>
@@ -888,6 +888,7 @@ export default function BomFormPage() {
                                 }}
                             />
                         ))}
+                        <AddBtn onClick={addMaterial} label="Add Material" />
                     </div>
                 </Section>
 
