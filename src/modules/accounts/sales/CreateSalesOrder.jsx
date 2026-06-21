@@ -18,10 +18,9 @@ const CreateSalesOrder = () => {
   const navigate = useNavigate();
   const { orderId } = useParams();
   const isEditMode = Boolean(orderId);
-  const SIZES = ['S', 'M', 'L', 'XL', 'XXL', `XXXL`, '4XL', '5XL', '6XL'];  
 
   // --- State ---
-  const [options, setOptions] = useState({ customers: [], products: [], fabricTypes: [], fabricColors: [] });
+  const [options, setOptions] = useState({ customers: [], products: [], fabricTypes: [], fabricColors: [], sizes: [] });
   const [header, setHeader] = useState({ customerId: '', orderNumber: '', buyerPoNumber: '', deliveryDate: '', notes: '' });
   
   // Revised Items State: Array of Groups.
@@ -32,7 +31,7 @@ const CreateSalesOrder = () => {
       salesOrderProductId: null,
       productId: '',
       fabricTypeId: '',
-      sizeRatio: { S: 0, M: 0, L: 0, XL: 0, XXL: 0, XXXL: 0, "4XL": 0, "5XL": 0, "6XL": 0 },
+      sizeRatio: {},
       colors: [
         { colorId: '', quantity: '', price: '' }
       ]
@@ -66,11 +65,11 @@ const CreateSalesOrder = () => {
     else setIsLoading(true);
     if (!silent) setError(null);
     try {
-      const promises = [accountingApi.getSalesOrderFormData()];
+      const promises = [accountingApi.getSalesOrderFormData(), accountingApi.getSizes()];
       if (isEditMode) promises.push(accountingApi.getSalesOrderDetails(orderId));
 
-      const [formRes, soRes] = await Promise.all(promises);
-      const opts = formRes.data;
+      const [formRes, sizesRes, soRes] = await Promise.all(promises);
+      const opts = { ...formRes.data, sizes: sizesRes.data?.data ?? sizesRes.data ?? [] };
       setOptions(opts);
 
       if (isEditMode && soRes?.data) {
@@ -100,10 +99,9 @@ const CreateSalesOrder = () => {
             f.name?.toLowerCase() === prod.fabric_type?.toLowerCase()
           );
 
-          const EMPTY_RATIO = { S: 0, M: 0, L: 0, XL: 0, XXL: 0, XXXL: 0, '4XL': 0, '5XL': 0, '6XL': 0 };
           const sizeRatio = prod.size_breakdown
-            ? { ...EMPTY_RATIO, ...prod.size_breakdown }
-            : EMPTY_RATIO;
+            ? Object.fromEntries(Object.entries(prod.size_breakdown).filter(([, v]) => Number(v) > 0))
+            : {};
 
           const colors = (prod.colors || []).map(c => {
             const matchedColor = opts.fabricColors.find(fc =>
@@ -202,7 +200,7 @@ const CreateSalesOrder = () => {
           salesOrderProductId: null,
           productId: '',
           fabricTypeId: '',
-          sizeRatio: { S: 0, M: 0, L: 0, XL: 0, XXL: 0 , XXXL: 0, "4XL": 0, "5XL": 0, "6XL": 0},
+          sizeRatio: {},
           colors: [{ colorId: '', quantity: '', price: '' }]
         }
       ];
@@ -233,6 +231,20 @@ const CreateSalesOrder = () => {
   const updateColor = (groupIndex, colorIndex, field, value) => {
     const newGroups = [...productGroups];
     newGroups[groupIndex].colors[colorIndex][field] = value;
+    setProductGroups(newGroups);
+  };
+
+  const addSizeToGroup = (groupIndex, sizeName) => {
+    if (!sizeName) return;
+    const newGroups = [...productGroups];
+    newGroups[groupIndex].sizeRatio = { ...newGroups[groupIndex].sizeRatio, [sizeName]: 0 };
+    setProductGroups(newGroups);
+  };
+
+  const removeSizeFromGroup = (groupIndex, sizeName) => {
+    const newGroups = [...productGroups];
+    const { [sizeName]: _removed, ...rest } = newGroups[groupIndex].sizeRatio;
+    newGroups[groupIndex].sizeRatio = rest;
     setProductGroups(newGroups);
   };
 
@@ -285,7 +297,7 @@ const CreateSalesOrder = () => {
               const base = {
                   product_id: group.productId,
                   fabric_type_id: group.fabricTypeId,
-                  size_breakdown: group.sizeRatio,
+                  size_breakdown: Object.fromEntries(Object.entries(group.sizeRatio).filter(([, v]) => Number(v) > 0)),
                   colors: group.colors.map(c => ({
                       fabric_color_id: c.colorId,
                       quantity: parseFloat(c.quantity) || 0,
@@ -464,7 +476,7 @@ const CreateSalesOrder = () => {
           const isExpanded   = expandedGroups.has(gIndex);
           const productName  = options.products.find(p => String(p.id) === String(group.productId))?.name;
           const fabricName   = options.fabricTypes.find(f => String(f.id) === String(group.fabricTypeId))?.name;
-          const sizeChips    = SIZES.filter(s => Number(group.sizeRatio[s]) > 0);
+          const sizeChips    = Object.entries(group.sizeRatio).filter(([, v]) => Number(v) > 0).map(([n]) => n);
           const groupQty     = group.colors.reduce((s, c) => s + (parseFloat(c.quantity) || 0), 0);
           const groupValue   = group.colors.reduce((s, c) => s + ((parseFloat(c.quantity) || 0) * (parseFloat(c.price) || 0)), 0);
           const filledColors = group.colors.filter(c => c.colorId).length;
@@ -556,20 +568,44 @@ const CreateSalesOrder = () => {
                             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
                                 Size Ratio <span className="normal-case text-slate-400 font-normal ml-1">(applies to all colors)</span>
                             </label>
-                            <div className="grid grid-cols-9 gap-2">
-                                {SIZES.map(size => (
-                                    <div key={size} className="flex flex-col items-center">
-                                        <span className="text-[10px] font-bold text-slate-400 mb-1">{size}</span>
+                            <div className="flex flex-wrap gap-2 items-center">
+                                {Object.entries(group.sizeRatio).map(([sizeName, ratio]) => (
+                                    <div key={sizeName} className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1.5">
+                                        <span className="text-xs font-bold text-indigo-700 min-w-[2rem] text-center shrink-0">{sizeName}</span>
                                         <input
                                             type="number"
                                             min="0"
-                                            className="w-full text-base p-2 text-center border border-gray-200 rounded-lg font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                            className="w-14 text-sm text-center border border-indigo-200 rounded px-1 py-0.5 font-bold text-slate-700 outline-none focus:border-indigo-500 bg-white"
                                             placeholder="0"
-                                            value={group.sizeRatio[size] === 0 ? '' : group.sizeRatio[size]}
-                                            onChange={e => updateRatio(gIndex, size, e.target.value)}
+                                            value={ratio === 0 ? '' : ratio}
+                                            onChange={e => updateRatio(gIndex, sizeName, e.target.value)}
                                         />
+                                        <button
+                                            type="button"
+                                            onClick={() => removeSizeFromGroup(gIndex, sizeName)}
+                                            className="text-indigo-300 hover:text-red-500 transition ml-0.5"
+                                            title={`Remove ${sizeName}`}
+                                        >
+                                            <X size={12} />
+                                        </button>
                                     </div>
                                 ))}
+                                {options.sizes.filter(s => !(s.name in group.sizeRatio)).length > 0 && (
+                                    <select
+                                        value=""
+                                        onChange={e => { if (e.target.value) addSizeToGroup(gIndex, e.target.value); }}
+                                        className="text-sm border border-dashed border-slate-300 rounded-lg px-3 py-1.5 text-slate-500 bg-white hover:border-indigo-400 hover:text-indigo-600 cursor-pointer outline-none transition"
+                                    >
+                                        <option value="">+ Add size</option>
+                                        {options.sizes
+                                            .filter(s => !(s.name in group.sizeRatio))
+                                            .map(s => <option key={s.id} value={s.name}>{s.name}</option>)
+                                        }
+                                    </select>
+                                )}
+                                {options.sizes.length === 0 && Object.keys(group.sizeRatio).length === 0 && (
+                                    <p className="text-xs text-slate-400 italic">No sizes configured. Add sizes in Admin → Inventory → Manage Sizes.</p>
+                                )}
                             </div>
                         </div>
 
@@ -758,7 +794,7 @@ const CreateSalesOrder = () => {
                     {productGroups.map((g, idx) => {
                       const productName = productById.get(String(g.productId))?.name || (g.productId ? `Product #${g.productId}` : '— pick product —');
                       const fabricName  = fabricById.get(String(g.fabricTypeId))?.name  || (g.fabricTypeId ? `Fabric #${g.fabricTypeId}` : '— pick fabric —');
-                      const sizes       = SIZES.filter(s => Number(g.sizeRatio[s]) > 0);
+                      const sizes       = Object.entries(g.sizeRatio).filter(([, v]) => Number(v) > 0).map(([n]) => n);
                       const groupQty    = g.colors.reduce((s, c) => s + (parseFloat(c.quantity) || 0), 0);
                       const groupValue  = g.colors.reduce((s, c) => s + ((parseFloat(c.quantity) || 0) * (parseFloat(c.price) || 0)), 0);
                       return (
