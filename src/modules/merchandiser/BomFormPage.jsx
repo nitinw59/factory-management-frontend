@@ -5,6 +5,7 @@ import {
     AlertCircle, Scissors, ArrowLeft, Check, XCircle, Ruler,
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
+import { accountingApi } from '../../api/accountingApi';
 
 const genKey = () => `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
@@ -13,22 +14,14 @@ const freshFabric = () => ({ _key: genKey(), fabric_type_id: '', consumption_inc
 const freshRatioGroup = () => ({
     _key: genKey(), ratio_group_name: '', marker_length_inches: '',
     fabrics: [freshFabric()],
-    items: [
-        { _key: genKey(), size: 'S', number_of_pieces: 2 },
-        { _key: genKey(), size: 'M', number_of_pieces: 3 },
-        { _key: genKey(), size: 'L', number_of_pieces: 2 },
-    ],
+    items: [],
 });
 
 const freshMaterial = () => ({
     _key: genKey(), trim_item_id: '',
     calculation_type: 'FIXED', fixed_quantity: '',
     placement_description: '', wastage_percentage: '',
-    size_consumptions: [
-        { _key: genKey(), size: 'S', quantity: '', target_variant_size: '' },
-        { _key: genKey(), size: 'M', quantity: '', target_variant_size: '' },
-        { _key: genKey(), size: 'L', quantity: '', target_variant_size: '' },
-    ],
+    size_consumptions: [],
 });
 
 // ─── Section wrapper ──────────────────────────────────────────────────────────
@@ -52,12 +45,12 @@ const AddBtn = ({ onClick, label }) => (
 
 // ─── Ratio Group Accordion ────────────────────────────────────────────────────
 
-const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, canRemove, fabricTypes }) => {
+const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, canRemove, fabricTypes, sizes }) => {
     const totalPieces = group.items.reduce((s, it) => s + (parseInt(it.number_of_pieces) || 0), 0);
     const sizeSummary = group.items.filter(it => it.size).map(it => `${it.size}×${it.number_of_pieces}`).join(' · ');
 
     const updItems = (items) => onUpdate(gIdx, 'items', items);
-    const addSize = () => updItems([...group.items, { _key: genKey(), size: '', number_of_pieces: 1 }]);
+    const addSize = (sizeName) => updItems([...group.items, { _key: genKey(), size: sizeName, number_of_pieces: 1 }]);
     const removeSize = (sIdx) => updItems(group.items.filter((_, i) => i !== sIdx));
     const updateSize = (sIdx, field, val) => {
         const items = [...group.items];
@@ -131,42 +124,64 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                     </div>
 
                     {/* Size ratio table */}
-                    <table className="w-full text-xs mb-2">
-                        <thead>
-                            <tr className="text-slate-400 font-bold border-b border-slate-100">
-                                <th className="text-left pb-1.5">Size</th>
-                                <th className="text-right pb-1.5 pr-3">Pieces in Marker</th>
-                                <th className="w-7" />
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {group.items.map((item, sIdx) => (
-                                <tr key={item._key} className="border-b border-slate-50">
-                                    <td className="py-1.5 pr-2">
-                                        <input type="text" value={item.size}
-                                            onChange={e => updateSize(sIdx, 'size', e.target.value)}
-                                            placeholder="S"
-                                            className="w-16 border border-slate-200 rounded px-2 py-1 text-xs outline-none text-center"
-                                        />
-                                    </td>
-                                    <td className="py-1.5 text-right pr-3">
-                                        <input type="number" min="1" value={item.number_of_pieces}
-                                            onChange={e => updateSize(sIdx, 'number_of_pieces', parseInt(e.target.value) || 1)}
-                                            className="w-20 border border-slate-200 rounded px-2 py-1 text-xs outline-none text-right"
-                                        />
-                                    </td>
-                                    <td className="py-1.5 text-center">
-                                        <button onClick={() => removeSize(sIdx)} className="text-slate-300 hover:text-red-400">
-                                            <X size={12} />
-                                        </button>
-                                    </td>
+                    {group.items.length > 0 && (
+                        <table className="w-full text-xs mb-2">
+                            <thead>
+                                <tr className="text-slate-400 font-bold border-b border-slate-100">
+                                    <th className="text-left pb-1.5">Size</th>
+                                    <th className="text-right pb-1.5 pr-3">Pieces in Marker</th>
+                                    <th className="w-7" />
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    <button onClick={addSize} className="text-[10px] font-bold text-violet-500 hover:text-violet-600 flex items-center gap-1 mb-4">
-                        <Plus size={10} /> Add size
-                    </button>
+                            </thead>
+                            <tbody>
+                                {group.items.map((item, sIdx) => {
+                                    const usedNamesExceptThis = new Set(
+                                        group.items.filter((_, i) => i !== sIdx).map(it => it.size)
+                                    );
+                                    return (
+                                        <tr key={item._key} className="border-b border-slate-50">
+                                            <td className="py-1.5 pr-2">
+                                                <select value={item.size}
+                                                    onChange={e => updateSize(sIdx, 'size', e.target.value)}
+                                                    className="w-20 border border-slate-200 rounded px-2 py-1 text-xs outline-none bg-white text-center"
+                                                >
+                                                    {item.size && <option value={item.size}>{item.size}</option>}
+                                                    {sizes.filter(s => !usedNamesExceptThis.has(s.name) && s.name !== item.size)
+                                                        .map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                                                </select>
+                                            </td>
+                                            <td className="py-1.5 text-right pr-3">
+                                                <input type="number" min="1" value={item.number_of_pieces}
+                                                    onChange={e => updateSize(sIdx, 'number_of_pieces', parseInt(e.target.value) || 1)}
+                                                    className="w-20 border border-slate-200 rounded px-2 py-1 text-xs outline-none text-right"
+                                                />
+                                            </td>
+                                            <td className="py-1.5 text-center">
+                                                <button onClick={() => removeSize(sIdx)} className="text-slate-300 hover:text-red-400">
+                                                    <X size={12} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    )}
+                    {(() => {
+                        const usedNames = new Set(group.items.map(it => it.size).filter(Boolean));
+                        const available = sizes.filter(s => !usedNames.has(s.name));
+                        return available.length > 0 ? (
+                            <select value="" onChange={e => { if (e.target.value) addSize(e.target.value); }}
+                                className="mb-4 text-[10px] font-bold text-violet-500 border border-dashed border-violet-300 rounded-lg px-3 py-1 bg-white hover:border-violet-500 hover:text-violet-700 cursor-pointer outline-none transition">
+                                <option value="">+ Add size</option>
+                                {available.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                            </select>
+                        ) : (
+                            <p className="mb-4 text-[10px] text-slate-400 italic">
+                                {sizes.length === 0 ? 'No sizes configured — add sizes in Admin → Inventory → Manage Sizes.' : 'All available sizes added.'}
+                            </p>
+                        );
+                    })()}
 
                     {/* Fabric consumptions */}
                     <div className="border-t border-slate-100 pt-3">
@@ -209,13 +224,105 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
     );
 };
 
+// ─── Quick-create trim modal ──────────────────────────────────────────────────
+
+const UOM_OPTIONS = ['pieces', 'meters', 'spools', 'packets'];
+
+const CreateTrimModal = ({ onClose, onCreated }) => {
+    const [name, setName]         = useState('');
+    const [brand, setBrand]       = useState('');
+    const [itemCode, setItemCode] = useState('');
+    const [uom, setUom]           = useState('pieces');
+    const [busy, setBusy]         = useState(false);
+    const [err, setErr]           = useState(null);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!name.trim() || !brand.trim()) { setErr('Name and brand are required.'); return; }
+        setBusy(true); setErr(null);
+        try {
+            const res = await bomApi.createTrimItem({
+                name: name.trim(), brand: brand.trim(),
+                item_code: itemCode.trim() || null,
+                unit_of_measure: uom,
+            });
+            onCreated(res.data?.data ?? res.data);
+        } catch (ex) {
+            setErr(ex?.response?.data?.error || ex.message || 'Failed to create trim item.');
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
+                    <p className="font-black text-slate-800 text-sm">New Trim Item</p>
+                    <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded-full">
+                        <X size={15} className="text-slate-400" />
+                    </button>
+                </div>
+                <form onSubmit={handleSubmit} className="px-5 py-4 space-y-3">
+                    {err && (
+                        <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-xs text-red-600">
+                            <AlertCircle size={13} /> {err}
+                        </div>
+                    )}
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Item Name *</label>
+                        <input autoFocus type="text" value={name} onChange={e => setName(e.target.value)}
+                            placeholder="e.g. Main Label"
+                            className="mt-0.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Brand *</label>
+                        <input type="text" value={brand} onChange={e => setBrand(e.target.value)}
+                            placeholder="e.g. YKK"
+                            className="mt-0.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300"
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Item Code</label>
+                            <input type="text" value={itemCode} onChange={e => setItemCode(e.target.value)}
+                                placeholder="SKU-001"
+                                className="mt-0.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Unit *</label>
+                            <select value={uom} onChange={e => setUom(e.target.value)}
+                                className="mt-0.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 bg-white">
+                                {UOM_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
+                            </select>
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-1 border-t border-slate-100">
+                        <button type="button" onClick={onClose} disabled={busy}
+                            className="text-sm font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition">
+                            Cancel
+                        </button>
+                        <button type="submit" disabled={busy}
+                            className="flex items-center gap-1.5 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-4 py-1.5 rounded-lg transition">
+                            {busy && <Loader2 size={12} className="animate-spin" />}
+                            Create Trim
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
 // ─── Material Accordion ───────────────────────────────────────────────────────
 
-const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, onUpdate, onRemove }) => {
+const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, onUpdate, onRemove, onTrimCreated }) => {
     const trimItem = trimItems.find(t => String(t.id) === String(mc.trim_item_id));
     const uom = trimItem?.unit_of_measure;
     const upd = (field, val) => onUpdate(mIdx, field, val);
 
+    const [createTrimOpen, setCreateTrimOpen] = useState(false);
     const [variantSizes, setVariantSizes] = useState([]);
     useEffect(() => {
         if (!mc.trim_item_id) { setVariantSizes([]); return; }
@@ -292,12 +399,24 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
 
             {expanded && (
                 <div className="px-4 pb-4 pt-3 border-t border-slate-100 bg-white space-y-3">
+                    {createTrimOpen && (
+                        <CreateTrimModal
+                            onClose={() => setCreateTrimOpen(false)}
+                            onCreated={newTrim => { setCreateTrimOpen(false); onTrimCreated(newTrim); }}
+                        />
+                    )}
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase">Trim Item</label>
-                            <select value={mc.trim_item_id} onChange={e => upd('trim_item_id', e.target.value)}
+                            <select
+                                value={mc.trim_item_id}
+                                onChange={e => {
+                                    if (e.target.value === '__create_new__') { setCreateTrimOpen(true); }
+                                    else { upd('trim_item_id', e.target.value); }
+                                }}
                                 className="w-full mt-0.5 border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 bg-white">
                                 <option value="">— Select trim item —</option>
+                                <option value="__create_new__">+ Create new trim…</option>
                                 {trimItems.map(t => (
                                     <option key={t.id} value={t.id}>
                                         {t.name}{t.item_code ? ` · ${t.item_code}` : ''}{t.unit_of_measure ? ` (${t.unit_of_measure})` : ''}
@@ -453,7 +572,7 @@ export default function BomFormPage() {
     });
 
     const [form, setForm] = useState(initialData.form);
-    const [formMeta, setFormMeta] = useState({ products: [], fabricTypes: [], trimItems: [] });
+    const [formMeta, setFormMeta] = useState({ products: [], fabricTypes: [], trimItems: [], sizes: [] });
     const [loading, setLoading] = useState(isEdit);
     const [saving, setSaving] = useState(false);
     const [err, setErr] = useState(null);
@@ -472,13 +591,14 @@ export default function BomFormPage() {
     };
 
     useEffect(() => {
-        bomApi.getFormData()
-            .then(res => {
-                const d = res.data?.data ?? res.data ?? {};
+        Promise.all([bomApi.getFormData(), accountingApi.getSizes()])
+            .then(([formRes, sizesRes]) => {
+                const d = formRes.data?.data ?? formRes.data ?? {};
                 setFormMeta({
                     products:    d.products    || [],
                     fabricTypes: d.fabricTypes || [],
                     trimItems:   d.trimItems   || [],
+                    sizes:       sizesRes.data?.data ?? sizesRes.data ?? [],
                 });
             })
             .catch(() => {});
@@ -741,6 +861,7 @@ export default function BomFormPage() {
                                 onRemove={removeRatioGroup}
                                 canRemove={form.ratio_groups.length > 1}
                                 fabricTypes={formMeta.fabricTypes}
+                                sizes={formMeta.sizes}
                             />
                         ))}
                     </div>
@@ -761,6 +882,10 @@ export default function BomFormPage() {
                                 onToggle={() => toggleMaterial(mc._key)}
                                 onUpdate={updateMaterial}
                                 onRemove={removeMaterial}
+                                onTrimCreated={newTrim => {
+                                    setFormMeta(prev => ({ ...prev, trimItems: [...prev.trimItems, newTrim] }));
+                                    updateMaterial(mIdx, 'trim_item_id', String(newTrim.id));
+                                }}
                             />
                         ))}
                     </div>

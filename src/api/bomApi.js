@@ -16,4 +16,5 @@ export const bomApi = {
     getMeasurementChart:    (bomId)       => api.get(`/bom/${bomId}/measurement-chart`),
     saveMeasurementChart:   (bomId, data) => api.put(`/bom/${bomId}/measurement-chart`, data),
     deleteMeasurementChart: (bomId)       => api.delete(`/bom/${bomId}/measurement-chart`),
+    createTrimItem: (data) => api.post('/shared/trim_items', data),
 };
