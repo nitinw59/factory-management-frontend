@@ -592,7 +592,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                     </div>
                 ) : (
                     /* Step 2 — scrollable code list */
-                    <div className="flex-grow flex flex-col bg-slate-900">
+                    <div className="flex-grow flex flex-col bg-slate-900 min-h-0">
                         <div className={`px-6 py-3 border-b shrink-0 flex items-center gap-3 ${pickerIsAmber ? 'bg-amber-500 border-amber-600' : 'bg-rose-700 border-rose-800'}`}>
                             <button onClick={() => { setSelectedCategory(null); setDefectSearch(''); }}
                                 className={`p-2 rounded-lg transition-colors shrink-0 ${pickerIsAmber ? 'bg-amber-600 hover:bg-amber-700' : 'bg-rose-800 hover:bg-rose-900'}`}>
@@ -629,18 +629,18 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                 <Send className="w-4 h-4" /> CONFIRM {pickerLabel} ({selectedDefectIds.size})
                             </button>
                         </div>
-                        <div className="flex-grow min-h-0 overflow-y-auto p-6">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="flex-grow min-h-0 overflow-y-auto p-4">
+                            <div className="grid grid-cols-3 gap-2">
                                 {availableDefects.map(defect => {
                                     const isChosen = selectedDefectIds.has(defect.id);
                                     return (
                                         <button key={defect.id} onClick={() => toggleDefect(defect.id)}
-                                            className={`relative p-4 rounded-2xl text-left transition-all active:scale-95 border-2 ${isChosen
+                                            className={`relative p-3 rounded-xl text-left transition-all active:scale-95 border-2 ${isChosen
                                                 ? (pickerIsAmber ? 'bg-amber-600 border-amber-400 shadow-lg' : 'bg-rose-700 border-rose-400 shadow-lg')
                                                 : 'bg-slate-800 border-slate-600 hover:border-slate-400'}`}>
-                                            {isChosen && <Check className="absolute top-3 right-3 w-5 h-5 text-white" strokeWidth={3} />}
-                                            <span className={`block text-xs font-bold uppercase tracking-widest mb-1 ${pickerIsAmber ? 'text-amber-300' : 'text-rose-300'}`}>{defect.code}</span>
-                                            <span className="text-white text-sm font-black leading-snug">{defect.description}</span>
+                                            {isChosen && <Check className="absolute top-2 right-2 w-4 h-4 text-white" strokeWidth={3} />}
+                                            <span className={`block text-sm font-bold uppercase tracking-widest mb-1 ${pickerIsAmber ? 'text-amber-300' : 'text-rose-300'}`}>{defect.code}</span>
+                                            <span className="text-white text-[17px] font-black leading-snug">{defect.description}</span>
                                         </button>
                                     );
                                 })}
