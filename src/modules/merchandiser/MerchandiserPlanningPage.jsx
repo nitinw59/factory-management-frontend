@@ -2562,317 +2562,293 @@ const READINESS_CFG = {
     force_ready:          { label: 'Force Ready',  cls: 'bg-violet-50 text-violet-700 border-violet-200',  icon: ShieldCheck },
 };
 
-const QuantitySuggestionModal = ({ linkedSops, onClose, onDone }) => {
-    const [suggestions, setSuggestions] = useState(null);
-    const [bomDetails,  setBomDetails]  = useState({});  // { [sopId]: bom detail with ratio_groups }
-    const [loading,     setLoading]     = useState(true);
-    const [error,       setError]       = useState(null);
-    const [choices,     setChoices]     = useState({});  // { [sopId_colorId]: 'lower' | 'upper' | 'exact' }
-    const [rgChoices,   setRgChoices]   = useState({});  // { [sopId_colorId]: ratioGroupId | '' }
-    const [submitting,  setSubmitting]  = useState(false);
+// ─── MARKER ALLOCATION MODAL ──────────────────────────────────────────────────
+// Per-color marker assignment: user picks a BOM ratio group per color, sees runs
+// needed based on actual per-size quantities, then confirms to calculate requirements.
+
+const _gcd2 = (a, b) => (b === 0 ? a : _gcd2(b, a % b));
+
+const MarkerAllocationModal = ({ sop, onClose, onDone }) => {
+    const [bomDetail,    setBomDetail]    = useState(null);
+    const [loading,      setLoading]      = useState(true);
+    const [error,        setError]        = useState(null);
+    const [markerChoice, setMarkerChoice] = useState({});  // { [colorId]: rgId string }
+    const [submitting,   setSubmitting]   = useState(false);
 
     useEffect(() => {
-        const suggestionsP = Promise.all(
-            linkedSops.map(sop =>
-                planningApi.getSuggestions(sop.id)
-                    .then(r => {
-                        const raw = r.data?.data ?? r.data;
-                        return {
-                            sopId:    sop.id,
-                            sopName:  sop.product_name,
-                            ratioSum: raw?.ratio_sum ?? null,
-                            colors:   raw?.suggestions || [],
-                        };
-                    })
-            )
-        );
-        const bomP = Promise.all(
-            linkedSops
-                .filter(sop => sop.bom_id)
-                .map(sop =>
-                    bomApi.getById(sop.bom_id)
-                        .then(r => ({ sopId: sop.id, detail: r.data?.data ?? r.data }))
-                        .catch(() => ({ sopId: sop.id, detail: null }))
-                )
-        );
+        if (!sop.bom_id) { setLoading(false); return; }
+        bomApi.getById(sop.bom_id)
+            .then(r => {
+                const detail = r.data?.data ?? r.data;
+                setBomDetail(detail);
+                // Default every color to the first ratio group
+                const firstRg = detail?.ratio_groups?.[0];
+                if (firstRg) {
+                    const firstId = String(firstRg.ratio_group_id ?? firstRg.id);
+                    const init = {};
+                    (sop.colors || []).forEach(c => { init[String(c.fabric_color_id)] = firstId; });
+                    setMarkerChoice(init);
+                }
+            })
+            .catch(e => setError(e?.response?.data?.error || 'Failed to load BOM details'))
+            .finally(() => setLoading(false));
+    }, [sop.bom_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-        Promise.all([suggestionsP, bomP]).then(([results, bomResults]) => {
-            const bomMap = {};
-            bomResults.forEach(({ sopId, detail }) => { if (detail) bomMap[sopId] = detail; });
-            setBomDetails(bomMap);
+    const ratioGroups = bomDetail?.ratio_groups || [];
 
-            setSuggestions(results);
-            const choiceInit = {};
-            const rgInit     = {};
-            results.forEach(({ sopId, colors }) => {
-                colors.forEach(c => {
-                    let selected = c.exact ? 'exact' : 'lower';
-                    if (c.selected_option) {
-                        selected = c.selected_option;
-                    } else {
-                        const prev = c.finalized_quantity ?? c.previous_finalized_quantity;
-                        if (prev != null) {
-                            const prevNum = Number(prev);
-                            if (Number(c.lower?.total_pieces) === prevNum)      selected = 'lower';
-                            else if (Number(c.upper?.total_pieces) === prevNum) selected = 'upper';
-                        }
-                    }
-                    choiceInit[`${sopId}_${c.fabric_color_id}`] = selected;
-                    if (c.selected_ratio_group_id) {
-                        rgInit[`${sopId}_${c.fabric_color_id}`] = String(c.selected_ratio_group_id);
-                    }
-                });
-            });
-            setChoices(choiceInit);
-            setRgChoices(rgInit);
-        }).catch(e => setError(e?.response?.data?.error || 'Failed to load suggestions'))
-          .finally(() => setLoading(false));
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // Build a quick lookup: rgId → { name, items:[{sizeName,pieces}], totalPieces }
+    const markerMap = useMemo(() => {
+        const map = {};
+        ratioGroups.forEach(rg => {
+            const rgId = String(rg.ratio_group_id ?? rg.id);
+            const items = (rg.items || [])
+                .map(it => ({ sizeName: stdSize(it.size || ''), pieces: parseInt(it.number_of_pieces) || 1 }))
+                .filter(it => it.sizeName);
+            const totalPieces = items.reduce((s, it) => s + it.pieces, 0) || rg.total_pieces_in_marker || 0;
+            map[rgId] = { name: rg.ratio_group_name || `Group ${rgId}`, items, totalPieces };
+        });
+        return map;
+    }, [ratioGroups]);
 
-    const pick   = (sopId, colorId, opt)  => setChoices(p   => ({ ...p, [`${sopId}_${colorId}`]: opt }));
-    const pickRg = (sopId, colorId, rgId) => setRgChoices(p => ({ ...p, [`${sopId}_${colorId}`]: rgId }));
+    // Calculate runs and produced quantities for a color + marker combination
+    const calcRuns = (colorSizes, rgId) => {
+        const marker = markerMap[rgId];
+        if (!marker || !marker.items.length) return null;
+        const markerBySz = {};
+        marker.items.forEach(it => { markerBySz[it.sizeName] = it.pieces; });
+        const orderedBySz = {};
+        (colorSizes || []).forEach(sz => {
+            const name = stdSize(sz.size_name || sz.size || String(sz.size_id ?? ''));
+            if (name) orderedBySz[name] = Number(sz.quantity) || 0;
+        });
+        let runs = 0;
+        marker.items.forEach(({ sizeName, pieces }) => {
+            const ordered = orderedBySz[sizeName] || 0;
+            if (ordered > 0) runs = Math.max(runs, Math.ceil(ordered / pieces));
+        });
+        const produced = {};
+        marker.items.forEach(({ sizeName, pieces }) => { produced[sizeName] = runs * pieces; });
+        const missingInMarker = Object.keys(orderedBySz)
+            .filter(s => orderedBySz[s] > 0 && !markerBySz[s]);
+        return { runs, produced, totalProduced: runs * marker.totalPieces, orderedBySz, missingInMarker };
+    };
 
     const handleConfirm = async () => {
         setSubmitting(true);
         setError(null);
         try {
-            await Promise.all(
-                suggestions.map(async ({ sopId, colors }) => {
-                    const quantities = colors.map(c => {
-                        const ck      = `${sopId}_${c.fabric_color_id}`;
-                        const opt     = choices[ck] || 'lower';
-                        const optData = (opt === 'exact' ? c.lower : c[opt]) ?? c.lower ?? c.upper;
-                        const selRgId = rgChoices[ck] || null;
-                        // Use per-ratio-group pieces/runs when a specific group is assigned
-                        const rgData  = selRgId && optData?.per_ratio_group
-                            ? optData.per_ratio_group.find(g => String(g.ratio_group_id) === String(selRgId))
-                            : null;
-                        return {
-                            fabric_color_id:    c.fabric_color_id,
-                            selected_option:    opt,
-                            finalized_quantity: rgData?.total_pieces ?? optData?.total_pieces ?? c.ordered_quantity,
-                            marker_runs:        rgData?.runs         ?? optData?.runs         ?? null,
-                            ratio_group_id:     selRgId ? parseInt(selRgId) : null,
-                        };
-                    });
-                    await planningApi.finalizeQuantities(sopId, { quantities });
-                    await planningApi.calculateRequirements(sopId);
-                })
-            );
+            const quantities = (sop.colors || []).map(c => {
+                const colorId = String(c.fabric_color_id);
+                const rgId    = markerChoice[colorId];
+                const calc    = rgId ? calcRuns(c.sizes, rgId) : null;
+                return {
+                    fabric_color_id:    c.fabric_color_id,
+                    ratio_group_id:     rgId ? parseInt(rgId) : null,
+                    marker_runs:        calc?.runs        ?? 0,
+                    finalized_quantity: calc?.totalProduced ?? (Number(c.total_quantity || c.quantity) || 0),
+                    selected_option:    'exact',
+                };
+            });
+            await planningApi.finalizeQuantities(sop.id, { quantities });
+            await planningApi.calculateRequirements(sop.id);
             onDone();
         } catch (e) {
-            setError(e?.response?.data?.error || 'Calculation failed');
+            setError(e?.response?.data?.error || 'Failed to save allocation');
             setSubmitting(false);
         }
     };
 
-    const totalSelections = suggestions?.reduce((s, g) => s + g.colors.length, 0) ?? 0;
-    const madeSelections  = Object.keys(choices).length;
-    const allChosen       = madeSelections >= totalSelections && totalSelections > 0;
+    const allAllocated = (sop.colors || []).every(c => markerChoice[String(c.fabric_color_id)]);
 
     return (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={!submitting ? onClose : undefined}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
-                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                {/* Header */}
+                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100 shrink-0">
                     <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Step 1 of 2 — Confirm Quantities</p>
-                        <h2 className="font-extrabold text-slate-800 text-base">Choose Nearest Marker Run</h2>
-                        <p className="text-xs text-slate-400 mt-0.5">Select lower or upper run for each color, then confirm to calculate requirements.</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Marker Allocation</p>
+                        <h2 className="font-extrabold text-slate-800 text-base">{sop.product_name}</h2>
+                        <p className="text-xs text-slate-400 mt-0.5">Assign a marker to each color — runs are calculated from ordered sizes.</p>
                     </div>
                     {!submitting && <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 mt-0.5"><X size={18} /></button>}
                 </div>
 
-                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
                     {loading && <Spinner />}
-                    {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>}
+                    {error && (
+                        <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>
+                    )}
+                    {!loading && !sop.bom_id && (
+                        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                            No BOM linked. Link a BOM to this product line first.
+                        </p>
+                    )}
+                    {!loading && sop.bom_id && ratioGroups.length === 0 && (
+                        <p className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+                            The linked BOM has no ratio groups defined.
+                        </p>
+                    )}
 
-                    {suggestions?.map(({ sopId, sopName, ratioSum, colors }) => (
-                        <div key={sopId} className="border border-slate-200 rounded-xl overflow-hidden">
-                            <div className="bg-slate-50 px-4 py-3 border-b border-slate-100">
-                                <p className="font-bold text-slate-800 text-sm">{sopName}</p>
-                                <p className="text-[10px] text-slate-400 mt-0.5">
-                                    {colors.length} color{colors.length !== 1 ? 's' : ''}
-                                    {ratioSum != null && <> · ratio sum: {ratioSum} pcs/cycle</>}
-                                </p>
-                            </div>
-                            <div className="p-4 space-y-3">
-                                {colors.map(c => {
-                                    const key    = `${sopId}_${c.fabric_color_id}`;
-                                    const chosen = choices[key] || 'lower';
-                                    return (
-                                        <div key={c.fabric_color_id} className="rounded-xl border border-slate-200 overflow-hidden">
-                                            <div className="flex items-center gap-2.5 px-3 py-2.5 bg-slate-50 border-b border-slate-100">
-                                                <span className="font-bold text-slate-800 text-sm">{c.color_name}</span>
-                                                {c.color_number && (
-                                                    <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{c.color_number}</span>
-                                                )}
-                                                <span className="ml-auto text-[10px] text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded font-medium">
-                                                    Ordered: {(c.ordered_quantity || 0).toLocaleString()} pcs
-                                                </span>
-                                            </div>
-                                            <div className="p-3 space-y-3">
-                                                {/* ── Ratio group picker ── shown when BOM has 2+ groups */}
-                                                {(() => {
-                                                    const rgKey = `${sopId}_${c.fabric_color_id}`;
-                                                    const rgs   = bomDetails[sopId]?.ratio_groups || [];
-                                                    if (rgs.length < 2) return null;
-                                                    const selRg = rgChoices[rgKey] || '';
+                    {!loading && (sop.colors || []).map(c => {
+                        const colorId      = String(c.fabric_color_id);
+                        const sizes        = c.sizes || [];
+                        const selRgId      = markerChoice[colorId] || '';
+                        const calc         = selRgId ? calcRuns(sizes, selRgId) : null;
+                        const totalOrdered = sizes.reduce((s, sz) => s + (Number(sz.quantity) || 0), 0);
+
+                        return (
+                            <div key={colorId} className="border border-slate-200 rounded-xl overflow-hidden">
+                                {/* Color header */}
+                                <div className="flex items-center gap-2.5 px-4 py-3 bg-slate-50 border-b border-slate-100">
+                                    <span className="font-bold text-slate-800 text-sm">{c.color_name}</span>
+                                    {c.color_number && (
+                                        <span className="text-[10px] font-mono text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded">{c.color_number}</span>
+                                    )}
+                                    <span className="ml-auto text-[10px] text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded font-medium">
+                                        {totalOrdered.toLocaleString()} pcs ordered
+                                    </span>
+                                </div>
+
+                                <div className="p-4 space-y-4">
+                                    {/* Size breakdown chips */}
+                                    {sizes.filter(sz => Number(sz.quantity) > 0).length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {sizes.filter(sz => Number(sz.quantity) > 0).map(sz => {
+                                                const sName = stdSize(sz.size_name || sz.size || String(sz.size_id ?? ''));
+                                                return (
+                                                    <span key={sz.size_id ?? sName}
+                                                        className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-700">
+                                                        <span className="text-slate-500">{sName}</span>
+                                                        <span className="text-slate-300">:</span>
+                                                        <span>{Number(sz.quantity).toLocaleString()}</span>
+                                                    </span>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+
+                                    {/* Marker (ratio group) picker */}
+                                    {ratioGroups.length > 0 && (
+                                        <div>
+                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">Select Marker</p>
+                                            <div className="space-y-2">
+                                                {ratioGroups.map(rg => {
+                                                    const rgId  = String(rg.ratio_group_id ?? rg.id);
+                                                    const m     = markerMap[rgId];
+                                                    const active = selRgId === rgId;
                                                     return (
-                                                        <div>
-                                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Assign Ratio Group</p>
-                                                            <div className="flex flex-wrap gap-1.5">
-                                                                <button
-                                                                    onClick={() => pickRg(sopId, c.fabric_color_id, '')}
-                                                                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition-all ${
-                                                                        !selRg
-                                                                            ? 'bg-violet-100 text-violet-700 border-violet-300'
-                                                                            : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-                                                                    }`}
-                                                                >
-                                                                    All groups
-                                                                </button>
-                                                                {rgs.map(rg => {
-                                                                    const rgId  = String(rg.ratio_group_id ?? rg.id);
-                                                                    const active = String(selRg) === rgId;
-                                                                    return (
-                                                                        <button key={rgId}
-                                                                            onClick={() => pickRg(sopId, c.fabric_color_id, rgId)}
-                                                                            className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition-all ${
-                                                                                active
-                                                                                    ? 'bg-violet-100 text-violet-700 border-violet-300'
-                                                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-                                                                            }`}
-                                                                        >
-                                                                            {rg.ratio_group_name || `Group ${rgId}`}
-                                                                        </button>
-                                                                    );
-                                                                })}
+                                                        <button key={rgId}
+                                                            onClick={() => setMarkerChoice(p => ({ ...p, [colorId]: rgId }))}
+                                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-all ${
+                                                                active
+                                                                    ? 'border-violet-400 bg-violet-50'
+                                                                    : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/30'
+                                                            }`}
+                                                        >
+                                                            <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors ${
+                                                                active ? 'border-violet-500 bg-violet-500' : 'border-slate-300 bg-white'
+                                                            }`}>
+                                                                {active && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                                                             </div>
-                                                        </div>
-                                                    );
-                                                })()}
-
-                                                {/* ── Lower / upper picker (scoped to selected ratio group) ── */}
-                                                {(() => {
-                                                    const rgKey  = `${sopId}_${c.fabric_color_id}`;
-                                                    const selRg  = rgChoices[rgKey] || '';
-                                                    // When a specific group is selected, scope lower/upper data to that group
-                                                    const scopeOpt = (optKey) => {
-                                                        const raw = c[optKey];
-                                                        if (!raw) return null;
-                                                        if (!selRg || !raw.per_ratio_group?.length) return raw;
-                                                        const match = raw.per_ratio_group.find(g => String(g.ratio_group_id) === String(selRg));
-                                                        return match ? { ...raw, total_pieces: match.total_pieces, runs: match.runs } : raw;
-                                                    };
-                                                    if (c.exact) {
-                                                        const d = scopeOpt('lower') ?? scopeOpt('upper');
-                                                        return (
-                                                            <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
-                                                                <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
-                                                                <div>
-                                                                    <p className="text-[9px] font-bold text-emerald-600 uppercase tracking-wider">Exact match</p>
-                                                                    <p className="text-xl font-extrabold text-slate-800 leading-none">
-                                                                        {((d?.total_pieces ?? c.ordered_quantity) || 0).toLocaleString()}
-                                                                    </p>
-                                                                    {d?.runs != null && (
-                                                                        <p className="text-[10px] text-slate-500 mt-0.5">{d.runs} run{d.runs !== 1 ? 's' : ''}</p>
-                                                                    )}
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="text-xs font-bold text-slate-700">{m?.name}</p>
+                                                                <div className="flex flex-wrap items-center gap-1 mt-1">
+                                                                    {(m?.items || []).map(it => (
+                                                                        <span key={it.sizeName}
+                                                                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                                                                active
+                                                                                    ? 'bg-violet-100 text-violet-700 border-violet-200'
+                                                                                    : 'bg-slate-50 text-slate-600 border-slate-200'
+                                                                            }`}>
+                                                                            {it.sizeName}×{it.pieces}
+                                                                        </span>
+                                                                    ))}
+                                                                    <span className="text-[9px] text-slate-400">= {m?.totalPieces} pcs/run</span>
                                                                 </div>
                                                             </div>
-                                                        );
-                                                    }
-                                                    return (
-                                                        <div className="grid grid-cols-2 gap-2">
-                                                            {['lower', 'upper'].map(optKey => {
-                                                                const d       = scopeOpt(optKey);
-                                                                if (!d) return null;
-                                                                const active  = chosen === optKey;
-                                                                const diff    = (d.total_pieces || 0) - (c.ordered_quantity || 0);
-                                                                const isUnder = diff < 0;
-                                                                return (
-                                                                    <button key={optKey} onClick={() => pick(sopId, c.fabric_color_id, optKey)}
-                                                                        className={`relative flex flex-col items-start p-3 rounded-xl border-2 text-left transition-all ${
-                                                                            active
-                                                                                ? isUnder ? 'border-blue-400 bg-blue-50' : 'border-violet-400 bg-violet-50'
-                                                                                : 'border-slate-200 bg-white hover:border-slate-300'
-                                                                        }`}>
-                                                                        {active && (
-                                                                            <CheckCircle2 size={13} className={`absolute top-2 right-2 ${isUnder ? 'text-blue-500' : 'text-violet-500'}`} />
-                                                                        )}
-                                                                        <span className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${isUnder ? 'text-blue-500' : 'text-violet-500'}`}>
-                                                                            {isUnder ? '▼ Under-run' : '▲ Over-run'}
-                                                                        </span>
-                                                                        <span className="text-xl font-extrabold text-slate-800 leading-none">
-                                                                            {(d.total_pieces || 0).toLocaleString()}
-                                                                        </span>
-                                                                        <span className="text-[10px] text-slate-500 mt-0.5">
-                                                                            {d.runs} run{d.runs !== 1 ? 's' : ''}
-                                                                        </span>
-                                                                        <span className={`text-[10px] font-bold mt-1 ${isUnder ? 'text-blue-600' : 'text-violet-600'}`}>
-                                                                            {isUnder ? `${Math.abs(diff).toLocaleString()} fewer` : `${diff.toLocaleString()} extra`} vs order
-                                                                        </span>
-                                                                    </button>
-                                                                );
-                                                            })}
-                                                        </div>
+                                                        </button>
                                                     );
-                                                })()}
-
-                                                {/* ── Per-group breakdown summary (only when "All groups" is active) ── */}
-                                                {(() => {
-                                                    const rgKey  = `${sopId}_${c.fabric_color_id}`;
-                                                    const selRg  = rgChoices[rgKey] || '';
-                                                    if (selRg) return null;
-                                                    const optData = c.exact ? c.lower : c[chosen];
-                                                    const groups  = optData?.per_ratio_group;
-                                                    if (!groups?.length) return null;
-                                                    return (
-                                                        <div className="pt-2 border-t border-slate-100">
-                                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Breakdown by Ratio Group</p>
-                                                            <div className="flex flex-wrap gap-1.5">
-                                                                {groups.map((rg, i) => (
-                                                                    <button key={i}
-                                                                        onClick={() => pickRg(sopId, c.fabric_color_id, String(rg.ratio_group_id))}
-                                                                        title="Click to assign this group to this color"
-                                                                        className="flex items-center gap-1.5 bg-violet-50 border border-violet-100 rounded-lg px-2 py-1 hover:border-violet-300 hover:bg-violet-100 transition-colors">
-                                                                        <span className="text-[10px] font-bold text-violet-700">{rg.ratio_group_name || `Group ${i + 1}`}</span>
-                                                                        <span className="text-[9px] text-violet-400">·</span>
-                                                                        <span className="text-[10px] text-violet-600">{rg.runs} run{rg.runs !== 1 ? 's' : ''}</span>
-                                                                        <span className="text-[9px] text-violet-400">·</span>
-                                                                        <span className="text-[10px] font-bold text-slate-700">{(rg.total_pieces || 0).toLocaleString()} pcs</span>
-                                                                    </button>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })()}
+                                                })}
                                             </div>
                                         </div>
-                                    );
-                                })}
+                                    )}
+
+                                    {/* Calculation result */}
+                                    {calc && calc.runs > 0 && (
+                                        <div className={`rounded-xl border px-4 py-3 ${
+                                            calc.missingInMarker.length > 0
+                                                ? 'bg-amber-50 border-amber-200'
+                                                : 'bg-emerald-50 border-emerald-200'
+                                        }`}>
+                                            <div className="flex items-start justify-between gap-3 mb-3">
+                                                <div>
+                                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Runs Required</p>
+                                                    <p className="text-2xl font-extrabold text-slate-800 leading-none mt-0.5">
+                                                        {calc.runs}
+                                                        <span className="text-sm font-bold text-slate-400 ml-1.5">runs</span>
+                                                    </p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Total Produced</p>
+                                                    <p className="text-xl font-extrabold text-slate-800 leading-none mt-0.5">
+                                                        {(calc.totalProduced || 0).toLocaleString()}
+                                                        <span className="text-sm font-normal text-slate-400 ml-1">pcs</span>
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            {/* Per-size: produced vs ordered */}
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {Object.entries(calc.produced).map(([sizeName, producedQty]) => {
+                                                    const ordered = calc.orderedBySz[sizeName] || 0;
+                                                    const extra   = producedQty - ordered;
+                                                    const exact   = extra === 0;
+                                                    return (
+                                                        <span key={sizeName} className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                                                            exact
+                                                                ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                                                : 'bg-amber-100 text-amber-800 border-amber-200'
+                                                        }`}>
+                                                            {sizeName}: {producedQty.toLocaleString()}
+                                                            {exact
+                                                                ? <CheckCircle2 size={10} className="text-emerald-600" />
+                                                                : <span className="text-[9px] font-normal text-amber-600">+{extra}</span>
+                                                            }
+                                                        </span>
+                                                    );
+                                                })}
+                                            </div>
+                                            {calc.missingInMarker.length > 0 && (
+                                                <p className="text-[10px] text-amber-700 mt-2 flex items-center gap-1">
+                                                    <AlertTriangle size={11} className="shrink-0" />
+                                                    Sizes not in this marker: <span className="font-bold ml-0.5">{calc.missingInMarker.join(', ')}</span>
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
 
-                {!loading && suggestions && (
-                    <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-between">
-                        <p className="text-xs text-slate-400">
-                            {madeSelections}/{totalSelections} color{totalSelections !== 1 ? 's' : ''} configured
-                        </p>
-                        <div className="flex items-center gap-3">
-                            <button onClick={onClose} disabled={submitting}
-                                className="text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40">
-                                Cancel
-                            </button>
-                            <button onClick={handleConfirm} disabled={submitting || !allChosen}
-                                className="flex items-center gap-2 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-5 py-2.5 rounded-xl transition-colors shadow-sm">
-                                {submitting ? <Loader2 size={15} className="animate-spin" /> : <Calculator size={15} />}
-                                Confirm & Calculate
-                            </button>
-                        </div>
+                {/* Footer */}
+                <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-between shrink-0">
+                    <p className="text-xs text-slate-400">
+                        {Object.keys(markerChoice).length}/{(sop.colors || []).length} color{(sop.colors || []).length !== 1 ? 's' : ''} allocated
+                    </p>
+                    <div className="flex items-center gap-3">
+                        <button onClick={onClose} disabled={submitting}
+                            className="text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40">
+                            Cancel
+                        </button>
+                        <button onClick={handleConfirm} disabled={submitting || !allAllocated}
+                            className="flex items-center gap-2 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-5 py-2.5 rounded-xl transition-colors shadow-sm">
+                            {submitting ? <Loader2 size={15} className="animate-spin" /> : <Calculator size={15} />}
+                            Confirm & Calculate
+                        </button>
                     </div>
-                )}
+                </div>
             </div>
         </div>
     );
@@ -3071,16 +3047,601 @@ const RecalculateConfirmModal = ({ preview, sopName, onClose, onConfirm, busy, e
     );
 };
 
+// ─── OPTIMAL MARKER ALLOCATION ────────────────────────────────────────────────
+// Jointly optimizes run counts across all selected markers for one color.
+// Three phases: (1) exclusive constraints, (2) deficit resolution, (3) reduction.
+
+const suggestOptimalRuns = (colorSizes, selectedRgIds, markerMap) => {
+    if (!selectedRgIds?.length) return null;
+
+    const required = {};
+    (colorSizes || []).forEach(sz => {
+        const name = stdSize(sz.size_name || sz.size || String(sz.size_id ?? ''));
+        if (name) required[name] = Number(sz.quantity) || 0;
+    });
+
+    const markers = selectedRgIds.map(rgId => ({
+        rgId,
+        items: markerMap[rgId]?.items || [],
+        totalPieces: markerMap[rgId]?.totalPieces || 0,
+    }));
+
+    // sizeCoverage[sizeName] = array of marker indices that include it
+    const sizeCoverage = {};
+    markers.forEach((m, i) => m.items.forEach(({ sizeName }) => {
+        (sizeCoverage[sizeName] ??= []).push(i);
+    }));
+
+    const runs = new Array(markers.length).fill(0);
+
+    const computeProduced = (r) => {
+        const p = {};
+        markers.forEach((m, i) => m.items.forEach(({ sizeName, pieces }) => {
+            p[sizeName] = (p[sizeName] || 0) + r[i] * pieces;
+        }));
+        return p;
+    };
+
+    // Phase 1: sizes covered by only ONE marker lock in that marker's minimum runs
+    Object.entries(required).forEach(([sz, qty]) => {
+        if (qty <= 0) return;
+        const idx = sizeCoverage[sz] || [];
+        if (idx.length === 1) {
+            const i = idx[0];
+            const pieces = markers[i].items.find(it => it.sizeName === sz)?.pieces || 1;
+            runs[i] = Math.max(runs[i], Math.ceil(qty / pieces));
+        }
+    });
+
+    let produced = computeProduced(runs);
+
+    // Phase 2: for any still-deficient shared size, pick the covering marker
+    // that adds the fewest extra pieces (greedy minimum-overproduction choice)
+    let anyDeficit = true;
+    while (anyDeficit) {
+        anyDeficit = false;
+        for (const [sz, qty] of Object.entries(required)) {
+            if (qty <= 0 || (produced[sz] || 0) >= qty) continue;
+            const deficit  = qty - (produced[sz] || 0);
+            const coverIdx = sizeCoverage[sz] || [];
+            if (!coverIdx.length) continue;
+
+            let bestI = -1, bestExtra = Infinity, bestCost = Infinity;
+            coverIdx.forEach(i => {
+                const pieces  = markers[i].items.find(it => it.sizeName === sz)?.pieces || 1;
+                const extra   = Math.ceil(deficit / pieces);
+                const addCost = markers[i].items.reduce((t, { sizeName: s, pieces: p }) =>
+                    t + Math.max(0, (produced[s] || 0) + extra * p - (required[s] || 0)), 0);
+                if (addCost < bestCost || (addCost === bestCost && extra < bestExtra)) {
+                    bestI = i; bestExtra = extra; bestCost = addCost;
+                }
+            });
+
+            if (bestI >= 0) {
+                runs[bestI] += bestExtra;
+                produced = computeProduced(runs);
+                anyDeficit = true;
+                break; // restart after each adjustment
+            }
+        }
+    }
+
+    // Phase 3: try reducing each marker's run count without causing underproduction
+    let reduced = true;
+    while (reduced) {
+        reduced = false;
+        for (let i = 0; i < markers.length; i++) {
+            if (runs[i] === 0) continue;
+            runs[i]--;
+            const test     = computeProduced(runs);
+            const feasible = Object.entries(required).every(([s, q]) => q <= 0 || (test[s] || 0) >= q);
+            if (feasible) { produced = test; reduced = true; }
+            else runs[i]++;
+        }
+    }
+
+    const perMarker = markers.map((m, i) => ({
+        rgId:         m.rgId,
+        runs:         runs[i],
+        produced:     Object.fromEntries(m.items.map(({ sizeName, pieces }) => [sizeName, runs[i] * pieces])),
+        totalProduced: runs[i] * m.totalPieces,
+    }));
+
+    const overProduction = {};
+    Object.entries(required).forEach(([sz, qty]) => {
+        const extra = (produced[sz] || 0) - qty;
+        if (extra > 0) overProduction[sz] = extra;
+    });
+
+    return {
+        perMarker,
+        produced,
+        overProduction,
+        totalOverProduction: Object.values(overProduction).reduce((s, v) => s + v, 0),
+        grandTotal:          Object.values(produced).reduce((s, v) => s + v, 0),
+        totalRuns:           runs.reduce((s, r) => s + r, 0),
+    };
+};
+
+// ─── LINK + ALLOCATE MODAL ────────────────────────────────────────────────────
+// Two-step flow: Step 1 = select BOM, Step 2 = assign marker per color.
+// On confirm: links the BOM, finalizes quantities, calculates requirements.
+
+const LinkAndAllocateModal = ({ sop, bomOptions, onClose, onDone, onLink, onPreview }) => {
+    const [step,            setStep]            = useState(1);
+    const [pickedBomId,     setPickedBomId]     = useState('');
+    const [pickedBomDetail, setPickedBomDetail] = useState(null);
+    const [loadingDetail,   setLoadingDetail]   = useState(false);
+    // { [colorId]: { [rgId]: boolean } } — multiple markers per color
+    const [markerChoices,   setMarkerChoices]   = useState({});
+    const [submitting,      setSubmitting]      = useState(false);
+    const [error,           setError]           = useState(null);
+
+    // Aggregate order sizes across all colors
+    const combinedSizeMap = useMemo(() => {
+        const map = {};
+        (sop.colors || []).forEach(c => {
+            (c.sizes || []).forEach(sz => {
+                const key = sz.size_name ?? String(sz.size_id);
+                if (key) map[key] = (map[key] || 0) + (Number(sz.quantity) || 0);
+            });
+        });
+        return map;
+    }, [sop.colors]);
+
+    const sizeEntries = useMemo(() =>
+        Object.keys(combinedSizeMap).length > 0
+            ? Object.entries(combinedSizeMap).filter(([, v]) => parseInt(v) > 0)
+            : Object.entries(sop.size_breakdown || {}).filter(([, v]) => parseInt(v) > 0),
+        [combinedSizeMap, sop.size_breakdown]);
+
+    // Use detailed ratio groups when loaded, fall back to list-level data
+    const ratioGroups = pickedBomDetail?.ratio_groups
+        || bomOptions.find(b => String(b.id) === pickedBomId)?.ratio_groups
+        || [];
+
+    const markerMap = useMemo(() => {
+        const map = {};
+        ratioGroups.forEach(rg => {
+            const rgId = String(rg.ratio_group_id ?? rg.id);
+            const items = (rg.items || [])
+                .map(it => ({ sizeName: stdSize(it.size || ''), pieces: parseInt(it.number_of_pieces) || 1 }))
+                .filter(it => it.sizeName);
+            const totalPieces = items.reduce((s, it) => s + it.pieces, 0) || rg.total_pieces_in_marker || 0;
+            map[rgId] = { name: rg.ratio_group_name || `Group ${rgId}`, items, totalPieces };
+        });
+        return map;
+    }, [ratioGroups]);
+
+    const pickBom = async (bomId) => {
+        setPickedBomId(bomId);
+        setPickedBomDetail(null);
+        setMarkerChoices({});
+        setLoadingDetail(true);
+        try {
+            const res    = await bomApi.getById(parseInt(bomId));
+            const detail = res.data?.data ?? res.data;
+            setPickedBomDetail(detail);
+        } catch { }
+        finally { setLoadingDetail(false); }
+    };
+
+    const toggleMarker = (colorId, rgId) => {
+        setMarkerChoices(prev => {
+            const colorMap = { ...(prev[colorId] || {}) };
+            colorMap[rgId] = !colorMap[rgId];
+            return { ...prev, [colorId]: colorMap };
+        });
+    };
+
+    // Jointly-optimised runs across all selected markers for a color
+    const calcAllForColor = (colorSizes, colorId) => {
+        const selectedIds = Object.entries(markerChoices[colorId] || {})
+            .filter(([, v]) => v).map(([id]) => id);
+        if (selectedIds.length === 0) return null;
+
+        const result = suggestOptimalRuns(colorSizes, selectedIds, markerMap);
+        if (!result) return null;
+
+        const orderedBySz = {};
+        (colorSizes || []).forEach(sz => {
+            const name = stdSize(sz.size_name || sz.size || String(sz.size_id ?? ''));
+            if (name) orderedBySz[name] = Number(sz.quantity) || 0;
+        });
+
+        const sizeCoverage = {};
+        result.perMarker.forEach(r => Object.keys(r.produced).forEach(sz => {
+            sizeCoverage[sz] = (sizeCoverage[sz] || 0) + 1;
+        }));
+
+        return {
+            ...result,
+            totalProduced: result.produced,   // alias: JSX uses totalProduced for the aggregate map
+            orderedBySz,
+            uncoveredSizes: Object.keys(orderedBySz).filter(s => orderedBySz[s] > 0 && !result.produced[s]),
+            overlapSizes:   Object.entries(sizeCoverage).filter(([, c]) => c > 1).map(([s]) => s),
+        };
+    };
+
+    const colorHasMarker = (colorId) =>
+        Object.values(markerChoices[colorId] || {}).some(Boolean);
+
+    const allAllocated = (sop.colors || []).every(c => colorHasMarker(String(c.fabric_color_id)));
+
+    const allocatedCount = (sop.colors || []).filter(c => colorHasMarker(String(c.fabric_color_id))).length;
+
+    const handleConfirm = async () => {
+        setSubmitting(true);
+        setError(null);
+        try {
+            const usedRgIds = [...new Set(
+                Object.values(markerChoices).flatMap(choices =>
+                    Object.entries(choices).filter(([, v]) => v).map(([id]) => parseInt(id))
+                )
+            )];
+            await onLink(sop.id, parseInt(pickedBomId), usedRgIds);
+            const quantities = (sop.colors || []).map(c => {
+                const colorId  = String(c.fabric_color_id);
+                const calc     = calcAllForColor(c.sizes, colorId);
+                const selectedIds = Object.entries(markerChoices[colorId] || {})
+                    .filter(([, v]) => v).map(([id]) => id);
+                return {
+                    fabric_color_id:    c.fabric_color_id,
+                    ratio_group_id:     selectedIds.length === 1 ? parseInt(selectedIds[0]) : null,
+                    marker_runs:        calc?.totalRuns        ?? 0,
+                    finalized_quantity: calc?.grandTotal       ?? (Number(c.total_quantity || c.quantity) || 0),
+                    selected_option:    'exact',
+                };
+            });
+            await planningApi.finalizeQuantities(sop.id, { quantities });
+            await planningApi.calculateRequirements(sop.id);
+            onDone();
+        } catch (e) {
+            setError(e?.response?.data?.error || 'Failed to link and allocate');
+            setSubmitting(false);
+        }
+    };
+
+    const stepTitle = step === 1 ? 'Step 1 of 2 — Select BOM' : 'Step 2 of 2 — Allocate Markers';
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={!submitting ? onClose : undefined}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+
+                {/* Header */}
+                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100 shrink-0">
+                    <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">{stepTitle}</p>
+                        <h2 className="font-extrabold text-slate-800 text-base">{sop.product_name}</h2>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                            {step === 1 ? 'Pick an approved BOM for this product line.' : 'Assign a marker to each color — runs are calculated from ordered sizes.'}
+                        </p>
+                    </div>
+                    {!submitting && <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 mt-0.5"><X size={18} /></button>}
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                    {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>}
+
+                    {/* ── STEP 1: Select BOM ── */}
+                    {step === 1 && (<>
+                        {/* Order sizes */}
+                        {sizeEntries.length > 0 && (
+                            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Order Requires</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {sizeEntries.map(([rawSize, qty]) => {
+                                        const s = stdSize(rawSize);
+                                        return (
+                                            <span key={s} className="flex items-center gap-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700 shadow-sm">
+                                                <span className="text-slate-500">{s}</span>
+                                                <span className="text-slate-300">:</span>
+                                                <span>{parseInt(qty).toLocaleString()} pcs</span>
+                                            </span>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* BOM list */}
+                        {bomOptions.length === 0 ? (
+                            <div className="text-center py-8 text-sm text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                No approved BOMs available for this product
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                {bomOptions.map(bom => {
+                                    const isSelected = pickedBomId === String(bom.id);
+                                    const rgs        = isSelected ? ratioGroups : (bom.ratio_groups || []);
+                                    return (
+                                        <div key={bom.id} className={`rounded-xl border transition-all ${
+                                            isSelected ? 'border-violet-400 bg-violet-50/60 shadow-sm' : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/20'
+                                        }`}>
+                                            <label className="flex items-start gap-3 p-3 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    name={`bom-link-${sop.id}`}
+                                                    value={bom.id}
+                                                    checked={isSelected}
+                                                    onChange={() => pickBom(String(bom.id))}
+                                                    className="mt-1 accent-violet-600 shrink-0"
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="font-bold text-slate-800 text-sm truncate">{bom.bom_name}</p>
+                                                        <button
+                                                            onClick={e => { e.preventDefault(); e.stopPropagation(); onPreview(bom.id); }}
+                                                            className="shrink-0 text-slate-400 hover:text-violet-600 transition-colors p-0.5"
+                                                            title="Preview BOM"
+                                                        >
+                                                            <Eye size={13} />
+                                                        </button>
+                                                    </div>
+                                                    {isSelected && loadingDetail ? (
+                                                        <div className="flex items-center gap-1.5 mt-1.5 text-[10px] text-slate-400">
+                                                            <Loader2 size={10} className="animate-spin" /> Loading ratio groups…
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex flex-wrap gap-1 mt-1.5">
+                                                            {rgs.map((rg, i) => {
+                                                                const items = (rg.items || [])
+                                                                    .map(it => `${stdSize(it.size || '')}×${it.number_of_pieces || 1}`)
+                                                                    .filter(Boolean);
+                                                                return (
+                                                                    <span key={i} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                                                        isSelected
+                                                                            ? 'bg-violet-50 text-violet-700 border-violet-200'
+                                                                            : 'bg-slate-50 text-slate-500 border-slate-200'
+                                                                    }`}>
+                                                                        {rg.ratio_group_name || `Group ${i + 1}`}
+                                                                        {items.length > 0 && (
+                                                                            <span className="font-normal text-[8px] ml-1 opacity-70">{items.join(' ')}</span>
+                                                                        )}
+                                                                    </span>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </label>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </>)}
+
+                    {/* ── STEP 2: Marker allocation per color ── */}
+                    {step === 2 && (sop.colors || []).map(c => {
+                        const colorId      = String(c.fabric_color_id);
+                        const sizes        = c.sizes || [];
+                        const totalOrdered = sizes.reduce((s, sz) => s + (Number(sz.quantity) || 0), 0);
+                        const colorChoices = markerChoices[colorId] || {};
+                        const calc         = calcAllForColor(sizes, colorId);
+                        const hasAny       = colorHasMarker(colorId);
+                        return (
+                            <div key={colorId} className="border border-slate-200 rounded-xl overflow-hidden">
+                                {/* Color header */}
+                                <div className="flex items-center gap-2.5 px-4 py-3 bg-slate-50 border-b border-slate-100">
+                                    <span className="font-bold text-slate-800 text-sm">{c.color_name}</span>
+                                    {c.color_number && (
+                                        <span className="text-[10px] font-mono text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded">{c.color_number}</span>
+                                    )}
+                                    <div className="ml-auto flex items-center gap-1.5">
+                                        {hasAny && (
+                                            <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                                                <CheckCircle2 size={9} /> {Object.values(colorChoices).filter(Boolean).length} marker{Object.values(colorChoices).filter(Boolean).length !== 1 ? 's' : ''}
+                                            </span>
+                                        )}
+                                        <span className="text-[10px] text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded font-medium">
+                                            {totalOrdered.toLocaleString()} pcs ordered
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="p-4 space-y-4">
+                                    {/* Size chips */}
+                                    {sizes.filter(sz => Number(sz.quantity) > 0).length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {sizes.filter(sz => Number(sz.quantity) > 0).map(sz => {
+                                                const sName = stdSize(sz.size_name || sz.size || String(sz.size_id ?? ''));
+                                                return (
+                                                    <span key={sz.size_id ?? sName}
+                                                        className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-700">
+                                                        <span className="text-slate-500">{sName}</span>
+                                                        <span className="text-slate-300">:</span>
+                                                        <span>{Number(sz.quantity).toLocaleString()}</span>
+                                                    </span>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+
+                                    {/* Multi-marker picker (checkboxes) */}
+                                    {ratioGroups.length > 0 && (
+                                        <div>
+                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                                                Select Markers <span className="font-normal normal-case text-slate-300 ml-1">— combine multiple markers to cover all sizes</span>
+                                            </p>
+                                            <div className="space-y-2">
+                                                {ratioGroups.map(rg => {
+                                                    const rgId          = String(rg.ratio_group_id ?? rg.id);
+                                                    const m             = markerMap[rgId];
+                                                    const active        = !!colorChoices[rgId];
+                                                    // Use joint-optimized run count, not the solo per-marker figure
+                                                    const optEntry      = active ? calc?.perMarker?.find(r => r.rgId === rgId) : null;
+                                                    return (
+                                                        <button key={rgId}
+                                                            onClick={() => toggleMarker(colorId, rgId)}
+                                                            className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-all ${
+                                                                active ? 'border-violet-400 bg-violet-50' : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/20'
+                                                            }`}
+                                                        >
+                                                            {/* Checkbox indicator */}
+                                                            <div className={`mt-0.5 w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${
+                                                                active ? 'border-violet-500 bg-violet-500' : 'border-slate-300 bg-white'
+                                                            }`}>
+                                                                {active && <CheckCircle2 size={10} className="text-white" strokeWidth={3} />}
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <p className="text-xs font-bold text-slate-700">{m?.name}</p>
+                                                                    {active && optEntry && (
+                                                                        <span className="text-[9px] font-bold text-violet-700 bg-violet-100 border border-violet-200 px-1.5 py-0.5 rounded shrink-0">
+                                                                            {optEntry.runs} run{optEntry.runs !== 1 ? 's' : ''} · {(optEntry.totalProduced || 0).toLocaleString()} pcs
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex flex-wrap items-center gap-1 mt-1">
+                                                                    {(m?.items || []).map(it => (
+                                                                        <span key={it.sizeName} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                                                            active ? 'bg-violet-100 text-violet-700 border-violet-200' : 'bg-slate-50 text-slate-600 border-slate-200'
+                                                                        }`}>
+                                                                            {it.sizeName}×{it.pieces}
+                                                                        </span>
+                                                                    ))}
+                                                                    <span className="text-[9px] text-slate-400">= {m?.totalPieces} pcs/run</span>
+                                                                </div>
+                                                            </div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Combined result across all selected markers */}
+                                    {calc && calc.grandTotal > 0 && (
+                                        <div className={`rounded-xl border px-4 py-3 space-y-3 ${
+                                            calc.uncoveredSizes.length > 0 ? 'bg-red-50 border-red-200'
+                                            : calc.overlapSizes.length > 0  ? 'bg-amber-50 border-amber-200'
+                                            : 'bg-emerald-50 border-emerald-200'
+                                        }`}>
+                                            {/* Summary row */}
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Total Runs</p>
+                                                    <p className="text-2xl font-extrabold text-slate-800 leading-none mt-0.5">
+                                                        {calc.totalRuns}
+                                                        <span className="text-sm font-bold text-slate-400 ml-1.5">
+                                                            across {calc.perMarker.length} marker{calc.perMarker.length !== 1 ? 's' : ''}
+                                                        </span>
+                                                    </p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Total Produced</p>
+                                                    <p className="text-xl font-extrabold text-slate-800 leading-none mt-0.5">
+                                                        {calc.grandTotal.toLocaleString()}
+                                                        <span className="text-sm font-normal text-slate-400 ml-1">pcs</span>
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            {/* Per-marker breakdown */}
+                                            {calc.perMarker.length > 1 && (
+                                                <div className="space-y-1">
+                                                    {calc.perMarker.map(r => {
+                                                        const m = markerMap[r.rgId];
+                                                        return (
+                                                            <div key={r.rgId} className="flex items-center justify-between text-[10px] text-slate-600 bg-white/60 px-2 py-1 rounded-lg">
+                                                                <span className="font-bold">{m?.name}</span>
+                                                                <span className="text-slate-500">{r.runs} run{r.runs !== 1 ? 's' : ''} → {r.totalProduced?.toLocaleString()} pcs</span>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+
+                                            {/* Per-size produced vs ordered */}
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {Object.entries(calc.totalProduced).map(([sz, producedQty]) => {
+                                                    const ordered = calc.orderedBySz[sz] || 0;
+                                                    const extra   = producedQty - ordered;
+                                                    const exact   = extra === 0;
+                                                    return (
+                                                        <span key={sz} className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                                                            exact ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-amber-100 text-amber-800 border-amber-200'
+                                                        }`}>
+                                                            {sz}: {producedQty.toLocaleString()}
+                                                            {exact
+                                                                ? <CheckCircle2 size={10} className="text-emerald-600" />
+                                                                : <span className="text-[9px] font-normal text-amber-600">+{extra}</span>
+                                                            }
+                                                        </span>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            {/* Warnings */}
+                                            {calc.uncoveredSizes.length > 0 && (
+                                                <p className="text-[10px] text-red-700 flex items-center gap-1">
+                                                    <AlertTriangle size={11} className="shrink-0" />
+                                                    Not covered by any marker: <span className="font-bold ml-0.5">{calc.uncoveredSizes.join(', ')}</span>
+                                                </p>
+                                            )}
+                                            {calc.overlapSizes.length > 0 && (
+                                                <p className="text-[10px] text-amber-700 flex items-center gap-1">
+                                                    <AlertTriangle size={11} className="shrink-0" />
+                                                    Sizes in multiple markers (overproduction likely): <span className="font-bold ml-0.5">{calc.overlapSizes.join(', ')}</span>
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* Footer */}
+                <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-between shrink-0">
+                    {step === 1 ? (
+                        <>
+                            <button onClick={onClose} disabled={submitting}
+                                className="text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40">
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => setStep(2)}
+                                disabled={!pickedBomId || loadingDetail}
+                                className="flex items-center gap-1.5 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-2.5 rounded-xl transition-colors"
+                            >
+                                {loadingDetail ? <Loader2 size={14} className="animate-spin" /> : <ChevronRight size={14} />}
+                                Next: Allocate Markers
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <button onClick={() => { setStep(1); setError(null); }} disabled={submitting}
+                                className="flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40">
+                                <ChevronLeft size={14} /> Back
+                            </button>
+                            <div className="flex items-center gap-3">
+                                <p className="text-xs text-slate-400">
+                                    {allocatedCount}/{(sop.colors || []).length} colors with markers
+                                </p>
+                                <button onClick={handleConfirm} disabled={submitting || !allAllocated}
+                                    className="flex items-center gap-2 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-2.5 rounded-xl transition-colors shadow-sm">
+                                    {submitting ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+                                    Link & Calculate
+                                </button>
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isLinking, onReadinessChange, onTAChange }) => {
     const { user } = useAuth();
-    const [showPicker,       setShowPicker]       = useState(false);
-    const [pickedBomId,      setPickedBomId]      = useState('');
-    const [selectedRgIdxs,   setSelectedRgIdxs]   = useState(new Set());
+    const [showLinkModal,    setShowLinkModal]    = useState(false);
+    const [expandedColorId,  setExpandedColorId]  = useState(null);
     const [confirmUnlink,    setConfirmUnlink]     = useState(false);
     const [readinessLoading, setReadinessLoading] = useState(false);
-    // Full BOM detail (with items + number_of_pieces) fetched on pick
-    const [pickedBomDetail,   setPickedBomDetail]   = useState(null);
-    const [loadingBomDetail,  setLoadingBomDetail]  = useState(false);
     // Per-SOP requirements
     const [sopReqs,           setSopReqs]           = useState(null);
     const [loadingReqs,       setLoadingReqs]       = useState(false);
@@ -3147,95 +3708,6 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
     const sizeEntries = Object.keys(combinedSizeMap).length > 0
         ? Object.entries(combinedSizeMap).filter(([, v]) => parseInt(v) > 0)
         : Object.entries(sop.size_breakdown || {}).filter(([, v]) => parseInt(v) > 0);
-
-    // Order: simplified ratio per size
-    const requiredSizesSet = new Set(sizeEntries.map(([s]) => stdSize(s)));
-    const requiredSizes    = Array.from(requiredSizesSet).sort();
-    const rawQtys          = sizeEntries.map(([, v]) => parseInt(v) || 1);
-    const commonGcd        = rawQtys.length > 0 ? rawQtys.reduce(_gcd) : 1;
-    const sizeRatioMap     = Object.fromEntries(
-        sizeEntries.map(([s, v]) => [stdSize(s), Math.round(parseInt(v) / commonGcd)])
-    );
-
-    // Union — use detailed items (number_of_pieces) when available; fall back to flat sizes list
-    const detailGroups = pickedBomDetail?.ratio_groups || null;
-    const unionSizesSet = new Set();
-    const unionRawMap   = {};
-    if (detailGroups) {
-        detailGroups.forEach((rg, idx) => {
-            if (!selectedRgIdxs.has(idx)) return;
-            (rg.items || []).forEach(it => {
-                const s = stdSize(it.size || '');
-                if (!s) return;
-                unionSizesSet.add(s);
-                unionRawMap[s] = (unionRawMap[s] || 0) + (parseInt(it.number_of_pieces) || 1);
-            });
-        });
-    } else {
-        // Detail not yet loaded — use flat sizes from list (no piece counts)
-        const listBom = bomOptions.find(b => String(b.id) === pickedBomId);
-        (listBom?.ratio_groups || []).forEach((rg, idx) => {
-            if (!selectedRgIdxs.has(idx)) return;
-            (rg.sizes || []).forEach(s => {
-                const norm = stdSize(s);
-                if (norm) unionSizesSet.add(norm);
-            });
-        });
-    }
-
-    const unionSizes    = Array.from(unionSizesSet).sort();
-    const unionRawQtys  = Object.values(unionRawMap);
-    const unionGcd      = unionRawQtys.length > 0 ? unionRawQtys.reduce(_gcd) : 1;
-    const unionRatioMap = Object.fromEntries(
-        Object.entries(unionRawMap).map(([s, v]) => [s, Math.round(v / unionGcd)])
-    );
-
-    const hasDetailData   = detailGroups !== null;
-    const missingSizes    = requiredSizes.filter(s => !unionSizesSet.has(s));
-    const extraSizes      = unionSizes.filter(s => !requiredSizesSet.has(s));
-    const sizesOnlyMatch  = missingSizes.length === 0 && extraSizes.length === 0 && unionSizes.length > 0;
-    const ratioMismatches = (hasDetailData && sizesOnlyMatch)
-        ? requiredSizes.filter(s => (sizeRatioMap[s] ?? 0) !== (unionRatioMap[s] ?? 0))
-        : [];
-    const isMatch = sizesOnlyMatch && ratioMismatches.length === 0 && selectedRgIdxs.size > 0 && hasDetailData;
-
-    const pickBom = async (bomId) => {
-        setPickedBomId(bomId);
-        setPickedBomDetail(null);
-        const listBom = bomOptions.find(b => String(b.id) === bomId);
-        // Pre-select all groups from list data while detail loads
-        setSelectedRgIdxs(new Set((listBom?.ratio_groups || []).map((_, i) => i)));
-        setLoadingBomDetail(true);
-        try {
-            const res    = await bomApi.getById(parseInt(bomId));
-            const detail = res.data?.data ?? res.data;
-            setPickedBomDetail(detail);
-            setSelectedRgIdxs(new Set((detail?.ratio_groups || []).map((_, i) => i)));
-        } catch {
-            // keep list data as fallback
-        } finally {
-            setLoadingBomDetail(false);
-        }
-    };
-
-    const toggleRg = (idx) => setSelectedRgIdxs(prev => {
-        const next = new Set(prev);
-        next.has(idx) ? next.delete(idx) : next.add(idx);
-        return next;
-    });
-
-    const confirmLink = () => {
-        if (!pickedBomId || !isMatch) return;
-        const selectedRgIds = (detailGroups || [])
-            .filter((_, i) => selectedRgIdxs.has(i))
-            .map(rg => rg.ratio_group_id || rg.id)
-            .filter(Boolean);
-        onLink(sop.id, parseInt(pickedBomId, 10), selectedRgIds);
-        setShowPicker(false);
-        setPickedBomId('');
-        setSelectedRgIdxs(new Set());
-        setPickedBomDetail(null);
-    };
 
     const doUnlink = () => {
         setConfirmUnlink(false);
@@ -3328,30 +3800,90 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
                 (sop.production_plan_items || []).forEach(p => {
                     planByColor[String(p.fabric_color_id)] = p;
                 });
+                const expandedColor = expandedColorId
+                    ? sop.colors.find(c => String(c.fabric_color_id) === expandedColorId)
+                    : null;
+                const expandedPlan = expandedColorId ? planByColor[expandedColorId] : null;
                 return (
-                <div className="px-4 py-2.5 border-t border-slate-100 flex flex-wrap gap-1.5">
-                    {sop.colors.map(c => {
-                        const ordered = Number(c.quantity ?? c.total_quantity ?? 0);
-                        const plan    = planByColor[String(c.fabric_color_id)];
-                        const finalized = plan?.finalized_quantity;
-                        const runs    = plan?.marker_runs;
-                        return (
-                            <span key={c.fabric_color_id}
-                                className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-md font-bold">
-                                {c.color_number || c.color_name}
-                                {c.color_number && c.color_name && (
-                                    <span className="font-normal text-indigo-400 ml-1">#{c.color_name}</span>
+                <div className="px-4 py-2.5 border-t border-slate-100">
+                    <div className="flex flex-wrap gap-1.5">
+                        {sop.colors.map(c => {
+                            const colorId   = String(c.fabric_color_id);
+                            const ordered   = Number(c.quantity ?? c.total_quantity ?? 0);
+                            const plan      = planByColor[colorId];
+                            const finalized = plan?.finalized_quantity;
+                            const runs      = plan?.marker_runs;
+                            const isExpanded = expandedColorId === colorId;
+                            return (
+                                <button key={colorId}
+                                    onClick={() => setExpandedColorId(isExpanded ? null : colorId)}
+                                    className={`text-[10px] border px-2 py-0.5 rounded-md font-bold text-left transition-colors ${
+                                        isExpanded
+                                            ? 'bg-indigo-100 text-indigo-800 border-indigo-300'
+                                            : 'bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100'
+                                    }`}>
+                                    {c.color_number || c.color_name}
+                                    {c.color_number && c.color_name && (
+                                        <span className="font-normal text-indigo-400 ml-1">#{c.color_name}</span>
+                                    )}
+                                    {' '}· {ordered.toLocaleString()} ordered
+                                    {finalized != null && (
+                                        <span className="ml-1 text-emerald-700">
+                                            · {Number(finalized).toLocaleString()} final
+                                            {runs != null && <span className="font-normal text-emerald-500"> ({runs} run{runs === 1 ? '' : 's'})</span>}
+                                        </span>
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {expandedColor && (
+                        <div className="mt-2 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                                {expandedColor.color_number || expandedColor.color_name} — Size Breakdown
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                                {(expandedColor.sizes || []).map(sz => (
+                                    <div key={sz.size_id ?? sz.size_name}
+                                        className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1">
+                                        <span className="text-[10px] font-bold text-slate-700">{sz.size_name || sz.size_id}</span>
+                                        <span className="text-slate-300 text-[9px]">·</span>
+                                        <span className="text-[10px] font-bold text-indigo-600">{Number(sz.quantity).toLocaleString()}</span>
+                                        <span className="text-[9px] text-slate-400">ordered</span>
+                                    </div>
+                                ))}
+                                {(expandedColor.sizes || []).length === 0 && (
+                                    <span className="text-[10px] text-slate-400 italic">No size breakdown available</span>
                                 )}
-                                {' '}· {ordered.toLocaleString()} ordered
-                                {finalized != null && (
-                                    <span className="ml-1 text-emerald-700">
-                                        · {Number(finalized).toLocaleString()} final
-                                        {runs != null && <span className="font-normal text-emerald-500"> ({runs} run{runs === 1 ? '' : 's'})</span>}
+                            </div>
+                            {expandedPlan?.finalized_quantity != null && (
+                                <div className="mt-2 pt-2 border-t border-slate-200 flex flex-wrap items-center gap-2 text-[10px]">
+                                    <span className="text-slate-500">
+                                        Ordered total: <span className="font-bold text-slate-700">
+                                            {Number(expandedColor.quantity ?? expandedColor.total_quantity ?? 0).toLocaleString()}
+                                        </span>
                                     </span>
-                                )}
-                            </span>
-                        );
-                    })}
+                                    <span className="text-slate-300">·</span>
+                                    <span className="text-slate-500">
+                                        Finalized: <span className="font-bold text-emerald-700">
+                                            {Number(expandedPlan.finalized_quantity).toLocaleString()}
+                                        </span>
+                                    </span>
+                                    {expandedPlan.marker_runs != null && (
+                                        <span className="text-slate-400">
+                                            ({expandedPlan.marker_runs} run{expandedPlan.marker_runs === 1 ? '' : 's'})
+                                        </span>
+                                    )}
+                                    {Number(expandedPlan.finalized_quantity) > Number(expandedColor.quantity ?? expandedColor.total_quantity ?? 0) && (
+                                        <span className="ml-auto text-amber-600 font-bold">
+                                            +{(Number(expandedPlan.finalized_quantity) - Number(expandedColor.quantity ?? expandedColor.total_quantity ?? 0)).toLocaleString()} over
+                                        </span>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
                 );
             })()}
@@ -3431,281 +3963,14 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
                         )}
                     </>
                 ) : (
-                    !showPicker ? (
                         <button
-                            onClick={() => setShowPicker(true)}
+                            onClick={() => setShowLinkModal(true)}
                             disabled={isLinking}
                             className="w-full flex items-center justify-center gap-2 text-sm font-bold text-violet-600 bg-violet-50 hover:bg-violet-100 border border-violet-200 border-dashed px-3 py-2.5 rounded-xl transition-colors disabled:opacity-40"
                         >
                             {isLinking ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
                             Link a BOM
                         </button>
-                    ) : (
-                        <div>
-                            <div className="flex items-center justify-between mb-2.5">
-                                <p className="text-xs font-bold text-slate-700">Select an approved BOM to validate sizes:</p>
-                                <button onClick={() => { setShowPicker(false); setPickedBomId(''); }}
-                                    className="text-slate-400 hover:text-slate-600 p-0.5">
-                                    <X size={14} />
-                                </button>
-                            </div>
-
-                            {bomOptions.length === 0 ? (
-                                <div className="text-center py-5 text-sm text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                                    No approved BOMs available for this product
-                                </div>
-                            ) : (
-                                <>
-                                    {/* ── Order required sizes with ratio ── */}
-                                    <div className="mb-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Order Requires</p>
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {sizeEntries.length === 0
-                                                ? <span className="text-[10px] text-slate-400 italic">No size breakdown available</span>
-                                                : sizeEntries.map(([rawSize, qty]) => {
-                                                    const s = stdSize(rawSize);
-                                                    const ratio = sizeRatioMap[s] ?? 1;
-                                                    return (
-                                                        <span key={s} className="flex items-center gap-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700 shadow-sm">
-                                                            <span className="text-slate-500">{s}</span>
-                                                            <span className="text-slate-300">·</span>
-                                                            <span className="text-violet-600">×{ratio}</span>
-                                                            <span className="text-[9px] font-normal text-slate-400">({parseInt(qty).toLocaleString()} pcs)</span>
-                                                        </span>
-                                                    );
-                                                })
-                                            }
-                                        </div>
-                                    </div>
-
-                                    {/* ── BOM list ── */}
-                                    <div className="space-y-2 max-h-[460px] overflow-y-auto pr-0.5">
-                                        {bomOptions.map(bom => {
-                                            const isSelected = pickedBomId === String(bom.id);
-                                            return (
-                                                <div key={bom.id} className={`rounded-xl border transition-all ${
-                                                    isSelected ? 'border-violet-400 bg-violet-50/60 shadow-sm' : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/20'
-                                                }`}>
-                                                    <label className="flex items-start gap-3 p-3 cursor-pointer">
-                                                        <input
-                                                            type="radio"
-                                                            name={`bom-pick-${sop.id}`}
-                                                            value={bom.id}
-                                                            checked={isSelected}
-                                                            onChange={() => pickBom(String(bom.id))}
-                                                            className="mt-0.5 accent-violet-600 shrink-0"
-                                                        />
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="flex items-center justify-between gap-1">
-                                                                <p className="font-bold text-slate-800 text-sm truncate">{bom.bom_name}</p>
-                                                                <button
-                                                                    onClick={e => { e.preventDefault(); e.stopPropagation(); onPreview(bom.id); }}
-                                                                    className="shrink-0 text-slate-400 hover:text-violet-600 transition-colors p-0.5"
-                                                                    title="Preview BOM"
-                                                                >
-                                                                    <Eye size={13} />
-                                                                </button>
-                                                            </div>
-                                                            <p className="text-[10px] text-slate-400 mt-0.5">
-                                                                {(bom.ratio_groups || []).length} ratio group{(bom.ratio_groups || []).length !== 1 ? 's' : ''}
-                                                            </p>
-                                                        </div>
-                                                    </label>
-
-                                                    {isSelected && (
-                                                        <div className="border-t border-violet-100 bg-white p-3 mx-1 mb-1 rounded-b-lg space-y-3">
-
-                                                            {/* Ratio group checkboxes */}
-                                                            <div>
-                                                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                                                                    Select Ratio Groups to Include in Union
-                                                                </p>
-                                                                {loadingBomDetail ? (
-                                                                    <div className="flex items-center gap-2 py-3 text-[11px] text-slate-400">
-                                                                        <Loader2 size={12} className="animate-spin" /> Loading ratio group details…
-                                                                    </div>
-                                                                ) : (
-                                                                <div className="space-y-1.5">
-                                                                    {(detailGroups || bom.ratio_groups || []).map((rg, rgIdx) => {
-                                                                        const checked  = selectedRgIdxs.has(rgIdx);
-                                                                        // items with number_of_pieces only exist in detailed response
-                                                                        const rgItems  = rg.items || [];
-                                                                        const rgSizes  = rgItems.length > 0
-                                                                            ? rgItems.map(it => stdSize(it.size || '')).filter(Boolean)
-                                                                            : (rg.sizes || []).map(s => stdSize(s)).filter(Boolean);
-                                                                        const rgPieces = Object.fromEntries(
-                                                                            rgItems.map(it => [stdSize(it.size || ''), parseInt(it.number_of_pieces) || 1])
-                                                                        );
-                                                                        return (
-                                                                            <label key={rgIdx}
-                                                                                className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                                                                                    checked
-                                                                                        ? 'bg-violet-50 border-violet-200'
-                                                                                        : 'bg-slate-50 border-slate-200 opacity-60 hover:opacity-80'
-                                                                                }`}>
-                                                                                <input
-                                                                                    type="checkbox"
-                                                                                    checked={checked}
-                                                                                    onChange={() => toggleRg(rgIdx)}
-                                                                                    className="mt-0.5 accent-violet-600 shrink-0"
-                                                                                />
-                                                                                <div className="flex-1 min-w-0">
-                                                                                    <p className="text-xs font-bold text-slate-700">
-                                                                                        {rg.ratio_group_name || `Group ${rgIdx + 1}`}
-                                                                                        {rg.marker_length_inches && (
-                                                                                            <span className="ml-1.5 text-[9px] font-normal text-slate-400">{rg.marker_length_inches}" marker</span>
-                                                                                        )}
-                                                                                    </p>
-                                                                                    <div className="flex flex-wrap gap-1 mt-1">
-                                                                                        {rgSizes.length === 0
-                                                                                            ? <span className="text-[9px] text-slate-400 italic">No sizes</span>
-                                                                                            : rgSizes.map(s => (
-                                                                                                <span key={s} className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
-                                                                                                    checked
-                                                                                                        ? 'bg-violet-100 text-violet-700 border-violet-200'
-                                                                                                        : 'bg-white text-slate-500 border-slate-200'
-                                                                                                }`}>
-                                                                                                    {s}{rgPieces[s] ? `×${rgPieces[s]}` : ''}
-                                                                                                </span>
-                                                                                            ))
-                                                                                        }
-                                                                                    </div>
-                                                                                </div>
-                                                                            </label>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                                )}
-                                                            </div>
-
-                                                            {/* Union comparison table */}
-                                                            <div className="border-t border-slate-100 pt-3">
-                                                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                                                                    Size Ratio Comparison
-                                                                </p>
-                                                                {selectedRgIdxs.size === 0 ? (
-                                                                    <p className="text-[10px] text-slate-400 italic">Select at least one group above</p>
-                                                                ) : (
-                                                                    <table className="w-full text-[10px] border-collapse">
-                                                                        <thead>
-                                                                            <tr className="border-b border-slate-200">
-                                                                                <th className="text-left py-1 pr-2 font-bold text-slate-400 uppercase">Size</th>
-                                                                                <th className="text-center py-1 px-2 font-bold text-slate-400 uppercase">Order Ratio</th>
-                                                                                <th className="text-center py-1 px-2 font-bold text-slate-400 uppercase">BOM Union</th>
-                                                                                <th className="text-center py-1 pl-2 font-bold text-slate-400 uppercase">Match</th>
-                                                                            </tr>
-                                                                        </thead>
-                                                                        <tbody>
-                                                                            {/* Ordered sizes */}
-                                                                            {requiredSizes.map(s => {
-                                                                                const orderR = sizeRatioMap[s] ?? 0;
-                                                                                const unionR = unionRatioMap[s] ?? null;
-                                                                                const present = unionSizesSet.has(s);
-                                                                                const ratioOk = present && orderR === unionR;
-                                                                                return (
-                                                                                    <tr key={s} className="border-b border-slate-50">
-                                                                                        <td className="py-1.5 pr-2 font-bold text-slate-700">{s}</td>
-                                                                                        <td className="py-1.5 px-2 text-center">
-                                                                                            <span className="bg-slate-100 text-slate-700 border border-slate-200 px-1.5 py-0.5 rounded font-bold">
-                                                                                                ×{orderR}
-                                                                                            </span>
-                                                                                        </td>
-                                                                                        <td className="py-1.5 px-2 text-center">
-                                                                                            {present ? (
-                                                                                                <span className={`px-1.5 py-0.5 rounded font-bold border ${
-                                                                                                    ratioOk
-                                                                                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                                                                                        : 'bg-red-50 text-red-600 border-red-200'
-                                                                                                }`}>
-                                                                                                    ×{unionR}
-                                                                                                </span>
-                                                                                            ) : (
-                                                                                                <span className="text-red-400 italic">missing</span>
-                                                                                            )}
-                                                                                        </td>
-                                                                                        <td className="py-1.5 pl-2 text-center">
-                                                                                            {ratioOk
-                                                                                                ? <CheckCircle2 size={12} className="text-emerald-500 mx-auto" />
-                                                                                                : <AlertTriangle size={12} className="text-red-500 mx-auto" />
-                                                                                            }
-                                                                                        </td>
-                                                                                    </tr>
-                                                                                );
-                                                                            })}
-                                                                            {/* Extra sizes not in order */}
-                                                                            {extraSizes.map(s => (
-                                                                                <tr key={s} className="border-b border-slate-50 opacity-70">
-                                                                                    <td className="py-1.5 pr-2 font-bold text-amber-600">{s}</td>
-                                                                                    <td className="py-1.5 px-2 text-center">
-                                                                                        <span className="text-slate-400 italic text-[9px]">not ordered</span>
-                                                                                    </td>
-                                                                                    <td className="py-1.5 px-2 text-center">
-                                                                                        <span className="bg-amber-50 text-amber-600 border border-amber-200 px-1.5 py-0.5 rounded font-bold">
-                                                                                            ×{unionRatioMap[s] ?? '?'}
-                                                                                        </span>
-                                                                                    </td>
-                                                                                    <td className="py-1.5 pl-2 text-center">
-                                                                                        <AlertTriangle size={12} className="text-amber-400 mx-auto" />
-                                                                                    </td>
-                                                                                </tr>
-                                                                            ))}
-                                                                        </tbody>
-                                                                    </table>
-                                                                )}
-                                                            </div>
-
-                                                            {/* Match verdict */}
-                                                            {selectedRgIdxs.size > 0 && (
-                                                                <div className="space-y-1.5">
-                                                                    {isMatch && (
-                                                                        <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 p-2 rounded-lg border border-emerald-200">
-                                                                            <CheckCircle2 size={13} className="shrink-0" />
-                                                                            <span><b>Perfect match —</b> sizes and ratios align exactly.</span>
-                                                                        </div>
-                                                                    )}
-                                                                    {missingSizes.length > 0 && (
-                                                                        <div className="flex items-center gap-1.5 text-[11px] text-red-700 bg-red-50 p-2 rounded-lg border border-red-200">
-                                                                            <AlertTriangle size={12} className="shrink-0" />
-                                                                            <span><b>Missing sizes:</b> {missingSizes.join(', ')} — order cannot be fully fulfilled</span>
-                                                                        </div>
-                                                                    )}
-                                                                    {ratioMismatches.length > 0 && (
-                                                                        <div className="flex items-center gap-1.5 text-[11px] text-red-700 bg-red-50 p-2 rounded-lg border border-red-200">
-                                                                            <AlertTriangle size={12} className="shrink-0" />
-                                                                            <span><b>Ratio mismatch:</b> {ratioMismatches.join(', ')} — pieces per marker don't match ordered ratio</span>
-                                                                        </div>
-                                                                    )}
-                                                                    {extraSizes.length > 0 && (
-                                                                        <div className="flex items-center gap-1.5 text-[11px] text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200">
-                                                                            <AlertTriangle size={12} className="shrink-0" />
-                                                                            <span><b>Extra sizes:</b> {extraSizes.join(', ')} — will be cut but not ordered</span>
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-
-                                    <div className="flex items-center justify-between mt-4">
-                                        <p className="text-[10px] text-slate-400">
-                                            Sizes are standardized before comparison.
-                                        </p>
-                                        <button
-                                            onClick={confirmLink}
-                                            disabled={!pickedBomId || !isMatch}
-                                            className="flex items-center gap-1.5 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2 rounded-xl transition-colors"
-                                        >
-                                            <Link2 size={14} /> Confirm Link
-                                        </button>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    )
                 )}
             </div>
 
@@ -3799,9 +4064,24 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
                 />
             )}
 
+            {showLinkModal && (
+                <LinkAndAllocateModal
+                    sop={sop}
+                    bomOptions={bomOptions}
+                    onClose={() => setShowLinkModal(false)}
+                    onLink={onLink}
+                    onPreview={onPreview}
+                    onDone={() => {
+                        setShowLinkModal(false);
+                        setRefreshTick(t => t + 1);
+                        if (onTAChange) onTAChange();
+                    }}
+                />
+            )}
+
             {showQuantityPicker && (
-                <QuantitySuggestionModal
-                    linkedSops={[sop]}
+                <MarkerAllocationModal
+                    sop={sop}
                     onClose={() => setShowQuantityPicker(false)}
                     onDone={() => {
                         setShowQuantityPicker(false);
@@ -3843,6 +4123,7 @@ const ProductionPlanningPage = () => {
     const [linking,           setLinking]           = useState({});
     const [searchQ,           setSearchQ]           = useState('');
     const [previewBomId,      setPreviewBomId]      = useState(null);
+    const [sidebarOpen,       setSidebarOpen]       = useState(true);
 
     // Load sales orders + approved BOMs on mount
     useEffect(() => {
@@ -3929,33 +4210,95 @@ const ProductionPlanningPage = () => {
         <>
         <div className="flex h-full bg-slate-50 overflow-hidden">
 
-            {/* ── LEFT: Order sidebar ── */}
-            <div className="w-72 min-w-[18rem] bg-white border-r border-slate-200 flex flex-col overflow-hidden">
-                <div className="px-4 py-4 border-b border-slate-100 shrink-0">
-                    <h2 className="font-extrabold text-slate-800 text-sm mb-3">Sales Orders</h2>
-                    <input
-                        type="search"
-                        placeholder="Search order or buyer…"
-                        value={searchQ}
-                        onChange={e => setSearchQ(e.target.value)}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-violet-400"
-                    />
-                </div>
-                <div className="flex-1 overflow-y-auto">
-                    {loadingForm && <Spinner h={32} />}
-                    {formErr && <p className="text-xs text-red-500 px-4 py-3">{formErr}</p>}
-                    {!loadingForm && filteredOrders.length === 0 && (
-                        <p className="text-xs text-slate-400 text-center py-10">No orders found</p>
-                    )}
-                    {filteredOrders.map(order => (
-                        <OrderCard
-                            key={order.id}
-                            order={order}
-                            isSelected={selectedOrderId === order.id}
-                            onClick={() => selectOrder(order.id)}
-                        />
-                    ))}
-                </div>
+            {/* ── LEFT: Order sidebar (collapsible) ── */}
+            <div className={`${sidebarOpen ? 'w-72 min-w-[18rem]' : 'w-14'} bg-white border-r border-slate-200 flex flex-col overflow-hidden transition-all duration-200 shrink-0`}>
+                {sidebarOpen ? (
+                    <>
+                        <div className="px-4 py-4 border-b border-slate-100 shrink-0">
+                            <div className="flex items-center justify-between mb-3">
+                                <h2 className="font-extrabold text-slate-800 text-sm">Sales Orders</h2>
+                                <button
+                                    onClick={() => setSidebarOpen(false)}
+                                    className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-1 rounded-lg transition-colors"
+                                    title="Collapse sidebar"
+                                >
+                                    <ChevronLeft size={15} />
+                                </button>
+                            </div>
+                            <input
+                                type="search"
+                                placeholder="Search order or buyer…"
+                                value={searchQ}
+                                onChange={e => setSearchQ(e.target.value)}
+                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                            />
+                        </div>
+                        <div className="flex-1 overflow-y-auto">
+                            {loadingForm && <Spinner h={32} />}
+                            {formErr && <p className="text-xs text-red-500 px-4 py-3">{formErr}</p>}
+                            {!loadingForm && filteredOrders.length === 0 && (
+                                <p className="text-xs text-slate-400 text-center py-10">No orders found</p>
+                            )}
+                            {filteredOrders.map(order => (
+                                <OrderCard
+                                    key={order.id}
+                                    order={order}
+                                    isSelected={selectedOrderId === order.id}
+                                    onClick={() => selectOrder(order.id)}
+                                />
+                            ))}
+                        </div>
+                    </>
+                ) : (
+                    /* ── Collapsed rail ── */
+                    <div className="flex flex-col items-center pt-3 pb-4 gap-3 overflow-y-auto">
+                        {/* Donut: BOM-linking completion — click to expand */}
+                        <button
+                            onClick={() => setSidebarOpen(true)}
+                            title={`${sops.length - unlinkedCount}/${sops.length} BOMs linked — click to expand`}
+                            className="shrink-0 hover:opacity-80 transition-opacity"
+                        >
+                            {(() => {
+                                const r  = 14;
+                                const circ = 2 * Math.PI * r;
+                                const frac = sops.length > 0 ? (sops.length - unlinkedCount) / sops.length : 0;
+                                const color = frac === 1 ? '#10b981' : frac > 0 ? '#a78bfa' : '#cbd5e1';
+                                return (
+                                    <svg width="40" height="40" viewBox="0 0 40 40">
+                                        <circle cx="20" cy="20" r={r} fill="none" stroke="#e2e8f0" strokeWidth="4" />
+                                        <circle cx="20" cy="20" r={r} fill="none" stroke={color} strokeWidth="4"
+                                            strokeDasharray={circ}
+                                            strokeDashoffset={circ * (1 - frac)}
+                                            strokeLinecap="round"
+                                            transform="rotate(-90 20 20)"
+                                        />
+                                        <text x="20" y="24" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#334155">
+                                            {Math.round(frac * 100)}%
+                                        </text>
+                                    </svg>
+                                );
+                            })()}
+                        </button>
+
+                        <div className="w-8 border-t border-slate-100" />
+
+                        {/* Order mini-chips */}
+                        {filteredOrders.map(order => (
+                            <button
+                                key={order.id}
+                                onClick={() => { selectOrder(order.id); setSidebarOpen(true); }}
+                                title={`#${order.order_number}${order.customer_name ? ` · ${order.customer_name}` : ''}`}
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold transition-colors shrink-0 ${
+                                    selectedOrderId === order.id
+                                        ? 'bg-violet-100 text-violet-700 ring-2 ring-violet-400'
+                                        : 'bg-slate-100 text-slate-500 hover:bg-violet-50 hover:text-violet-600'
+                                }`}
+                            >
+                                {String(order.order_number || '').slice(-3)}
+                            </button>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* ── RIGHT: Detail panel ── */}
