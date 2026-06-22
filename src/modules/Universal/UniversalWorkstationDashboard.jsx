@@ -415,6 +415,23 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     const [selectedCategory, setSelectedCategory] = useState(null);
     const [selectedDefectIds, setSelectedDefectIds] = useState(new Set());
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [pieceRepairDetails, setPieceRepairDetails] = useState({});
+    const fetchedPiecesRef = useRef(new Set());
+
+    const fetchPieceRepairs = async (pieceId) => {
+        if (fetchedPiecesRef.current.has(pieceId)) return;
+        fetchedPiecesRef.current.add(pieceId);
+        setPieceRepairDetails(prev => ({ ...prev, [pieceId]: { loading: true, items: [] } }));
+        try {
+            const res = await universalApi.getPieceHistory(pieceId);
+            const raw = res.data;
+            const items = Array.isArray(raw) ? raw : (raw?.items ?? raw?.rework_items ?? raw?.defects ?? []);
+            setPieceRepairDetails(prev => ({ ...prev, [pieceId]: { loading: false, items } }));
+        } catch {
+            fetchedPiecesRef.current.delete(pieceId);
+            setPieceRepairDetails(prev => ({ ...prev, [pieceId]: { loading: false, items: [] } }));
+        }
+    };
 
     const displayBatch = itemInfo.batchCode || itemInfo.batchId;
     const displayRoll = itemInfo.rollId ? `ROLL #${itemInfo.rollId}` : '';
@@ -433,13 +450,16 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
         if ((isReworkPiece && !currentlyRepair && selectedIds.size > 0) || (isPendingPiece && currentlyRepair)) {
             setSelectedIds(new Set([piece.id]));
             setIntendedAction(null);
+            if (isReworkPiece) fetchPieceRepairs(piece.id);
             return;
         }
 
         const newSet = new Set(selectedIds);
         if (!allowMultiple && isPendingPiece && !newSet.has(piece.id)) newSet.clear();
+        const isAdding = !newSet.has(piece.id);
         if (newSet.has(piece.id)) newSet.delete(piece.id); else newSet.add(piece.id);
         setSelectedIds(newSet);
+        if (isReworkPiece && isAdding) fetchPieceRepairs(piece.id);
     };
 
     const toggleSelectAll = () => {
@@ -692,6 +712,31 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                         </div>
                     </div>
                     <div className="bg-white p-4 border-t-4 border-amber-400 shadow-[0_-20px_50px_rgba(0,0,0,0.15)] shrink-0">
+                        {selectedIds.size === 1 && (() => {
+                            const pid = [...selectedIds][0];
+                            const info = pieceRepairDetails[pid];
+                            if (!info) return null;
+                            if (info.loading) return (
+                                <div className="flex items-center gap-2 mb-3 pb-3 border-b border-amber-100">
+                                    <Loader2 size={12} className="animate-spin text-amber-600" />
+                                    <span className="text-xs font-bold text-amber-700">Loading repair history…</span>
+                                </div>
+                            );
+                            if (!info.items?.length) return null;
+                            return (
+                                <div className="mb-3 pb-3 border-b border-amber-200">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-600 mb-2">Pending Repairs</p>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {info.items.map((item, i) => (
+                                            <div key={i} className="flex items-center gap-1.5 bg-amber-100 border border-amber-300 rounded-lg px-2.5 py-1">
+                                                <span className="font-mono font-black text-amber-800 text-xs">{item.defect_code ?? item.code ?? '—'}</span>
+                                                {(item.defect_description ?? item.description) && <span className="text-amber-700 text-xs">{item.defect_description ?? item.description}</span>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })()}
                         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
                             <div className="bg-amber-50 px-5 py-3 rounded-xl border-2 border-amber-200 text-center min-w-[140px]">
                                 <span className="block text-amber-600 text-xs font-black uppercase mb-0.5 tracking-widest">Validating</span>
@@ -772,23 +817,50 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
 
                     <div className="bg-white p-4 border-t-4 border-slate-300 shadow-[0_-20px_50px_rgba(0,0,0,0.15)] flex flex-col shrink-0">
                         {isRepairMode ? (
-                            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-                                <div className="bg-amber-50 px-5 py-3 rounded-xl border-2 border-amber-200 text-center min-w-[140px]">
-                                    <span className="block text-amber-600 text-xs font-black uppercase mb-0.5 tracking-widest">Repairing</span>
-                                    <span className="text-4xl font-black text-amber-700 leading-none">{selectedIds.size}</span>
+                            <>
+                                {selectedIds.size === 1 && (() => {
+                                    const pid = [...selectedIds][0];
+                                    const info = pieceRepairDetails[pid];
+                                    if (!info) return null;
+                                    if (info.loading) return (
+                                        <div className="flex items-center gap-2 mb-3 pb-3 border-b border-amber-100">
+                                            <Loader2 size={12} className="animate-spin text-amber-600" />
+                                            <span className="text-xs font-bold text-amber-700">Loading repair history…</span>
+                                        </div>
+                                    );
+                                    if (!info.items?.length) return null;
+                                    return (
+                                        <div className="mb-3 pb-3 border-b border-amber-200">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-amber-600 mb-2">Pending Repairs</p>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {info.items.map((item, i) => (
+                                                    <div key={i} className="flex items-center gap-1.5 bg-amber-100 border border-amber-300 rounded-lg px-2.5 py-1">
+                                                        <span className="font-mono font-black text-amber-800 text-xs">{item.defect_code ?? item.code ?? '—'}</span>
+                                                        {(item.defect_description ?? item.description) && <span className="text-amber-700 text-xs">{item.defect_description ?? item.description}</span>}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                                <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                                    <div className="bg-amber-50 px-5 py-3 rounded-xl border-2 border-amber-200 text-center min-w-[140px]">
+                                        <span className="block text-amber-600 text-xs font-black uppercase mb-0.5 tracking-widest">Repairing</span>
+                                        <span className="text-4xl font-black text-amber-700 leading-none">{selectedIds.size}</span>
+                                    </div>
+                                    <div className="flex-grow grid grid-cols-2 gap-4 h-[60px]">
+                                        <button onClick={() => handleRepairAction('QC_REJECTED')} disabled={selectedIds.size === 0}
+                                            className="w-full h-full bg-rose-600 text-white rounded-xl font-black text-lg shadow-xl hover:bg-rose-700 active:scale-95 disabled:opacity-30 flex items-center justify-center border-b-4 border-rose-800">
+                                            <XCircle className="w-5 h-5 mr-2" /> FAILED
+                                        </button>
+                                        <button onClick={() => handleRepairAction('APPROVED')} disabled={selectedIds.size === 0 || isSubmitting}
+                                            className="w-full h-full bg-emerald-600 text-white rounded-xl font-black text-lg shadow-xl hover:bg-emerald-700 active:scale-95 disabled:opacity-30 flex items-center justify-center border-b-4 border-emerald-800">
+                                            {isSubmitting ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <CheckCircle2 className="w-5 h-5 mr-2" />}
+                                            {isSubmitting ? 'SAVING…' : 'PASSED'}
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="flex-grow grid grid-cols-2 gap-4 h-[60px]">
-                                    <button onClick={() => handleRepairAction('QC_REJECTED')} disabled={selectedIds.size === 0}
-                                        className="w-full h-full bg-rose-600 text-white rounded-xl font-black text-lg shadow-xl hover:bg-rose-700 active:scale-95 disabled:opacity-30 flex items-center justify-center border-b-4 border-rose-800">
-                                        <XCircle className="w-5 h-5 mr-2" /> FAILED
-                                    </button>
-                                    <button onClick={() => handleRepairAction('APPROVED')} disabled={selectedIds.size === 0 || isSubmitting}
-                                        className="w-full h-full bg-emerald-600 text-white rounded-xl font-black text-lg shadow-xl hover:bg-emerald-700 active:scale-95 disabled:opacity-30 flex items-center justify-center border-b-4 border-emerald-800">
-                                        {isSubmitting ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <CheckCircle2 className="w-5 h-5 mr-2" />}
-                                        {isSubmitting ? 'SAVING…' : 'PASSED'}
-                                    </button>
-                                </div>
-                            </div>
+                            </>
                         ) : (
                             <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
                                 <div className="bg-slate-100 px-5 py-3 rounded-xl border-2 border-slate-300 text-center min-w-[140px]">

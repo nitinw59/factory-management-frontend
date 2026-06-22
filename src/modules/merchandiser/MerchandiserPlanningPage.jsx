@@ -2564,13 +2564,15 @@ const READINESS_CFG = {
 
 const QuantitySuggestionModal = ({ linkedSops, onClose, onDone }) => {
     const [suggestions, setSuggestions] = useState(null);
+    const [bomDetails,  setBomDetails]  = useState({});  // { [sopId]: bom detail with ratio_groups }
     const [loading,     setLoading]     = useState(true);
     const [error,       setError]       = useState(null);
-    const [choices,     setChoices]     = useState({});
+    const [choices,     setChoices]     = useState({});  // { [sopId_colorId]: 'lower' | 'upper' | 'exact' }
+    const [rgChoices,   setRgChoices]   = useState({});  // { [sopId_colorId]: ratioGroupId | '' }
     const [submitting,  setSubmitting]  = useState(false);
 
     useEffect(() => {
-        Promise.all(
+        const suggestionsP = Promise.all(
             linkedSops.map(sop =>
                 planningApi.getSuggestions(sop.id)
                     .then(r => {
@@ -2583,17 +2585,31 @@ const QuantitySuggestionModal = ({ linkedSops, onClose, onDone }) => {
                         };
                     })
             )
-        ).then(results => {
+        );
+        const bomP = Promise.all(
+            linkedSops
+                .filter(sop => sop.bom_id)
+                .map(sop =>
+                    bomApi.getById(sop.bom_id)
+                        .then(r => ({ sopId: sop.id, detail: r.data?.data ?? r.data }))
+                        .catch(() => ({ sopId: sop.id, detail: null }))
+                )
+        );
+
+        Promise.all([suggestionsP, bomP]).then(([results, bomResults]) => {
+            const bomMap = {};
+            bomResults.forEach(({ sopId, detail }) => { if (detail) bomMap[sopId] = detail; });
+            setBomDetails(bomMap);
+
             setSuggestions(results);
-            const init = {};
+            const choiceInit = {};
+            const rgInit     = {};
             results.forEach(({ sopId, colors }) => {
                 colors.forEach(c => {
                     let selected = c.exact ? 'exact' : 'lower';
-                    // If the API tells us the previous selection, use it.
                     if (c.selected_option) {
                         selected = c.selected_option;
                     } else {
-                        // Otherwise infer from previously-finalized quantity
                         const prev = c.finalized_quantity ?? c.previous_finalized_quantity;
                         if (prev != null) {
                             const prevNum = Number(prev);
@@ -2601,16 +2617,20 @@ const QuantitySuggestionModal = ({ linkedSops, onClose, onDone }) => {
                             else if (Number(c.upper?.total_pieces) === prevNum) selected = 'upper';
                         }
                     }
-                    init[`${sopId}_${c.fabric_color_id}`] = selected;
+                    choiceInit[`${sopId}_${c.fabric_color_id}`] = selected;
+                    if (c.selected_ratio_group_id) {
+                        rgInit[`${sopId}_${c.fabric_color_id}`] = String(c.selected_ratio_group_id);
+                    }
                 });
             });
-            setChoices(init);
+            setChoices(choiceInit);
+            setRgChoices(rgInit);
         }).catch(e => setError(e?.response?.data?.error || 'Failed to load suggestions'))
           .finally(() => setLoading(false));
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const pick = (sopId, colorId, opt) =>
-        setChoices(p => ({ ...p, [`${sopId}_${colorId}`]: opt }));
+    const pick   = (sopId, colorId, opt)  => setChoices(p   => ({ ...p, [`${sopId}_${colorId}`]: opt }));
+    const pickRg = (sopId, colorId, rgId) => setRgChoices(p => ({ ...p, [`${sopId}_${colorId}`]: rgId }));
 
     const handleConfirm = async () => {
         setSubmitting(true);
@@ -2619,13 +2639,20 @@ const QuantitySuggestionModal = ({ linkedSops, onClose, onDone }) => {
             await Promise.all(
                 suggestions.map(async ({ sopId, colors }) => {
                     const quantities = colors.map(c => {
-                        const opt    = choices[`${sopId}_${c.fabric_color_id}`] || 'lower';
-                        const chosen = (opt === 'exact' ? c.lower : c[opt]) ?? c.lower ?? c.upper;
+                        const ck      = `${sopId}_${c.fabric_color_id}`;
+                        const opt     = choices[ck] || 'lower';
+                        const optData = (opt === 'exact' ? c.lower : c[opt]) ?? c.lower ?? c.upper;
+                        const selRgId = rgChoices[ck] || null;
+                        // Use per-ratio-group pieces/runs when a specific group is assigned
+                        const rgData  = selRgId && optData?.per_ratio_group
+                            ? optData.per_ratio_group.find(g => String(g.ratio_group_id) === String(selRgId))
+                            : null;
                         return {
                             fabric_color_id:    c.fabric_color_id,
                             selected_option:    opt,
-                            finalized_quantity: chosen?.total_pieces ?? c.ordered_quantity,
-                            marker_runs:        chosen?.runs ?? null,
+                            finalized_quantity: rgData?.total_pieces ?? optData?.total_pieces ?? c.ordered_quantity,
+                            marker_runs:        rgData?.runs         ?? optData?.runs         ?? null,
+                            ratio_group_id:     selRgId ? parseInt(selRgId) : null,
                         };
                     });
                     await planningApi.finalizeQuantities(sopId, { quantities });
@@ -2683,55 +2710,142 @@ const QuantitySuggestionModal = ({ linkedSops, onClose, onDone }) => {
                                                     Ordered: {(c.ordered_quantity || 0).toLocaleString()} pcs
                                                 </span>
                                             </div>
-                                            <div className="p-3">
-                                                {c.exact ? (
-                                                    <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
-                                                        <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+                                            <div className="p-3 space-y-3">
+                                                {/* ── Ratio group picker ── shown when BOM has 2+ groups */}
+                                                {(() => {
+                                                    const rgKey = `${sopId}_${c.fabric_color_id}`;
+                                                    const rgs   = bomDetails[sopId]?.ratio_groups || [];
+                                                    if (rgs.length < 2) return null;
+                                                    const selRg = rgChoices[rgKey] || '';
+                                                    return (
                                                         <div>
-                                                            <p className="text-[9px] font-bold text-emerald-600 uppercase tracking-wider">Exact match</p>
-                                                            <p className="text-xl font-extrabold text-slate-800 leading-none">
-                                                                {(c.lower?.total_pieces ?? c.upper?.total_pieces ?? c.ordered_quantity).toLocaleString()}
-                                                            </p>
-                                                            {c.lower?.runs != null && (
-                                                                <p className="text-[10px] text-slate-500 mt-0.5">{c.lower.runs} run{c.lower.runs !== 1 ? 's' : ''}</p>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <div className="grid grid-cols-2 gap-2">
-                                                        {['lower', 'upper'].map(opt => {
-                                                            const d       = c[opt];
-                                                            if (!d) return null;
-                                                            const active  = chosen === opt;
-                                                            const diff    = (d.total_pieces || 0) - (c.ordered_quantity || 0);
-                                                            const isUnder = diff < 0;
-                                                            return (
-                                                                <button key={opt} onClick={() => pick(sopId, c.fabric_color_id, opt)}
-                                                                    className={`relative flex flex-col items-start p-3 rounded-xl border-2 text-left transition-all ${
-                                                                        active
-                                                                            ? isUnder ? 'border-blue-400 bg-blue-50' : 'border-violet-400 bg-violet-50'
-                                                                            : 'border-slate-200 bg-white hover:border-slate-300'
-                                                                    }`}>
-                                                                    {active && (
-                                                                        <CheckCircle2 size={13} className={`absolute top-2 right-2 ${isUnder ? 'text-blue-500' : 'text-violet-500'}`} />
-                                                                    )}
-                                                                    <span className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${isUnder ? 'text-blue-500' : 'text-violet-500'}`}>
-                                                                        {isUnder ? '▼ Under-run' : '▲ Over-run'}
-                                                                    </span>
-                                                                    <span className="text-xl font-extrabold text-slate-800 leading-none">
-                                                                        {(d.total_pieces || 0).toLocaleString()}
-                                                                    </span>
-                                                                    <span className="text-[10px] text-slate-500 mt-0.5">
-                                                                        {d.runs} run{d.runs !== 1 ? 's' : ''}
-                                                                    </span>
-                                                                    <span className={`text-[10px] font-bold mt-1 ${isUnder ? 'text-blue-600' : 'text-violet-600'}`}>
-                                                                        {isUnder ? `${Math.abs(diff).toLocaleString()} fewer` : `${diff.toLocaleString()} extra`} vs order
-                                                                    </span>
+                                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Assign Ratio Group</p>
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                <button
+                                                                    onClick={() => pickRg(sopId, c.fabric_color_id, '')}
+                                                                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition-all ${
+                                                                        !selRg
+                                                                            ? 'bg-violet-100 text-violet-700 border-violet-300'
+                                                                            : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                                                                    }`}
+                                                                >
+                                                                    All groups
                                                                 </button>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                )}
+                                                                {rgs.map(rg => {
+                                                                    const rgId  = String(rg.ratio_group_id ?? rg.id);
+                                                                    const active = String(selRg) === rgId;
+                                                                    return (
+                                                                        <button key={rgId}
+                                                                            onClick={() => pickRg(sopId, c.fabric_color_id, rgId)}
+                                                                            className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition-all ${
+                                                                                active
+                                                                                    ? 'bg-violet-100 text-violet-700 border-violet-300'
+                                                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                                                                            }`}
+                                                                        >
+                                                                            {rg.ratio_group_name || `Group ${rgId}`}
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
+
+                                                {/* ── Lower / upper picker (scoped to selected ratio group) ── */}
+                                                {(() => {
+                                                    const rgKey  = `${sopId}_${c.fabric_color_id}`;
+                                                    const selRg  = rgChoices[rgKey] || '';
+                                                    // When a specific group is selected, scope lower/upper data to that group
+                                                    const scopeOpt = (optKey) => {
+                                                        const raw = c[optKey];
+                                                        if (!raw) return null;
+                                                        if (!selRg || !raw.per_ratio_group?.length) return raw;
+                                                        const match = raw.per_ratio_group.find(g => String(g.ratio_group_id) === String(selRg));
+                                                        return match ? { ...raw, total_pieces: match.total_pieces, runs: match.runs } : raw;
+                                                    };
+                                                    if (c.exact) {
+                                                        const d = scopeOpt('lower') ?? scopeOpt('upper');
+                                                        return (
+                                                            <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+                                                                <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-emerald-600 uppercase tracking-wider">Exact match</p>
+                                                                    <p className="text-xl font-extrabold text-slate-800 leading-none">
+                                                                        {((d?.total_pieces ?? c.ordered_quantity) || 0).toLocaleString()}
+                                                                    </p>
+                                                                    {d?.runs != null && (
+                                                                        <p className="text-[10px] text-slate-500 mt-0.5">{d.runs} run{d.runs !== 1 ? 's' : ''}</p>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return (
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            {['lower', 'upper'].map(optKey => {
+                                                                const d       = scopeOpt(optKey);
+                                                                if (!d) return null;
+                                                                const active  = chosen === optKey;
+                                                                const diff    = (d.total_pieces || 0) - (c.ordered_quantity || 0);
+                                                                const isUnder = diff < 0;
+                                                                return (
+                                                                    <button key={optKey} onClick={() => pick(sopId, c.fabric_color_id, optKey)}
+                                                                        className={`relative flex flex-col items-start p-3 rounded-xl border-2 text-left transition-all ${
+                                                                            active
+                                                                                ? isUnder ? 'border-blue-400 bg-blue-50' : 'border-violet-400 bg-violet-50'
+                                                                                : 'border-slate-200 bg-white hover:border-slate-300'
+                                                                        }`}>
+                                                                        {active && (
+                                                                            <CheckCircle2 size={13} className={`absolute top-2 right-2 ${isUnder ? 'text-blue-500' : 'text-violet-500'}`} />
+                                                                        )}
+                                                                        <span className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${isUnder ? 'text-blue-500' : 'text-violet-500'}`}>
+                                                                            {isUnder ? '▼ Under-run' : '▲ Over-run'}
+                                                                        </span>
+                                                                        <span className="text-xl font-extrabold text-slate-800 leading-none">
+                                                                            {(d.total_pieces || 0).toLocaleString()}
+                                                                        </span>
+                                                                        <span className="text-[10px] text-slate-500 mt-0.5">
+                                                                            {d.runs} run{d.runs !== 1 ? 's' : ''}
+                                                                        </span>
+                                                                        <span className={`text-[10px] font-bold mt-1 ${isUnder ? 'text-blue-600' : 'text-violet-600'}`}>
+                                                                            {isUnder ? `${Math.abs(diff).toLocaleString()} fewer` : `${diff.toLocaleString()} extra`} vs order
+                                                                        </span>
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    );
+                                                })()}
+
+                                                {/* ── Per-group breakdown summary (only when "All groups" is active) ── */}
+                                                {(() => {
+                                                    const rgKey  = `${sopId}_${c.fabric_color_id}`;
+                                                    const selRg  = rgChoices[rgKey] || '';
+                                                    if (selRg) return null;
+                                                    const optData = c.exact ? c.lower : c[chosen];
+                                                    const groups  = optData?.per_ratio_group;
+                                                    if (!groups?.length) return null;
+                                                    return (
+                                                        <div className="pt-2 border-t border-slate-100">
+                                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Breakdown by Ratio Group</p>
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                {groups.map((rg, i) => (
+                                                                    <button key={i}
+                                                                        onClick={() => pickRg(sopId, c.fabric_color_id, String(rg.ratio_group_id))}
+                                                                        title="Click to assign this group to this color"
+                                                                        className="flex items-center gap-1.5 bg-violet-50 border border-violet-100 rounded-lg px-2 py-1 hover:border-violet-300 hover:bg-violet-100 transition-colors">
+                                                                        <span className="text-[10px] font-bold text-violet-700">{rg.ratio_group_name || `Group ${i + 1}`}</span>
+                                                                        <span className="text-[9px] text-violet-400">·</span>
+                                                                        <span className="text-[10px] text-violet-600">{rg.runs} run{rg.runs !== 1 ? 's' : ''}</span>
+                                                                        <span className="text-[9px] text-violet-400">·</span>
+                                                                        <span className="text-[10px] font-bold text-slate-700">{(rg.total_pieces || 0).toLocaleString()} pcs</span>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     );
@@ -3020,7 +3134,19 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
 
     const linkedBomDetail = bomOptions.find(b => b.id === sop.bom_id);
     const totalQty        = (sop.colors || []).reduce((s, c) => s + (c.quantity || c.total_quantity || 0), 0);
-    const sizeEntries     = Object.entries(sop.size_breakdown || {}).filter(([, v]) => parseInt(v) > 0);
+
+    // Aggregate per-color sizes into a combined size→qty map (replaces the old global size_breakdown)
+    const combinedSizeMap = {};
+    (sop.colors || []).forEach(c => {
+        (c.sizes || []).forEach(sz => {
+            const key = sz.size_name ?? String(sz.size_id);
+            if (key) combinedSizeMap[key] = (combinedSizeMap[key] || 0) + (Number(sz.quantity) || 0);
+        });
+    });
+    // Fall back to legacy size_breakdown if backend hasn't migrated yet
+    const sizeEntries = Object.keys(combinedSizeMap).length > 0
+        ? Object.entries(combinedSizeMap).filter(([, v]) => parseInt(v) > 0)
+        : Object.entries(sop.size_breakdown || {}).filter(([, v]) => parseInt(v) > 0);
 
     // Order: simplified ratio per size
     const requiredSizesSet = new Set(sizeEntries.map(([s]) => stdSize(s)));
