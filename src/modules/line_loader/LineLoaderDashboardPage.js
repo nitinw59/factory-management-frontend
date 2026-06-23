@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { lineLoaderApi } from '../../api/lineLoaderApi';
+import { assemblyPortalApi } from '../../api/assemblyPortalApi';
 import { Link } from 'react-router-dom';
 import Modal from '../../shared/Modal';
 import {
@@ -23,19 +24,59 @@ const Spinner = () => (
 // LINE SELECTION MODAL
 // ============================================================================
 // readyRolls: array of roll objects { roll_id, meter, fabric_type, color_name, ... }
-const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = [], onClose, onSave, wipMap }) => {
+const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = [], onClose, onSave, wipMap, allStages = [] }) => {
     const [step, setStep] = useState('line');
     const [lines, setLines] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [selectedLine, setSelectedLine] = useState(currentLineId ? String(currentLineId) : '');
     const [selectedRollIds, setSelectedRollIds] = useState(() => new Set(readyRolls.map(r => String(r.roll_id))));
 
+    const [isAssemblyScope,   setIsAssemblyScope]   = useState(false);
+    const [siblingStages,     setSiblingStages]     = useState([]);
+    const [siblingLinesMap,   setSiblingLinesMap]   = useState({});
+    const [assemblyOverrides, setAssemblyOverrides] = useState({});
+
     useEffect(() => {
-        lineLoaderApi.getLinesByType(cycleFlow.line_type_id)
-            .then(res => setLines(res.data || []))
-            .catch(err => console.error("Failed to fetch lines", err))
-            .finally(() => setIsLoading(false));
-    }, [cycleFlow.line_type_id]);
+        const init = async () => {
+            try {
+                const [linesRes, typesRes] = await Promise.all([
+                    lineLoaderApi.getLinesByType(cycleFlow.line_type_id),
+                    lineLoaderApi.getLineTypes(),
+                ]);
+                setLines(linesRes.data || []);
+
+                const typeMap = {};
+                (typesRes.data || []).forEach(t => { typeMap[t.id] = t; });
+
+                const isAssembly = typeMap[cycleFlow.line_type_id]?.processing_scope === 'ASSEMBLY';
+                setIsAssemblyScope(isAssembly);
+
+                if (isAssembly) {
+                    const siblings = allStages.filter(
+                        s => s.id !== cycleFlow.id && typeMap[s.line_type_id]?.processing_scope === 'ASSEMBLY'
+                    );
+                    setSiblingStages(siblings);
+
+                    const results = await Promise.all(
+                        siblings.map(s => lineLoaderApi.getLinesByType(s.line_type_id)
+                            .then(r => ({ cfId: s.id, lines: r.data || [] })))
+                    );
+                    const linesMap = {};
+                    results.forEach(({ cfId, lines: ls }) => { linesMap[cfId] = ls; });
+                    setSiblingLinesMap(linesMap);
+
+                    const overrides = {};
+                    siblings.forEach(s => { overrides[s.id] = ''; });
+                    setAssemblyOverrides(overrides);
+                }
+            } catch (err) {
+                console.error('LineSelectionModal init failed', err);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        init();
+    }, [cycleFlow.line_type_id, cycleFlow.id, allStages]);
 
     const selectedLineName = lines.find(l => String(l.id) === String(selectedLine))?.name || '';
     const lineWip = selectedLine ? wipMap[String(selectedLine)] : null;
@@ -58,7 +99,20 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
     };
 
     const handleFinalConfirm = async () => {
-        await onSave({ batchId, cycleFlowId: cycleFlow.id, lineId: selectedLine, selectedRollIds: selectedRollObjects.map(r => r.roll_id) });
+        const payload = {
+            batchId,
+            cycleFlowId: cycleFlow.id,
+            lineId: selectedLine,
+            selectedRollIds: selectedRollObjects.map(r => r.roll_id),
+        };
+        if (isAssemblyScope && siblingStages.length > 0) {
+            const overrides = {};
+            Object.entries(assemblyOverrides).forEach(([cfId, lineId]) => {
+                if (lineId) overrides[cfId] = Number(lineId);
+            });
+            if (Object.keys(overrides).length > 0) payload.assemblyLineOverrides = overrides;
+        }
+        await onSave(payload);
     };
 
     if (isLoading) return <Spinner />;
@@ -91,6 +145,33 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
                     </div>
                 )}
             </div>
+            {isAssemblyScope && siblingStages.length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
+                    <p className="text-xs font-black text-blue-700 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                        <Zap size={12} /> Co-Activate Assembly Stages
+                    </p>
+                    <p className="text-[11px] text-blue-500 mb-3 font-medium">
+                        These stages activate simultaneously. Leave on "Auto" to let the system pick the lowest-WIP line.
+                    </p>
+                    <div className="space-y-3">
+                        {siblingStages.map(sibling => (
+                            <div key={sibling.id}>
+                                <label className="block text-xs font-bold text-slate-600 mb-1">{sibling.line_type_name}</label>
+                                <select
+                                    value={assemblyOverrides[sibling.id] ?? ''}
+                                    onChange={e => setAssemblyOverrides(prev => ({ ...prev, [sibling.id]: e.target.value }))}
+                                    className="w-full p-2.5 border-2 border-slate-300 rounded-xl bg-white text-sm font-bold text-slate-700 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 outline-none appearance-none"
+                                >
+                                    <option value="">Auto — Lowest WIP</option>
+                                    {(siblingLinesMap[sibling.id] || []).map(line => (
+                                        <option key={line.id} value={line.id}>{line.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
             <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
                 <button onClick={onClose} className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-bold text-sm active:scale-95">Cancel</button>
                 <button onClick={() => setStep('rolls')} disabled={!selectedLine || isWipBlocked}
@@ -172,6 +253,22 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
                     <span className="text-base font-black text-blue-600">{selectedCount} Rolls <span className="text-sm font-bold text-slate-500">({selectedMeters}m)</span></span>
                 </div>
             </div>
+            {isAssemblyScope && siblingStages.length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
+                    <p className="text-xs font-black text-blue-700 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                        <Zap size={12} /> Co-Activated Stages
+                    </p>
+                    {siblingStages.map(s => {
+                        const overrideLine = (siblingLinesMap[s.id] || []).find(l => String(l.id) === String(assemblyOverrides[s.id]));
+                        return (
+                            <div key={s.id} className="flex justify-between items-center text-sm py-1 border-b border-blue-100 last:border-0">
+                                <span className="font-bold text-slate-700">{s.line_type_name}</span>
+                                <span className="text-blue-600 font-black">{overrideLine?.name || 'Auto — Lowest WIP'}</span>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
             <div className="mb-5">
                 <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Rolls to Dispatch</h5>
                 <div className="max-h-[30vh] overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 bg-white shadow-inner">
@@ -428,12 +525,69 @@ const StageConnector = ({ readyRolls }) => (
 );
 
 // ============================================================================
+// COMPLETION OUTCOME NODES
+// ============================================================================
+const CompletionNode = ({ type, summary, loading }) => {
+    const isApproved = type === 'approved';
+    const count    = isApproved ? (summary?.total_approved ?? null) : (summary?.total_rejected ?? null);
+    const repaired = isApproved ? (summary?.total_repaired ?? 0) : 0;
+    const total    = summary?.total_garments ?? null;
+
+    console.log(`[CompletionNode:${type}]`, { loading, summary, count, total, repaired });
+
+    const cfg = isApproved
+        ? { header: 'bg-emerald-600', ring: 'ring-emerald-400', bg: 'bg-emerald-50', label: 'APPROVED', Icon: CheckCircle2, countColor: 'text-emerald-700' }
+        : { header: 'bg-rose-600',    ring: 'ring-rose-400',    bg: 'bg-rose-50',    label: 'REJECTED', Icon: X,            countColor: 'text-rose-700'    };
+
+    return (
+        <div className={`flex flex-col rounded-2xl border-2 overflow-hidden ring-2 ${cfg.ring} ${cfg.bg} w-[160px] shrink-0`}>
+            <div className={`${cfg.header} text-white px-3 py-1.5 flex items-center justify-between`}>
+                <span className="font-black text-[10px] uppercase tracking-widest">{cfg.label}</span>
+                <cfg.Icon size={12} />
+            </div>
+            <div className="p-3 flex flex-col gap-0.5">
+                {loading ? (
+                    <span className="text-xs font-bold text-slate-400">Loading…</span>
+                ) : (
+                    <>
+                        <span className={`text-3xl font-black ${cfg.countColor}`}>{count ?? '—'}</span>
+                        {total != null && (
+                            <span className="text-[10px] font-bold text-slate-400">of {total} garments</span>
+                        )}
+                        {isApproved && repaired > 0 && (
+                            <span className="text-[10px] font-bold text-teal-600 mt-1">+{repaired} repaired</span>
+                        )}
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// ============================================================================
 // BATCH PIPELINE CARD
 // ============================================================================
 const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
     const [modalData, setModalData] = useState(null);
     const [detailData, setDetailData] = useState(null); // { stage, progress, readyRolls }
     const [checkingStageId, setCheckingStageId] = useState(null);
+    const [completion, setCompletion] = useState(null);
+    const [loadingCompletion, setLoadingCompletion] = useState(false);
+
+    useEffect(() => {
+        console.log(`[CompletionNodes] fetching batch_id=${batch.batch_id}`);
+        setLoadingCompletion(true);
+        assemblyPortalApi.getBatchCompletion(batch.batch_id)
+            .then(res => {
+                console.log(`[CompletionNodes] batch_id=${batch.batch_id} response:`, res.data);
+                setCompletion(res.data);
+            })
+            .catch(err => {
+                console.error(`[CompletionNodes] batch_id=${batch.batch_id} FAILED`, err?.response?.status, err?.response?.data ?? err.message);
+                setCompletion(null);
+            })
+            .finally(() => setLoadingCompletion(false));
+    }, [batch.batch_id]);
 
     const cycleFlow = batch.cycle_flow || [];
     const progressMap = useMemo(() => {
@@ -467,7 +621,7 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
         const progress = progressMap[cf.id];
         const readyRolls = getReadyRolls(stageIndex);
         setDetailData(null);
-        setModalData({ cycleFlow: cf, currentLineId: progress?.line_id ?? null, readyRolls });
+        setModalData({ cycleFlow: cf, currentLineId: progress?.line_id ?? null, readyRolls, allStages: cycleFlow });
     };
 
     const handleSave = async (data) => {
@@ -557,6 +711,15 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                                 </React.Fragment>
                             );
                         })}
+                        {cycleFlow.length > 0 && (
+                            <>
+                                <StageConnector readyRolls={0} />
+                                <div className="flex flex-col gap-2">
+                                    <CompletionNode type="approved" summary={completion?.summary} loading={loadingCompletion} />
+                                    <CompletionNode type="rejected" summary={completion?.summary} loading={loadingCompletion} />
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
             </div>
@@ -585,6 +748,7 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                         wipMap={wipMap}
                         onClose={() => setModalData(null)}
                         onSave={handleSave}
+                        allStages={modalData.allStages}
                     />
                 </Modal>
             )}

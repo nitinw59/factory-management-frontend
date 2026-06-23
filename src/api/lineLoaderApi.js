@@ -11,6 +11,7 @@ export const lineLoaderApi = {
    * @param {number | string} lineTypeId The ID of the line type.
    */
   getLinesByType: (lineTypeId) => api.get(`/line-loader/lines/${lineTypeId}`),
+  getLineTypes: () => api.get('/shared/production_line_types'),
 
   /**
    * Assigns a batch to a production line for a specific step in its cycle.

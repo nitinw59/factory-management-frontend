@@ -7,6 +7,18 @@ import {
 } from 'lucide-react';
 import { assemblyApi } from '../../api/assemblyApi';
 
+// ── Debug helpers ─────────────────────────────────────────────────────────────
+const _ts  = () => new Date().toISOString().slice(11, 23);   // HH:MM:SS.mmm
+const _fmt = (a) => { try { return typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a ?? ''); } catch { return String(a); } };
+const _emit = (type, args) => {
+    const msg = args.map(_fmt).join(' ');
+    window.dispatchEvent(new CustomEvent('gp-log', { detail: { type, msg } }));
+    return msg;
+};
+const dbg  = (...a) => { const m = _emit('info',  a); console.log   ('%c[GarmentPortal]', 'color:#6366f1;font-weight:bold', _ts(), m); };
+const dbgW = (...a) => { const m = _emit('warn',  a); console.warn  ('%c[GarmentPortal]', 'color:#f59e0b;font-weight:bold', _ts(), m); };
+const dbgE = (...a) => { const m = _emit('error', a); console.error ('%c[GarmentPortal]', 'color:#ef4444;font-weight:bold', _ts(), m); };
+
 // ── Work Log helpers ──────────────────────────────────────────────────────────
 const STATS_REFRESH_MS = 60_000;
 
@@ -344,6 +356,11 @@ const AssemblyProcessingPortal = () => {
     const [workData,    setWorkData]    = useState(null);
     const [loadingWork, setLoadingWork] = useState(false);
     const [apiError,    setApiError]    = useState(null);
+
+    // On-screen debug log panel
+    const [debugLogs,      setDebugLogs]      = useState([]);
+    const [showDebugPanel, setShowDebugPanel] = useState(true);
+    const debugScrollRef = useRef(null);
     const apiErrTimer = useRef(null);
     const popApiError = (msg) => {
         setApiError(msg);
@@ -381,28 +398,69 @@ const AssemblyProcessingPortal = () => {
 
     // --- DATA INITIALIZATION ---
     const loadRequiredData = useCallback(async () => {
+        console.group('%c[GarmentPortal] loadRequiredData', 'color:#6366f1;font-weight:bold');
+        dbg('→ fetching defect codes + monitor data');
         try {
             const [defectsRes, monitorRes] = await Promise.all([
                 assemblyApi.getDefectCodes(),
                 assemblyApi.getMonitorData()
             ]);
-            console.log("Defect Codes:", defectsRes.data);
-            console.log("Monitor Data:", monitorRes.data);
-            setDefectCodes(defectsRes.data);
-            setActiveBatches(monitorRes.data.active_batches || []);
-            console.log("Active Batches:", monitorRes.data.active_batches);
-            setWorkstationInfo(monitorRes.data.workstation || null);
-            setRecentScans(monitorRes.data.recent_scans || []);
+            dbg('← defect codes raw:', defectsRes.data);
+            dbg('← monitor data raw:', monitorRes.data);
+
+            const defects   = defectsRes.data ?? [];
+            const batches   = monitorRes.data.active_batches ?? [];
+            const ws        = monitorRes.data.workstation ?? null;
+            const scans     = monitorRes.data.recent_scans ?? [];
+
+            dbg(`  defect codes: ${defects.length} items`);
+            console.table(defects.slice(0, 10));
+
+            dbg(`  active batches: ${batches.length}`, batches);
+            dbg(`  workstation:`, ws);
+            dbg(`  recent scans: ${scans.length}`, scans);
+
+            setDefectCodes(defects);
+            setActiveBatches(batches);
+            setWorkstationInfo(ws);
+            setRecentScans(scans);
         } catch (e) {
-            console.error("Failed to load portal data.", e);
+            dbgE('loadRequiredData FAILED', e?.response?.status, e?.response?.data ?? e.message, e);
+        } finally {
+            console.groupEnd();
         }
     }, []);
 
     useEffect(() => { loadRequiredData(); }, [loadRequiredData]);
 
+    // Capture gp-log events emitted by dbg/dbgW/dbgE into on-screen panel
+    useEffect(() => {
+        let idCounter = 0;
+        const handler = (e) => {
+            const entry = { id: idCounter++, ts: _ts(), type: e.detail.type, msg: e.detail.msg };
+            setDebugLogs(prev => prev.length >= 200 ? [...prev.slice(-199), entry] : [...prev, entry]);
+        };
+        window.addEventListener('gp-log', handler);
+        return () => window.removeEventListener('gp-log', handler);
+    }, []);
+
+    // Auto-scroll debug panel to latest entry
+    useEffect(() => {
+        if (debugScrollRef.current) {
+            debugScrollRef.current.scrollTop = debugScrollRef.current.scrollHeight;
+        }
+    }, [debugLogs]);
+
     const loadStats = useCallback(async () => {
-        try { const res = await assemblyApi.getCheckerStats(); setStats(res.data); }
-        catch (err) { popApiError(err.response?.data?.error || err.message || 'Failed to load stats'); }
+        dbg('loadStats → getCheckerStats');
+        try {
+            const res = await assemblyApi.getCheckerStats();
+            dbg('loadStats ←', res.data);
+            setStats(res.data);
+        } catch (err) {
+            dbgE('loadStats FAILED', err?.response?.status, err?.response?.data ?? err.message);
+            popApiError(err.response?.data?.error || err.message || 'Failed to load stats');
+        }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     useEffect(() => {
@@ -412,10 +470,19 @@ const AssemblyProcessingPortal = () => {
     }, [loadStats]);
 
     const fetchWork = useCallback(async (date) => {
+        dbg(`fetchWork → date="${date}"`);
         setLoadingWork(true);
-        try { const res = await assemblyApi.getTodayWork(date); setWorkData(res.data); }
-        catch (err) { setWorkData(null); popApiError(err.response?.data?.error || err.message || 'Failed to load work log'); }
-        finally { setLoadingWork(false); }
+        try {
+            const res = await assemblyApi.getTodayWork(date);
+            dbg('fetchWork ←', { rows: res.data?.rows?.length, defect_logs: res.data?.defect_logs?.length, raw: res.data });
+            setWorkData(res.data);
+        } catch (err) {
+            dbgE('fetchWork FAILED', err?.response?.status, err?.response?.data ?? err.message);
+            setWorkData(null);
+            popApiError(err.response?.data?.error || err.message || 'Failed to load work log');
+        } finally {
+            setLoadingWork(false);
+        }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     const handleOpenModal = () => { setShowModal(true); fetchWork(new Date().toISOString().split('T')[0]); };
@@ -438,51 +505,77 @@ const AssemblyProcessingPortal = () => {
 
     // --- NEW: BATCH MODE FETCHING ---
     const handleBatchClick = async (batch) => {
+        console.group('%c[GarmentPortal] handleBatchClick', 'color:#6366f1;font-weight:bold');
+        dbg('→ batch selected:', batch);
         setIsLoading(true);
         setSelectedBatch(batch);
         try {
+            dbg(`  getBatchGarments(${batch.batch_id})`);
             const res = await assemblyApi.getBatchGarments(batch.batch_id);
-
+            dbg(`← ${res.data?.length ?? 0} pieces received`);
+            console.table((res.data ?? []).map(p => ({
+                id: p.id, uid: p.garment_uid, seq: p.piece_sequence,
+                roll: p.fabric_roll_id, status: p.status, defects: p.active_garment_defect_count,
+            })));
             setBatchPieces(res.data);
         } catch (e) {
+            dbgE('handleBatchClick FAILED', e?.response?.status, e?.response?.data ?? e.message, e);
             alert("Failed to load pieces for this batch.");
             setSelectedBatch(null);
         } finally {
             setIsLoading(false);
+            console.groupEnd();
         }
     };
 
     const handlePieceClick = async (piece) => {
+        console.group('%c[GarmentPortal] handlePieceClick', 'color:#6366f1;font-weight:bold');
+        dbg('→ piece:', { id: piece.id, uid: piece.garment_uid, seq: piece.piece_sequence, status: piece.status });
         setIsPieceLoading(true);
         setError(null);
         setGarment(null);
         setSelectedPiece(piece);
         try {
+            dbg(`  getGarmentDetails("${piece.garment_uid}")`);
             const res = await assemblyApi.getGarmentDetails(piece.garment_uid);
+            dbg('← garment detail:', res.data);
+            dbg('  components:', res.data?.components?.map(c => `${c.part_name}:${c.has_active_defect ? 'DEFECT' : 'OK'}`));
             setGarment(res.data);
             playFeedback('success');
         } catch (err) {
-            playFeedback('error');
-            const status = err.response?.status;
+            const status  = err.response?.status;
             const errData = err.response?.data;
-            if (status === 400 && errData?.error === "DNA Defect") {
+            dbgE(`handlePieceClick FAILED HTTP ${status}`, errData, err);
+            playFeedback('error');
+            if (status === 400 && errData?.error === 'DNA Defect') {
+                dbgW('  → DNA Defect path', errData);
                 setDnaDefect(errData);
             } else {
-                setError(errData?.message || errData?.error || "Failed to load piece.");
+                dbgW('  → generic error path', errData?.message || errData?.error);
+                setError(errData?.message || errData?.error || 'Failed to load piece.');
             }
             setSelectedPiece(null);
         } finally {
             setIsPieceLoading(false);
+            console.groupEnd();
         }
     };
 
     // --- CORE SCAN PROCESSING ---
     const processScan = async (uid) => {
-        if (isLoading || isProcessingAction) return;
+        if (isLoading || isProcessingAction) {
+            dbgW(`processScan blocked — isLoading=${isLoading} isProcessingAction=${isProcessingAction}, uid="${uid}"`);
+            return;
+        }
 
         const cleanUid = uid.trim();
+        console.group('%c[GarmentPortal] processScan', 'color:#6366f1;font-weight:bold');
+        dbg(`→ uid="${cleanUid}" viewMode="${viewMode}"`);
 
-        if (viewMode !== 'SCANNER') setViewMode('SCANNER');
+        if (viewMode !== 'SCANNER') {
+            dbg('  switching viewMode → SCANNER');
+            setViewMode('SCANNER');
+        }
 
         setIsLoading(true);
         setError(null);
@@ -492,23 +585,31 @@ const AssemblyProcessingPortal = () => {
         setScannedTextVisual(cleanUid);
 
         try {
+            dbg(`  getGarmentDetails("${cleanUid}")`);
             const res = await assemblyApi.getGarmentDetails(cleanUid);
+            dbg('← success:', res.data);
+            dbg('  components:', res.data?.components?.map(c => `${c.part_name}:${c.has_active_defect ? 'DEFECT' : 'OK'}`));
             setGarment(res.data);
             playFeedback('success');
             setScannedTextVisual('');
         } catch (err) {
-            const status = err.response?.status;
+            const status  = err.response?.status;
             const errData = err.response?.data;
+            dbgE(`processScan FAILED HTTP ${status}`, errData);
             playFeedback('error');
-            if (status === 403 && errData?.error === "Batch Mismatch") {
+            if (status === 403 && errData?.error === 'Batch Mismatch') {
+                dbgW('  → Batch Mismatch path', errData);
                 setMismatch(errData);
-            } else if (status === 400 && errData?.error === "DNA Defect") {
+            } else if (status === 400 && errData?.error === 'DNA Defect') {
+                dbgW('  → DNA Defect path', errData);
                 setDnaDefect(errData);
             } else {
-                setError(errData?.message || errData?.error || "Invalid Scan: Check Barcode Integrity.");
+                dbgW('  → generic error path', errData?.message || errData?.error);
+                setError(errData?.message || errData?.error || 'Invalid Scan: Check Barcode Integrity.');
             }
         } finally {
             setIsLoading(false);
+            console.groupEnd();
         }
     };
 
@@ -524,48 +625,81 @@ const AssemblyProcessingPortal = () => {
     // --- HARDWARE SCANNER LOGIC ---
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if (isProcessingAction || showManualBox) return;
+            if (isProcessingAction || showManualBox) {
+                if (e.key === 'Enter') dbgW(`keydown Enter suppressed — isProcessingAction=${isProcessingAction} showManualBox=${showManualBox}`);
+                return;
+            }
 
             const now = Date.now();
             const gap = now - lastKeyStrokeAt.current;
 
             // QR codes via Retsol D 5015 need 120ms gap threshold (wider than Code 128)
             if (gap > 120 && scanBuffer.current.length > 0) {
+                dbgW(`scanner gap ${gap}ms > 120ms — flushing stale buffer "${scanBuffer.current}"`);
                 scanBuffer.current = '';
             }
 
             if (e.key === 'Enter') {
-                if (scanBuffer.current.length > 3) {
-                    processScan(scanBuffer.current);
+                const buffered = scanBuffer.current;
+                dbg(`scanner Enter — buffer="${buffered}" len=${buffered.length} gap=${gap}ms`);
+                if (buffered.length > 3) {
+                    dbg(`  → dispatching processScan("${buffered}")`);
+                    processScan(buffered);
+                } else {
+                    dbgW(`  → buffer too short (${buffered.length} chars), ignoring`);
                 }
                 scanBuffer.current = '';
             } else if (e.key.length === 1) {
                 scanBuffer.current += e.key;
+                // Log every 5 chars so we can see the buffer building without flooding
+                if (scanBuffer.current.length % 5 === 0) {
+                    dbg(`scanner buffer (${scanBuffer.current.length} chars): "${scanBuffer.current}"`);
+                }
             }
 
             lastKeyStrokeAt.current = now;
         };
 
+        dbg('keydown listener (re)attached — deps changed');
         window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
+        return () => {
+            dbg('keydown listener removed');
+            window.removeEventListener('keydown', handleKeyDown);
+        };
     }, [garment, mismatch, isLoading, isProcessingAction, showManualBox, viewMode]);
 
     // --- FINAL ACTIONS ---
     const handleAction = async (status, defectCodeId = null) => {
-        if (isProcessingAction) return;
+        if (isProcessingAction) {
+            dbgW('handleAction called while already processing — ignored');
+            return;
+        }
+        console.group('%c[GarmentPortal] handleAction', 'color:#6366f1;font-weight:bold');
+        const detectedAtLineId =
+            garment.current_production_line_id ??
+            selectedBatch?.line_id ??
+            null;
+
+        dbg('→ payload:', {
+            garmentId: garment.garment_id,
+            garment_uid: garment.garment_uid,
+            status,
+            defectCodeId,
+            detected_at_line_id: detectedAtLineId,
+            viewMode,
+            selectedBatch: selectedBatch?.batch_id ?? null,
+        });
+
         setIsProcessingAction(true);
         try {
-            const detectedAtLineId =
-                garment.current_production_line_id ??
-                selectedBatch?.line_id ??
-                null;
-
             await assemblyApi.processGarmentStatus({
                 garmentId: garment.garment_id,
                 status,
                 defectCodeId,
                 detected_at_line_id: detectedAtLineId
             });
+            dbg('← processGarmentStatus OK', { uid: garment.garment_uid, status });
+
             setLastAction({ uid: garment.garment_uid, status });
             setGarment(null);
             setShowDefectModal(null);
@@ -574,18 +708,22 @@ const AssemblyProcessingPortal = () => {
 
             // If in batch mode, refresh the batch pieces so status updates live
             if (viewMode === 'BATCH' && selectedBatch) {
+                dbg(`  refreshing batch pieces for ${selectedBatch.batch_id}`);
                 const res = await assemblyApi.getBatchGarments(selectedBatch.batch_id);
-                console.log("Updated ba tch pieces after action:", res.data);
+                dbg(`  ← ${res.data?.length ?? 0} pieces after refresh`);
                 setBatchPieces(res.data);
             }
+            dbg('  calling loadRequiredData to refresh monitor data');
             loadRequiredData();
 
             setTimeout(() => setLastAction(null), 4000);
         } catch (err) {
+            dbgE('handleAction FAILED', err?.response?.status, err?.response?.data ?? err.message, err);
             playFeedback('error');
-            alert(err.response?.data?.error || "Transaction failed.");
+            alert(err.response?.data?.error || 'Transaction failed.');
         } finally {
             setIsProcessingAction(false);
+            console.groupEnd();
         }
     };
 
@@ -1300,6 +1438,47 @@ const AssemblyProcessingPortal = () => {
                     </div>
                 </div>
             )}
+
+            {/* ── ON-SCREEN DEBUG LOG PANEL ── */}
+            <div className="fixed top-4 right-4 z-[9999] flex flex-col items-end gap-1 pointer-events-none">
+                {/* toggle button */}
+                <button
+                    onClick={() => setShowDebugPanel(p => !p)}
+                    className="pointer-events-auto flex items-center gap-1.5 px-2.5 py-1 bg-slate-900/80 hover:bg-slate-900 text-indigo-300 text-[10px] font-mono font-bold rounded-lg border border-indigo-900/60 shadow-lg transition-colors select-none"
+                >
+                    🐛 {showDebugPanel ? 'hide' : 'show'} log
+                    <span className="ml-1 bg-indigo-600/60 text-indigo-200 rounded px-1">{debugLogs.length}</span>
+                </button>
+
+                {showDebugPanel && (
+                    <div className="pointer-events-auto w-[420px] max-h-72 bg-slate-950/95 border border-indigo-900/50 rounded-xl shadow-2xl overflow-hidden flex flex-col">
+                        {/* header */}
+                        <div className="flex items-center justify-between px-3 py-1.5 border-b border-indigo-900/40 shrink-0">
+                            <span className="text-[10px] font-mono font-bold text-indigo-400 tracking-widest uppercase">Debug Log</span>
+                            <button
+                                onClick={() => setDebugLogs([])}
+                                className="text-[9px] font-mono text-slate-600 hover:text-rose-400 transition-colors"
+                            >
+                                clear
+                            </button>
+                        </div>
+                        {/* entries */}
+                        <div ref={debugScrollRef} className="overflow-y-auto flex-1 p-2 space-y-0.5">
+                            {debugLogs.length === 0 ? (
+                                <p className="text-[10px] font-mono text-slate-700 text-center py-4">no events yet</p>
+                            ) : debugLogs.map(e => (
+                                <div key={e.id} className={`flex gap-1.5 leading-snug font-mono text-[10px] ${
+                                    e.type === 'error' ? 'text-red-400' :
+                                    e.type === 'warn'  ? 'text-amber-400' : 'text-emerald-400'
+                                }`}>
+                                    <span className="text-slate-600 shrink-0">{e.ts}</span>
+                                    <span className="break-all">{e.msg}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
         </div>
     );
 };

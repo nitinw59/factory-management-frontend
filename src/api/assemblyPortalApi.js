@@ -4,6 +4,6 @@ export const assemblyPortalApi = {
     logAssemblyStatus: (statusData) => {
         return api.post('/assembly-portal/assembly-operator/log-status', statusData);
     },
-    approveRepairedAssembly: (statusData) => api.post('/assembly-portal/assembly-operator/approve-repaired-pieces',statusData)
-
+    approveRepairedAssembly: (statusData) => api.post('/assembly-portal/assembly-operator/approve-repaired-pieces',statusData),
+    getBatchCompletion: (batchId) => api.get(`/assembly-portal/completion/batch/${batchId}`),
 };  
