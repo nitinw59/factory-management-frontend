@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { lineLoaderApi } from '../../api/lineLoaderApi';
-import { assemblyPortalApi } from '../../api/assemblyPortalApi';
 import { Link } from 'react-router-dom';
 import Modal from '../../shared/Modal';
 import {
     Loader, CheckCircle2, X,
     Package, FileText, ExternalLink,
-    ArrowLeft, Layers,
+    ArrowLeft, Truck,
     AlertTriangle, ArrowRight, Zap,
-    History, ChevronDown, ChevronUp
+    History, ChevronDown, ChevronUp, RefreshCw
 } from 'lucide-react';
 
 // ============================================================================
@@ -39,21 +38,15 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
     useEffect(() => {
         const init = async () => {
             try {
-                const [linesRes, typesRes] = await Promise.all([
-                    lineLoaderApi.getLinesByType(cycleFlow.line_type_id),
-                    lineLoaderApi.getLineTypes(),
-                ]);
+                const linesRes = await lineLoaderApi.getLinesByType(cycleFlow.line_type_id);
                 setLines(linesRes.data || []);
 
-                const typeMap = {};
-                (typesRes.data || []).forEach(t => { typeMap[t.id] = t; });
-
-                const isAssembly = typeMap[cycleFlow.line_type_id]?.processing_scope === 'ASSEMBLY';
+                const isAssembly = cycleFlow.processing_scope === 'ASSEMBLY';
                 setIsAssemblyScope(isAssembly);
 
                 if (isAssembly) {
                     const siblings = allStages.filter(
-                        s => s.id !== cycleFlow.id && typeMap[s.line_type_id]?.processing_scope === 'ASSEMBLY'
+                        s => s.id !== cycleFlow.id && s.processing_scope === 'ASSEMBLY'
                     );
                     setSiblingStages(siblings);
 
@@ -76,9 +69,11 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
             }
         };
         init();
-    }, [cycleFlow.line_type_id, cycleFlow.id, allStages]);
+    }, [cycleFlow.line_type_id, cycleFlow.id, cycleFlow.processing_scope, allStages]);
 
-    const selectedLineName = lines.find(l => String(l.id) === String(selectedLine))?.name || '';
+    const selectedLineObj = lines.find(l => String(l.id) === String(selectedLine));
+    const selectedLineName = selectedLineObj?.name || '';
+    const isSelectedLineJobWork = selectedLineObj?.is_job_work === true;
     const lineWip = selectedLine ? wipMap[String(selectedLine)] : null;
     const isAlreadyOnThisLine = String(selectedLine) === String(currentLineId);
     const isWipBlocked = lineWip?.isAtCapacity && !isAlreadyOnThisLine;
@@ -133,7 +128,8 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
                     <option value="">-- Select line --</option>
                     {lines.map(line => {
                         const wip = wipMap[String(line.id)];
-                        return <option key={line.id} value={line.id}>{wip ? `${line.name}  (WIP: ${wip.currentWip}/${wip.wipLimit})` : line.name}</option>;
+                        const label = line.is_job_work ? `${line.name}  [External]` : line.name;
+                        return <option key={line.id} value={line.id}>{wip ? `${label}  (WIP: ${wip.currentWip}/${wip.wipLimit})` : label}</option>;
                     })}
                 </select>
                 {selectedLine && lineWip && (
@@ -142,6 +138,17 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
                         Line Load: {lineWip.currentWip} / {lineWip.wipLimit} batches
                         {isWipBlocked && <span className="ml-2 bg-rose-200 text-rose-800 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-widest">At Limit</span>}
                         {lineWip.isAtCapacity && isAlreadyOnThisLine && <span className="ml-2 bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-widest">Existing — Bypassed</span>}
+                    </div>
+                )}
+                {isSelectedLineJobWork && (
+                    <div className="mt-3 flex items-start gap-2.5 bg-amber-50 border border-amber-300 rounded-xl px-3.5 py-3">
+                        <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-xs font-black text-amber-800 uppercase tracking-widest">External — Job Work Line</p>
+                            <p className="text-[11px] text-amber-700 mt-0.5 font-medium">
+                                Garments on this line go to an external vendor. The Production Manager must raise a challan after assignment.
+                            </p>
+                        </div>
                     </div>
                 )}
             </div>
@@ -239,10 +246,17 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
     // ── Step 3: Confirm ─────────────────────────────────────────────────────
     return (
         <div className="p-2">
-            <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-5 text-center mb-5">
-                <h4 className="text-blue-900 font-black text-lg mb-1">Confirm Dispatch</h4>
-                <p className="text-blue-700 font-medium text-sm">These rolls will be activated on the selected line.</p>
-            </div>
+            {isSelectedLineJobWork ? (
+                <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 text-center mb-5">
+                    <h4 className="text-amber-900 font-black text-lg mb-1">Confirm Dispatch — External Line</h4>
+                    <p className="text-amber-700 font-medium text-sm">Rolls will be assigned to an external job-work line. The Production Manager must raise a challan before garments leave the factory.</p>
+                </div>
+            ) : (
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-5 text-center mb-5">
+                    <h4 className="text-blue-900 font-black text-lg mb-1">Confirm Dispatch</h4>
+                    <p className="text-blue-700 font-medium text-sm">These rolls will be activated on the selected line.</p>
+                </div>
+            )}
             <div className="grid grid-cols-2 gap-3 mb-5">
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Target Line</span>
@@ -299,6 +313,222 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
 };
 
 // ============================================================================
+// BATCH INFO BANNER  (shared by StageDetailModal + ChangeLineModal)
+// ============================================================================
+const BatchInfoBanner = ({ batch, activeStage }) => {
+    const completedStages = (batch.progress || []).filter(p => p.status === 'COMPLETED').length;
+    const totalStages     = batch.total_steps || batch.cycle_flow?.length || 1;
+    const lastProgress    = [...(batch.progress || [])].sort((a, b) => b.sequence_no - a.sequence_no)[0];
+    const completedRolls  = lastProgress?.roll_summary?.completed ?? lastProgress?.completed_roll_ids?.length ?? 0;
+    const totalRolls      = batch.total_rolls ?? 0;
+    const gs              = batch.garment_summary;
+
+    return (
+        <div className="bg-slate-900 rounded-xl px-4 py-3.5 mb-4">
+            {/* Batch identity */}
+            <div className="flex items-start justify-between gap-2 mb-3">
+                <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-white font-black text-sm tracking-tight">
+                            BATCH #{batch.batch_id}
+                        </span>
+                        <span className="font-mono text-xs font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                            {batch.batch_code}
+                        </span>
+                    </div>
+                    <p className="text-slate-400 text-xs font-medium mt-0.5">{batch.product_name}</p>
+                </div>
+                {batch.trim_orders?.length > 0 && (
+                    <div className="flex gap-1 flex-wrap justify-end">
+                        {batch.trim_orders.map(to => (
+                            <span key={to.id} className="text-[10px] font-bold bg-purple-900 text-purple-300 px-2 py-0.5 rounded border border-purple-700">
+                                TO #{to.id}
+                            </span>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Stats row */}
+            <div className="grid grid-cols-3 gap-2">
+                <div className="bg-slate-800 rounded-lg px-2.5 py-2 text-center">
+                    <div className="text-white font-black text-base leading-none">
+                        {completedStages}/{totalStages}
+                    </div>
+                    <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-0.5">Stages</div>
+                </div>
+                <div className="bg-slate-800 rounded-lg px-2.5 py-2 text-center">
+                    <div className="text-white font-black text-base leading-none">
+                        {completedRolls}/{totalRolls}
+                    </div>
+                    <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-0.5">Rolls</div>
+                </div>
+                <div className="bg-slate-800 rounded-lg px-2.5 py-2 text-center">
+                    {gs ? (
+                        <>
+                            <div className="text-emerald-400 font-black text-base leading-none">
+                                {gs.approved ?? 0}
+                                {gs.qc_rejected > 0 && (
+                                    <span className="text-rose-400 text-xs ml-1">/ {gs.qc_rejected}✗</span>
+                                )}
+                            </div>
+                            <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-0.5">Garments</div>
+                        </>
+                    ) : (
+                        <>
+                            <div className="text-slate-500 font-black text-base leading-none">—</div>
+                            <div className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-0.5">Garments</div>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            {/* Active stage pill */}
+            {activeStage && (
+                <div className="mt-3 flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Stage</span>
+                    <span className="text-xs font-black text-white">{activeStage.line_type_name}</span>
+                    <span className="ml-auto text-[10px] font-bold text-blue-400 uppercase tracking-widest">
+                        #{activeStage.sequence_no ?? ''}
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+};
+
+// ============================================================================
+// CHANGE LINE MODAL
+// ============================================================================
+const ChangeLineModal = ({ batch, batchId, cycleFlow, currentLineId, currentLineName, wipMap, onClose, onSave }) => {
+    const [lines, setLines]           = useState([]);
+    const [isLoading, setIsLoading]   = useState(true);
+    const [selectedLine, setSelectedLine] = useState('');
+    const [isSaving, setIsSaving]     = useState(false);
+    const [error, setError]           = useState('');
+
+    useEffect(() => {
+        lineLoaderApi.getLinesByType(cycleFlow.line_type_id)
+            .then(res => setLines(res.data || []))
+            .catch(() => setError('Failed to load lines.'))
+            .finally(() => setIsLoading(false));
+    }, [cycleFlow.line_type_id]);
+
+    const selectedLineObj  = lines.find(l => String(l.id) === String(selectedLine));
+    const lineWip          = selectedLine ? wipMap[String(selectedLine)] : null;
+    const isSameLine       = String(selectedLine) === String(currentLineId);
+    const isWipBlocked     = lineWip?.isAtCapacity && !isSameLine;
+    const isJobWork        = selectedLineObj?.is_job_work === true;
+
+    const handleConfirm = async () => {
+        if (!selectedLine || isSameLine || isWipBlocked) return;
+        setIsSaving(true);
+        setError('');
+        try {
+            await onSave(Number(selectedLine));
+        } catch (err) {
+            setError(err.response?.data?.error || 'Failed to change line.');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    return (
+        <div className="p-2">
+            {batch && <BatchInfoBanner batch={batch} activeStage={cycleFlow} />}
+            <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-black text-slate-800">Change Production Line</h3>
+                {currentLineName && (
+                    <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg">
+                        Current: {currentLineName}
+                    </span>
+                )}
+            </div>
+
+            {isLoading ? <Spinner /> : (
+                <>
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-4">
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                            Select New Line
+                        </label>
+                        <select
+                            value={selectedLine}
+                            onChange={e => setSelectedLine(e.target.value)}
+                            className={`w-full p-3 border-2 rounded-xl bg-white focus:ring-4 outline-none font-bold text-slate-700 transition-all cursor-pointer shadow-sm appearance-none
+                                ${isWipBlocked ? 'border-rose-400 focus:ring-rose-50' : 'border-slate-300 focus:border-blue-500 focus:ring-blue-50'}`}
+                        >
+                            <option value="">-- Select line --</option>
+                            {lines.map(line => {
+                                const wip   = wipMap[String(line.id)];
+                                const label = line.is_job_work ? `${line.name}  [External]` : line.name;
+                                const isCurrent = String(line.id) === String(currentLineId);
+                                return (
+                                    <option key={line.id} value={line.id}>
+                                        {isCurrent ? `${label}  (current)` : wip ? `${label}  (WIP: ${wip.currentWip}/${wip.wipLimit})` : label}
+                                    </option>
+                                );
+                            })}
+                        </select>
+
+                        {selectedLine && lineWip && (
+                            <div className={`mt-2 flex items-center text-xs font-bold px-2.5 py-1.5 rounded-md border w-fit
+                                ${isWipBlocked ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                                {isWipBlocked ? <AlertTriangle size={12} className="mr-1.5" /> : <CheckCircle2 size={12} className="mr-1.5" />}
+                                Line Load: {lineWip.currentWip} / {lineWip.wipLimit} batches
+                                {isWipBlocked && <span className="ml-2 bg-rose-200 text-rose-800 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-widest">At Limit</span>}
+                            </div>
+                        )}
+
+                        {isJobWork && (
+                            <div className="mt-3 flex items-start gap-2.5 bg-amber-50 border border-amber-300 rounded-xl px-3.5 py-3">
+                                <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                                <div>
+                                    <p className="text-xs font-black text-amber-800 uppercase tracking-widest">External — Job Work Line</p>
+                                    <p className="text-[11px] text-amber-700 mt-0.5 font-medium">
+                                        The Production Manager must raise a new challan after this change.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {isSameLine && selectedLine && (
+                            <p className="mt-2 text-xs font-bold text-slate-400">This is the current line — select a different one.</p>
+                        )}
+                    </div>
+
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-2">
+                        <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                        <p className="text-xs text-amber-800 font-medium">
+                            All in-progress rolls will move to the new line. WIP counts will be updated automatically.
+                        </p>
+                    </div>
+
+                    {error && (
+                        <div className="mb-4 flex items-center gap-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                            <AlertTriangle size={13} /> {error}
+                        </div>
+                    )}
+
+                    <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+                        <button onClick={onClose} className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-bold text-sm active:scale-95">
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleConfirm}
+                            disabled={!selectedLine || isSameLine || isWipBlocked || isSaving}
+                            className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed shadow-md font-bold text-sm flex items-center gap-2 active:scale-95"
+                        >
+                            {isSaving ? <Loader size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                            Confirm Change
+                        </button>
+                    </div>
+                </>
+            )}
+        </div>
+    );
+};
+
+// ============================================================================
 // STAGE DETAIL MODAL
 // ============================================================================
 const RollRow = ({ roll, badge, badgeClass }) => (
@@ -315,7 +545,7 @@ const RollRow = ({ roll, badge, badgeClass }) => (
     </div>
 );
 
-const StageDetailModal = ({ stage, progress, onClose, onAssign, readyRolls }) => {
+const StageDetailModal = ({ batch, stage, progress, onClose, onAssign, onChangeLine, readyRolls }) => {
     const wipRolls = progress?.wip_roll_ids ?? [];
     const completedRolls = progress?.completed_roll_ids ?? [];
     const dispatchedRolls = progress?.dispatched_roll_ids ?? [];
@@ -329,6 +559,9 @@ const StageDetailModal = ({ stage, progress, onClose, onAssign, readyRolls }) =>
 
     return (
         <div className="p-2">
+            {/* Batch info banner */}
+            {batch && <BatchInfoBanner batch={batch} activeStage={stage} />}
+
             {/* Header */}
             <div className="flex items-center justify-between mb-5">
                 <div>
@@ -372,13 +605,21 @@ const StageDetailModal = ({ stage, progress, onClose, onAssign, readyRolls }) =>
                 </div>
             )}
 
-            {/* Assign button if rolls are ready */}
-            {readyRolls.length > 0 && onAssign && (
-                <div className="pt-4 border-t border-slate-200">
-                    <button onClick={onAssign}
-                        className="w-full py-3 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-700 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest">
-                        <Zap size={16} /> Assign {readyRolls.length} Roll{readyRolls.length !== 1 ? 's' : ''} to Line
-                    </button>
+            {/* Action buttons */}
+            {(onAssign || onChangeLine) && (
+                <div className="pt-4 border-t border-slate-200 flex flex-col gap-2">
+                    {readyRolls.length > 0 && onAssign && (
+                        <button onClick={onAssign}
+                            className="w-full py-3 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-700 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest">
+                            <Zap size={16} /> Assign {readyRolls.length} Roll{readyRolls.length !== 1 ? 's' : ''} to Line
+                        </button>
+                    )}
+                    {onChangeLine && progress && (
+                        <button onClick={onChangeLine}
+                            className="w-full py-2.5 bg-white border-2 border-slate-300 text-slate-700 font-black rounded-xl hover:bg-slate-50 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest">
+                            <RefreshCw size={14} /> Change Line
+                        </button>
+                    )}
                 </div>
             )}
         </div>
@@ -389,16 +630,14 @@ const StageDetailModal = ({ stage, progress, onClose, onAssign, readyRolls }) =>
 // STAGE NODE
 // ============================================================================
 const StageNode = ({ stage, progress, totalRolls, readyRolls, processingMode, wipMap, isFirst, onActivate, onCheckComplete, isCheckingComplete }) => {
-    // completed_roll_ids: finished at this stage, ready to move forward
-    // dispatched_roll_ids: finished here AND already assigned to next stage
-    const completedIds = progress?.completed_roll_ids ?? [];
-    const dispatchedIds = progress?.dispatched_roll_ids ?? [];
-    const rollsCompleted = completedIds.length;
-    const rollsDispatched = dispatchedIds.length;
+    const summary = progress?.roll_summary;
+    const completedIds   = progress?.completed_roll_ids  ?? [];
+    const dispatchedIds  = progress?.dispatched_roll_ids ?? [];
+    const rollsCompleted = summary?.completed         ?? completedIds.length;
+    const rollsDispatched = summary?.dispatched_forward ?? dispatchedIds.length;
     const isComplete = progress?.status === 'COMPLETED';
     const isActive = !isComplete && !!progress;
     const canActivate = isFirst || processingMode === 'SERIALIZED' || readyRolls > 0;
-    console.log('[StageNode]', stage.line_type_name, { isFirst, processingMode, readyRolls, canActivate, isActive, isComplete });
 
     let state;
     if (isComplete) state = 'COMPLETE';
@@ -440,6 +679,11 @@ const StageNode = ({ stage, progress, totalRolls, readyRolls, processingMode, wi
                             Serial
                         </span>
                     )}
+                    {progress?.is_job_work && (
+                        <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 shrink-0">
+                            External
+                        </span>
+                    )}
                 </div>
                 <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${cfg.labelBg} shrink-0`}>{cfg.label}</span>
             </div>
@@ -479,6 +723,27 @@ const StageNode = ({ stage, progress, totalRolls, readyRolls, processingMode, wi
                         <span className="text-[10px] text-blue-500 font-bold mt-0.5 block">{rollsDispatched} forwarded</span>
                     )}
                 </div>
+
+                {/* Garment WIP — ASSEMBLY-scoped stages only */}
+                {progress?.garment_wip && (
+                    <div className="mt-1">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Garments</span>
+                        <div className="flex flex-wrap gap-1">
+                            {progress.garment_wip.approved > 0 && (
+                                <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">{progress.garment_wip.approved} ✓</span>
+                            )}
+                            {progress.garment_wip.in_progress > 0 && (
+                                <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{progress.garment_wip.in_progress} in prog</span>
+                            )}
+                            {progress.garment_wip.pending > 0 && (
+                                <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{progress.garment_wip.pending} pending</span>
+                            )}
+                            {progress.garment_wip.qc_rejected > 0 && (
+                                <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">{progress.garment_wip.qc_rejected} ✗</span>
+                            )}
+                        </div>
+                    </div>
+                )}
 
                 {/* CTA hint */}
                 {state === 'ACTIVATABLE' && (
@@ -529,11 +794,9 @@ const StageConnector = ({ readyRolls }) => (
 // ============================================================================
 const CompletionNode = ({ type, summary, loading }) => {
     const isApproved = type === 'approved';
-    const count    = isApproved ? (summary?.total_approved ?? null) : (summary?.total_rejected ?? null);
-    const repaired = isApproved ? (summary?.total_repaired ?? 0) : 0;
+    const count    = isApproved ? (summary?.approved ?? null) : (summary?.qc_rejected ?? null);
+    const repaired = isApproved ? (summary?.repaired ?? 0) : 0;
     const total    = summary?.total_garments ?? null;
-
-    console.log(`[CompletionNode:${type}]`, { loading, summary, count, total, repaired });
 
     const cfg = isApproved
         ? { header: 'bg-emerald-600', ring: 'ring-emerald-400', bg: 'bg-emerald-50', label: 'APPROVED', Icon: CheckCircle2, countColor: 'text-emerald-700' }
@@ -570,24 +833,8 @@ const CompletionNode = ({ type, summary, loading }) => {
 const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
     const [modalData, setModalData] = useState(null);
     const [detailData, setDetailData] = useState(null); // { stage, progress, readyRolls }
+    const [changeLineData, setChangeLineData] = useState(null); // { stage, progress }
     const [checkingStageId, setCheckingStageId] = useState(null);
-    const [completion, setCompletion] = useState(null);
-    const [loadingCompletion, setLoadingCompletion] = useState(false);
-
-    useEffect(() => {
-        console.log(`[CompletionNodes] fetching batch_id=${batch.batch_id}`);
-        setLoadingCompletion(true);
-        assemblyPortalApi.getBatchCompletion(batch.batch_id)
-            .then(res => {
-                console.log(`[CompletionNodes] batch_id=${batch.batch_id} response:`, res.data);
-                setCompletion(res.data);
-            })
-            .catch(err => {
-                console.error(`[CompletionNodes] batch_id=${batch.batch_id} FAILED`, err?.response?.status, err?.response?.data ?? err.message);
-                setCompletion(null);
-            })
-            .finally(() => setLoadingCompletion(false));
-    }, [batch.batch_id]);
 
     const cycleFlow = batch.cycle_flow || [];
     const progressMap = useMemo(() => {
@@ -613,7 +860,7 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
         const cf = cycleFlow[stageIndex];
         const progress = progressMap[cf.id] ?? null;
         const readyRolls = getReadyRolls(stageIndex);
-        setDetailData({ stage: cf, progress, readyRolls, stageIndex });
+        setDetailData({ stage: cf, progress, readyRolls, stageIndex, batch });
     };
 
     const handleActivate = (stageIndex) => {
@@ -627,6 +874,19 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
     const handleSave = async (data) => {
         await onAssign(data);
         setModalData(null);
+    };
+
+    const handleOpenChangeLine = (stageIndex) => {
+        const cf = cycleFlow[stageIndex];
+        const progress = progressMap[cf.id];
+        setDetailData(null);
+        setChangeLineData({ stage: cf, progress, batch });
+    };
+
+    const handleChangeLineSave = async (newLineId) => {
+        await lineLoaderApi.changeLine(batch.batch_id, changeLineData.stage.id, newLineId);
+        setChangeLineData(null);
+        await onRefresh();
     };
 
     const handleCheckComplete = async (stageId, productionLineId) => {
@@ -643,21 +903,47 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
 
     const completedStages = (batch.progress || []).filter(p => p.status === 'COMPLETED').length;
     const totalStages = batch.total_steps || cycleFlow.length || 1;
-    // Use last active stage's completed roll count as the overall roll progress signal
     const lastProgress = [...(batch.progress || [])].sort((a, b) => b.sequence_no - a.sequence_no)[0];
-    const overallCompletedRolls = lastProgress?.completed_roll_ids?.length ?? 0;
-    const overallPct = batch.total_rolls > 0 ? Math.round((overallCompletedRolls / batch.total_rolls) * 100) : 0;
+    const overallCompletedRolls = lastProgress?.roll_summary?.completed ?? lastProgress?.completed_roll_ids?.length ?? 0;
+    const overallPct = batch.garment_summary?.completion_pct != null
+        ? Math.round(batch.garment_summary.completion_pct)
+        : batch.total_rolls > 0 ? Math.round((overallCompletedRolls / batch.total_rolls) * 100) : 0;
 
     return (
         <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
             {/* Batch header */}
             <div className="bg-slate-900 px-6 py-4 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
                 <div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
                         <h2 className="text-xl font-black text-white tracking-tight">BATCH #{batch.batch_id}</h2>
                         <span className="text-sm font-mono font-bold text-slate-400 bg-slate-800 px-2.5 py-1 rounded-lg">{batch.batch_code}</span>
+                        {batch.overall_status && (
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                                batch.overall_status === 'COMPLETED'  ? 'bg-emerald-900 text-emerald-400' :
+                                batch.overall_status === 'IN_PROGRESS'? 'bg-blue-900 text-blue-400' :
+                                                                        'bg-slate-700 text-slate-400'
+                            }`}>{batch.overall_status}</span>
+                        )}
                     </div>
-                    <p className="text-slate-400 font-medium text-sm mt-0.5">{batch.product_name}</p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <p className="text-slate-400 font-medium text-sm">{batch.product_name}</p>
+                        {batch.current_step_group && (
+                            <span className="text-[10px] font-black text-amber-400 bg-amber-900/40 px-2 py-0.5 rounded">
+                                ▶ {batch.current_step_group}
+                            </span>
+                        )}
+                    </div>
+                    {batch.job_work_challans?.length > 0 && (
+                        <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                            {batch.job_work_challans.map(c => (
+                                <span key={c.id} className={`text-[10px] font-black px-2 py-0.5 rounded border ${
+                                    c.status === 'RECEIVED' ? 'bg-emerald-900 text-emerald-400 border-emerald-700' :
+                                    c.status === 'SENT'     ? 'bg-blue-900 text-blue-400 border-blue-700' :
+                                                              'bg-slate-700 text-slate-400 border-slate-600'
+                                }`}>{c.challan_number ?? `JWC-${c.id}`} · {c.status}</span>
+                            ))}
+                        </div>
+                    )}
                 </div>
                 <div className="flex items-center gap-4">
                     <div className="text-right">
@@ -715,8 +1001,8 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                             <>
                                 <StageConnector readyRolls={0} />
                                 <div className="flex flex-col gap-2">
-                                    <CompletionNode type="approved" summary={completion?.summary} loading={loadingCompletion} />
-                                    <CompletionNode type="rejected" summary={completion?.summary} loading={loadingCompletion} />
+                                    <CompletionNode type="approved" summary={batch.garment_summary} loading={false} />
+                                    <CompletionNode type="rejected" summary={batch.garment_summary} loading={false} />
                                 </div>
                             </>
                         )}
@@ -724,15 +1010,37 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                 )}
             </div>
 
+            {/* Awaiting job work return banner */}
+            {batch.overall_status === 'COMPLETED' && batch.job_work_challans?.some(c => c.status !== 'RECEIVED') && (
+                <div className="mx-6 mb-5 flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                    <Truck size={16} className="text-amber-600 shrink-0" />
+                    <div>
+                        <p className="text-xs font-black text-amber-800 uppercase tracking-widest">Awaiting Job Work Return</p>
+                        <p className="text-[11px] text-amber-600 mt-0.5">
+                            Production complete. Waiting for external vendor to return garments.
+                        </p>
+                    </div>
+                    <div className="ml-auto flex gap-1.5">
+                        {batch.job_work_challans.filter(c => c.status !== 'RECEIVED').map(c => (
+                            <span key={c.id} className={`text-[10px] font-black px-2 py-0.5 rounded border ${
+                                c.status === 'SENT' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-slate-100 text-slate-600 border-slate-200'
+                            }`}>{c.challan_number ?? `JWC-${c.id}`} · {c.status}</span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {/* Stage detail panel */}
             {detailData && (
                 <Modal title="" onClose={() => setDetailData(null)}>
                     <StageDetailModal
+                        batch={detailData.batch}
                         stage={detailData.stage}
                         progress={detailData.progress}
                         readyRolls={detailData.readyRolls}
                         onClose={() => setDetailData(null)}
                         onAssign={detailData.readyRolls.length > 0 && detailData.stageIndex !== 0 ? () => handleActivate(detailData.stageIndex) : null}
+                        onChangeLine={detailData.progress ? () => handleOpenChangeLine(detailData.stageIndex) : null}
                     />
                 </Modal>
             )}
@@ -749,6 +1057,22 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                         onClose={() => setModalData(null)}
                         onSave={handleSave}
                         allStages={modalData.allStages}
+                    />
+                </Modal>
+            )}
+
+            {/* Change line modal */}
+            {changeLineData && (
+                <Modal title="" onClose={() => setChangeLineData(null)}>
+                    <ChangeLineModal
+                        batch={changeLineData.batch}
+                        batchId={batch.batch_id}
+                        cycleFlow={changeLineData.stage}
+                        currentLineId={changeLineData.progress?.line_id}
+                        currentLineName={changeLineData.progress?.line_name}
+                        wipMap={wipMap}
+                        onClose={() => setChangeLineData(null)}
+                        onSave={handleChangeLineSave}
                     />
                 </Modal>
             )}
@@ -992,7 +1316,6 @@ const LineLoaderDashboardPage = () => {
                 lineLoaderApi.getAllActiveLineWip().catch(() => ({ data: {} })) // non-fatal
             ]);
 
-            console.log("Dashbocard data:", dashRes.data);
             setAllBatches(dashRes.data || []);
             // wipRes.data expected: { [lineId]: { currentWip, wipLimit, isAtCapacity } }
             setWipMap(wipRes.data || {});

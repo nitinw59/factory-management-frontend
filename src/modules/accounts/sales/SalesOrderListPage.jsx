@@ -1,159 +1,137 @@
 import { useState, useEffect } from 'react';
-import { productionManagerApi } from '../../../api/productionManagerApi'; 
+import { Link } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import { storeManagerApi } from '../../../api/storeManagerApi';
-import { accountingApi } from '../../../api/accountingApi'; 
+import { accountingApi } from '../../../api/accountingApi';
 import {
-    FileText, ShoppingCart, Truck, ChevronDown, Package, Edit3, Eye, Layers, Loader2, Search, Box, DollarSign, Palette, Pencil
+    Search, Loader2, X, Paperclip, Package, Plus,
+    Layers, Edit3, FileText, Truck, ExternalLink,
+    Pencil, AlertCircle, ChevronDown
 } from 'lucide-react';
 import Modal from '../../../shared/Modal';
-import FabricIntakeForm from '../purchase/FabricIntakeForm'; 
+import FabricIntakeForm from '../purchase/FabricIntakeForm';
 import EditFabricRollModal from '../purchase/EditFabricRollModal';
 
+// ─── Utilities ───────────────────────────────────────────────────────────────
 
-// --- HELPER COMPONENT: Received Rolls List ---
+const fmt = (d) =>
+    d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+
+const formatFileSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const STATUS_STYLE = {
+    PENDING:     'bg-amber-50 text-amber-700 border-amber-200',
+    ACTIVE:      'bg-blue-50 text-blue-700 border-blue-200',
+    IN_PROGRESS: 'bg-violet-50 text-violet-700 border-violet-200',
+    COMPLETED:   'bg-emerald-50 text-emerald-700 border-emerald-200',
+    CANCELLED:   'bg-red-50 text-red-700 border-red-200',
+};
+
+const StatusBadge = ({ status }) => (
+    <span className={`inline-block px-2.5 py-0.5 text-[11px] font-bold rounded-full border tracking-wide ${STATUS_STYLE[status] || 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+        {status?.replace(/_/g, ' ') || '—'}
+    </span>
+);
+
+// ─── ReceivedRollsList (unchanged, kept working) ─────────────────────────────
+
 const ReceivedRollsList = ({ purchaseOrderId }) => {
-    const [rolls, setRolls] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+    const [rolls, setRolls]           = useState([]);
+    const [loading, setLoading]       = useState(true);
+    const [error, setError]           = useState(null);
     const [meterFilter, setMeterFilter] = useState('');
     const [editingRoll, setEditingRoll] = useState(null);
-    const [editingIntake, setEditingIntake] = useState(null); // { id } for edit mode
+    const [editingIntake, setEditingIntake] = useState(null);
 
     const fetchRolls = async () => {
         setLoading(true);
         try {
             const res = await storeManagerApi.getFabricRollsByPO(purchaseOrderId);
             setRolls(res.data);
-        } catch (err) {
-            console.error(err);
-            setError("Failed to load rolls");
-        } finally {
-            setLoading(false);
-        }
+        } catch { setError('Failed to load rolls'); }
+        finally { setLoading(false); }
     };
 
-    useEffect(() => {
-        if (purchaseOrderId) fetchRolls();
-    }, [purchaseOrderId]);
+    useEffect(() => { if (purchaseOrderId) fetchRolls(); }, [purchaseOrderId]);
 
-    const handleUpdateRoll = async (updatedData) => {
-        try {
-            await storeManagerApi.updateFabricRoll(updatedData.id, {
-                meter: updatedData.meter,
-                uom: updatedData.uom,
-                fabric_color_id: updatedData.fabric_color_id,
-            });
-            setEditingRoll(null);
-            fetchRolls();
-        } catch (err) {
-            throw err;
-        }
+    const handleUpdateRoll = async (data) => {
+        await storeManagerApi.updateFabricRoll(data.id, {
+            meter: data.meter, uom: data.uom, fabric_color_id: data.fabric_color_id,
+        });
+        setEditingRoll(null); fetchRolls();
     };
 
-    const handleDeleteRoll = async (rollId) => {
-        await storeManagerApi.deleteFabricRoll(rollId);
-        setEditingRoll(null);
-        fetchRolls();
+    const handleDeleteRoll = async (id) => {
+        await storeManagerApi.deleteFabricRoll(id);
+        setEditingRoll(null); fetchRolls();
     };
 
-    const handleEditIntakeSave = async () => {
-        setEditingIntake(null);
-        fetchRolls();
-    };
-
-    const filteredRolls = rolls.filter(r => !meterFilter || r.meter.toString().includes(meterFilter));
-
-    // Group filtered rolls by intake_id
-    const intakeGroups = filteredRolls.reduce((acc, roll) => {
-        const key = roll.intake_id ?? 'unknown';
-        if (!acc[key]) {
-            acc[key] = {
-                intake_id: roll.intake_id,
-                intake_date: roll.intake_date || roll.bill_date,
-                reference_number: roll.reference_number,
-                rolls: [],
-            };
-        }
-        acc[key].rolls.push(roll);
+    const filtered = rolls.filter(r => !meterFilter || String(r.meter).includes(meterFilter));
+    const intakeGroups = Object.values(filtered.reduce((acc, roll) => {
+        const k = roll.intake_id ?? 'unknown';
+        if (!acc[k]) acc[k] = { intake_id: roll.intake_id, intake_date: roll.intake_date || roll.bill_date, reference_number: roll.reference_number, rolls: [] };
+        acc[k].rolls.push(roll);
         return acc;
-    }, {});
-    const intakeGroupList = Object.values(intakeGroups);
+    }, {}));
 
-    if (loading) return <div className="text-xs text-gray-500 p-2 flex items-center"><Loader2 className="animate-spin mr-2 h-3 w-3"/> Loading rolls...</div>;
-    if (error) return <div className="text-xs text-red-500 p-2">{error}</div>;
-    if (rolls.length === 0) return <div className="text-xs text-gray-400 p-2 italic">No rolls received yet.</div>;
+    if (loading) return <div className="text-xs text-slate-500 py-3 flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin"/> Loading rolls…</div>;
+    if (error)   return <div className="text-xs text-red-500 py-2">{error}</div>;
+    if (!rolls.length) return <div className="text-xs text-slate-400 italic py-2">No rolls received yet.</div>;
 
     return (
-        <div className="mt-3 bg-gray-50 rounded-md border border-gray-200 p-2 animate-in fade-in zoom-in duration-200">
-            <div className="flex justify-between items-center border-b border-gray-200 pb-2 mb-2">
-                <h6 className="text-xs font-bold text-gray-500 uppercase flex items-center">
-                    <Layers size={12} className="mr-1"/> Received Inventory ({filteredRolls.length}/{rolls.length})
-                </h6>
+        <div className="mt-2 bg-white rounded-lg border border-slate-200">
+            <div className="flex justify-between items-center px-3 py-2 border-b border-slate-100">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                    <Layers size={11}/> Received ({filtered.length}/{rolls.length})
+                </span>
                 <div className="relative">
-                    <Search className="absolute left-2 top-1.5 text-gray-400 w-3 h-3" />
+                    <Search className="absolute left-2 top-1.5 text-slate-400 w-3 h-3"/>
                     <input
                         type="number"
-                        placeholder="Filter by meters..."
+                        placeholder="Filter meters…"
                         value={meterFilter}
-                        onChange={(e) => setMeterFilter(e.target.value)}
-                        className="pl-6 pr-2 py-1 text-xs border rounded w-32 focus:outline-none focus:border-blue-400"
+                        onChange={e => setMeterFilter(e.target.value)}
+                        className="pl-6 pr-2 py-1 text-xs border border-slate-200 rounded w-28 focus:outline-none focus:border-blue-400"
                     />
                 </div>
             </div>
-
-            <div className="max-h-60 overflow-y-auto space-y-2">
-                {intakeGroupList.map(group => (
-                    <div key={group.intake_id ?? 'unknown'} className="border border-gray-200 rounded-md overflow-hidden">
-                        {/* Intake group header */}
-                        <div className="flex items-center justify-between bg-indigo-50 px-2.5 py-1.5 border-b border-indigo-100">
-                            <div className="flex items-center gap-2 text-[11px] text-indigo-700">
+            <div className="max-h-52 overflow-y-auto divide-y divide-slate-100">
+                {intakeGroups.map(group => (
+                    <div key={group.intake_id ?? 'unknown'}>
+                        <div className="flex items-center justify-between bg-indigo-50/60 px-3 py-1.5 text-[11px] text-indigo-700">
+                            <div className="flex items-center gap-2">
                                 <span className="font-bold">Intake #{group.intake_id ?? '—'}</span>
-                                {group.intake_date && (
-                                    <span className="text-indigo-400">
-                                        {new Date(group.intake_date).toLocaleDateString()}
-                                    </span>
-                                )}
-                                {group.reference_number && (
-                                    <span className="text-indigo-500 font-medium">· {group.reference_number}</span>
-                                )}
+                                {group.intake_date && <span className="text-indigo-400">{fmt(group.intake_date)}</span>}
+                                {group.reference_number && <span className="text-indigo-500">· {group.reference_number}</span>}
                                 <span className="text-indigo-300">({group.rolls.length} roll{group.rolls.length !== 1 ? 's' : ''})</span>
                             </div>
                             {group.intake_id != null && (
-                                <button
-                                    onClick={() => setEditingIntake({ id: group.intake_id })}
-                                    className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-100 px-1.5 py-0.5 rounded transition-colors"
-                                    title="Edit this intake"
-                                >
-                                    <Pencil size={11} /> Edit
+                                <button onClick={() => setEditingIntake({ id: group.intake_id })} className="flex items-center gap-0.5 text-[10px] font-bold text-indigo-600 hover:text-indigo-800 px-1 py-0.5 rounded hover:bg-indigo-100">
+                                    <Pencil size={10}/> Edit
                                 </button>
                             )}
                         </div>
-                        {/* Rolls table */}
-                        <table className="w-full text-xs text-left">
-                            <tbody className="divide-y divide-gray-100">
+                        <table className="w-full text-xs">
+                            <tbody className="divide-y divide-slate-50">
                                 {group.rolls.map(roll => (
-                                    <tr key={roll.id} className="hover:bg-gray-100 transition-colors">
-                                        <td className="py-1.5 pl-2.5 font-mono text-indigo-600 w-16">R-{roll.id}</td>
-                                        <td className="py-1.5 text-gray-700">
-                                            {roll.fabric_type} <span className="text-gray-400 mx-1">•</span> {roll.fabric_color}
-                                        </td>
-                                        <td className="py-1.5 text-right font-bold text-gray-800 w-16">{roll.meter}</td>
-                                        <td className="py-1.5 text-center text-gray-500 w-12">{roll.uom || 'm'}</td>
-                                        <td className="py-1.5 text-center w-12">
-                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                                roll.status === 'IN_STOCK' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
-                                            }`}>
+                                    <tr key={roll.id} className="hover:bg-slate-50">
+                                        <td className="py-1.5 pl-3 font-mono text-indigo-500 w-14">R-{roll.id}</td>
+                                        <td className="py-1.5 text-slate-600">{roll.fabric_type} · {roll.fabric_color}</td>
+                                        <td className="py-1.5 text-right font-bold text-slate-800 w-14">{roll.meter}</td>
+                                        <td className="py-1.5 text-center text-slate-400 w-10">{roll.uom || 'm'}</td>
+                                        <td className="py-1.5 text-center w-14">
+                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${roll.status === 'IN_STOCK' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
                                                 {roll.status === 'IN_STOCK' ? 'Stock' : 'Prod'}
                                             </span>
                                         </td>
-                                        <td className="py-1.5 pr-2 text-center w-8">
-                                            <button
-                                                onClick={() => setEditingRoll(roll)}
-                                                className="text-gray-400 hover:text-blue-600 transition-colors"
-                                                title="Edit Roll"
-                                                disabled={roll.status == 'COMPLETED'}
-                                            >
-                                                <Edit3 size={12} />
+                                        <td className="py-1.5 pr-3 text-center w-8">
+                                            <button onClick={() => setEditingRoll(roll)} disabled={roll.status === 'COMPLETED'} className="text-slate-300 hover:text-blue-500 disabled:cursor-not-allowed transition-colors">
+                                                <Edit3 size={12}/>
                                             </button>
                                         </td>
                                     </tr>
@@ -162,478 +140,480 @@ const ReceivedRollsList = ({ purchaseOrderId }) => {
                         </table>
                     </div>
                 ))}
-                {filteredRolls.length === 0 && (
-                    <p className="text-center py-2 text-gray-400 text-xs">No matching rolls found.</p>
-                )}
             </div>
-
             {editingRoll && (
-                <EditFabricRollModal
-                    roll={editingRoll}
-                    onSave={handleUpdateRoll}
-                    onDelete={handleDeleteRoll}
-                    onClose={() => setEditingRoll(null)}
-                />
+                <EditFabricRollModal roll={editingRoll} onSave={handleUpdateRoll} onDelete={handleDeleteRoll} onClose={() => setEditingRoll(null)}/>
             )}
-
             {editingIntake && (
                 <Modal title={`Edit Intake #${editingIntake.id}`} onClose={() => setEditingIntake(null)}>
-                    <FabricIntakeForm
-                        intake={editingIntake}
-                        onSave={handleEditIntakeSave}
-                        onClose={() => setEditingIntake(null)}
-                    />
+                    <FabricIntakeForm intake={editingIntake} onSave={() => { setEditingIntake(null); fetchRolls(); }} onClose={() => setEditingIntake(null)}/>
                 </Modal>
             )}
         </div>
     );
 };
 
-// --- COMPONENT: Sales Order Summary & Details Section ---
-const SalesOrderExpandedDetails = ({ orderId }) => {
-    const [details, setDetails] = useState(null);
-    const [loading, setLoading] = useState(true);
+// ─── Sales Order Detail Modal ────────────────────────────────────────────────
+
+const SalesOrderDetailModal = ({ so, onClose }) => {
+    const soId = so.id ?? so.sales_order_id;
+
+    const [details, setDetails]         = useState(null);
+    const [loading, setLoading]         = useState(true);
+    const [error, setError]             = useState(null);
+    const [expandedPOs, setExpandedPOs] = useState({});
+    const [intakeModalOpen, setIntakeModalOpen] = useState(false);
+    const [selectedPO, setSelectedPO]   = useState(null);
 
     useEffect(() => {
-        const load = async () => {
-            setLoading(true);
-            try {
-                const res = await accountingApi.getSalesOrderDetails(orderId);
-                setDetails(res.data);
-            } catch (err) {
-                console.error("Failed to load SO details", err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        if(orderId) load();
-    }, [orderId]);
+        accountingApi.getSalesOrderDetails(soId)
+            .then(res => setDetails(res.data))
+            .catch(() => setError('Failed to load order details.'))
+            .finally(() => setLoading(false));
+    }, [soId]);
 
-    if(loading) return <div className="p-4 flex justify-center"><Loader2 className="animate-spin text-gray-400 w-5 h-5" /></div>;
-    if(!details) return <div className="p-4 text-center text-red-500 text-sm">Failed to load details.</div>;
+    const togglePO = (id) => setExpandedPOs(prev => ({ ...prev, [id]: !prev[id] }));
 
-    return (
-        <div className="mb-6 bg-white border border-blue-100 rounded-lg overflow-hidden shadow-sm">
-            {/* Summary Header */}
-            <div className="bg-blue-50/50 p-4 border-b border-blue-100 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div>
-                    <span className="block text-xs font-bold text-gray-400 uppercase mb-1">Customer Details</span>
-                    <p className="font-semibold text-gray-800">{details.customer_name}</p>
-                    <p className="text-xs text-gray-500">{details.customer_email || 'No email'}</p>
-                </div>
-                <div>
-                    <span className="block text-xs font-bold text-gray-400 uppercase mb-1">Order Refs & Dates</span>
-                    <p className="text-gray-700">
-                        <span className="text-gray-400 text-xs mr-1">Buyer PO:</span> 
-                        <span className="font-semibold text-indigo-700">{details.buyer_po_number || 'N/A'}</span>
-                    </p>
-                    <p className="text-gray-700"><span className="text-gray-400 text-xs mr-1">Ordered:</span> {new Date(details.order_date).toLocaleDateString()}</p>
-                    {details.delivery_date && <p className="text-gray-700"><span className="text-gray-400 text-xs mr-1">Delivery:</span> {new Date(details.delivery_date).toLocaleDateString()}</p>}
-                </div>
-                <div>
-                    <span className="block text-xs font-bold text-gray-400 uppercase mb-1">Financials</span>
-                    <p className="font-bold text-emerald-700 flex items-center text-lg">
-                        <DollarSign size={16} className="mr-0.5"/> {details.total_amount || '0.00'}
-                    </p>
-                </div>
-                <div>
-                    <span className="block text-xs font-bold text-gray-400 uppercase mb-1">Notes</span>
-                    <p className="text-xs text-gray-500 italic line-clamp-2">{details.notes || 'No notes provided.'}</p>
-                </div>
-            </div>
+    // Merge: use fetched details for products+attachments, list data for purchase_orders
+    const purchaseOrders = so.purchase_orders || [];
 
-            {/* Detailed Products Table */}
-            <div className="p-0">
-                <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase flex items-center">
-                    <Box size={14} className="mr-2"/> Order Items & Color Breakdown
+    return createPortal(
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+
+                {/* ── Modal header ── */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0 bg-white">
+                    <div className="flex items-center gap-3">
+                        <FileText className="w-5 h-5 text-indigo-500 shrink-0"/>
+                        <h2 className="text-lg font-bold text-slate-900 tracking-tight">{so.order_number}</h2>
+                        <StatusBadge status={so.status}/>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Link
+                            to={`/accounts/sales/${soId}/edit`}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-indigo-600 hover:bg-indigo-50 border border-indigo-100 rounded-lg transition-colors"
+                        >
+                            <Pencil size={13}/> Edit
+                        </Link>
+                        <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-full transition-colors">
+                            <X size={18} className="text-slate-500"/>
+                        </button>
+                    </div>
                 </div>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left">
-                        <thead className="bg-white text-gray-500 border-b border-gray-100">
-                            <tr>
-                                <th className="px-4 py-3 font-medium w-1/4">Product Style</th>
-                                <th className="px-4 py-3 font-medium w-1/6">Fabric</th>
-                                <th className="px-4 py-3 font-medium w-1/4">Size Breakdown</th>
-                                <th className="px-4 py-3 font-medium">Color Details & Quantities</th>
-                                <th className="px-4 py-3 font-medium text-right w-20">Total</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                            {details.products.map((prod, idx) => {
-                                const totalQty = prod.colors ? prod.colors.reduce((sum, c) => sum + parseInt(c.quantity || 0), 0) : 0;
-                                return (
-                                    <tr key={idx} className="hover:bg-gray-50/30 align-top">
-                                        <td className="px-4 py-3">
-                                            <p className="font-semibold text-gray-800">{prod.product_name}</p>
-                                        </td>
-                                        <td className="px-4 py-3 text-gray-600">{prod.fabric_type}</td>
-                                        <td className="px-4 py-3">
-                                            <div className="flex flex-wrap gap-1.5">
-                                                {prod.size_breakdown && Object.entries(prod.size_breakdown).map(([size, ratio]) => (
-                                                    <span key={size} className="text-[10px] bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded text-indigo-700 shadow-sm flex flex-col items-center min-w-[2rem]">
-                                                        <span className="font-bold opacity-60 text-[8px] leading-tight">{size}</span>
-                                                        <span className="font-extrabold leading-tight">{ratio}</span>
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            <div className="flex flex-col gap-1.5">
-                                                {prod.colors && prod.colors.length > 0 ? prod.colors.map((c, i) => (
-                                                    <div key={i} className="text-xs bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-md flex justify-between items-center w-full max-w-[240px] shadow-sm">
-                                                        <span className="text-slate-700 font-medium flex items-center">
-                                                            <Palette size={12} className="text-slate-400 mr-1.5"/>
-                                                            {c.color_number} <span className="text-slate-400 font-normal ml-1">({c.color_name})</span>
-                                                        </span>
-                                                        <span className="font-bold text-blue-700">{c.quantity} pcs</span>
+
+                {/* ── Scrollable body ── */}
+                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+
+                    {loading && (
+                        <div className="flex justify-center py-16">
+                            <Loader2 className="w-7 h-7 animate-spin text-indigo-400"/>
+                        </div>
+                    )}
+
+                    {error && (
+                        <div className="flex items-center gap-2 bg-red-50 text-red-700 px-4 py-3 rounded-xl border border-red-200">
+                            <AlertCircle size={15} className="shrink-0"/> <span className="text-sm">{error}</span>
+                        </div>
+                    )}
+
+                    {details && (
+                        <>
+                            {/* ── Order header info ── */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                {[
+                                    { label: 'Customer',    value: details.customer_name  || so.customer_name },
+                                    { label: 'Buyer PO',    value: details.buyer_po_number || so.buyer_po_number || '—' },
+                                    { label: 'Order Date',  value: fmt(details.order_date  || so.order_date) },
+                                    { label: 'Delivery',    value: fmt(details.delivery_date || so.delivery_date) },
+                                ].map(({ label, value }) => (
+                                    <div key={label} className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</p>
+                                        <p className="text-sm font-semibold text-slate-800 mt-1 truncate">{value}</p>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {details.notes && (
+                                <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
+                                    <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wider mb-1">Notes</p>
+                                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{details.notes}</p>
+                                </div>
+                            )}
+
+                            {/* ── Products with per-color size breakdown ── */}
+                            <div>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+                                    Product Lines · {details.products?.length ?? 0}
+                                </p>
+                                <div className="space-y-3">
+                                    {(details.products || []).map((prod, pIdx) => {
+                                        const colors = prod.colors || [];
+                                        const prodTotal = colors.reduce((sum, c) => {
+                                            const fromSizes = (c.sizes || []).reduce((s, sz) => s + (Number(sz.quantity) || 0), 0);
+                                            return sum + (fromSizes || Number(c.quantity) || 0);
+                                        }, 0);
+
+                                        return (
+                                            <div key={pIdx} className="border border-slate-200 rounded-xl overflow-hidden">
+                                                {/* Product row header */}
+                                                <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-100">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-bold text-slate-800">{prod.product_name}</span>
+                                                        <span className="text-slate-300">·</span>
+                                                        <span className="text-sm text-slate-500">{prod.fabric_type}</span>
                                                     </div>
-                                                )) : <span className="text-xs text-gray-400 italic">No colors defined</span>}
+                                                    <span className="text-sm font-bold text-slate-600 tabular-nums">
+                                                        {prodTotal.toLocaleString()} pcs
+                                                    </span>
+                                                </div>
+
+                                                {/* Colors */}
+                                                {colors.length === 0 ? (
+                                                    <p className="px-4 py-3 text-sm text-slate-400 italic">No colors defined</p>
+                                                ) : (
+                                                    <div className="divide-y divide-slate-100">
+                                                        {colors.map((color, cIdx) => {
+                                                            const sizes   = color.sizes || [];
+                                                            const cTotal  = sizes.length > 0
+                                                                ? sizes.reduce((s, sz) => s + (Number(sz.quantity) || 0), 0)
+                                                                : Number(color.quantity) || 0;
+                                                            const price   = parseFloat(color.unit_price) || 0;
+                                                            const lineVal = cTotal * price;
+
+                                                            return (
+                                                                <div key={cIdx} className="px-4 py-3 flex flex-wrap items-center gap-4">
+                                                                    {/* Color label */}
+                                                                    <div className="w-28 shrink-0">
+                                                                        <p className="text-sm font-semibold text-slate-700">{color.color_name}</p>
+                                                                        <p className="text-[11px] text-slate-400 font-mono">{color.color_number}</p>
+                                                                    </div>
+
+                                                                    {/* Size chips */}
+                                                                    <div className="flex flex-wrap gap-1.5 flex-1">
+                                                                        {sizes.length > 0 ? sizes.map(sz => (
+                                                                            <div key={sz.size_id} className="flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1 min-w-[2.75rem]">
+                                                                                <span className="text-[9px] font-bold text-indigo-400 uppercase leading-none">{sz.size_name || `#${sz.size_id}`}</span>
+                                                                                <span className="text-sm font-bold text-indigo-800 leading-tight mt-0.5">{sz.quantity}</span>
+                                                                            </div>
+                                                                        )) : (
+                                                                            <span className="text-xs text-slate-400 italic self-center">No size breakdown</span>
+                                                                        )}
+                                                                    </div>
+
+                                                                    {/* Totals */}
+                                                                    <div className="text-right shrink-0 ml-auto min-w-[6rem]">
+                                                                        <p className="text-sm font-bold text-slate-800 tabular-nums">{cTotal.toLocaleString()} pcs</p>
+                                                                        {price > 0 && (
+                                                                            <p className="text-[11px] text-slate-400 tabular-nums">₹{price}/pc · ₹{lineVal.toLocaleString('en-IN', { minimumFractionDigits: 0 })}</p>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
                                             </div>
-                                        </td>
-                                        <td className="px-4 py-3 text-right font-extrabold text-gray-800 text-base">{totalQty}</td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* ── Attachments ── */}
+                            <div>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                                    <Paperclip size={12}/> Documents & Attachments
+                                </p>
+                                {(details.attachments || []).length > 0 ? (
+                                    <div className="space-y-2">
+                                        {details.attachments.map(att => (
+                                            <a
+                                                key={att.id}
+                                                href={att.file_url || att.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex items-center gap-3 px-4 py-3 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-xl transition-colors group"
+                                            >
+                                                <FileText className="w-4 h-4 text-slate-400 group-hover:text-blue-500 shrink-0"/>
+                                                <span className="text-sm text-slate-700 group-hover:text-blue-700 flex-1 truncate">
+                                                    {att.original_filename || att.filename || att.name || 'File'}
+                                                </span>
+                                                {att.file_size != null && (
+                                                    <span className="text-[11px] text-slate-400 shrink-0">{formatFileSize(att.file_size)}</span>
+                                                )}
+                                                <ExternalLink size={13} className="text-slate-300 group-hover:text-blue-400 shrink-0"/>
+                                            </a>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="px-4 py-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl text-sm text-slate-400 text-center">
+                                        No documents attached
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    )}
+
+                    {/* ── Purchase Orders (always from list data) ── */}
+                    <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                            <Truck size={12}/> Linked Purchase Orders
+                        </p>
+                        {purchaseOrders.length > 0 ? (
+                            <div className="space-y-2">
+                                {purchaseOrders.map(po => (
+                                    <div key={po.id} className="border border-slate-200 rounded-xl overflow-hidden">
+                                        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                                            <div>
+                                                <p className="text-sm font-bold text-slate-700">{po.po_code || po.po_number}</p>
+                                                <p className="text-[11px] text-slate-500 mt-0.5">{po.supplier_name}</p>
+                                                {po.material_summary && (
+                                                    <p className="text-[11px] text-slate-400 mt-0.5 max-w-sm truncate">{po.material_summary}</p>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <StatusBadge status={po.status}/>
+                                                <button
+                                                    onClick={() => togglePO(po.id)}
+                                                    className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg border transition-colors ${expandedPOs[po.id] ? 'bg-slate-100 border-slate-300 text-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                                                >
+                                                    <Layers size={13}/> Rolls
+                                                    <ChevronDown size={12} className={`transition-transform ${expandedPOs[po.id] ? 'rotate-180' : ''}`}/>
+                                                </button>
+                                                <button
+                                                    onClick={() => { setSelectedPO(po); setIntakeModalOpen(true); }}
+                                                    className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-sm"
+                                                >
+                                                    <Package size={13}/> Receive Fabric
+                                                </button>
+                                            </div>
+                                        </div>
+                                        {expandedPOs[po.id] && (
+                                            <div className="px-4 pb-3 border-t border-slate-100 bg-slate-50/50">
+                                                <ReceivedRollsList purchaseOrderId={po.id}/>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="px-4 py-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl text-sm text-slate-400 text-center">
+                                No purchase orders linked to this sales order
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
-        </div>
+
+            {intakeModalOpen && selectedPO && (
+                <Modal title={`Receive Fabric — ${selectedPO.po_code || selectedPO.po_number}`} onClose={() => setIntakeModalOpen(false)}>
+                    <FabricIntakeForm
+                        onSave={async (data) => {
+                            await storeManagerApi.createFabricIntake(data);
+                            setIntakeModalOpen(false);
+                        }}
+                        onClose={() => setIntakeModalOpen(false)}
+                        purchaseOrder={selectedPO}
+                    />
+                </Modal>
+            )}
+        </div>,
+        document.body
     );
 };
 
-// --- COMPONENT: Purchase Order Details Modal ---
-const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
-    const [po, setPo] = useState(null);
-    const [loading, setLoading] = useState(true);
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+const STATUS_FILTERS = ['All', 'ACTIVE', 'PENDING', 'COMPLETED', 'CANCELLED'];
+
+const SalesOrderListPage = () => {
+    const [orders, setOrders]         = useState([]);
+    const [loading, setLoading]       = useState(true);
+    const [search, setSearch]         = useState('');
+    const [statusFilter, setStatus]   = useState('All');
+    const [selectedSO, setSelectedSO] = useState(null);
 
     useEffect(() => {
-        const load = async () => {
-            try {
-                const res = await accountingApi.getPurchaseOrderDetails(poId);
-                setPo(res.data);
-            } catch (err) {
-                console.error(err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        load();
-    }, [poId]);
+        accountingApi.getAllSalesOrders()
+            .then(res => {
+                const sorted = (res.data || []).sort((a, b) => new Date(b.order_date) - new Date(a.order_date));
+                setOrders(sorted);
+            })
+            .catch(err => console.error('Failed to load sales orders', err))
+            .finally(() => setLoading(false));
+    }, []);
 
-    if (loading) return (
-        <Modal title="Loading PO..." onClose={onClose}>
-            <div className="flex justify-center p-8"><Loader2 className="animate-spin text-indigo-600"/></div>
-        </Modal>
-    );
+    const filtered = orders.filter(so => {
+        if (statusFilter !== 'All' && so.status !== statusFilter) return false;
+        if (!search) return true;
+        const q = search.toLowerCase();
+        return (
+            so.order_number?.toLowerCase().includes(q) ||
+            so.customer_name?.toLowerCase().includes(q) ||
+            so.buyer_po_number?.toLowerCase().includes(q)
+        );
+    });
 
-    if (!po) return null;
+    // Stats from list data
+    const totalOrders  = orders.length;
+    const activeOrders = orders.filter(o => o.status === 'ACTIVE' || o.status === 'PENDING').length;
+    const totalValue   = orders.reduce((s, o) => s + (parseFloat(o.total_amount) || 0), 0);
 
     return (
-        <Modal title={`Purchase Order: ${po.po_code || po.po_number}`} onClose={onClose}>
-            <div className="space-y-6">
-                {/* Header Info */}
-                <div className="bg-amber-50 p-4 rounded-lg border border-amber-100 grid grid-cols-2 gap-4">
+        <div className="min-h-screen bg-slate-50">
+            {/* ── Page header ── */}
+            <div className="bg-white border-b border-slate-200 px-8 py-5">
+                <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-end justify-between gap-4">
                     <div>
-                        <p className="text-xs text-amber-700 font-bold uppercase mb-1">Supplier</p>
-                        <p className="font-bold text-gray-800">{po.supplier_name}</p>
-                        <p className="text-xs text-gray-500">{po.supplier_email}</p>
+                        <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Sales Orders</h1>
+                        <p className="text-sm text-slate-500 mt-0.5">Track and manage all customer orders</p>
                     </div>
-                    <div className="text-right">
-                        <p className="text-xs text-amber-700 font-bold uppercase mb-1">Status</p>
-                        <span className="px-2 py-1 bg-white text-amber-800 border border-amber-200 rounded text-xs font-bold">
-                            {po.status}
-                        </span>
-                        <p className="text-xs text-gray-500 mt-2">Delivery: {po.expected_delivery_date ? new Date(po.expected_delivery_date).toLocaleDateString() : 'N/A'}</p>
+                    <div className="flex items-center gap-3">
+                        <div className="relative">
+                            <Search className="absolute left-3 top-2.5 text-slate-400 w-4 h-4"/>
+                            <input
+                                type="text"
+                                placeholder="Search order, customer, buyer PO…"
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
+                                className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none w-64"
+                            />
+                        </div>
+                        <Link
+                            to="/accounts/sales/new"
+                            className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow-sm transition-colors shrink-0"
+                        >
+                            <Plus size={15}/> New Order
+                        </Link>
                     </div>
                 </div>
+            </div>
 
-                {/* Items Table */}
-                <div>
-                    <h4 className="text-sm font-bold text-gray-700 mb-3 flex items-center">
-                        <Box size={16} className="mr-2"/> Ordered Items (Requirements)
-                    </h4>
-                    <div className="border rounded-lg overflow-hidden">
+            <div className="max-w-7xl mx-auto px-8 py-6 space-y-5">
+
+                {/* ── Stats ── */}
+                {!loading && (
+                    <div className="grid grid-cols-3 gap-4">
+                        {[
+                            { label: 'Total Orders',  value: totalOrders,                 sub: 'all time' },
+                            { label: 'Open Orders',   value: activeOrders,               sub: 'active / pending' },
+                            { label: 'Total Value',   value: `₹${totalValue.toLocaleString('en-IN', { minimumFractionDigits: 0 })}`, sub: 'across all orders' },
+                        ].map(({ label, value, sub }) => (
+                            <div key={label} className="bg-white border border-slate-200 rounded-xl px-5 py-4">
+                                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{label}</p>
+                                <p className="text-2xl font-black text-slate-900 mt-1 tabular-nums">{value}</p>
+                                <p className="text-xs text-slate-400 mt-0.5">{sub}</p>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* ── Status filter tabs ── */}
+                <div className="flex gap-1 flex-wrap">
+                    {STATUS_FILTERS.map(s => (
+                        <button
+                            key={s}
+                            onClick={() => setStatus(s)}
+                            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${
+                                statusFilter === s
+                                    ? 'bg-indigo-600 text-white shadow-sm'
+                                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                            }`}
+                        >
+                            {s === 'All' ? `All (${orders.length})` : s.replace(/_/g, ' ')}
+                        </button>
+                    ))}
+                </div>
+
+                {/* ── Table ── */}
+                {loading ? (
+                    <div className="flex justify-center py-20">
+                        <Loader2 className="w-7 h-7 animate-spin text-indigo-500"/>
+                    </div>
+                ) : filtered.length === 0 ? (
+                    <div className="text-center py-20 bg-white rounded-xl border border-dashed border-slate-200">
+                        <FileText className="w-8 h-8 text-slate-300 mx-auto mb-3"/>
+                        <p className="text-slate-400 font-medium">
+                            {search || statusFilter !== 'All' ? 'No orders match your filters' : 'No sales orders yet'}
+                        </p>
+                        {!search && statusFilter === 'All' && (
+                            <Link to="/accounts/sales/new" className="mt-4 inline-flex items-center gap-1.5 text-sm font-bold text-indigo-600 hover:underline">
+                                <Plus size={14}/> Create your first order
+                            </Link>
+                        )}
+                    </div>
+                ) : (
+                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
                         <table className="w-full text-sm text-left">
-                            <thead className="bg-gray-100 text-gray-600 border-b">
-                                <tr>
-                                    <th className="px-4 py-2 font-medium">Fabric Type</th>
-                                    <th className="px-4 py-2 font-medium">Color</th>
-                                    <th className="px-4 py-2 font-medium text-right">Quantity</th>
-                                    <th className="px-4 py-2 font-medium text-right">Unit Price</th>
-                                    <th className="px-4 py-2 font-medium text-right">Total</th>
+                            <thead>
+                                <tr className="border-b border-slate-100 bg-slate-50/80">
+                                    <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Order #</th>
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Customer</th>
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden md:table-cell">Buyer PO</th>
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden lg:table-cell">Order Date</th>
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden lg:table-cell">Delivery</th>
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right hidden md:table-cell">POs</th>
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {po.items.map((item, idx) => (
-                                    <tr key={idx} className="hover:bg-gray-50">
-                                        <td className="px-4 py-2 font-medium text-gray-800">{item.fabric_type}</td>
-                                        <td className="px-4 py-2 text-gray-600">{item.color_number} <span className="text-xs text-gray-400">({item.fabric_color})</span></td>
-                                        <td className="px-4 py-2 text-right font-bold">{item.quantity} {item.uom}</td>
-                                        <td className="px-4 py-2 text-right text-gray-500">${item.unit_price}</td>
-                                        <td className="px-4 py-2 text-right text-gray-800">${item.total_price}</td>
+                            <tbody className="divide-y divide-slate-100">
+                                {filtered.map((so, idx) => (
+                                    <tr
+                                        key={(so.id ?? so.sales_order_id) ?? `row-${idx}`}
+                                        onClick={() => setSelectedSO(so)}
+                                        className="hover:bg-indigo-50/40 cursor-pointer transition-colors group"
+                                    >
+                                        <td className="px-5 py-4">
+                                            <p className="font-bold text-indigo-700 group-hover:text-indigo-800">{so.order_number}</p>
+                                        </td>
+                                        <td className="px-4 py-4">
+                                            <p className="font-medium text-slate-800">{so.customer_name}</p>
+                                        </td>
+                                        <td className="px-4 py-4 text-slate-500 font-mono text-xs hidden md:table-cell">
+                                            {so.buyer_po_number || <span className="text-slate-300">—</span>}
+                                        </td>
+                                        <td className="px-4 py-4 text-slate-500 hidden lg:table-cell">{fmt(so.order_date)}</td>
+                                        <td className="px-4 py-4 hidden lg:table-cell">
+                                            {so.delivery_date ? (
+                                                <span className={`text-sm ${new Date(so.delivery_date) < new Date() && so.status !== 'COMPLETED' ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
+                                                    {fmt(so.delivery_date)}
+                                                </span>
+                                            ) : <span className="text-slate-300">—</span>}
+                                        </td>
+                                        <td className="px-4 py-4 text-right hidden md:table-cell">
+                                            <span className="text-sm font-semibold text-slate-600 tabular-nums">
+                                                {so.purchase_orders?.length ?? 0}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-4">
+                                            <StatusBadge status={so.status}/>
+                                        </td>
+                                        <td className="px-4 py-4 text-right" onClick={e => e.stopPropagation()}>
+                                            <Link
+                                                to={`/accounts/sales/${so.id ?? so.sales_order_id}/edit`}
+                                                className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg border border-transparent hover:border-indigo-100 transition-colors"
+                                                title="Edit order"
+                                            >
+                                                <Pencil size={13}/> Edit
+                                            </Link>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
-                    </div>
-                </div>
-
-                {/* Received Rolls Summary */}
-                <div>
-                    <h4 className="text-sm font-bold text-gray-700 mb-2 flex items-center">
-                        <Layers size={16} className="mr-2"/> Received Rolls
-                    </h4>
-                     <ReceivedRollsList purchaseOrderId={po.id} />
-                </div>
-            </div>
-            <div className="flex justify-end pt-4 border-t mt-4">
-                <button onClick={onClose} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-md font-medium">Close</button>
-            </div>
-        </Modal>
-    );
-};
-
-const SalesOrderListPage = () => {
-    const [workflowData, setWorkflowData] = useState([]);
-    const [filteredData, setFilteredData] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [expandedSO, setExpandedSO] = useState({});
-    
-    // Modal States
-    const [intakeModalOpen, setIntakeModalOpen] = useState(false);
-    const [poDetailsModalOpen, setPoDetailsModalOpen] = useState(false);
-    
-    const [selectedPO, setSelectedPO] = useState(null); 
-    const [expandedPO, setExpandedPO] = useState({});
-    const [searchTerm, setSearchTerm] = useState('');
-
-    const fetchData = async () => {
-        setLoading(true);
-        try {
-            const res = await accountingApi.getAllSalesOrders();
-            console.log("Fetched workflow data:", res.data);
-            // Sort by order_date descending by default
-            const sortedData = (res.data || []).sort((a, b) => new Date(b.order_date) - new Date(a.order_date));
-            setWorkflowData(sortedData);
-            setFilteredData(sortedData);
-        } catch (err) {
-            console.error("Failed to load orders", err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        fetchData();
-    }, []);
-
-    // Filter Logic
-    useEffect(() => {
-        if (!searchTerm) {
-            setFilteredData(workflowData);
-        } else {
-            const lowerTerm = searchTerm.toLowerCase();
-            const filtered = workflowData.filter(so => 
-                so.order_number.toLowerCase().includes(lowerTerm) || 
-                so.customer_name.toLowerCase().includes(lowerTerm) ||
-                (so.buyer_po_number && so.buyer_po_number.toLowerCase().includes(lowerTerm))
-            );
-            setFilteredData(filtered);
-        }
-    }, [searchTerm, workflowData]);
-
-    const toggleSO = (key) => {
-        setExpandedSO(prev => ({ ...prev, [key]: !prev[key] }));
-    };
-    
-    const togglePO = (id) => {
-        setExpandedPO(prev => ({ ...prev, [id]: !prev[id] }));
-    };
-
-    const handleReceiveFabricClick = (e, po) => {
-        e.stopPropagation(); 
-        setSelectedPO(po);
-        setIntakeModalOpen(true);
-    };
-
-    const handleViewPODetails = (po) => {
-        setSelectedPO(po);
-        setPoDetailsModalOpen(true);
-    };
-
-    const handleIntakeSave = async (data) => {
-        try {
-            await storeManagerApi.createFabricIntake(data);
-            setIntakeModalOpen(false);
-            fetchData(); 
-        } catch (err) {
-            alert("Failed to save intake.");
-        }
-    };
-
-    if (loading) return <div className="flex justify-center p-12"><Loader2 className="animate-spin text-indigo-600" /></div>;
-
-    return (
-        <div className="p-6 bg-slate-50 min-h-screen font-inter text-slate-800">
-            <header className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-                <div>
-                    <h1 className="text-3xl font-extrabold text-slate-900">Sales & Purchase Orders</h1>
-                    <p className="text-slate-500 mt-1">Manage orders and receive fabric against Purchase Orders.</p>
-                </div>
-                <div className="relative w-full md:w-64">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Search className="text-slate-400" size={18}/>
-                    </div>
-                    <input 
-                        type="text"
-                        placeholder="Search SO, PO or Customer..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow focus:shadow-sm"
-                    />
-                </div>
-            </header>
-
-            <div className="space-y-4">
-                {filteredData.map((so, idx) => (
-                    <div key={so.sales_order_id ?? `unlinked-${idx}`} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden transition-shadow hover:shadow-md">
-                        {/* Sales Order Header */}
-                        <div
-                            onClick={() => toggleSO(so.sales_order_id ?? `unlinked-${idx}`)}
-                            className={`flex items-center justify-between p-4 cursor-pointer transition-colors select-none ${expandedSO[so.sales_order_id ?? `unlinked-${idx}`] ? 'bg-slate-50 border-b border-slate-100' : 'hover:bg-slate-50'}`}
-                        >
-                            <div className="flex items-center gap-4">
-                                <button className={`p-1 rounded hover:bg-slate-200 text-slate-500 transition-transform duration-300 ${expandedSO[so.sales_order_id] ? 'rotate-180' : ''}`}>
-                                    <ChevronDown size={20}/>
-                                </button>
-                                <div>
-                                    <h3 className="font-bold text-lg text-slate-800 flex items-center">
-                                        <FileText size={18} className="mr-2 text-blue-600"/> 
-                                        {so.order_number}
-                                        {so.buyer_po_number && (
-                                            <span className="ml-3 px-2 py-0.5 bg-slate-200 text-slate-700 text-[10px] rounded-md border border-slate-300 font-bold uppercase tracking-wider shadow-sm">
-                                                Ref: {so.buyer_po_number}
-                                            </span>
-                                        )}
-                                    </h3>
-                                    <p className="text-sm text-slate-500">{so.customer_name}</p>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-4">
-                                <div className="text-right hidden md:block">
-                                     <p className="text-xs text-slate-400">Date</p>
-                                     <p className="text-sm font-medium text-slate-700">{new Date(so.order_date).toLocaleDateString()}</p>
-                                </div>
-                                <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100">
-                                    {so.status}
-                                </span>
-                            </div>
+                        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/50 text-xs text-slate-400">
+                            Showing {filtered.length} of {orders.length} order{orders.length !== 1 ? 's' : ''}
                         </div>
-
-                        {/* Expanded Content */}
-                        {expandedSO[so.sales_order_id] && (
-                            <div className="bg-white p-4 space-y-4 animate-in slide-in-from-top-1 fade-in duration-200">
-
-                                {/* 1. Sales Order Details Summary */}
-                                <SalesOrderExpandedDetails orderId={so.sales_order_id} />
-
-                                {/* 2. Linked Purchase Orders */}
-                                <div>
-                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 ml-1 flex items-center">
-                                        <ShoppingCart size={14} className="mr-1.5"/> Linked Purchase Orders
-                                    </h4>
-                                    
-                                    {so.purchase_orders && so.purchase_orders.length > 0 ? (
-                                        <div className="space-y-3">
-                                            {so.purchase_orders.map(po => (
-                                                <div key={po.id} className="bg-white p-0 rounded-lg border border-slate-200 overflow-hidden shadow-sm">
-                                                    {/* PO Row Header */}
-                                                    <div 
-                                                        className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 hover:bg-slate-50 transition-colors cursor-pointer"
-                                                        onClick={() => handleViewPODetails(po)}
-                                                    >
-                                                        <div className="flex items-start gap-3">
-                                                            <div className="p-2 bg-amber-50 text-amber-600 rounded-lg mt-1">
-                                                                <Truck size={18}/>
-                                                            </div>
-                                                            <div>
-                                                                <p className="font-bold text-slate-700 text-sm flex items-center hover:text-amber-700 transition-colors">
-                                                                    {po.po_code || po.po_number}
-                                                                    <span className="ml-2 text-[10px] text-slate-400 font-normal border px-1 rounded flex items-center bg-white"><Eye size={10} className="mr-1"/> Details</span>
-                                                                </p>
-                                                                <p className="text-xs text-slate-500 mt-0.5 font-medium">
-                                                                    {po.supplier_name}
-                                                                </p>
-                                                                <p className="text-xs text-slate-400 mt-1 truncate max-w-md">
-                                                                    {po.material_summary || 'No material summary available'}
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                        
-                                                        <div className="flex items-center gap-3 self-end md:self-center">
-                                                            <span className={`px-2 py-0.5 text-[10px] font-bold rounded border uppercase ${
-                                                                po.status === 'RECEIVED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'
-                                                            }`}>
-                                                                {po.status}
-                                                            </span>
-
-                                                            <button 
-                                                                onClick={(e) => { e.stopPropagation(); togglePO(po.id); }}
-                                                                className={`flex items-center px-3 py-1.5 border border-slate-200 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-100 transition-colors ${expandedPO[po.id] ? 'bg-slate-100' : 'bg-white'}`}
-                                                            >
-                                                                <Layers size={14} className="mr-1.5"/> {expandedPO[po.id] ? 'Hide Rolls' : 'View Rolls'}
-                                                            </button>
-
-                                                            <button 
-                                                                onClick={(e) => handleReceiveFabricClick(e, po)}
-                                                                className="flex items-center px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
-                                                            >
-                                                                <Package size={14} className="mr-1.5"/> Receive
-                                                            </button>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Expanded Rolls List for this PO (Inline) */}
-                                                    {expandedPO[po.id] && (
-                                                        <div className="px-4 pb-4 bg-slate-50 border-t border-slate-100">
-                                                            <ReceivedRollsList purchaseOrderId={po.id} />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div className="text-center p-6 text-sm text-slate-400 italic border-2 border-dashed border-slate-100 rounded-lg bg-slate-50/50">
-                                            No Purchase Orders linked to this Sales Order.
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                ))}
-                {filteredData.length === 0 && (
-                    <div className="text-center py-20 bg-white rounded-xl border border-dashed border-slate-200 shadow-sm">
-                        <p className="text-slate-400 text-lg font-medium">No sales orders found matching "{searchTerm}"</p>
                     </div>
                 )}
             </div>
 
-            {/* Modal for Fabric Intake */}
-            {intakeModalOpen && selectedPO && (
-                <Modal title={`Receive Fabric for ${selectedPO.po_code || selectedPO.po_number}`} onClose={() => setIntakeModalOpen(false)}>
-                    <FabricIntakeForm 
-                        onSave={handleIntakeSave} 
-                        onClose={() => setIntakeModalOpen(false)}
-                        purchaseOrder={selectedPO} 
-                    />
-                </Modal>
-            )}
-
-            {/* Modal for PO Details */}
-            {poDetailsModalOpen && selectedPO && (
-                <PurchaseOrderDetailsModal poId={selectedPO.id} onClose={() => setPoDetailsModalOpen(false)} />
+            {/* ── Detail modal ── */}
+            {selectedSO && (
+                <SalesOrderDetailModal
+                    so={selectedSO}
+                    onClose={() => setSelectedSO(null)}
+                />
             )}
         </div>
     );

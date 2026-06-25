@@ -1693,7 +1693,10 @@ const UniversalWorkstationDashboard = () => {
                         {headerInfo.line_name && (
                             <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg">{headerInfo.line_name}</span>
                         )}
-                        <span className="text-xs text-slate-500 hidden sm:block">{user?.name}</span>
+                        <div className="hidden sm:flex flex-col items-end leading-tight">
+                            <span className="text-xs font-medium text-slate-600">{user?.name}</span>
+                            {user?.email && <span className="text-[10px] text-slate-400">{user.email}</span>}
+                        </div>
                         <button
                             onClick={() => setShowHistory(true)}
                             className="flex items-center text-xs font-semibold text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-300 px-2.5 py-1.5 rounded-lg transition bg-white shadow-sm"
@@ -1749,20 +1752,10 @@ const UniversalWorkstationDashboard = () => {
                 {/* Row 3: collapsible nav + batch filter */}
                 {showNav && (
                     <nav className="border-t border-gray-100 px-4 py-2 flex flex-wrap items-center gap-4">
-                        <NavLink to="/numbering-portal/dashboard"
+                        <NavLink to="/universal-checker/dashboard"
                             onClick={() => setShowNav(false)}
                             className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                             <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" /> My Queue
-                        </NavLink>
-                        <NavLink to="/numbering-portal/summary"
-                            onClick={() => setShowNav(false)}
-                            className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
-                            <FileText className="w-3.5 h-3.5 mr-1.5" /> Batch QC Summary
-                        </NavLink>
-                        <NavLink to="/numbering-portal/sewing-machine-complaints"
-                            onClick={() => setShowNav(false)}
-                            className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
-                            <LayoutGrid className="w-3.5 h-3.5 mr-1.5" /> SM Complaints
                         </NavLink>
                         {/* Part filter — Row 3 */}
                         {uniquePartNames.length > 0 && (

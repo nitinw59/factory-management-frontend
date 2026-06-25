@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import SupplierCodePill from './SupplierCodePill';
+import SearchableSelect from '../../shared/SearchableSelect';
 import { adminApi } from '../../api/adminApi';
 import { trimsApi } from '../../api/trimsApi';
 import { taApi } from '../../api/taApi';
@@ -185,59 +186,55 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
                 <div className="grid grid-cols-2 gap-2">
                     <div>
                         <label className="text-[9px] font-bold text-slate-400 uppercase">Fabric Type</label>
-                        <select value={form.fabric_type_id ?? ''}
-                            onChange={e => set('fabric_type_id', e.target.value)}
-                            className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-violet-400 bg-white">
-                            <option value="">— Select type —</option>
-                            {fabricTypes.map(t => (
-                                <option key={t.id} value={t.id}>
-                                    {t.name || t.fabric_type_name || `Type #${t.id}`}
-                                </option>
-                            ))}
-                        </select>
+                        <SearchableSelect
+                            value={form.fabric_type_id ?? ''}
+                            onChange={v => set('fabric_type_id', v)}
+                            options={fabricTypes.map(t => ({ value: t.id, label: t.name || t.fabric_type_name || `Type #${t.id}` }))}
+                            placeholder="— Select type —"
+                            className="w-full mt-0.5"
+                            size="sm"
+                            accentColor="violet"
+                        />
                     </div>
                     <div>
                         <label className="text-[9px] font-bold text-slate-400 uppercase">Fabric Color</label>
-                        <select value={form.fabric_color_id ?? ''}
-                            onChange={e => set('fabric_color_id', e.target.value)}
-                            className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-violet-400 bg-white">
-                            <option value="">— Select color —</option>
-                            {fabricColors.map(c => (
-                                <option key={c.id} value={c.id}>
-                                    {c.color_name || c.name || `Color #${c.id}`}{c.color_number ? ` (${c.color_number})` : ''}
-                                </option>
-                            ))}
-                        </select>
+                        <SearchableSelect
+                            value={form.fabric_color_id ?? ''}
+                            onChange={v => set('fabric_color_id', v)}
+                            options={fabricColors.map(c => ({ value: c.id, label: `${c.color_name || c.name || `Color #${c.id}`}${c.color_number ? ` (${c.color_number})` : ''}` }))}
+                            placeholder="— Select color —"
+                            className="w-full mt-0.5"
+                            size="sm"
+                            accentColor="violet"
+                        />
                     </div>
                 </div>
             ) : (
                 <div className="grid grid-cols-2 gap-2">
                     <div>
                         <label className="text-[9px] font-bold text-slate-400 uppercase">Trim Item</label>
-                        <select value={form.trim_item_id ?? ''}
-                            onChange={e => set('trim_item_id', e.target.value)}
-                            className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-amber-400 bg-white">
-                            <option value="">— Select trim —</option>
-                            {trimItems.map(t => (
-                                <option key={t.id} value={t.id}>
-                                    {t.name || t.item_name || `Trim #${t.id}`}{t.item_code ? ` · ${t.item_code}` : ''}
-                                </option>
-                            ))}
-                        </select>
+                        <SearchableSelect
+                            value={form.trim_item_id ?? ''}
+                            onChange={v => set('trim_item_id', v)}
+                            options={trimItems.map(t => ({ value: t.id, label: `${t.name || t.item_name || `Trim #${t.id}`}${t.item_code ? ` · ${t.item_code}` : ''}` }))}
+                            placeholder="— Select trim —"
+                            className="w-full mt-0.5"
+                            size="sm"
+                            accentColor="amber"
+                        />
                     </div>
                     <div>
                         <label className="text-[9px] font-bold text-slate-400 uppercase">Variant</label>
-                        <select value={form.trim_item_variant_id ?? ''}
-                            onChange={e => set('trim_item_variant_id', e.target.value)}
+                        <SearchableSelect
+                            value={form.trim_item_variant_id ?? ''}
+                            onChange={v => set('trim_item_variant_id', v)}
+                            options={trimVariants.map(v => ({ value: v.id, label: `${v.color_name || v.name || `Variant #${v.id}`}${v.color_number ? ` (${v.color_number})` : ''}` }))}
+                            placeholder={form.trim_item_id ? '— Select variant —' : '— Pick a trim first —'}
                             disabled={!form.trim_item_id}
-                            className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-amber-400 bg-white disabled:bg-slate-100 disabled:text-slate-400">
-                            <option value="">{form.trim_item_id ? '— Select variant —' : '— Pick a trim first —'}</option>
-                            {trimVariants.map(v => (
-                                <option key={v.id} value={v.id}>
-                                    {v.color_name || v.name || `Variant #${v.id}`}{v.color_number ? ` (${v.color_number})` : ''}
-                                </option>
-                            ))}
-                        </select>
+                            className="w-full mt-0.5"
+                            size="sm"
+                            accentColor="amber"
+                        />
                     </div>
                 </div>
             )}

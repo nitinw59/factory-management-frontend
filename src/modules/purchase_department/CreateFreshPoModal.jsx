@@ -6,6 +6,7 @@ import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { trimsApi } from '../../api/trimsApi';
 import api from '../../utils/api';
 import SupplierCodePill from './SupplierCodePill';
+import SearchableSelect from '../../shared/SearchableSelect';
 
 const rk = () => Math.random().toString(36).slice(2);
 
@@ -211,16 +212,13 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Supplier</label>
-                            <select
+                            <SearchableSelect
                                 value={supplierId}
-                                onChange={e => setSupplierId(e.target.value)}
-                                className="w-full mt-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-orange-400 bg-white"
-                            >
-                                <option value="">— None —</option>
-                                {suppliers.map(s => (
-                                    <option key={s.id} value={s.id}>{s.name || s.username || `Supplier #${s.id}`}</option>
-                                ))}
-                            </select>
+                                onChange={v => setSupplierId(v)}
+                                options={suppliers.map(s => ({ value: s.id, label: s.name || s.username || `Supplier #${s.id}` }))}
+                                placeholder="— None —"
+                                className="w-full mt-1"
+                            />
                         </div>
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Expected Delivery</label>
@@ -303,31 +301,25 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                                             <div>
                                                 <label className="text-[9px] font-bold text-slate-400 uppercase">{isFabric ? 'Fabric Type *' : 'Trim Item *'}</label>
                                                 {isFabric ? (
-                                                    <select
+                                                    <SearchableSelect
                                                         value={g.fabric_type_id}
-                                                        onChange={e => setGroupField(gi, 'fabric_type_id', e.target.value)}
-                                                        className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-violet-400 bg-white"
-                                                    >
-                                                        <option value="">— Select fabric type —</option>
-                                                        {fabricTypes.map(t => (
-                                                            <option key={t.id} value={t.id}>
-                                                                {t.name || t.fabric_type_name || `Type #${t.id}`}
-                                                            </option>
-                                                        ))}
-                                                    </select>
+                                                        onChange={v => setGroupField(gi, 'fabric_type_id', v)}
+                                                        options={fabricTypes.map(t => ({ value: t.id, label: t.name || t.fabric_type_name || `Type #${t.id}` }))}
+                                                        placeholder="— Select fabric type —"
+                                                        className="w-full mt-0.5"
+                                                        size="sm"
+                                                        accentColor="violet"
+                                                    />
                                                 ) : (
-                                                    <select
+                                                    <SearchableSelect
                                                         value={g.trim_item_id}
-                                                        onChange={e => setGroupField(gi, 'trim_item_id', e.target.value)}
-                                                        className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-amber-400 bg-white"
-                                                    >
-                                                        <option value="">— Select trim —</option>
-                                                        {trimItems.map(t => (
-                                                            <option key={t.id} value={t.id}>
-                                                                {t.name || t.item_name || `Trim #${t.id}`}{t.item_code ? ` · ${t.item_code}` : ''}
-                                                            </option>
-                                                        ))}
-                                                    </select>
+                                                        onChange={v => setGroupField(gi, 'trim_item_id', v)}
+                                                        options={trimItems.map(t => ({ value: t.id, label: `${t.name || t.item_name || `Trim #${t.id}`}${t.item_code ? ` · ${t.item_code}` : ''}` }))}
+                                                        placeholder="— Select trim —"
+                                                        className="w-full mt-0.5"
+                                                        size="sm"
+                                                        accentColor="amber"
+                                                    />
                                                 )}
                                             </div>
                                             <div>
@@ -377,32 +369,24 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                                                     <div className="flex items-end gap-2">
                                                         <div className="flex-1 min-w-0">
                                                             {isFabric ? (
-                                                                <select
+                                                                <SearchableSelect
                                                                     value={ln.fabric_color_id}
-                                                                    onChange={e => setLineField(gi, li, 'fabric_color_id', e.target.value)}
-                                                                    className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-violet-400 bg-white"
-                                                                >
-                                                                    <option value="">— Color —</option>
-                                                                    {fabricColors.map(c => (
-                                                                        <option key={c.id} value={c.id}>
-                                                                            {c.color_name || c.name || `Color #${c.id}`}{c.color_number ? ` (${c.color_number})` : ''}
-                                                                        </option>
-                                                                    ))}
-                                                                </select>
+                                                                    onChange={v => setLineField(gi, li, 'fabric_color_id', v)}
+                                                                    options={fabricColors.map(c => ({ value: c.id, label: `${c.color_name || c.name || `Color #${c.id}`}${c.color_number ? ` (${c.color_number})` : ''}` }))}
+                                                                    placeholder="— Color —"
+                                                                    size="sm"
+                                                                    accentColor="violet"
+                                                                />
                                                             ) : (
-                                                                <select
+                                                                <SearchableSelect
                                                                     value={ln.trim_item_variant_id}
-                                                                    onChange={e => setLineField(gi, li, 'trim_item_variant_id', e.target.value)}
+                                                                    onChange={v => setLineField(gi, li, 'trim_item_variant_id', v)}
+                                                                    options={variants.map(v => ({ value: v.id, label: `${v.color_name || v.name || `Variant #${v.id}`}${v.color_number ? ` (${v.color_number})` : ''}${v.variant_size ? ` · Sz ${v.variant_size}` : ''}` }))}
+                                                                    placeholder={g.trim_item_id ? '— Variant —' : '— Pick a trim first —'}
                                                                     disabled={!g.trim_item_id}
-                                                                    className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-amber-400 bg-white disabled:bg-slate-100 disabled:text-slate-400"
-                                                                >
-                                                                    <option value="">{g.trim_item_id ? '— Variant —' : '— Pick a trim first —'}</option>
-                                                                    {variants.map(v => (
-                                                                        <option key={v.id} value={v.id}>
-                                                                            {v.color_name || v.name || `Variant #${v.id}`}{v.color_number ? ` (${v.color_number})` : ''}{v.variant_size ? ` · Sz ${v.variant_size}` : ''}
-                                                                        </option>
-                                                                    ))}
-                                                                </select>
+                                                                    size="sm"
+                                                                    accentColor="amber"
+                                                                />
                                                             )}
                                                         </div>
                                                         <div className="w-24 shrink-0">

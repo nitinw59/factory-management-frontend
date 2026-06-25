@@ -78,6 +78,9 @@ const InitialRedirect = () => {
         case 'purchase_manager':
             return <Navigate to="/purchase-department/requirements" replace />;
 
+        case 'job_work_receiver':
+            return <Navigate to="/receiver/dashboard" replace />;
+
         default:
             // If a user has a valid login but their role is not recognized
             // by the application's portals, they are sent to an unauthorized page.

@@ -24,7 +24,7 @@ const DraggableChip = ({ item, type, onDragStart, icon: Icon, colorClass }) => (
 );
 
 // --- COLLAPSIBLE PRODUCTION LINE COMPONENT ---
-const ProductionLine = ({ line, onDragOver, onDrop, onDragLeave, onDragStart, onEditClick, onDeleteClick }) => {
+const ProductionLine = ({ line, onDragOver, onDrop, onDragLeave, onDragStart, onEditClick, onDeleteClick, onToggleJobWork }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [operatorSearch, setOperatorSearch] = useState('');
     
@@ -51,7 +51,6 @@ const ProductionLine = ({ line, onDragOver, onDrop, onDragLeave, onDragStart, on
                          <LuLayoutGrid className="mr-2 text-indigo-500" size={18}/>{line.name}
                      </h2>
 
-                     {/* // Inside ProductionLine component, around line 43: */}
                         {!isExpanded && (
                             <div className="hidden sm:flex items-center gap-2 ml-4 animate-in fade-in duration-300">
                             <span className="bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-md text-xs font-bold border border-emerald-100 flex items-center">
@@ -60,12 +59,9 @@ const ProductionLine = ({ line, onDragOver, onDrop, onDragLeave, onDragStart, on
                             <span className="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-md text-xs font-bold border border-blue-100 flex items-center">
                                 <LuPackage className="mr-1" size={12}/> {line.workstations?.length || 0} Machines
                             </span>
-                            
-                            {/* NEW: Display the WIP Limit */}
                             <span className="bg-amber-50 text-amber-700 px-2.5 py-1 rounded-md text-xs font-bold border border-amber-100 flex items-center" title="Max Active Batches Allowed">
                                 WIP Limit: {line.wip_limit || 5}
                             </span>
-
                             {(line.line_manager_name || line.line_loader_name) && (
                                 <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md text-xs font-bold border border-slate-200">
                                     Assigned: {line.line_manager_name ? 'Mgr' : ''} {line.line_manager_name && line.line_loader_name ? '&' : ''} {line.line_loader_name ? 'Ldr' : ''}
@@ -73,17 +69,34 @@ const ProductionLine = ({ line, onDragOver, onDrop, onDragLeave, onDragStart, on
                             )}
                             </div>
                         )}
+
+                        {line.is_job_work && (
+                            <span className="ml-2 bg-orange-100 text-orange-700 px-2.5 py-1 rounded-md text-xs font-bold border border-orange-200 flex-shrink-0">
+                                External / JW
+                            </span>
+                        )}
                  </div>
                  
                  <div className="flex items-center gap-2 mt-3 sm:mt-0" onClick={(e) => e.stopPropagation()}>
-                    <button 
+                    <button
+                        onClick={() => onToggleJobWork(line)}
+                        className={`px-2.5 py-1 rounded-md text-xs font-bold border transition-colors ${
+                            line.is_job_work
+                                ? 'bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200'
+                                : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                        }`}
+                        title={line.is_job_work ? 'Mark as Internal Line' : 'Mark as Job Work Line'}
+                    >
+                        {line.is_job_work ? 'JW: On' : 'JW: Off'}
+                    </button>
+                    <button
                         onClick={() => onEditClick(line)}
                         className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
                         title="Edit Line"
                     >
                         <LuPencil size={18} />
                     </button>
-                    <button 
+                    <button
                         onClick={() => onDeleteClick(line.id, line.name)}
                         className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
                         title="Delete Line"
@@ -187,12 +200,13 @@ export default function FactoryLayoutPlannerPage() {
     const [isEditing, setIsEditing] = useState(false);
     
     // NEW STATE: Added output_attributes to handle dynamic JSON tracking
-    const [lineFormData, setLineFormData] = useState({ 
-        id: null, 
-        name: '', 
+    const [lineFormData, setLineFormData] = useState({
+        id: null,
+        name: '',
         production_line_type_id: '',
-       output_attributes: ['Total Quantity'],
-        wip_limit: 5 
+        output_attributes: ['Total Quantity'],
+        wip_limit: 5,
+        is_job_work: false,
     });
 
     const [isLoading, setIsLoading] = useState(true);
@@ -226,24 +240,26 @@ export default function FactoryLayoutPlannerPage() {
     // --- LINE CRUD OPERATIONS ---
     const openCreateModal = () => {
         setIsEditing(false);
-        setLineFormData({ 
-            id: null, 
-            name: '', 
+        setLineFormData({
+            id: null,
+            name: '',
             production_line_type_id: '',
-           output_attributes: ['Total Quantity'],
-            wip_limit: 5
+            output_attributes: ['Total Quantity'],
+            wip_limit: 5,
+            is_job_work: false,
         });
         setIsModalOpen(true);
     };
 
     const openEditModal = (line) => {
         setIsEditing(true);
-        setLineFormData({ 
-            id: line.id, 
-            name: line.name, 
+        setLineFormData({
+            id: line.id,
+            name: line.name,
             production_line_type_id: line.production_line_type_id || '',
             output_attributes: line.output_attributes && line.output_attributes.length > 0 ? line.output_attributes : ['Total Quantity'],
-            wip_limit: line.wip_limit !== undefined ? line.wip_limit : 5 // NEW: Load existing limit
+            wip_limit: line.wip_limit !== undefined ? line.wip_limit : 5,
+            is_job_work: line.is_job_work ?? false,
         });
         setIsModalOpen(true);
     };
@@ -278,6 +294,17 @@ export default function FactoryLayoutPlannerPage() {
             alert(error.response?.data?.error || `Failed to ${isEditing ? 'update' : 'create'} line. Please check console.`);
         } finally {
             setIsSaving(false); // Turn off loading state whether it succeeds or fails
+        }
+    };
+
+    const handleToggleJobWork = async (line) => {
+        const newValue = !line.is_job_work;
+        setLines(prev => prev.map(l => l.id === line.id ? { ...l, is_job_work: newValue } : l));
+        try {
+            await productionManagerApi.patchProductionLine(line.id, { is_job_work: newValue });
+        } catch (error) {
+            setLines(prev => prev.map(l => l.id === line.id ? { ...l, is_job_work: line.is_job_work } : l));
+            alert("Failed to update job work status.");
         }
     };
 
@@ -443,10 +470,11 @@ export default function FactoryLayoutPlannerPage() {
                     {/* RIGHT MAIN: Production Lines */}
                     <div className="flex-1 overflow-y-auto pr-2 pb-10 flex flex-col">
                         {lines.map(line => (
-                            <ProductionLine 
-                                key={line.id} line={line} 
+                            <ProductionLine
+                                key={line.id} line={line}
                                 onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} onDragStart={handleDragStart}
                                 onEditClick={openEditModal} onDeleteClick={handleDeleteLine}
+                                onToggleJobWork={handleToggleJobWork}
                             />
                         ))}
                         {lines.length === 0 && <div className="h-full"><Placeholder text="No production lines created yet. Click 'Add New Line' to begin." /></div>}
@@ -499,8 +527,22 @@ export default function FactoryLayoutPlannerPage() {
                                         />
                                         <p className="text-xs text-slate-500 mt-1">Prevents loaders from overloading this line beyond capacity.</p>
                                     </div>
-                                
-                                {/* NEW: Tracked Output Attributes Configuration */}
+
+                                {/* Job Work toggle */}
+                                <label className="flex items-start gap-3 cursor-pointer select-none p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition">
+                                    <input
+                                        type="checkbox"
+                                        className="mt-0.5 accent-amber-500 w-4 h-4 shrink-0"
+                                        checked={lineFormData.is_job_work}
+                                        onChange={e => setLineFormData({ ...lineFormData, is_job_work: e.target.checked })}
+                                    />
+                                    <div>
+                                        <div className="text-sm font-bold text-slate-700">External / Job Work Line</div>
+                                        <div className="text-xs text-slate-500 mt-0.5">Garments on this line are sent to a third-party vendor. Enables challan generation in Job Work Dashboard.</div>
+                                    </div>
+                                </label>
+
+                                {/* Tracked Output Attributes Configuration */}
                                 <div>
                                     <label className="block text-sm font-bold text-slate-700 mb-1">Tracked Output Attributes</label>
                                     <p className="text-xs text-slate-500 mb-2">Press comma (,) or Enter to add a new tracking metric.</p>

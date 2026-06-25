@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     Loader2, BookOpen, Filter, ChevronLeft, ChevronRight,
-    AlertTriangle, TrendingUp, TrendingDown, Search,
+    AlertTriangle, TrendingUp, TrendingDown,
 } from 'lucide-react';
 import { trimsApi } from '../../api/trimsApi';
+import SearchableSelect from '../../shared/SearchableSelect';
 
 // ── Source kind styling ──────────────────────────────────────────────────────
 const SOURCE_CFG = {
@@ -35,7 +36,6 @@ export default function TrimsLedgerPage() {
     const [trimItems, setTrimItems] = useState([]);
     const [trimItemsLoading, setTrimItemsLoading] = useState(true);
     const [selectedItemId, setSelectedItemId] = useState('');
-    const [itemSearch, setItemSearch] = useState('');
 
     const [variants, setVariants] = useState([]);
     const [variantsLoading, setVariantsLoading] = useState(false);
@@ -102,16 +102,6 @@ export default function TrimsLedgerPage() {
         return [...seen];
     }, [rows]);
 
-    // Trim-item dropdown search
-    const filteredTrimItems = useMemo(() => {
-        const q = itemSearch.trim().toLowerCase();
-        if (!q) return trimItems;
-        return trimItems.filter(t =>
-            (t.name || t.item_name || '').toLowerCase().includes(q) ||
-            (t.item_code || '').toLowerCase().includes(q)
-        );
-    }, [trimItems, itemSearch]);
-
     const selectedItem    = trimItems.find(t => String(t.id) === String(selectedItemId));
     const selectedVariant = variants.find(v => String(v.id) === String(selectedVariantId));
 
@@ -154,60 +144,43 @@ export default function TrimsLedgerPage() {
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_200px] gap-3">
                 <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Trim Item *</label>
-                    <div className="relative mt-1">
-                        <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <input
-                            type="text"
-                            placeholder="Search trim items…"
-                            value={itemSearch}
-                            onChange={e => setItemSearch(e.target.value)}
-                            className="w-full text-xs border border-slate-200 rounded-lg pl-7 pr-2 py-1.5 focus:outline-none focus:border-orange-400"
-                        />
-                    </div>
-                    <select
+                    <SearchableSelect
                         value={selectedItemId}
-                        onChange={e => setSelectedItemId(e.target.value)}
+                        onChange={v => setSelectedItemId(v)}
+                        options={trimItems.map(t => ({ value: t.id, label: `${t.name || t.item_name || `Trim #${t.id}`}${t.item_code ? ` · ${t.item_code}` : ''}` }))}
+                        placeholder={trimItemsLoading ? 'Loading…' : '— Select trim item —'}
                         disabled={trimItemsLoading}
-                        className="w-full mt-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-orange-400 bg-white"
-                    >
-                        <option value="">— Select trim item —</option>
-                        {filteredTrimItems.map(t => (
-                            <option key={t.id} value={t.id}>
-                                {t.name || t.item_name || `Trim #${t.id}`}{t.item_code ? ` · ${t.item_code}` : ''}
-                            </option>
-                        ))}
-                    </select>
+                        className="w-full mt-1"
+                    />
                 </div>
                 <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Variant (optional)</label>
-                    <select
+                    <SearchableSelect
                         value={selectedVariantId}
-                        onChange={e => setSelectedVariantId(e.target.value)}
+                        onChange={v => setSelectedVariantId(v)}
+                        options={[
+                            { value: '', label: selectedItemId ? 'All variants' : '— Pick a trim first —' },
+                            ...variants.map(v => ({ value: v.id, label: `${v.color_number ? `${v.color_number} · ` : ''}${v.color_name || v.name || `Variant #${v.id}`}${v.variant_size ? ` · Sz ${v.variant_size}` : ''}` })),
+                        ]}
+                        placeholder={selectedItemId ? 'All variants' : '— Pick a trim first —'}
                         disabled={!selectedItemId || variantsLoading}
-                        className="w-full mt-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-orange-400 bg-white disabled:bg-slate-100 disabled:text-slate-400"
-                    >
-                        <option value="">{selectedItemId ? 'All variants' : '— Pick a trim first —'}</option>
-                        {variants.map(v => (
-                            <option key={v.id} value={v.id}>
-                                {v.color_number ? `${v.color_number} · ` : ''}{v.color_name || v.name || `Variant #${v.id}`}{v.variant_size ? ` · Sz ${v.variant_size}` : ''}
-                            </option>
-                        ))}
-                    </select>
+                        className="w-full mt-1"
+                    />
                 </div>
                 <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                         <Filter size={11} /> Source
                     </label>
-                    <select
+                    <SearchableSelect
                         value={sourceKind}
-                        onChange={e => setSourceKind(e.target.value)}
-                        className="w-full mt-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-orange-400 bg-white"
-                    >
-                        <option value="">All sources</option>
-                        {sourceKindOptions.map(k => (
-                            <option key={k} value={k}>{sourceCfg(k).label}</option>
-                        ))}
-                    </select>
+                        onChange={v => setSourceKind(v)}
+                        options={[
+                            { value: '', label: 'All sources' },
+                            ...sourceKindOptions.map(k => ({ value: k, label: sourceCfg(k).label })),
+                        ]}
+                        placeholder="All sources"
+                        className="w-full mt-1"
+                    />
                 </div>
             </div>
 

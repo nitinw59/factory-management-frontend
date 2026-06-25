@@ -27,4 +27,6 @@ export const lineLoaderApi = {
   getAllActiveLineWip: () => api.get('/line-loader/active-lines-wip'),
   checkAndCompleteStage: (batchId, productionLineId) => api.post(`/line-loader/batch/${batchId}/stage/${productionLineId}/check-complete`),
   getCompletedBatches: () => api.get('/line-loader/completed-batches'),
+  changeLine: (batchId, cycleFlowId, newLineId) =>
+    api.post(`/line-loader/batch/${batchId}/stage/${cycleFlowId}/change-line`, { newLineId }),
 };

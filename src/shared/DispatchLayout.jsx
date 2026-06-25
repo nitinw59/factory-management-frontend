@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import MatrixBrand from './MatrixBrand';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LuLogOut, LuClipboardCheck, LuTruck, LuMenu, LuX, LuArchive } from 'react-icons/lu';
+import { LuLogOut, LuClipboardCheck, LuTruck, LuMenu, LuX, LuArchive, LuFactory } from 'react-icons/lu';
 
 export const DispatchLayout = () => {
     const { logout } = useAuth();
@@ -35,12 +35,19 @@ export const DispatchLayout = () => {
                                 <LuClipboardCheck className="mr-1.5" size={18} />
                                 Dispatch Queue
                             </NavLink>
-                            <NavLink 
-                                to="/dispatch-portal/receipts" 
+                            <NavLink
+                                to="/dispatch-portal/receipts"
                                 className={({ isActive }) => `flex items-center text-sm font-medium transition-colors ${isActive ? 'text-blue-600' : 'text-slate-600 hover:text-blue-600'}`}
                             >
                                 <LuArchive className="mr-1.5" size={18} />
                                 Dispatch Receipts
+                            </NavLink>
+                            <NavLink
+                                to="/dispatch-portal/job-work"
+                                className={({ isActive }) => `flex items-center text-sm font-medium transition-colors ${isActive ? 'text-blue-600' : 'text-slate-600 hover:text-blue-600'}`}
+                            >
+                                <LuFactory className="mr-1.5" size={18} />
+                                Job Work
                             </NavLink>
                         </nav>
 
@@ -76,13 +83,21 @@ export const DispatchLayout = () => {
                                 <LuClipboardCheck className="mr-3" size={18} />
                                 Dispatch Queue
                             </NavLink>
-                            <NavLink 
-                                to="/dispatch-portal/receipts" 
+                            <NavLink
+                                to="/dispatch-portal/receipts"
                                 onClick={closeMobileMenu}
                                 className={({ isActive }) => `flex items-center px-4 py-3 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-blue-50 text-blue-600' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'}`}
                             >
                                 <LuArchive className="mr-3" size={18} />
                                 Dispatch Receipts
+                            </NavLink>
+                            <NavLink
+                                to="/dispatch-portal/job-work"
+                                onClick={closeMobileMenu}
+                                className={({ isActive }) => `flex items-center px-4 py-3 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-blue-50 text-blue-600' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'}`}
+                            >
+                                <LuFactory className="mr-3" size={18} />
+                                Job Work
                             </NavLink>
                         </nav>
                         

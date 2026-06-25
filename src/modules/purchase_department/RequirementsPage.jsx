@@ -7,6 +7,7 @@ import {
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import api from '../../utils/api';
 import PoDetailModal from './PoDetailModal';
+import SearchableSelect from '../../shared/SearchableSelect';
 
 const URGENCY_CFG = {
     urgent: { cls: 'bg-red-100 text-red-700 border-red-200',         dot: 'bg-red-500',     label: 'Urgent' },
@@ -400,16 +401,13 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
                     {/* Supplier */}
                     <div>
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Supplier *</label>
-                        <select
+                        <SearchableSelect
                             value={supplierId}
-                            onChange={e => setSupplierID(e.target.value)}
-                            className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400 bg-white"
-                        >
-                            <option value="">— Select supplier —</option>
-                            {suppliers.map(s => (
-                                <option key={s.id} value={s.id}>{s.name || s.username || `Supplier #${s.id}`}</option>
-                            ))}
-                        </select>
+                            onChange={v => setSupplierID(v)}
+                            options={suppliers.map(s => ({ value: s.id, label: s.name || s.username || `Supplier #${s.id}` }))}
+                            placeholder="— Select supplier —"
+                            className="w-full"
+                        />
                     </div>
 
                     {/* Expected delivery date */}

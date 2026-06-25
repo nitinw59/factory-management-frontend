@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { initializationPortalApi } from '../../api/initializationPortalApi';
+import { accountingApi } from '../../api/accountingApi';
 
 const Spinner = () => (
     <div className="flex justify-center p-8">
@@ -238,12 +239,7 @@ const CreateProductionBatchForm = () => {
     const [sopContext,      setSopContext]       = useState(null);
     const [ratiosAutoFilled, setRatiosAutoFilled] = useState(false);
 
-    const SIZES = useMemo(() => [
-        { key: '28', value: '28' }, { key: '30', value: '30' }, { key: '32', value: '32' },
-        { key: '34', value: '34' }, { key: '36', value: '36' }, { key: '38', value: '38' },
-        { key: '40', value: '40' }, { key: '42', value: '42' }, { key: '44', value: '44' },
-    ], []);
-    const [sizeRatios, setSizeRatios] = useState(SIZES.map(s => ({ size: s.key, ratio: '' })));
+    const [sizeRatios, setSizeRatios] = useState([]);
 
     const [selectedShellRolls, setSelectedShellRolls] = useState([]);
 
@@ -269,11 +265,24 @@ const CreateProductionBatchForm = () => {
             setIsLoading(true);
             setError(null);
             try {
-                const [typesRes, colorsRes, templatesRes] = await Promise.all([
+                const [typesRes, colorsRes, templatesRes, sizesRes] = await Promise.all([
                     productionManagerApi.getFabricTypes(),
                     productionManagerApi.getFabricColors(),
                     initializationPortalApi.getInterliningTemplates(),
+                    accountingApi.getSizes(),
                 ]);
+                const SIZE_SORT_ORDER = [
+                    'XXS','XS','S','M','L','XL','XXL','2XL','3XL','4XL','5XL','6XL',
+                    '24','26','28','30','32','34','36','38','40','42','44','46','48','50',
+                ];
+                const apiSizes = (sizesRes.data || []).sort((a, b) => {
+                    const iA = SIZE_SORT_ORDER.indexOf(a.name);
+                    const iB = SIZE_SORT_ORDER.indexOf(b.name);
+                    if (iA !== -1 && iB !== -1) return iA - iB;
+                    if (iA !== -1) return -1;
+                    if (iB !== -1) return 1;
+                    return a.name.localeCompare(b.name, undefined, { numeric: true });
+                });
 
                 const commonOptions = {
                     fabricTypes:  typesRes.data  || [],
@@ -298,11 +307,11 @@ const CreateProductionBatchForm = () => {
                     if (notesMatch) setPlannedCutQty(notesMatch[1]);
                     if (data.batchDetails.interlining_template_id) setInterliningConfirmed(true);
 
-                    const initialRatios = SIZES.map(s => {
-                        const found = (data.size_ratios || []).find(r => r.size === s.value);
-                        return { size: s.key, ratio: found ? found.ratio : '' };
-                    });
-                    setSizeRatios(initialRatios);
+                    const savedRatios = data.size_ratios || [];
+                    setSizeRatios(apiSizes.map(s => {
+                        const found = savedRatios.find(r => String(r.size) === String(s.name));
+                        return { size: s.name, ratio: found ? String(found.ratio) : '' };
+                    }));
 
                     const available   = data.available_rolls   || [];
                     const assignedIds = data.assigned_roll_ids || [];
@@ -333,15 +342,15 @@ const CreateProductionBatchForm = () => {
                     // Auto-fill size ratios from suggestion
                     const suggested = fd.suggested_size_ratios || [];
                     if (suggested.length > 0) {
-                        const newRatios = SIZES.map(s => {
-                            const found = suggested.find(r => String(r.size) === String(s.key));
-                            return { size: s.key, ratio: found ? String(found.ratio) : '' };
+                        const newRatios = apiSizes.map(s => {
+                            const found = suggested.find(r => String(r.size) === String(s.name));
+                            return { size: s.name, ratio: found ? String(found.ratio) : '' };
                         });
                         const hasAny = newRatios.some(r => r.ratio !== '');
                         setSizeRatios(newRatios);
                         setRatiosAutoFilled(hasAny);
                     } else {
-                        setSizeRatios(SIZES.map(s => ({ size: s.key, ratio: '' })));
+                        setSizeRatios(apiSizes.map(s => ({ size: s.name, ratio: '' })));
                         setRatiosAutoFilled(false);
                     }
 
@@ -366,7 +375,7 @@ const CreateProductionBatchForm = () => {
             } finally { setIsLoading(false); }
         };
         loadData();
-    }, [batchId, isEditMode, SIZES, prefillSalesOrderId, prefillSalesOrderProductId, prefillFabricRollId]);
+    }, [batchId, isEditMode, prefillSalesOrderId, prefillSalesOrderProductId, prefillFabricRollId]);
 
     // ── 3. Derived values ─────────────────────────────────────────────────
     const productIsLocked     = !isEditMode && !!sopContext?.sales_order_product;

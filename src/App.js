@@ -101,7 +101,6 @@ import ProductionCapacityDashboard from './modules/production/ProductionCapacity
 import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
 import CuttingDailyReportPage from './modules/initialisation_portal/CuttingDailyReportPage';
 import InterliningManagerPage from './modules/initialisation_portal/InterliningManagerPage';
-import PlanPurchaseRequirementsPage from './modules/accounts/purchase/PlanPurchaseRequirementsPage';
 import FabricRollManagementPage from './modules/accounts/purchase/FabricIntakeForm';
 
 import MechanicsLayout from './shared/MechanicsLayout';
@@ -121,6 +120,8 @@ import DispatchLayout from './shared/DispatchLayout';
 import DispatchProtectedRoute from './shared/DispatchProtectedRoute';
 import DispatchDashboardPage from './modules/depatch_portal/DispatchDashboardPage';
 import DispatchReceiptsPage from './modules/depatch_portal/DispatchReceiptsPage';
+import DispatchJobWorkPage from './modules/depatch_portal/DispatchJobWorkPage';
+import AccountsJobWorkPage from './modules/accounts/JobWorkPage';
 
 import SparesIssuanceDashboard from './modules/store_manager/SparesIssuanceDashboard';
 
@@ -160,6 +161,10 @@ import ProductionTargetPage from './modules/production/ProductionTargetPage';
 import ScoreboardPage from './modules/production/ScoreboardPage';
 import ScorecardDetailedPage from './modules/production/ScorecardDetailedPage';
 import BomApprovalPage from './modules/production/BomApprovalPage';
+import JobWorkDashboardPage from './modules/production_manager/JobWorkDashboardPage';
+import ReceiverProtectedRoute from './shared/ReceiverProtectedRoute';
+import ReceiverLayout from './shared/ReceiverLayout';
+import ReceiverDashboardPage from './modules/receiver/ReceiverDashboardPage';
 
 import AdminLineConfigPage from './modules/asset/AdminLineConfigPage';
 
@@ -281,6 +286,7 @@ function App() {
           <Route path="scorecard" element={<ScoreboardPage />} />
           <Route path="scorecard-detailed" element={<ScorecardDetailedPage />} />
           <Route path="bom-approvals" element={<BomApprovalPage />} />
+          <Route path="job-work" element={<JobWorkDashboardPage />} />
 
         </Route>
       </Route>
@@ -294,14 +300,13 @@ function App() {
             <Route path="sales/new" element={<CreateSalesOrder />} />
             <Route path="sales/:orderId/edit" element={<CreateSalesOrder />} />
             <Route path="sales/orders" element={<SalesOrderListPage />} />
-            <Route path="purchase-requirements" element={<PlanPurchaseRequirementsPage />} />
             <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
             {/* Purchase Department pages rendered inside AccountsLayout */}
-            <Route path="purchase/requirements" element={<RequirementsPage />} />
             <Route path="purchase/orders" element={<OrdersPage />} />
             <Route path="purchase/orders/:id" element={<PurchaseFlowPage />} />
             <Route path="purchase/trims-ledger" element={<TrimsLedgerPage />} />
             <Route path="purchase/supplier-color-codes" element={<SupplierColorCodesPage />} />
+            <Route path="job-work" element={<AccountsJobWorkPage />} />
         </Route>
 
       <Route path="/cutting-portal" element={<CuttingOperatorProtectedRoute><CuttingPortalLayout /></CuttingOperatorProtectedRoute>}>
@@ -422,7 +427,7 @@ function App() {
         <Route index element={<DispatchDashboardPage />} />
         <Route path="dashboard" element={<DispatchDashboardPage />} />
         <Route path="receipts" element={<DispatchReceiptsPage />} />
-        {/* Add more dispatch operator specific routes here later */}
+        <Route path="job-work" element={<DispatchJobWorkPage />} />
     </Route>
 
 
@@ -463,6 +468,12 @@ function App() {
         <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
         <Route path="trims-ledger" element={<TrimsLedgerPage />} />
         <Route path="supplier-color-codes" element={<SupplierColorCodesPage />} />
+    </Route>
+
+    {/* Receiver Portal */}
+    <Route path="/receiver" element={<ReceiverProtectedRoute><ReceiverLayout /></ReceiverProtectedRoute>}>
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<ReceiverDashboardPage />} />
     </Route>
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}

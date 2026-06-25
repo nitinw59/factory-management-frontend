@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Plus, Trash2, Save, Palette, Loader2, AlertCircle, AlertTriangle, CheckCircle2, DollarSign, X, ClipboardCheck, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Trash2, Save, Palette, Loader2, AlertCircle, AlertTriangle, CheckCircle2, DollarSign, X, ClipboardCheck, ChevronDown, ChevronRight, Paperclip, FileText, Copy } from 'lucide-react';
 import { accountingApi } from '../../../api/accountingApi';
 
 const skippedLabel = (entry) => {
@@ -12,6 +12,12 @@ const skippedLabel = (entry) => {
     default:
       return `Product (SOP #${entry?.sales_order_product_id ?? '?'}) couldn't be removed.`;
   }
+};
+
+const formatFileSize = (bytes) => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 const freshColor = () => ({ colorId: '', price: '', sizes: {} });
@@ -37,6 +43,11 @@ const CreateSalesOrder = () => {
   const [showReview, setShowReview] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState(() => new Set([0]));
   const [originalSopsById, setOriginalSopsById] = useState(() => new Map());
+  const [stagedFiles, setStagedFiles] = useState([]);
+  const [existingAttachments, setExistingAttachments] = useState([]);
+  const fileInputRef = useRef(null);
+  // copySizesPanel: { gIndex, sizes: { [sizeId]: qty } } | null
+  const [copySizesPanel, setCopySizesPanel] = useState(null);
 
   const loadOrderForEdit = useCallback(async ({ silent = false } = {}) => {
     if (silent) setReloading(true);
@@ -108,6 +119,7 @@ const CreateSalesOrder = () => {
         setOriginalSopsById(new Map(
           groups.filter(g => g.salesOrderProductId).map(g => [g.salesOrderProductId, { productId: g.productId }])
         ));
+        setExistingAttachments(so.attachments || []);
       } else if (!isEditMode) {
         const year = new Date().getFullYear();
         const randomStr = Math.floor(1000 + Math.random() * 9000);
@@ -123,6 +135,54 @@ const CreateSalesOrder = () => {
   }, [orderId, isEditMode]);
 
   useEffect(() => { loadOrderForEdit(); }, [loadOrderForEdit]);
+
+  // --- Copy-sizes-to-all-colors handlers ---
+  const openCopySizesPanel = (gIndex) => {
+    const group = productGroups[gIndex];
+    const seed = group.colors.find(c => Object.keys(c.sizes).length > 0);
+    setCopySizesPanel({ gIndex, sizes: seed ? { ...seed.sizes } : {} });
+  };
+
+  const addSizeToCopyTemplate = (sizeId) => {
+    setCopySizesPanel(prev => ({ ...prev, sizes: { ...prev.sizes, [String(sizeId)]: 0 } }));
+  };
+
+  const updateCopyTemplateSizeQty = (sizeId, qty) => {
+    setCopySizesPanel(prev => ({ ...prev, sizes: { ...prev.sizes, [String(sizeId)]: parseInt(qty) || 0 } }));
+  };
+
+  const removeSizeFromCopyTemplate = (sizeId) => {
+    setCopySizesPanel(prev => {
+      const { [String(sizeId)]: _, ...rest } = prev.sizes;
+      return { ...prev, sizes: rest };
+    });
+  };
+
+  const applyCopySizesToAllColors = () => {
+    const { gIndex, sizes } = copySizesPanel;
+    const newGroups = [...productGroups];
+    newGroups[gIndex] = {
+      ...newGroups[gIndex],
+      colors: newGroups[gIndex].colors.map(c => ({ ...c, sizes: { ...sizes } })),
+    };
+    setProductGroups(newGroups);
+    setCopySizesPanel(null);
+  };
+
+  // --- File handlers ---
+  const handleFilesSelected = (fileList) => {
+    const incoming = Array.from(fileList);
+    setStagedFiles(prev => [...prev, ...incoming]);
+  };
+
+  const removeStagedFile = (index) => {
+    setStagedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    handleFilesSelected(e.dataTransfer.files);
+  };
 
   // --- Helpers ---
   const colorTotal = (color) =>
@@ -260,6 +320,17 @@ const CreateSalesOrder = () => {
         : await accountingApi.createSalesOrder(payload);
       const body = res?.data || {};
       const skipped = body.skipped_product_removals ?? [];
+
+      const soId = isEditMode ? orderId : body.orderId;
+      if (stagedFiles.length > 0 && soId) {
+        try {
+          await accountingApi.uploadSalesOrderAttachments(String(soId), stagedFiles);
+          setStagedFiles([]);
+        } catch (uploadErr) {
+          console.warn('[CreateSalesOrder] File upload failed after SO save:', uploadErr);
+        }
+      }
+
       if (isEditMode) {
         setSuccess(body.message || 'Sales order updated.');
         setSkippedRemovals(skipped);
@@ -392,6 +463,74 @@ const CreateSalesOrder = () => {
               onChange={e => setHeader({ ...header, notes: e.target.value })}
             />
           </details>
+
+          {/* Supporting documents */}
+          <div className="mt-4">
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+              Supporting Documents
+            </label>
+
+            {existingAttachments.length > 0 && (
+              <div className="mb-3 space-y-1.5">
+                {existingAttachments.map((att) => (
+                  <div key={att.id} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                    <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                    <a
+                      href={att.file_url || att.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-blue-600 hover:underline flex-1 truncate"
+                    >
+                      {att.original_filename || att.filename || att.name}
+                    </a>
+                    {att.file_size != null && (
+                      <span className="text-xs text-slate-400 shrink-0">{formatFileSize(att.file_size)}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div
+              onDrop={handleDrop}
+              onDragOver={e => e.preventDefault()}
+              onDragEnter={e => e.preventDefault()}
+              onClick={() => fileInputRef.current?.click()}
+              className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/40 transition-colors select-none"
+            >
+              <Paperclip className="w-5 h-5 text-slate-400 mx-auto mb-1" />
+              <p className="text-sm text-slate-500">
+                Drop files here or <span className="text-blue-600 font-semibold">browse</span>
+              </p>
+              <p className="text-xs text-slate-400 mt-0.5">PDF, Excel, Word, images — any type</p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={e => { handleFilesSelected(e.target.files); e.target.value = ''; }}
+              />
+            </div>
+
+            {stagedFiles.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {stagedFiles.map((file, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                    <FileText className="w-4 h-4 text-blue-400 shrink-0" />
+                    <span className="text-sm text-slate-700 flex-1 truncate">{file.name}</span>
+                    <span className="text-xs text-slate-400 shrink-0">{formatFileSize(file.size)}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeStagedFile(i)}
+                      className="text-slate-400 hover:text-red-500 transition-colors ml-1"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Products heading */}
@@ -489,14 +628,99 @@ const CreateSalesOrder = () => {
                       <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                         <Palette size={13} className="text-indigo-500" /> Colors & Sizes
                       </label>
-                      <button
-                        type="button"
-                        onClick={() => addColorToGroup(gIndex)}
-                        className="text-sm font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 px-2 py-1 rounded hover:bg-blue-50"
-                      >
-                        <Plus size={14} /> Add color
-                      </button>
+                      <div className="flex items-center gap-1">
+                        {group.colors.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => openCopySizesPanel(gIndex)}
+                            className="text-sm font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 px-2 py-1 rounded hover:bg-indigo-50"
+                            title="Set the same sizes & quantities on every color at once"
+                          >
+                            <Copy size={13} /> Set sizes for all
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => addColorToGroup(gIndex)}
+                          className="text-sm font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 px-2 py-1 rounded hover:bg-blue-50"
+                        >
+                          <Plus size={14} /> Add color
+                        </button>
+                      </div>
                     </div>
+
+                    {/* Copy-sizes inline panel */}
+                    {copySizesPanel?.gIndex === gIndex && (
+                      <div className="mb-3 bg-indigo-50 border border-indigo-200 rounded-xl p-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-bold text-indigo-700 uppercase tracking-wider">
+                            Size template — apply to all {group.colors.length} colors
+                          </p>
+                          <button type="button" onClick={() => setCopySizesPanel(null)} className="text-indigo-400 hover:text-indigo-700 transition-colors">
+                            <X size={14} />
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 items-center">
+                          {Object.entries(copySizesPanel.sizes).map(([sizeId, qty]) => {
+                            const sizeName = options.sizes.find(s => String(s.id) === sizeId)?.name ?? sizeId;
+                            return (
+                              <div key={sizeId} className="flex items-center gap-1.5 bg-white border border-indigo-300 rounded-lg px-2.5 py-1.5 shadow-sm">
+                                <span className="text-xs font-bold text-indigo-700 min-w-[2rem] text-center shrink-0">{sizeName}</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  className="w-16 text-sm text-center border border-indigo-200 rounded px-1 py-0.5 font-bold text-slate-700 outline-none focus:border-indigo-500 bg-white"
+                                  placeholder="0"
+                                  value={qty === 0 ? '' : qty}
+                                  onChange={e => updateCopyTemplateSizeQty(sizeId, e.target.value)}
+                                />
+                                <button type="button" onClick={() => removeSizeFromCopyTemplate(sizeId)} className="text-indigo-300 hover:text-red-500 transition ml-0.5">
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            );
+                          })}
+                          {options.sizes.filter(s => !(String(s.id) in copySizesPanel.sizes)).length > 0 && (
+                            <select
+                              value=""
+                              onChange={e => { if (e.target.value) addSizeToCopyTemplate(e.target.value); }}
+                              className="text-sm border border-dashed border-indigo-300 rounded-lg px-3 py-1.5 text-indigo-500 bg-white cursor-pointer outline-none hover:border-indigo-500 transition"
+                            >
+                              <option value="">+ Add size</option>
+                              {options.sizes.filter(s => !(String(s.id) in copySizesPanel.sizes)).map(s => (
+                                <option key={s.id} value={s.id}>{s.name}</option>
+                              ))}
+                            </select>
+                          )}
+                          {options.sizes.length === 0 && Object.keys(copySizesPanel.sizes).length === 0 && (
+                            <p className="text-xs text-indigo-400 italic">No sizes configured yet.</p>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1">
+                          <p className="text-[11px] text-indigo-400">Overwrites existing sizes on all colors in this product line.</p>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setCopySizesPanel(null)}
+                              className="text-xs font-bold px-3 py-1.5 rounded-lg text-indigo-600 hover:bg-indigo-100 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={applyCopySizesToAllColors}
+                              disabled={Object.keys(copySizesPanel.sizes).length === 0}
+                              className="text-xs font-bold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            >
+                              Apply to all {group.colors.length} colors
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="space-y-3">
                       {group.colors.map((color, cIndex) => {
                         const cTotal = colorTotal(color);
@@ -610,6 +834,15 @@ const CreateSalesOrder = () => {
             <span><strong className="text-slate-800 tabular-nums">{totalPieces.toLocaleString()}</strong> pcs</span>
             <span className="text-slate-300">·</span>
             <span className="flex items-center"><DollarSign size={14} className="text-slate-500" /><strong className="text-slate-800 tabular-nums">{grandTotal}</strong></span>
+            {stagedFiles.length > 0 && (
+              <>
+                <span className="text-slate-300">·</span>
+                <span className="flex items-center gap-1">
+                  <Paperclip size={13} className="text-slate-500" />
+                  <strong className="text-slate-800">{stagedFiles.length}</strong>
+                </span>
+              </>
+            )}
           </div>
           <button
             type="button"
@@ -757,6 +990,24 @@ const CreateSalesOrder = () => {
                     <p className="text-xs text-red-600 italic mt-2">
                       Note: products with linked BOMs or in-progress production will be retained by the backend.
                     </p>
+                  </div>
+                )}
+
+                {/* Attachments */}
+                {stagedFiles.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                      Attachments · {stagedFiles.length}
+                    </p>
+                    <div className="space-y-1.5">
+                      {stagedFiles.map((f, i) => (
+                        <div key={i} className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                          <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                          <span className="text-sm text-slate-700 flex-1 truncate">{f.name}</span>
+                          <span className="text-xs text-slate-400 shrink-0">{formatFileSize(f.size)}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 

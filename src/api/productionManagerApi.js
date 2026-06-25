@@ -47,6 +47,7 @@ export const productionManagerApi = {
   getProductionLineById: (id) => api.get(`/shared/production-lines/${id}`), // Fetch single for editing
   createProductionLine: (data) => api.post('/shared/production-lines/production-lines', data),
   updateProductionLine: (id, data) => api.put(`/shared/production-lines/production-lines/${id}`, data),
+  patchProductionLine: (id, fields) => api.patch(`/shared/production-lines/production-lines/${id}`, fields),
   deleteProductionLine: (id) => api.delete(`/shared/production-lines/production-lines/${id}`),
 
   // --- NEW: Functions to fetch data for the Production Line Form ---

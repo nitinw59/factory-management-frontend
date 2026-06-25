@@ -5,6 +5,7 @@ import {
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { trimsApi } from '../../api/trimsApi';
 import api, { IMAGE_BASE_URL } from '../../utils/api';
+import SearchableSelect from '../../shared/SearchableSelect';
 
 const TYPE_ICON = { fabric: Package, trim: Scissors, other: Tag };
 
@@ -1084,21 +1085,25 @@ export default function InwardModal({
                                                         {/* Shared header fields */}
                                                         <div className="grid grid-cols-[1fr_70px_90px] gap-1.5 mb-2">
                                                             {isFabric ? (
-                                                                <select value={g.fabric_type_id}
-                                                                    onChange={e => setCustomGroupField(g._k, 'fabric_type_id', e.target.value)}
+                                                                <SearchableSelect
+                                                                    value={g.fabric_type_id}
+                                                                    onChange={v => setCustomGroupField(g._k, 'fabric_type_id', v)}
+                                                                    options={fabricTypes.map(t => ({ value: t.id, label: t.name || t.fabric_type_name || `Type #${t.id}` }))}
+                                                                    placeholder="— Fabric type —"
                                                                     disabled={!editable}
-                                                                    className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white">
-                                                                    <option value="">— Fabric type —</option>
-                                                                    {fabricTypes.map(t => <option key={t.id} value={t.id}>{t.name || t.fabric_type_name || `Type #${t.id}`}</option>)}
-                                                                </select>
+                                                                    size="xs"
+                                                                    accentColor="violet"
+                                                                />
                                                             ) : (
-                                                                <select value={g.trim_item_id}
-                                                                    onChange={e => setCustomGroupField(g._k, 'trim_item_id', e.target.value)}
+                                                                <SearchableSelect
+                                                                    value={g.trim_item_id}
+                                                                    onChange={v => setCustomGroupField(g._k, 'trim_item_id', v)}
+                                                                    options={trimItems.map(t => ({ value: t.id, label: `${t.name || t.item_name || `Trim #${t.id}`}${t.item_code ? ` · ${t.item_code}` : ''}` }))}
+                                                                    placeholder="— Trim item —"
                                                                     disabled={!editable}
-                                                                    className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white">
-                                                                    <option value="">— Trim item —</option>
-                                                                    {trimItems.map(t => <option key={t.id} value={t.id}>{t.name || t.item_name || `Trim #${t.id}`}{t.item_code ? ` · ${t.item_code}` : ''}</option>)}
-                                                                </select>
+                                                                    size="xs"
+                                                                    accentColor="amber"
+                                                                />
                                                             )}
                                                             <input type="text" placeholder="UOM"
                                                                 value={g.uom}
@@ -1135,13 +1140,16 @@ export default function InwardModal({
                                                                     {isFabric ? (
                                                                         <>
                                                                             <div className="flex items-center gap-2 mb-1">
-                                                                                <select value={ln.fabric_color_id}
-                                                                                    onChange={e => setCustomLineField(g._k, ln._k, 'fabric_color_id', e.target.value)}
+                                                                                <SearchableSelect
+                                                                                    value={ln.fabric_color_id}
+                                                                                    onChange={v => setCustomLineField(g._k, ln._k, 'fabric_color_id', v)}
+                                                                                    options={fabricColors.map(co => ({ value: co.id, label: `${co.color_number ? `${co.color_number} · ` : ''}${co.color_name || `Color #${co.id}`}` }))}
+                                                                                    placeholder="— Color —"
                                                                                     disabled={!editable}
-                                                                                    className="flex-1 text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white">
-                                                                                    <option value="">— Color —</option>
-                                                                                    {fabricColors.map(co => <option key={co.id} value={co.id}>{co.color_number ? `${co.color_number} · ` : ''}{co.color_name || `Color #${co.id}`}</option>)}
-                                                                                </select>
+                                                                                    className="flex-1 min-w-0"
+                                                                                    size="xs"
+                                                                                    accentColor="violet"
+                                                                                />
                                                                                 {editable && g.lines.length > 1 && (
                                                                                     <button onClick={() => removeCustomLine(g._k, ln._k)} title="Remove line"
                                                                                         className="p-1 text-slate-300 hover:text-red-500 transition">
@@ -1188,13 +1196,16 @@ export default function InwardModal({
                                                                         </>
                                                                     ) : (
                                                                         <div className="flex items-center gap-2">
-                                                                            <select value={ln.trim_item_variant_id}
-                                                                                onChange={e => setCustomLineField(g._k, ln._k, 'trim_item_variant_id', e.target.value)}
+                                                                            <SearchableSelect
+                                                                                value={ln.trim_item_variant_id}
+                                                                                onChange={v => setCustomLineField(g._k, ln._k, 'trim_item_variant_id', v)}
+                                                                                options={variants.map(v => ({ value: v.id, label: `${v.color_number ? `${v.color_number} · ` : ''}${v.color_name || v.name || `Variant #${v.id}`}${v.variant_size ? ` · Sz ${v.variant_size}` : ''}` }))}
+                                                                                placeholder={g.trim_item_id ? '— Variant —' : '— Pick trim first —'}
                                                                                 disabled={!editable || !g.trim_item_id}
-                                                                                className="flex-1 text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white disabled:bg-slate-100 disabled:text-slate-400">
-                                                                                <option value="">{g.trim_item_id ? '— Variant —' : '— Pick trim first —'}</option>
-                                                                                {variants.map(v => <option key={v.id} value={v.id}>{v.color_number ? `${v.color_number} · ` : ''}{v.color_name || v.name || `Variant #${v.id}`}{v.variant_size ? ` · Sz ${v.variant_size}` : ''}</option>)}
-                                                                            </select>
+                                                                                className="flex-1 min-w-0"
+                                                                                size="xs"
+                                                                                accentColor="amber"
+                                                                            />
                                                                             <input type="number" min="0" step="any" placeholder="Qty"
                                                                                 value={ln.qty_received}
                                                                                 onChange={e => setCustomLineField(g._k, ln._k, 'qty_received', e.target.value)}

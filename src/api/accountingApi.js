@@ -57,6 +57,12 @@ export const accountingApi = {
   getPlanTrimRequirements:   (params) => api.get('/accounting/plan-purchase-requirements/trim',   { params }),
   createPOFromRequirements:  (data)   => api.post('/accounting/purchase-orders/from-requirements', data),
 
+  uploadSalesOrderAttachments: (soId, files) => {
+    const form = new FormData();
+    files.forEach(f => form.append('files', f));
+    return api.post(`/accounting/sales-orders/${soId}/attachments`, form);
+  },
+
   getSizes: () => api.get('/sizes'),
   createSize: (data) => api.post('/sizes', data),
   updateSize: (id, data) => api.patch(`/sizes/${id}`, data),
