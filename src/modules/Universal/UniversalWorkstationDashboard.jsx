@@ -72,6 +72,19 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
         });
         return Object.entries(groups).sort(([a],[b]) => a.localeCompare(b));
     }, [merged, mode]);
+    const groupedRoll = useMemo(() => {
+        if (mode !== 'roll') return [];
+        const rolls = {};
+        merged.forEach(row => {
+            const rKey  = `Roll #${row.fabric_roll_id ?? 'Unknown'}`;
+            const ptKey = `${row.part_name ?? 'Unknown'} | Sz ${row.size ?? '—'}`;
+            if (!rolls[rKey]) rolls[rKey] = {};
+            if (!rolls[rKey][ptKey]) rolls[rKey][ptKey] = [];
+            rolls[rKey][ptKey].push(row);
+        });
+        return Object.entries(rolls).sort(([a],[b]) => a.localeCompare(b))
+            .map(([rKey, pts]) => [rKey, Object.entries(pts).sort(([a],[b]) => a.localeCompare(b))]);
+    }, [merged, mode]);
     useEffect(() => { setOpenGroups(new Set()); }, [mode, workData]);
     const toggleGroup = (key) => setOpenGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
     const handleDateChange = (e) => { const d = e.target.value; setModalDate(d); onDateChange(d); };
@@ -82,7 +95,7 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
                     <div className="flex items-center gap-3">
                         <div>
                             <h2 className="text-base font-black text-gray-900">Work Log</h2>
-                            <p className="text-xs text-gray-400">{merged.length} entries · {grouped.length} groups</p>
+                            <p className="text-xs text-gray-400">{merged.length} entries · {mode === 'roll' ? groupedRoll.length : grouped.length} groups</p>
                         </div>
                         <input type="date" value={modalDate} onChange={handleDateChange}
                             className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-400 bg-gray-50" />
@@ -124,63 +137,152 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
                         </div>
                     ) : (
                         <div className="space-y-2">
-                            {grouped.map(([groupKey, groupRows]) => {
-                                const approved = groupRows.filter(r => r.action==='APPROVED').length;
-                                const rework   = groupRows.filter(r => r.action==='NEEDS_REWORK').length;
-                                const repaired = groupRows.filter(r => r.action==='REPAIRED').length;
-                                const rejected = groupRows.filter(r => r.action==='QC_REJECTED').length;
-                                const isOpen   = openGroups.has(groupKey);
-                                return (
-                                    <div key={groupKey} className="border border-gray-200 rounded-xl overflow-hidden">
-                                        <button type="button" onClick={() => toggleGroup(groupKey)}
-                                            className="w-full bg-gray-50 hover:bg-gray-100 px-4 py-2 flex items-center justify-between transition text-left">
-                                            <div className="flex items-center gap-2">
-                                                <LuChevronRight size={14} className={`text-gray-400 transition-transform shrink-0 ${isOpen?'rotate-90':''}`}/>
-                                                <span className="font-black text-gray-700 text-sm">{groupKey}</span>
-                                            </div>
-                                            <div className="flex items-center gap-3 text-xs font-semibold">
-                                                {approved>0 && <span className="text-emerald-600">{approved} approved</span>}
-                                                {repaired>0 && <span className="text-teal-600">{repaired} repaired</span>}
-                                                {rework>0   && <span className="text-amber-600">{rework} rework</span>}
-                                                {rejected>0 && <span className="text-red-600">{rejected} rejected</span>}
-                                                <span className="text-gray-400 font-normal">{groupRows.length} total</span>
-                                            </div>
-                                        </button>
-                                        {isOpen && (
-                                            <table className="w-full text-xs border-t border-gray-100">
-                                                <tbody>
-                                                    {groupRows.map((r, i) => (
-                                                        <tr key={i} className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${r._type==='defect'?'bg-amber-50/40':''}`}>
-                                                            <td className="px-3 py-1.5 font-mono text-gray-400 whitespace-nowrap">{fmtTime(r.time)}</td>
-                                                            <td className="px-3 py-1.5 font-semibold text-gray-800 whitespace-nowrap">{r.batch_code}</td>
-                                                            <td className="px-3 py-1.5 text-gray-600 capitalize">{r.part_name}</td>
-                                                            <td className="px-3 py-1.5 text-gray-500">Sz {r.size}</td>
-                                                            {mode==='hourly' && <td className="px-3 py-1.5 text-gray-500 font-mono">Roll #{r.fabric_roll_id??'—'}</td>}
-                                                            <td className="px-3 py-1.5 text-gray-500 font-mono">#{r.piece_sequence}</td>
-                                                            <td className="px-3 py-1.5"><ActionBadge action={r.action}/></td>
-                                                            <td className="px-3 py-1.5">
-                                                                {r.defect_code && (
-                                                                    <div>
-                                                                        <span className="font-mono text-gray-600">{r.defect_code}</span>
-                                                                        {r.defect_description && <span className="block text-gray-400 text-[10px]">{r.defect_description}</span>}
+                            {mode === 'roll' ? (
+                                groupedRoll.map(([rollKey, partGroups]) => {
+                                    const rollRows = partGroups.flatMap(([, rows]) => rows);
+                                    const approved = rollRows.filter(r => r.action==='APPROVED').length;
+                                    const rework   = rollRows.filter(r => r.action==='NEEDS_REWORK').length;
+                                    const repaired = rollRows.filter(r => r.action==='REPAIRED').length;
+                                    const rejected = rollRows.filter(r => r.action==='QC_REJECTED').length;
+                                    const isOpen   = openGroups.has(rollKey);
+                                    return (
+                                        <div key={rollKey} className="border border-gray-200 rounded-xl overflow-hidden">
+                                            <button type="button" onClick={() => toggleGroup(rollKey)}
+                                                className="w-full bg-gray-50 hover:bg-gray-100 px-4 py-2 flex items-center justify-between transition text-left">
+                                                <div className="flex items-center gap-2">
+                                                    <LuChevronRight size={14} className={`text-gray-400 transition-transform shrink-0 ${isOpen?'rotate-90':''}`}/>
+                                                    <span className="font-black text-gray-700 text-sm">{rollKey}</span>
+                                                    <span className="text-[10px] font-bold text-gray-400">{partGroups.length} type{partGroups.length!==1?'s':''}</span>
+                                                </div>
+                                                <div className="flex items-center gap-3 text-xs font-semibold">
+                                                    {approved>0 && <span className="text-emerald-600">{approved} approved</span>}
+                                                    {repaired>0 && <span className="text-teal-600">{repaired} repaired</span>}
+                                                    {rework>0   && <span className="text-amber-600">{rework} rework</span>}
+                                                    {rejected>0 && <span className="text-red-600">{rejected} rejected</span>}
+                                                    <span className="text-gray-400 font-normal">{rollRows.length} total</span>
+                                                </div>
+                                            </button>
+                                            {isOpen && (
+                                                <div className="p-2 space-y-1.5 bg-white border-t border-gray-100">
+                                                    {partGroups.map(([ptKey, ptRows]) => {
+                                                        const ptApproved = ptRows.filter(r => r.action==='APPROVED').length;
+                                                        const ptRework   = ptRows.filter(r => r.action==='NEEDS_REWORK').length;
+                                                        const ptRepaired = ptRows.filter(r => r.action==='REPAIRED').length;
+                                                        const ptRejected = ptRows.filter(r => r.action==='QC_REJECTED').length;
+                                                        const ptKey2     = `pt::${rollKey}::${ptKey}`;
+                                                        const isPtOpen   = openGroups.has(ptKey2);
+                                                        return (
+                                                            <div key={ptKey} className="border border-gray-200 rounded-lg overflow-hidden">
+                                                                <button type="button" onClick={() => toggleGroup(ptKey2)}
+                                                                    className="w-full bg-gray-50 hover:bg-gray-100 px-3 py-1.5 flex items-center justify-between transition text-left">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <LuChevronRight size={12} className={`text-gray-400 transition-transform shrink-0 ${isPtOpen?'rotate-90':''}`}/>
+                                                                        <span className="font-black text-gray-700 text-xs capitalize">{ptKey}</span>
                                                                     </div>
+                                                                    <div className="flex items-center gap-3 text-[11px] font-semibold">
+                                                                        {ptApproved>0 && <span className="text-emerald-600">{ptApproved} approved</span>}
+                                                                        {ptRepaired>0 && <span className="text-teal-600">{ptRepaired} repaired</span>}
+                                                                        {ptRework>0   && <span className="text-amber-600">{ptRework} rework</span>}
+                                                                        {ptRejected>0 && <span className="text-red-600">{ptRejected} rejected</span>}
+                                                                        <span className="text-gray-400 font-normal">{ptRows.length}</span>
+                                                                    </div>
+                                                                </button>
+                                                                {isPtOpen && (
+                                                                    <table className="w-full text-xs border-t border-gray-100">
+                                                                        <tbody>
+                                                                            {ptRows.map((r, i) => (
+                                                                                <tr key={i} className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${r._type==='defect'?'bg-amber-50/40':''}`}>
+                                                                                    <td className="px-3 py-1.5 font-mono text-gray-400 whitespace-nowrap">{fmtTime(r.time)}</td>
+                                                                                    <td className="px-3 py-1.5 font-semibold text-gray-800 whitespace-nowrap">{r.batch_code}</td>
+                                                                                    <td className="px-3 py-1.5 text-gray-500 font-mono">#{r.piece_sequence}</td>
+                                                                                    <td className="px-3 py-1.5"><ActionBadge action={r.action}/></td>
+                                                                                    <td className="px-3 py-1.5">
+                                                                                        {r.defect_code && (
+                                                                                            <div>
+                                                                                                <span className="font-mono text-gray-600">{r.defect_code}</span>
+                                                                                                {r.defect_description && <span className="block text-gray-400 text-[10px]">{r.defect_description}</span>}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </td>
+                                                                                    {r._type==='defect' && (
+                                                                                        <td className="px-3 py-1.5">
+                                                                                            <span className={`font-semibold ${r.is_resolved?'text-emerald-500':'text-amber-500'}`}>
+                                                                                                {r.is_resolved ? '✓ Resolved' : '⏳ Pending'}
+                                                                                            </span>
+                                                                                        </td>
+                                                                                    )}
+                                                                                </tr>
+                                                                            ))}
+                                                                        </tbody>
+                                                                    </table>
                                                                 )}
-                                                            </td>
-                                                            {r._type==='defect' && (
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })
+                            ) : (
+                                grouped.map(([groupKey, groupRows]) => {
+                                    const approved = groupRows.filter(r => r.action==='APPROVED').length;
+                                    const rework   = groupRows.filter(r => r.action==='NEEDS_REWORK').length;
+                                    const repaired = groupRows.filter(r => r.action==='REPAIRED').length;
+                                    const rejected = groupRows.filter(r => r.action==='QC_REJECTED').length;
+                                    const isOpen   = openGroups.has(groupKey);
+                                    return (
+                                        <div key={groupKey} className="border border-gray-200 rounded-xl overflow-hidden">
+                                            <button type="button" onClick={() => toggleGroup(groupKey)}
+                                                className="w-full bg-gray-50 hover:bg-gray-100 px-4 py-2 flex items-center justify-between transition text-left">
+                                                <div className="flex items-center gap-2">
+                                                    <LuChevronRight size={14} className={`text-gray-400 transition-transform shrink-0 ${isOpen?'rotate-90':''}`}/>
+                                                    <span className="font-black text-gray-700 text-sm">{groupKey}</span>
+                                                </div>
+                                                <div className="flex items-center gap-3 text-xs font-semibold">
+                                                    {approved>0 && <span className="text-emerald-600">{approved} approved</span>}
+                                                    {repaired>0 && <span className="text-teal-600">{repaired} repaired</span>}
+                                                    {rework>0   && <span className="text-amber-600">{rework} rework</span>}
+                                                    {rejected>0 && <span className="text-red-600">{rejected} rejected</span>}
+                                                    <span className="text-gray-400 font-normal">{groupRows.length} total</span>
+                                                </div>
+                                            </button>
+                                            {isOpen && (
+                                                <table className="w-full text-xs border-t border-gray-100">
+                                                    <tbody>
+                                                        {groupRows.map((r, i) => (
+                                                            <tr key={i} className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${r._type==='defect'?'bg-amber-50/40':''}`}>
+                                                                <td className="px-3 py-1.5 font-mono text-gray-400 whitespace-nowrap">{fmtTime(r.time)}</td>
+                                                                <td className="px-3 py-1.5 font-semibold text-gray-800 whitespace-nowrap">{r.batch_code}</td>
+                                                                <td className="px-3 py-1.5 text-gray-600 capitalize">{r.part_name}</td>
+                                                                <td className="px-3 py-1.5 text-gray-500">Sz {r.size}</td>
+                                                                <td className="px-3 py-1.5 text-gray-500 font-mono">Roll #{r.fabric_roll_id??'—'}</td>
+                                                                <td className="px-3 py-1.5 text-gray-500 font-mono">#{r.piece_sequence}</td>
+                                                                <td className="px-3 py-1.5"><ActionBadge action={r.action}/></td>
                                                                 <td className="px-3 py-1.5">
-                                                                    <span className={`font-semibold ${r.is_resolved?'text-emerald-500':'text-amber-500'}`}>
-                                                                        {r.is_resolved ? '✓ Resolved' : '⏳ Pending'}
-                                                                    </span>
+                                                                    {r.defect_code && (
+                                                                        <div>
+                                                                            <span className="font-mono text-gray-600">{r.defect_code}</span>
+                                                                            {r.defect_description && <span className="block text-gray-400 text-[10px]">{r.defect_description}</span>}
+                                                                        </div>
+                                                                    )}
                                                                 </td>
-                                                            )}
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        )}
-                                    </div>
-                                );
-                            })}
+                                                                {r._type==='defect' && (
+                                                                    <td className="px-3 py-1.5">
+                                                                        <span className={`font-semibold ${r.is_resolved?'text-emerald-500':'text-amber-500'}`}>
+                                                                            {r.is_resolved ? '✓ Resolved' : '⏳ Pending'}
+                                                                        </span>
+                                                                    </td>
+                                                                )}
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            )}
+                                        </div>
+                                    );
+                                })
+                            )}
                         </div>
                     )}
                 </div>
@@ -433,7 +535,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
         }
     };
 
-    const displayBatch = itemInfo.batchCode || itemInfo.batchId;
+    const displayBatch = itemInfo.batchId;
     const displayRoll = itemInfo.rollId ? `ROLL #${itemInfo.rollId}` : '';
     const displayPartSize = `${itemInfo.partName} | SIZE ${itemInfo.size || 'MIXED'}`;
 
@@ -1419,10 +1521,15 @@ const UniversalWorkstationDashboard = () => {
     const [modalState, setModalState] = useState(null);
     const [headerInfo, setHeaderInfo] = useState({});
     const [selectedBatchId, setSelectedBatchId] = useState('ALL');
-    const [openBatchId, setOpenBatchId] = useState(null);
+    const [openBatchId,    setOpenBatchId]    = useState(null);
+    const [openBundleParts, setOpenBundleParts] = useState(new Set());
+    const toggleBundlePart = (key) => setOpenBundleParts(prev => {
+        const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next;
+    });
     const [showNav,     setShowNav]     = useState(false);
     const [showHistory, setShowHistory] = useState(false);
-    const [stats,             setStats]             = useState(null);
+    const [stats,                setStats]                = useState(null);
+    const [todayApprovedPieces, setTodayApprovedPieces] = useState(null);
     const [showModal,         setShowModal]         = useState(false);
     const [showApprovedModal, setShowApprovedModal] = useState(false);
     const [workData,          setWorkData]          = useState(null);
@@ -1512,11 +1619,20 @@ const UniversalWorkstationDashboard = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
         catch (err) { popApiError(err.response?.data?.error || err.message || 'Failed to load stats'); }
     }, []);
+    const refreshTodayApproved = useCallback(async () => {
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const res = await universalApi.getTodayWork(today);
+            const rows = res.data?.rows ?? [];
+            setTodayApprovedPieces(rows.filter(r => r.action === 'APPROVED').length);
+        } catch { /* silent — stats fallback still shows */ }
+    }, []);
     useEffect(() => {
         loadStats();
-        const iv = setInterval(loadStats, STATS_REFRESH_MS);
+        refreshTodayApproved();
+        const iv = setInterval(() => { loadStats(); refreshTodayApproved(); }, STATS_REFRESH_MS);
         return () => clearInterval(iv);
-    }, [loadStats]);
+    }, [loadStats, refreshTodayApproved]);
 
     // ── Work log fetch ────────────────────────────────────────────────────────
     const fetchWork = useCallback(async (date) => {
@@ -1588,11 +1704,12 @@ const UniversalWorkstationDashboard = () => {
             } else {
                 await universalApi.logPieceCheck(validationData);
             }
-            const newBatches = await fetchQueue(); 
+            const newBatches = await fetchQueue();
             refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
-        } catch (err) { 
-            alert(err.response?.data?.error || `Error: ${err.message}`); 
-            throw err; 
+            refreshTodayApproved();
+        } catch (err) {
+            alert(err.response?.data?.error || `Error: ${err.message}`);
+            throw err;
         } finally {
             setIsProcessing(false); // 🚨 Global Full-Screen Lock OFF
         }
@@ -1604,9 +1721,10 @@ const UniversalWorkstationDashboard = () => {
             await universalApi.approveAlteredPieces({ batchId: modalState.batchId, pieceIds, status, defectCodeIds });
             const newBatches = await fetchQueue();
             refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
-        } catch (err) { 
-            alert(err.response?.data?.error || `Error: ${err.message}`); 
-            throw err; 
+            refreshTodayApproved();
+        } catch (err) {
+            alert(err.response?.data?.error || `Error: ${err.message}`);
+            throw err;
         } finally {
             setIsProcessing(false); // 🚨 Global Full-Screen Lock OFF
         }
@@ -1624,7 +1742,8 @@ const UniversalWorkstationDashboard = () => {
                 pieceIds: actionableIds, qcStatus: 'APPROVED', defectCodeId: null, bundleId: entity.bundle_id
             });
             await fetchQueue();
-        } catch (err) { alert(err.response?.data?.error || `Error: ${err.message}`); } 
+            refreshTodayApproved();
+        } catch (err) { alert(err.response?.data?.error || `Error: ${err.message}`); }
         finally { setIsProcessing(false); }
     };
 
@@ -1634,7 +1753,7 @@ const UniversalWorkstationDashboard = () => {
     const filteredBatches = selectedBatchId === 'ALL' ? batches : batches.filter(b => String(b.batch_id) === String(selectedBatchId));
 
     const groupedBatches = filteredBatches.reduce((acc, batch) => {
-        const lineName = headerInfo.line_name || 'Unassigned Line';
+        const lineName = batch.line_name || headerInfo.line_name || 'Unassigned Line';
         if (!acc[lineName]) acc[lineName] = [];
         acc[lineName].push(batch);
         return acc;
@@ -1683,7 +1802,7 @@ const UniversalWorkstationDashboard = () => {
                             >
                                 <option value="ALL">ALL BATCHES</option>
                                 {batches.map(b => (
-                                    <option key={b.batch_id} value={String(b.batch_id)}>BATCH #{b.batch_id} ({b.batch_code})</option>
+                                    <option key={b.batch_id} value={String(b.batch_id)}>BATCH #{b.batch_id}</option>
                                 ))}
                             </select>
                         )}
@@ -1735,7 +1854,9 @@ const UniversalWorkstationDashboard = () => {
                         >
                             <ThumbsUp size={13} className="text-emerald-500 shrink-0" />
                             <span className="text-xs text-gray-500">Today's Approved</span>
-                            <span className="text-sm font-black tabular-nums text-emerald-600">{stats == null ? '—' : (stats.today_approved ?? 0)}</span>
+                            <span className="text-sm font-black tabular-nums text-emerald-600">
+                                {todayApprovedPieces != null ? todayApprovedPieces : stats == null ? '—' : (stats.today_approved ?? 0)}
+                            </span>
                             {loadingWork && !showApprovedModal && <Loader2 size={11} className="animate-spin text-emerald-500" />}
                         </button>
                     </div>
@@ -1797,7 +1918,12 @@ const UniversalWorkstationDashboard = () => {
                         </div>
                     )}
                     {Object.entries(groupedBatches).map(([lineName, lineBatches]) => (
-                        <div key={lineName} className="space-y-8">
+                        <div key={lineName} className="space-y-4">
+                            <div className="flex items-center gap-3">
+                                <span className="text-xs font-black uppercase tracking-widest text-slate-500 bg-slate-300 px-3 py-1.5 rounded-lg">{lineName}</span>
+                                <span className="text-xs font-bold text-slate-400">{lineBatches.length} batch{lineBatches.length !== 1 ? 'es' : ''}</span>
+                            </div>
+                            <div className="space-y-8">
                             {lineBatches.map(batch => {
                                 const isBundleMode = headerInfo.processing_mode === 'BUNDLE';
                                 return (
@@ -1810,7 +1936,7 @@ const UniversalWorkstationDashboard = () => {
                                                 {openBatchId === batch.batch_id ? <ChevronDown className="w-5 h-5 text-slate-500 shrink-0" /> : <ChevronRight className="w-5 h-5 text-slate-500 shrink-0" />}
                                                 <Shirt className="w-5 h-5 text-indigo-400 shrink-0" />
                                                 <h2 className="text-lg font-black text-white tracking-tight uppercase">
-                                                    BATCH #{batch.batch_id} <span className="text-sm font-bold text-slate-500 font-mono">({batch.batch_code})</span>
+                                                    BATCH #{batch.batch_id}
                                                 </h2>
                                                 {(batch.cut_rolls != null || batch.total_rolls != null) && (
                                                     <div className="flex items-center gap-2">
@@ -1861,23 +1987,45 @@ const UniversalWorkstationDashboard = () => {
                                                                         <RollHandoffButton batchId={batch.batch_id} lineId={headerInfo.line_id} rollId={rollId} onComplete={() => fetchQueue()} />
                                                                     </div>
                                                                 </div>
-                                                                {Object.entries(parts).filter(([partName]) => isPartVisible(partName)).map(([partName, bundles]) => (
-                                                                    <div key={partName} className="mb-2 last:mb-0">
-                                                                        <h4 className="font-black text-slate-800 text-xs tracking-tight uppercase mb-2 flex items-center pl-1 border-l-2 border-slate-300">
-                                                                            <Component className="w-3 h-3 mr-2 text-indigo-500" /> {partName}
-                                                                        </h4>
-                                                                        <div className="space-y-1 pl-2">
-                                                                            {bundles.map(bundle => (
-                                                                                <ValidationProgressRow key={bundle.bundle_id} label={`Size ${bundle.size}`} subLabel={`Bundle ${bundle.bundle_code}`} icon={Package} entity={bundle}
-                                                                                    canApproveBundle={allowBundle}
-                                                                                    onQuickApprove={(entity) => handleQuickBulkApprove(entity, batch.batch_id, rollId)}
-                                                                                    onInspect={() => setModalState({ type: 'validate', isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, allowMultiple, ...bundle, pieces: bundle.pieces.map(p => ({ ...p, _displayGroup: `${partName} | Size ${bundle.size}` })) })}
-                                                                                    onRepair={() => setModalState({ type: 'validate', forceRepairMode: true, isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, ...bundle })}
-                                                                                />
-                                                                            ))}
+                                                                {Object.entries(parts).filter(([partName]) => isPartVisible(partName)).map(([partName, bundles]) => {
+                                                                    const partKey   = `${rollId}::${partName}`;
+                                                                    const isPartOpen = openBundleParts.has(partKey);
+                                                                    const allPartPieces = bundles.flatMap(b => b.pieces);
+                                                                    const ps = checkEntityStatus({ pieces: allPartPieces });
+                                                                    return (
+                                                                        <div key={partName} className="mb-2 last:mb-0 border border-slate-200 rounded-xl overflow-hidden">
+                                                                            <button type="button" onClick={() => toggleBundlePart(partKey)}
+                                                                                className="w-full bg-slate-50 hover:bg-slate-100 px-3 py-2 flex items-center justify-between transition text-left">
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <ChevronRight size={14} className={`text-slate-400 transition-transform shrink-0 ${isPartOpen ? 'rotate-90' : ''}`} />
+                                                                                    <Component className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                                                                    <span className="font-black text-slate-800 text-xs uppercase tracking-tight">{partName}</span>
+                                                                                    <span className="text-[10px] text-slate-400 font-semibold">{bundles.length} bundle{bundles.length !== 1 ? 's' : ''}</span>
+                                                                                </div>
+                                                                                <div className="flex items-center gap-2 text-xs font-semibold">
+                                                                                    {ps.total_validated > 0 && <span className="text-emerald-600">{ps.total_validated} approved</span>}
+                                                                                    {ps.total_repaired > 0 && <span className="text-teal-600">{ps.total_repaired} repaired</span>}
+                                                                                    {ps.pending_alter  > 0 && <span className="text-amber-600">{ps.pending_alter} rework</span>}
+                                                                                    {ps.total_rejected > 0 && <span className="text-red-600">{ps.total_rejected} rejected</span>}
+                                                                                    <span className="text-slate-400 font-normal">{ps.total_processed}/{ps.total_cut}</span>
+                                                                                    {ps.isComplete && <Check className="w-3.5 h-3.5 text-emerald-500" />}
+                                                                                </div>
+                                                                            </button>
+                                                                            {isPartOpen && (
+                                                                                <div className="p-2 space-y-1 bg-white border-t border-slate-100">
+                                                                                    {bundles.map(bundle => (
+                                                                                        <ValidationProgressRow key={bundle.bundle_id} label={`Size ${bundle.size}`} subLabel={`Bundle ${bundle.bundle_code}`} icon={Package} entity={bundle}
+                                                                                            canApproveBundle={allowBundle}
+                                                                                            onQuickApprove={(entity) => handleQuickBulkApprove(entity, batch.batch_id, rollId)}
+                                                                                            onInspect={() => setModalState({ type: 'validate', isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, allowMultiple, ...bundle, pieces: bundle.pieces.map(p => ({ ...p, _displayGroup: `${partName} | Size ${bundle.size}` })) })}
+                                                                                            onRepair={() => setModalState({ type: 'validate', forceRepairMode: true, isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, ...bundle })}
+                                                                                        />
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
                                                                         </div>
-                                                                    </div>
-                                                                ))}
+                                                                    );
+                                                                })}
                                                             </div>
                                                         );
                                                     });
@@ -1913,6 +2061,7 @@ const UniversalWorkstationDashboard = () => {
                                     </div>
                                 );
                             })}
+                            </div>
                         </div>
                     ))}
                 </div>

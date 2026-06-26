@@ -95,12 +95,16 @@ export default function ScorecardDetailedPage() {
     const totalAssigned = visibleLines.reduce((s, l) => s + (l.manpower_assigned ?? 0), 0);
     const grandDefects  = visibleLines.reduce((s, l) => s + (l.total_defects     ?? 0), 0);
     const grandOutput   = visibleLines.reduce((s, l) => s + (l.total_output      ?? 0), 0);
+    const grandChecked  = visibleLines.reduce((s, l) =>
+        s + (l.total_approved ?? 0) + (l.total_rework ?? 0), 0);
     const grandTarget   = visibleLines.reduce((s, l) =>
         s + l.parts.reduce((ps, p) => ps + p.target_quantity, 0), 0);
     const grandActual   = visibleLines.reduce((s, l) =>
         s + l.parts.reduce((ps, p) => ps + p.actual, 0), 0);
     const grandPct      = grandTarget > 0 ? Math.round(grandActual * 100 / grandTarget) : null;
-    const grandDHU      = grandOutput  > 0 ? (grandDefects / grandOutput) * 100 : null;
+    const grandDHU      = grandChecked > 0 ? (grandDefects / grandChecked) * 100
+                        : grandOutput  > 0 ? (grandDefects / grandOutput)  * 100
+                        : null;
 
     // ── Date display ───────────────────────────────────────────────────────────
     const d         = new Date(date + 'T12:00:00');

@@ -82,15 +82,19 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
         if (mode !== 'roll') return [];
         const batches = {};
         merged.forEach(row => {
-            const bKey = row.batch_id ?? 'Unknown';
-            const rKey = `Roll #${row.fabric_roll_id ?? 'Unknown'}`;
+            const bKey  = row.batch_id ?? 'Unknown';
+            const rKey  = `Roll #${row.fabric_roll_id ?? 'Unknown'}`;
+            const ptKey = `${row.part_name ?? 'Unknown'} | Sz ${row.size ?? '—'}`;
             if (!batches[bKey]) batches[bKey] = {};
-            if (!batches[bKey][rKey]) batches[bKey][rKey] = [];
-            batches[bKey][rKey].push(row);
+            if (!batches[bKey][rKey]) batches[bKey][rKey] = {};
+            if (!batches[bKey][rKey][ptKey]) batches[bKey][rKey][ptKey] = [];
+            batches[bKey][rKey][ptKey].push(row);
         });
         return Object.entries(batches)
             .sort(([a], [b]) => a.localeCompare(b))
-            .map(([bKey, rolls]) => [bKey, Object.entries(rolls).sort(([a], [b]) => a.localeCompare(b))]);
+            .map(([bKey, rolls]) => [bKey, Object.entries(rolls).sort(([a], [b]) => a.localeCompare(b))
+                .map(([rKey, pts]) => [rKey, Object.entries(pts).sort(([a], [b]) => a.localeCompare(b))])
+            ]);
     }, [merged, mode]);
 
     useEffect(() => { setOpenGroups(new Set()); }, [mode, workData]);
@@ -151,7 +155,7 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
                         /* ── Roll mode: batch → roll nested accordions ── */
                         <div className="space-y-2">
                             {groupedRoll.map(([batchCode, rolls]) => {
-                                const batchRows = rolls.flatMap(([, rows]) => rows);
+                                const batchRows = rolls.flatMap(([, pts]) => pts.flatMap(([, rows]) => rows));
                                 const bApproved = batchRows.filter(r => r.action==='APPROVED').length;
                                 const bRework   = batchRows.filter(r => r.action==='NEEDS_REWORK').length;
                                 const bRepaired = batchRows.filter(r => r.action==='REPAIRED').length;
@@ -177,7 +181,8 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
                                         </button>
                                         {isBatchOpen && (
                                             <div className="p-2 space-y-1.5 bg-white border-t border-indigo-100">
-                                                {rolls.map(([rollKey, rollRows]) => {
+                                                {rolls.map(([rollKey, partGroups]) => {
+                                                    const rollRows  = partGroups.flatMap(([, rows]) => rows);
                                                     const rApproved = rollRows.filter(r => r.action==='APPROVED').length;
                                                     const rRework   = rollRows.filter(r => r.action==='NEEDS_REWORK').length;
                                                     const rRepaired = rollRows.filter(r => r.action==='REPAIRED').length;
@@ -191,6 +196,7 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
                                                                 <div className="flex items-center gap-2">
                                                                     <ChevronRight size={12} className={`text-gray-400 transition-transform shrink-0 ${isRollOpen?'rotate-90':''}`}/>
                                                                     <span className="font-black text-gray-700 text-xs">{rollKey}</span>
+                                                                    <span className="text-[10px] font-bold text-gray-400">{partGroups.length} type{partGroups.length!==1?'s':''}</span>
                                                                 </div>
                                                                 <div className="flex items-center gap-3 text-[11px] font-semibold">
                                                                     {rApproved>0 && <span className="text-emerald-600">{rApproved} approved</span>}
@@ -201,34 +207,62 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
                                                                 </div>
                                                             </button>
                                                             {isRollOpen && (
-                                                                <table className="w-full text-xs border-t border-gray-100">
-                                                                    <tbody>
-                                                                        {rollRows.map((r, i) => (
-                                                                            <tr key={i} className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${r._type==='defect'?'bg-amber-50/40':''}`}>
-                                                                                <td className="px-3 py-1.5 font-mono text-gray-400 whitespace-nowrap">{fmtTime(r.time)}</td>
-                                                                                <td className="px-3 py-1.5 text-gray-600 capitalize">{r.part_name}</td>
-                                                                                <td className="px-3 py-1.5 text-gray-500">Sz {r.size}</td>
-                                                                                <td className="px-3 py-1.5 text-gray-500 font-mono">#{r.piece_sequence}</td>
-                                                                                <td className="px-3 py-1.5"><ActionBadge action={r.action}/></td>
-                                                                                <td className="px-3 py-1.5">
-                                                                                    {r.defect_code && (
-                                                                                        <div>
-                                                                                            <span className="font-mono text-gray-600">{r.defect_code}</span>
-                                                                                            {r.defect_description && <span className="block text-gray-400 text-[10px]">{r.defect_description}</span>}
-                                                                                        </div>
-                                                                                    )}
-                                                                                </td>
-                                                                                {r._type==='defect' && (
-                                                                                    <td className="px-3 py-1.5">
-                                                                                        <span className={`font-semibold ${r.is_resolved?'text-emerald-500':'text-amber-500'}`}>
-                                                                                            {r.is_resolved ? '✓ Resolved' : '⏳ Pending'}
-                                                                                        </span>
-                                                                                    </td>
+                                                                <div className="p-2 space-y-1 bg-white border-t border-gray-100">
+                                                                    {partGroups.map(([ptKey, ptRows]) => {
+                                                                        const ptApproved = ptRows.filter(r => r.action==='APPROVED').length;
+                                                                        const ptRework   = ptRows.filter(r => r.action==='NEEDS_REWORK').length;
+                                                                        const ptRepaired = ptRows.filter(r => r.action==='REPAIRED').length;
+                                                                        const ptRejected = ptRows.filter(r => r.action==='QC_REJECTED').length;
+                                                                        const ptKey2     = `pt::${rKey}::${ptKey}`;
+                                                                        const isPtOpen   = openGroups.has(ptKey2);
+                                                                        return (
+                                                                            <div key={ptKey} className="border border-gray-100 rounded-md overflow-hidden">
+                                                                                <button type="button" onClick={() => toggleGroup(ptKey2)}
+                                                                                    className="w-full bg-gray-50 hover:bg-gray-100 px-3 py-1 flex items-center justify-between transition text-left">
+                                                                                    <div className="flex items-center gap-1.5">
+                                                                                        <ChevronRight size={10} className={`text-gray-400 transition-transform shrink-0 ${isPtOpen?'rotate-90':''}`}/>
+                                                                                        <span className="font-black text-gray-700 text-[11px] capitalize">{ptKey}</span>
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-2 text-[10px] font-semibold">
+                                                                                        {ptApproved>0 && <span className="text-emerald-600">{ptApproved} approved</span>}
+                                                                                        {ptRepaired>0 && <span className="text-teal-600">{ptRepaired} repaired</span>}
+                                                                                        {ptRework>0   && <span className="text-amber-600">{ptRework} rework</span>}
+                                                                                        {ptRejected>0 && <span className="text-red-600">{ptRejected} rejected</span>}
+                                                                                        <span className="text-gray-400 font-normal">{ptRows.length}</span>
+                                                                                    </div>
+                                                                                </button>
+                                                                                {isPtOpen && (
+                                                                                    <table className="w-full text-xs border-t border-gray-100">
+                                                                                        <tbody>
+                                                                                            {ptRows.map((r, i) => (
+                                                                                                <tr key={i} className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${r._type==='defect'?'bg-amber-50/40':''}`}>
+                                                                                                    <td className="px-3 py-1.5 font-mono text-gray-400 whitespace-nowrap">{fmtTime(r.time)}</td>
+                                                                                                    <td className="px-3 py-1.5 text-gray-500 font-mono">#{r.piece_sequence}</td>
+                                                                                                    <td className="px-3 py-1.5"><ActionBadge action={r.action}/></td>
+                                                                                                    <td className="px-3 py-1.5">
+                                                                                                        {r.defect_code && (
+                                                                                                            <div>
+                                                                                                                <span className="font-mono text-gray-600">{r.defect_code}</span>
+                                                                                                                {r.defect_description && <span className="block text-gray-400 text-[10px]">{r.defect_description}</span>}
+                                                                                                            </div>
+                                                                                                        )}
+                                                                                                    </td>
+                                                                                                    {r._type==='defect' && (
+                                                                                                        <td className="px-3 py-1.5">
+                                                                                                            <span className={`font-semibold ${r.is_resolved?'text-emerald-500':'text-amber-500'}`}>
+                                                                                                                {r.is_resolved ? '✓ Resolved' : '⏳ Pending'}
+                                                                                                            </span>
+                                                                                                        </td>
+                                                                                                    )}
+                                                                                                </tr>
+                                                                                            ))}
+                                                                                        </tbody>
+                                                                                    </table>
                                                                                 )}
-                                                                            </tr>
-                                                                        ))}
-                                                                    </tbody>
-                                                                </table>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
                                                             )}
                                                         </div>
                                                     );
@@ -311,7 +345,8 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
 const STATUS = {
     APPROVED: 'APPROVED',
     REWORK: 'NEEDS_REWORK',
-    REJECT: 'QC_REJECTED'
+    REJECT: 'QC_REJECTED',
+    REPAIRED: 'REPAIRED',
 };
 
 const AssemblyProcessingPortal = () => {
@@ -323,12 +358,15 @@ const AssemblyProcessingPortal = () => {
     const [mismatch, setMismatch] = useState(null);
     const [dnaDefect, setDnaDefect] = useState(null);
     const [defectCodes, setDefectCodes] = useState([]);
-    const [showDefectModal, setShowDefectModal] = useState(null); 
+    const [showDefectModal, setShowDefectModal] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [isProcessingAction, setIsProcessingAction] = useState(false);
     const [error, setError] = useState(null);
     const [lastAction, setLastAction] = useState(null);
     const [defectSearch, setDefectSearch] = useState('');
+    const [selectedDefectCategory, setSelectedDefectCategory] = useState(null);
+    const [selectedDefectIds, setSelectedDefectIds] = useState(new Set());
+    const [reworkHistory, setReworkHistory] = useState(null);
     
     // Batch Mode State
     const [activeBatches, setActiveBatches] = useState([]);
@@ -668,8 +706,19 @@ const AssemblyProcessingPortal = () => {
         };
     }, [garment, mismatch, isLoading, isProcessingAction, showManualBox, viewMode]);
 
+    // Fetch defect history when a rework garment is loaded so the repair mode UI can show previous faults
+    useEffect(() => {
+        if (garment?.garment_id && garment?.qc_status === 'NEEDS_REWORK') {
+            assemblyApi.getGarmentHistory(garment.garment_id)
+                .then(res => setReworkHistory(res.data))
+                .catch(() => setReworkHistory(null));
+        } else {
+            setReworkHistory(null);
+        }
+    }, [garment?.garment_id, garment?.qc_status]);
+
     // --- FINAL ACTIONS ---
-    const handleAction = async (status, defectCodeId = null) => {
+    const handleAction = async (status, defectCodeIds = []) => {
         if (isProcessingAction) {
             dbgW('handleAction called while already processing — ignored');
             return;
@@ -680,10 +729,13 @@ const AssemblyProcessingPortal = () => {
             selectedBatch?.line_id ??
             null;
 
+        const defectCodeId = defectCodeIds.length > 0 ? defectCodeIds[0] : null;
+
         dbg('→ payload:', {
             garmentId: garment.garment_id,
             garment_uid: garment.garment_uid,
             status,
+            defectCodeIds,
             defectCodeId,
             detected_at_line_id: detectedAtLineId,
             viewMode,
@@ -696,6 +748,7 @@ const AssemblyProcessingPortal = () => {
                 garmentId: garment.garment_id,
                 status,
                 defectCodeId,
+                defectCodeIds,
                 detected_at_line_id: detectedAtLineId
             });
             dbg('← processGarmentStatus OK', { uid: garment.garment_uid, status });
@@ -704,6 +757,9 @@ const AssemblyProcessingPortal = () => {
             setGarment(null);
             setShowDefectModal(null);
             setSelectedPiece(null);
+            setSelectedDefectIds(new Set());
+            setSelectedDefectCategory(null);
+            setReworkHistory(null);
             playFeedback('success');
 
             // If in batch mode, refresh the batch pieces so status updates live
@@ -1002,42 +1058,91 @@ const AssemblyProcessingPortal = () => {
 
                                 {/* RIGHT: COMMAND CONSOLE */}
                                 <div className="flex flex-col gap-6">
-                                    <button 
-                                        onClick={() => handleAction(STATUS.APPROVED)}
-                                        disabled={isProcessingAction || garment.components.some(c => c.has_active_defect)}
-                                        className="flex-1 bg-emerald-600 text-white rounded-[3rem] shadow-2xl shadow-emerald-200/50 flex flex-col items-center justify-center p-10 hover:bg-emerald-700 transition-all active:scale-95 disabled:grayscale disabled:opacity-50 disabled:cursor-not-allowed group"
-                                    >
-                                        <ShieldCheck size={70} className="mb-4 group-hover:scale-110 transition-transform" />
-                                        {garment.batch_id && (
-                                            <span className="font-mono font-black text-8xl opacity-80 mb-1 tracking-wider">{garment.batch_id}</span>
-                                        )}
-                                        <span className="text-3xl font-black">APPROVE</span>
-                                        <span className="text-[11px] font-bold opacity-60 mt-2 uppercase tracking-widest">Pass to Quality</span>
-                                    </button>
+                                    {garment.qc_status === 'NEEDS_REWORK' ? (
+                                        /* ── REPAIR VALIDATION MODE ── */
+                                        <>
+                                            {/* Rework alert banner */}
+                                            <div className="bg-amber-50 border-2 border-amber-300 rounded-[2rem] p-6 text-center">
+                                                <div className="flex items-center justify-center gap-2 mb-3">
+                                                    <Hammer size={22} className="text-amber-600" />
+                                                    <span className="text-amber-700 font-black text-sm uppercase tracking-widest">Previously Flagged for Rework</span>
+                                                </div>
+                                                {reworkHistory && reworkHistory.length > 0 && (
+                                                    <div className="flex flex-wrap justify-center gap-2">
+                                                        {reworkHistory.slice(0, 6).map((h, i) => (
+                                                            <span key={i} className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 text-[10px] font-black px-2.5 py-1 rounded-full border border-amber-200">
+                                                                {h.defect_code || h.defect_description || 'Defect'}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
 
-                                    <div className="grid grid-cols-1 gap-4">
-                                        <button 
-                                            onClick={() => setShowDefectModal('REWORK')}
-                                            disabled={isProcessingAction}
-                                            className="bg-amber-500 text-white rounded-[2.5rem] shadow-xl shadow-amber-200/50 flex items-center justify-center p-8 hover:bg-amber-600 transition-all active:scale-95 group"
-                                        >
-                                            <Hammer size={32} className="mr-4 group-hover:rotate-12 transition-transform" />
-                                            <span className="text-xl font-black">REWORK</span>
-                                        </button>
+                                            {/* Repair action buttons */}
+                                            <button
+                                                onClick={() => handleAction(STATUS.REPAIRED)}
+                                                disabled={isProcessingAction}
+                                                className="flex-1 bg-teal-600 text-white rounded-[3rem] shadow-2xl shadow-teal-200/50 flex flex-col items-center justify-center p-10 hover:bg-teal-700 transition-all active:scale-95 disabled:grayscale disabled:opacity-50 disabled:cursor-not-allowed group"
+                                            >
+                                                <ShieldCheck size={70} className="mb-4 group-hover:scale-110 transition-transform" />
+                                                <span className="text-3xl font-black">REPAIRED</span>
+                                                <span className="text-[11px] font-bold opacity-60 mt-2 uppercase tracking-widest">Defect Fixed ✓</span>
+                                            </button>
 
-                                        <button 
-                                            onClick={() => setShowDefectModal('REJECT')}
-                                            disabled={isProcessingAction}
-                                            className="bg-rose-600 text-white rounded-[2.5rem] shadow-xl shadow-rose-200/50 flex items-center justify-center p-8 hover:bg-rose-700 transition-all active:scale-95 group"
-                                        >
-                                            <X size={32} className="mr-4 group-hover:scale-90 transition-transform" />
-                                            <span className="text-xl font-black">REJECT</span>
-                                        </button>
-                                    </div>
-                                    
-                                    <button onClick={() => setGarment(null)} className="py-4 text-slate-400 font-bold hover:text-slate-600 transition-colors uppercase text-xs tracking-widest">
-                                        Cancel Scan
-                                    </button>
+                                            <button
+                                                onClick={() => setShowDefectModal('REJECT')}
+                                                disabled={isProcessingAction}
+                                                className="bg-rose-600 text-white rounded-[2.5rem] shadow-xl shadow-rose-200/50 flex items-center justify-center p-8 hover:bg-rose-700 transition-all active:scale-95 group"
+                                            >
+                                                <X size={32} className="mr-4 group-hover:scale-90 transition-transform" />
+                                                <span className="text-xl font-black">STILL DEFECTIVE</span>
+                                            </button>
+
+                                            <button onClick={() => setGarment(null)} className="py-4 text-slate-400 font-bold hover:text-slate-600 transition-colors uppercase text-xs tracking-widest">
+                                                Cancel Scan
+                                            </button>
+                                        </>
+                                    ) : (
+                                        /* ── NORMAL QC MODE ── */
+                                        <>
+                                            <button
+                                                onClick={() => handleAction(STATUS.APPROVED)}
+                                                disabled={isProcessingAction || garment.components.some(c => c.has_active_defect)}
+                                                className="flex-1 bg-emerald-600 text-white rounded-[3rem] shadow-2xl shadow-emerald-200/50 flex flex-col items-center justify-center p-10 hover:bg-emerald-700 transition-all active:scale-95 disabled:grayscale disabled:opacity-50 disabled:cursor-not-allowed group"
+                                            >
+                                                <ShieldCheck size={70} className="mb-4 group-hover:scale-110 transition-transform" />
+                                                {garment.batch_id && (
+                                                    <span className="font-mono font-black text-8xl opacity-80 mb-1 tracking-wider">{garment.batch_id}</span>
+                                                )}
+                                                <span className="text-3xl font-black">APPROVE</span>
+                                                <span className="text-[11px] font-bold opacity-60 mt-2 uppercase tracking-widest">Pass to Quality</span>
+                                            </button>
+
+                                            <div className="grid grid-cols-1 gap-4">
+                                                <button
+                                                    onClick={() => setShowDefectModal('REWORK')}
+                                                    disabled={isProcessingAction}
+                                                    className="bg-amber-500 text-white rounded-[2.5rem] shadow-xl shadow-amber-200/50 flex items-center justify-center p-8 hover:bg-amber-600 transition-all active:scale-95 group"
+                                                >
+                                                    <Hammer size={32} className="mr-4 group-hover:rotate-12 transition-transform" />
+                                                    <span className="text-xl font-black">REWORK</span>
+                                                </button>
+
+                                                <button
+                                                    onClick={() => setShowDefectModal('REJECT')}
+                                                    disabled={isProcessingAction}
+                                                    className="bg-rose-600 text-white rounded-[2.5rem] shadow-xl shadow-rose-200/50 flex items-center justify-center p-8 hover:bg-rose-700 transition-all active:scale-95 group"
+                                                >
+                                                    <X size={32} className="mr-4 group-hover:scale-90 transition-transform" />
+                                                    <span className="text-xl font-black">REJECT</span>
+                                                </button>
+                                            </div>
+
+                                            <button onClick={() => setGarment(null)} className="py-4 text-slate-400 font-bold hover:text-slate-600 transition-colors uppercase text-xs tracking-widest">
+                                                Cancel Scan
+                                            </button>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -1334,60 +1439,136 @@ const AssemblyProcessingPortal = () => {
 
             {/* DEFECT DICTIONARY MODAL */}
             {showDefectModal && (() => {
+                const isReworkModal = showDefectModal === 'REWORK';
+                const accentBg = isReworkModal ? 'bg-amber-500' : 'bg-rose-600';
+                const accentText = isReworkModal ? 'text-amber-600' : 'text-rose-600';
+                const targetStatus = STATUS[isReworkModal ? 'REWORK' : 'REJECT'];
+
                 const q = defectSearch.trim().toLowerCase();
+                const categories = [...new Set(defectCodes.map(c => c.category).filter(Boolean))].sort();
                 const filtered = defectCodes.filter(c =>
-                    !q ||
-                    c.code?.toLowerCase().includes(q) ||
-                    c.description?.toLowerCase().includes(q) ||
-                    c.category?.toLowerCase().includes(q)
+                    (!selectedDefectCategory || c.category === selectedDefectCategory) &&
+                    (!q || c.code?.toLowerCase().includes(q) || c.description?.toLowerCase().includes(q) || c.category?.toLowerCase().includes(q))
                 );
+
+                const toggleDefect = (id) => {
+                    setSelectedDefectIds(prev => {
+                        const next = new Set(prev);
+                        next.has(id) ? next.delete(id) : next.add(id);
+                        return next;
+                    });
+                };
+
+                const closeModal = () => {
+                    setShowDefectModal(null);
+                    setDefectSearch('');
+                    setSelectedDefectCategory(null);
+                    setSelectedDefectIds(new Set());
+                };
+
+                const confirmSelection = () => {
+                    if (selectedDefectIds.size === 0) return;
+                    handleAction(targetStatus, [...selectedDefectIds]);
+                    closeModal();
+                };
+
                 return (
-                    <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl z-[300] flex items-center justify-center p-6 animate-in fade-in">
-                        <div className="bg-white w-full max-w-3xl rounded-[4rem] overflow-hidden shadow-2xl border border-white/20">
-                            {/* Header */}
-                            <div className={`px-10 pt-10 pb-6 ${showDefectModal === 'REWORK' ? 'bg-amber-500' : 'bg-rose-600'} text-white`}>
-                                <div className="flex justify-between items-start mb-4">
-                                    <div>
-                                        <h2 className="text-3xl font-black tracking-tighter">SELECT REASON</h2>
-                                        <p className="text-[10px] font-bold uppercase opacity-60 tracking-widest mt-1">Classification: {showDefectModal}</p>
-                                    </div>
-                                    <button onClick={() => { setShowDefectModal(null); setDefectSearch(''); }} className="p-3 bg-white/20 rounded-full hover:bg-white/30 transition-colors"><X /></button>
+                    <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl z-[300] flex items-end sm:items-center justify-center sm:p-4 animate-in fade-in">
+                        <div className="bg-white w-full max-w-3xl sm:rounded-[2rem] rounded-t-[2rem] overflow-hidden shadow-2xl flex flex-col h-[95dvh] sm:h-[92vh]">
+                            {/* Compact header */}
+                            <div className={`px-4 py-3 ${accentBg} text-white shrink-0`}>
+                                {/* Row 1: label + UID + close */}
+                                <div className="flex items-center gap-2 mb-2">
+                                    <span className="font-black text-sm uppercase tracking-widest opacity-90">{showDefectModal}</span>
+                                    {garment && (
+                                        <span className="bg-white/20 rounded-lg px-2 py-0.5 font-mono font-black text-xs tracking-wide">
+                                            {garment.garment_uid} · Sz {garment.size}
+                                        </span>
+                                    )}
+                                    <button onClick={closeModal} className="ml-auto p-1.5 bg-white/20 rounded-full hover:bg-white/30 transition-colors"><X size={14} /></button>
                                 </div>
-                                {/* Garment UID */}
-                                {garment && (
-                                    <div className="bg-white/15 rounded-2xl px-4 py-2 mb-4 inline-flex items-center gap-2">
-                                        <Barcode size={14} className="opacity-70" />
-                                        <span className="font-mono font-black text-sm tracking-wide">{garment.garment_uid}</span>
-                                        <span className="opacity-60 text-xs font-bold">· Sz {garment.size}</span>
-                                    </div>
-                                )}
-                                {/* Search */}
+                                {/* Row 2: search */}
                                 <input
                                     type="text"
                                     value={defectSearch}
                                     onChange={e => setDefectSearch(e.target.value)}
-                                    placeholder="Search by code or description…"
+                                    placeholder="Search defect…"
                                     autoFocus
-                                    className="w-full bg-white/20 placeholder-white/50 text-white font-bold text-sm px-4 py-2.5 rounded-2xl outline-none border border-white/20 focus:border-white/60 transition-colors"
+                                    className="w-full bg-white/20 placeholder-white/50 text-white font-bold text-sm px-3 py-2 rounded-xl outline-none border border-white/20 focus:border-white/60 transition-colors"
                                 />
+                                {/* Row 3: category chips */}
+                                {categories.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 mt-2">
+                                        <button
+                                            onClick={() => setSelectedDefectCategory(null)}
+                                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wide transition-all border ${!selectedDefectCategory ? 'bg-white text-slate-900 border-white' : 'bg-white/15 text-white border-white/30 hover:bg-white/25'}`}
+                                        >All</button>
+                                        {categories.map(cat => (
+                                            <button
+                                                key={cat}
+                                                onClick={() => setSelectedDefectCategory(prev => prev === cat ? null : cat)}
+                                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wide transition-all border ${selectedDefectCategory === cat ? 'bg-white text-slate-900 border-white' : 'bg-white/15 text-white border-white/30 hover:bg-white/25'}`}
+                                            >{cat}</button>
+                                        ))}
+                                    </div>
+                                )}
+                                {/* Row 4: selected chips (only when something picked) */}
+                                {selectedDefectIds.size > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-white/20">
+                                        {[...selectedDefectIds].map(id => {
+                                            const c = defectCodes.find(x => x.id === id);
+                                            return c ? (
+                                                <span key={id} className="inline-flex items-center gap-1 bg-white/25 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                                                    {c.code || c.description}
+                                                    <button onClick={() => toggleDefect(id)} className="hover:opacity-70"><X size={10} /></button>
+                                                </span>
+                                            ) : null;
+                                        })}
+                                    </div>
+                                )}
                             </div>
-                            {/* Codes grid */}
-                            <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[50vh] overflow-y-auto custom-scrollbar">
+
+                            {/* Codes grid — takes all remaining space */}
+                            <div className="p-3 grid grid-cols-2 md:grid-cols-3 gap-2 overflow-y-auto custom-scrollbar flex-1">
                                 {filtered.length === 0 ? (
                                     <div className="col-span-full py-10 text-center text-slate-400 font-bold">No matching defect codes.</div>
-                                ) : filtered.map(code => (
-                                    <button
-                                        key={code.id}
-                                        onClick={() => { handleAction(STATUS[showDefectModal === 'REWORK' ? 'REWORK' : 'REJECT'], code.id); setDefectSearch(''); }}
-                                        className="p-6 text-left border-2 border-slate-50 bg-slate-50/30 rounded-3xl hover:border-indigo-500 hover:bg-indigo-50 transition-all group active:scale-95"
-                                    >
-                                        <div className="flex items-center gap-2 mb-1">
-                                            {code.code && <span className="font-mono text-xs font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-lg">{code.code}</span>}
-                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{code.category}</span>
-                                        </div>
-                                        <span className="font-bold text-slate-800 text-base leading-tight group-hover:text-indigo-900">{code.description}</span>
-                                    </button>
-                                ))}
+                                ) : filtered.map(code => {
+                                    const isSelected = selectedDefectIds.has(code.id);
+                                    return (
+                                        <button
+                                            key={code.id}
+                                            onClick={() => toggleDefect(code.id)}
+                                            className={`p-3 text-left border-2 rounded-2xl transition-all active:scale-95 ${
+                                                isSelected
+                                                    ? `${isReworkModal ? 'border-amber-400 bg-amber-50' : 'border-rose-400 bg-rose-50'}`
+                                                    : 'border-slate-100 bg-slate-50 hover:border-indigo-400 hover:bg-indigo-50'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-1.5 mb-1">
+                                                {code.code && <span className={`font-mono text-[10px] font-black px-1.5 py-0.5 rounded ${isSelected ? accentText + ' bg-white' : 'text-indigo-500 bg-indigo-50'}`}>{code.code}</span>}
+                                                {isSelected && <span className={`ml-auto text-[10px] font-black ${accentText}`}>✓</span>}
+                                            </div>
+                                            <span className={`font-bold text-sm leading-tight line-clamp-2 ${isSelected ? 'text-slate-900' : 'text-slate-700'}`}>{code.description}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Compact confirm footer */}
+                            <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3 shrink-0">
+                                <button onClick={closeModal} className="px-4 py-2 text-slate-500 font-bold hover:text-slate-700 transition-colors text-sm">
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={confirmSelection}
+                                    disabled={selectedDefectIds.size === 0}
+                                    className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-black text-white text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed ${isReworkModal ? 'bg-amber-500 hover:bg-amber-600' : 'bg-rose-600 hover:bg-rose-700'}`}
+                                >
+                                    Confirm {showDefectModal}
+                                    {selectedDefectIds.size > 0 && (
+                                        <span className="bg-white/25 text-xs px-2 py-0.5 rounded-full">{selectedDefectIds.size}</span>
+                                    )}
+                                </button>
                             </div>
                         </div>
                     </div>

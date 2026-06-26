@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { 
     LuGripVertical, LuUser, LuPackage, LuLayoutGrid, LuTruck, LuUsers, 
@@ -8,6 +8,25 @@ import {
 // --- SHARED COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8 h-full"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div></div>;
 const Placeholder = ({ text }) => <div className="p-8 text-center bg-slate-50 rounded-lg h-full flex items-center justify-center border-2 border-dashed border-slate-200"><p className="text-sm text-slate-400 font-medium">{text}</p></div>;
+
+// --- LINE TYPE GROUP HEADER ---
+const LineTypeGroupHeader = ({ typeName, typeId, lineCount, totalStaff, totalMachines, isCollapsed, onToggle, onAddLine }) => (
+    <div className="flex items-center gap-3 mb-3 mt-2 group cursor-pointer select-none">
+        <div className="w-1 h-8 bg-indigo-500 rounded-full flex-shrink-0" />
+        <button onClick={() => onToggle(typeId)} className="flex items-center gap-2 flex-1 text-left min-w-0">
+            {isCollapsed ? <LuChevronRight size={18} className="text-slate-400 flex-shrink-0"/> : <LuChevronDown size={18} className="text-slate-400 flex-shrink-0"/>}
+            <span className="text-xl font-extrabold text-slate-800 tracking-tight truncate">{typeName}</span>
+            <span className="bg-indigo-50 text-indigo-700 text-xs font-bold px-2.5 py-0.5 rounded-full border border-indigo-100 flex-shrink-0">{lineCount} {lineCount === 1 ? 'Line' : 'Lines'}</span>
+            <span className="text-xs text-slate-400 font-medium hidden sm:inline flex-shrink-0">{totalStaff} Staff · {totalMachines} Machines</span>
+        </button>
+        <button
+            onClick={() => onAddLine(typeId)}
+            className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50 flex-shrink-0"
+        >
+            <LuPlus size={12}/> Add Line
+        </button>
+    </div>
+);
 
 // --- DRAGGABLE CHIPS ---
 const DraggableChip = ({ item, type, onDragStart, icon: Icon, colorClass }) => (
@@ -211,6 +230,36 @@ export default function FactoryLayoutPlannerPage() {
 
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
+    const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+    const groupRefs = useRef({});
+    const hasInitializedCollapse = useRef(false);
+
+    const groupedLines = useMemo(() => {
+        const typeMap = Object.fromEntries(lineTypes.map(t => [String(t.id), t.type_name]));
+        const groups = {};
+        lines.forEach(line => {
+            const key = String(line.production_line_type_id || 'uncategorized');
+            if (!groups[key]) {
+                groups[key] = { typeId: key, typeName: typeMap[key] || 'Uncategorized', lines: [] };
+            }
+            groups[key].lines.push(line);
+        });
+        return Object.values(groups);
+    }, [lines, lineTypes]);
+
+    const toggleGroup = (typeId) =>
+        setCollapsedGroups(prev => {
+            const next = new Set(prev);
+            next.has(typeId) ? next.delete(typeId) : next.add(typeId);
+            return next;
+        });
+
+    useEffect(() => {
+        if (groupedLines.length > 0 && !hasInitializedCollapse.current) {
+            setCollapsedGroups(new Set(groupedLines.map(g => g.typeId)));
+            hasInitializedCollapse.current = true;
+        }
+    }, [groupedLines]);
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
@@ -238,12 +287,12 @@ export default function FactoryLayoutPlannerPage() {
     useEffect(() => { fetchData(); }, [fetchData]);
 
     // --- LINE CRUD OPERATIONS ---
-    const openCreateModal = () => {
+    const openCreateModal = (prefilledTypeId = '') => {
         setIsEditing(false);
         setLineFormData({
             id: null,
             name: '',
-            production_line_type_id: '',
+            production_line_type_id: prefilledTypeId,
             output_attributes: ['Total Quantity'],
             wip_limit: 5,
             is_job_work: false,
@@ -469,14 +518,51 @@ export default function FactoryLayoutPlannerPage() {
 
                     {/* RIGHT MAIN: Production Lines */}
                     <div className="flex-1 overflow-y-auto pr-2 pb-10 flex flex-col">
-                        {lines.map(line => (
-                            <ProductionLine
-                                key={line.id} line={line}
-                                onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} onDragStart={handleDragStart}
-                                onEditClick={openEditModal} onDeleteClick={handleDeleteLine}
-                                onToggleJobWork={handleToggleJobWork}
-                            />
-                        ))}
+
+                        {/* Jump-to-group nav pills */}
+                        {groupedLines.length > 1 && (
+                            <div className="flex-shrink-0 flex items-center gap-2 mb-5 flex-wrap">
+                                {groupedLines.map(g => (
+                                    <button
+                                        key={g.typeId}
+                                        onClick={() => groupRefs.current[g.typeId]?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                                        className="px-3 py-1 text-xs font-bold rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 transition-colors shadow-sm"
+                                    >
+                                        {g.typeName}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Grouped production lines */}
+                        {groupedLines.map(group => {
+                            const isCollapsed = collapsedGroups.has(group.typeId);
+                            const totalStaff = group.lines.reduce((s, l) => s + (l.operators?.length || 0), 0);
+                            const totalMachines = group.lines.reduce((s, l) => s + (l.workstations?.length || 0), 0);
+                            return (
+                                <div key={group.typeId} className="mb-4" ref={el => groupRefs.current[group.typeId] = el}>
+                                    <LineTypeGroupHeader
+                                        typeName={group.typeName}
+                                        typeId={group.typeId}
+                                        lineCount={group.lines.length}
+                                        totalStaff={totalStaff}
+                                        totalMachines={totalMachines}
+                                        isCollapsed={isCollapsed}
+                                        onToggle={toggleGroup}
+                                        onAddLine={openCreateModal}
+                                    />
+                                    {!isCollapsed && group.lines.map(line => (
+                                        <ProductionLine
+                                            key={line.id} line={line}
+                                            onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} onDragStart={handleDragStart}
+                                            onEditClick={openEditModal} onDeleteClick={handleDeleteLine}
+                                            onToggleJobWork={handleToggleJobWork}
+                                        />
+                                    ))}
+                                </div>
+                            );
+                        })}
+
                         {lines.length === 0 && <div className="h-full"><Placeholder text="No production lines created yet. Click 'Add New Line' to begin." /></div>}
                     </div>
                 </div>

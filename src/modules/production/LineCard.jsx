@@ -41,14 +41,16 @@ export function buildLineData(formLines = [], summaryRows = [], outputLines = []
     const outputByLine = new Map();
     for (const ol of outputLines) {
         outputByLine.set(String(ol.line_id), {
-            total_output:  parseInt(ol.summary?.total_output)  || 0,
-            total_defects: parseInt(ol.summary?.total_defects) || 0,
+            total_output:   parseInt(ol.summary?.total_output)   || 0,
+            total_defects:  parseInt(ol.summary?.total_defects)  || 0,
+            total_approved: parseInt(ol.summary?.total_approved) || 0,
+            total_rework:   parseInt(ol.summary?.total_rework)   || 0,
         });
     }
 
     return formLines.map(line => {
         const id  = String(line.line_id);
-        const out = outputByLine.get(id) ?? { total_output: 0, total_defects: 0 };
+        const out = outputByLine.get(id) ?? { total_output: 0, total_defects: 0, total_approved: 0, total_rework: 0 };
         let parts = summaryByLine.get(id) ?? [];
 
         // Fallback if summary API returned no target parts at all
@@ -101,6 +103,8 @@ export function buildLineData(formLines = [], summaryRows = [], outputLines = []
             parts,
             total_output:       out.total_output,
             total_defects:      out.total_defects,
+            total_approved:     out.total_approved,
+            total_rework:       out.total_rework,
             batches:            line.batches ?? [],
             employees_assigned: line.employees_assigned ?? [],
             employees_present:  line.employees_present  ?? [],
@@ -169,7 +173,10 @@ export default function LineCard({ line, defaultExpandEmployees = false }) {
     const hasTarget = parts.some(p => p.target_quantity > 0);
     const output    = line.total_output  ?? 0;
     const defects   = line.total_defects ?? 0;
-    const dhu       = output > 0 ? (defects / output) * 100 : null;
+    const checked   = (line.total_approved ?? 0) + (line.total_rework ?? 0);
+    const dhu       = checked > 0 ? (defects / checked) * 100
+                    : output  > 0 ? (defects / output)  * 100
+                    : null;
 
     const batches      = line.batches ?? [];
     const employeesAll = line.employees_assigned ?? [];
