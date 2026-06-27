@@ -159,6 +159,7 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
     const soId = so.id ?? so.sales_order_id;
 
     const [details, setDetails]         = useState(null);
+    const [sizeMap, setSizeMap]         = useState({});
     const [loading, setLoading]         = useState(true);
     const [error, setError]             = useState(null);
     const [expandedPOs, setExpandedPOs] = useState({});
@@ -166,8 +167,15 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
     const [selectedPO, setSelectedPO]   = useState(null);
 
     useEffect(() => {
-        accountingApi.getSalesOrderDetails(soId)
-            .then(res => setDetails(res.data))
+        Promise.all([
+            accountingApi.getSalesOrderDetails(soId),
+            accountingApi.getSizes(),
+        ])
+            .then(([detailsRes, sizesRes]) => {
+                setDetails(detailsRes.data);
+                const sizes = sizesRes.data?.data ?? sizesRes.data ?? [];
+                setSizeMap(Object.fromEntries(sizes.map(s => [String(s.id), s.name])));
+            })
             .catch(() => setError('Failed to load order details.'))
             .finally(() => setLoading(false));
     }, [soId]);
@@ -292,7 +300,7 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
                                                                     <div className="flex flex-wrap gap-1.5 flex-1">
                                                                         {sizes.length > 0 ? sizes.map(sz => (
                                                                             <div key={sz.size_id} className="flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1 min-w-[2.75rem]">
-                                                                                <span className="text-[9px] font-bold text-indigo-400 uppercase leading-none">{sz.size_name || `#${sz.size_id}`}</span>
+                                                                                <span className="text-[9px] font-bold text-indigo-400 uppercase leading-none">{sizeMap[String(sz.size_id)] || sz.size_name || `#${sz.size_id}`}</span>
                                                                                 <span className="text-sm font-bold text-indigo-800 leading-tight mt-0.5">{sz.quantity}</span>
                                                                             </div>
                                                                         )) : (

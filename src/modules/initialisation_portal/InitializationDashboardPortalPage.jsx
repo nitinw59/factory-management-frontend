@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom';
 import { initializationPortalApi } from '../../api/initializationPortalApi';
 import Modal from '../../shared/Modal';
 import CuttingForm from '../cutting_portal/CuttingForm'; 
-import { 
-    Play, Layers, Info, MoreHorizontal, Square, CheckSquare, 
-    ChevronDown, ChevronRight, Loader2, AlertCircle, Box, 
-    BarChart2, Scissors, ShoppingBag, Package, Wrench, FileText, Eye, Ruler, Filter, X
+import {
+    Play, Layers, Info, MoreHorizontal, Square, CheckSquare,
+    ChevronDown, ChevronRight, Loader2, AlertCircle, Box,
+    BarChart2, Scissors, ShoppingBag, Package, Wrench, FileText, Eye, Ruler, Filter, X, Clock
 } from 'lucide-react';
 
 // --- SHARED COMPONENTS ---
@@ -470,12 +470,22 @@ const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll }) => {
                     <div className="flex-1 min-w-0">
                         <p className="text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-wide flex justify-between items-center">
                             <span>Rolls Assigned</span>
-                            <span className="text-slate-300 font-medium">{batch.rolls?.length || 0}</span>
+                            <span className="flex items-center gap-1">
+                                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">
+                                    {(batch.rolls || []).filter(r => r.is_cut).length} saved
+                                </span>
+                                <span className="text-slate-300">·</span>
+                                <span className="bg-slate-100 text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded font-bold">
+                                    {(batch.rolls || []).filter(r => !r.is_cut).length} pending
+                                </span>
+                                <span className="text-slate-300">·</span>
+                                <span className="text-slate-400 font-medium">{batch.rolls?.length || 0}</span>
+                            </span>
                         </p>
                         
                         <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                             {(batch.rolls || []).map((roll) => (
-                                <div key={roll.id} className="bg-white p-2.5 rounded-lg border border-slate-100 shadow-sm flex items-center justify-between group/roll hover:border-indigo-100 transition-colors">
+                                <div key={roll.id} className={`bg-white p-2.5 rounded-lg border shadow-sm flex items-center justify-between transition-colors ${roll.is_cut ? 'border-emerald-100' : 'border-slate-100 hover:border-indigo-100'}`}>
                                     <div className="flex flex-col min-w-0 pr-2">
                                         <div className="flex items-center gap-1.5">
                                             <span className="font-bold text-slate-700 text-xs font-mono">R-{Number(roll.id)%1000}</span>
@@ -484,14 +494,22 @@ const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll }) => {
                                         <span className="text-[10px] text-slate-500 truncate mt-0.5">
                                             {roll.type} • {roll.color || 'Generic'}
                                         </span>
+                                        {roll.is_cut ? (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 mt-0.5 w-fit">
+                                                <Layers size={9}/> Data saved
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-400 border border-slate-200 mt-0.5 w-fit">
+                                                <Clock size={9}/> Pending
+                                            </span>
+                                        )}
                                     </div>
-                                    
-                                    {/* Action Button - Only show if batch is in progress or pending (depending on workflow) */}
+
                                     {!isCompleted && (
-                                        <button 
+                                        <button
                                             onClick={() => onCutRoll(batch.batch_id, roll.id, roll.meter)}
-                                            className="p-1.5 bg-indigo-50 text-indigo-600 rounded-md hover:bg-indigo-100 hover:text-indigo-700 transition-colors border border-indigo-100"
-                                            title="Enter Cutting Data"
+                                            className={`p-1.5 rounded-md transition-colors border shrink-0 ${roll.is_cut ? 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100' : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100 hover:text-indigo-700'}`}
+                                            title={roll.is_cut ? 'Edit Cut Data' : 'Enter Cutting Data'}
                                         >
                                             <Scissors size={14} />
                                         </button>
@@ -591,7 +609,7 @@ const InitializationDashboardPortalPage = () => {
         setIsLoading(true);
         try {
             const response = await initializationPortalApi.getDashboardData();
-            console.log("Fetched dashboard data:", response.data);
+            console.log("Fetched dashboard dataaaa:", response.data);
             setBatches(response.data);
         } catch (err) {
             setError("Could not load initialization queue.");

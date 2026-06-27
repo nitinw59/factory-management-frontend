@@ -42,18 +42,20 @@ const Spinner = () => (
 
 const StatusBadge = ({ status }) => {
     const colors = {
-        CONFIRMED:   'bg-blue-100 text-blue-700 border-blue-200',
-        RECEIVED:    'bg-green-100 text-green-700 border-green-200',
-        COMPLETED:   'bg-emerald-100 text-emerald-700 border-emerald-200',
-        IN_PROGRESS: 'bg-indigo-100 text-indigo-700 border-indigo-200',
-        ISSUED:      'bg-amber-100 text-amber-700 border-amber-200',
-        DRAFT:       'bg-gray-100 text-gray-600 border-gray-200',
-        PENDING:     'bg-yellow-50 text-yellow-700 border-yellow-200',
-        PREPARED:    'bg-orange-100 text-orange-700 border-orange-200',
-        SHIPPED:     'bg-purple-100 text-purple-700 border-purple-200',
-        DISPATCHED:  'bg-purple-100 text-purple-700 border-purple-200',
-        NOT_STARTED: 'bg-gray-100 text-gray-400 border-gray-200',
-        READY:       'bg-teal-100 text-teal-700 border-teal-200',
+        CONFIRMED:     'bg-blue-100 text-blue-700 border-blue-200',
+        IN_PRODUCTION: 'bg-violet-100 text-violet-700 border-violet-200',
+        SHIPPED:       'bg-purple-100 text-purple-700 border-purple-200',
+        CANCELLED:     'bg-red-100 text-red-700 border-red-200',
+        RECEIVED:      'bg-green-100 text-green-700 border-green-200',
+        COMPLETED:     'bg-emerald-100 text-emerald-700 border-emerald-200',
+        IN_PROGRESS:   'bg-indigo-100 text-indigo-700 border-indigo-200',
+        ISSUED:        'bg-amber-100 text-amber-700 border-amber-200',
+        DRAFT:         'bg-gray-100 text-gray-600 border-gray-200',
+        PENDING:       'bg-yellow-50 text-yellow-700 border-yellow-200',
+        PREPARED:      'bg-orange-100 text-orange-700 border-orange-200',
+        DISPATCHED:    'bg-purple-100 text-purple-700 border-purple-200',
+        NOT_STARTED:   'bg-gray-100 text-gray-400 border-gray-200',
+        READY:         'bg-teal-100 text-teal-700 border-teal-200',
     };
     return (
         <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${colors[status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
@@ -742,7 +744,6 @@ const SalesOrderDetailsModal = ({ orderId, onClose }) => {
     useEffect(() => {
         accountingApi.getSalesOrderDetails(orderId)
             .then(res => setOrder(res.data))
-            .then(() => console.log('Fetched SO details:', order))
             .catch(console.error)
             .finally(() => setLoading(false));
     }, [orderId]);
@@ -807,19 +808,29 @@ const SalesOrderDetailsModal = ({ orderId, onClose }) => {
                             </thead>
                             <tbody className="divide-y divide-gray-100 bg-white">
                                 {(order.products || []).map((prod, idx) => {
-                                    const total = prod.colors?.reduce((s, c) => s + parseInt(c.quantity || 0), 0) || 0;
+                                    const total = prod.colors?.reduce((s, c) => s + Number(c.quantity || 0), 0) || 0;
+                                    // Aggregate per-size quantities across all colors for this product
+                                    const aggSizes = {};
+                                    (prod.colors || []).forEach(c => {
+                                        (c.sizes || []).forEach(sz => {
+                                            aggSizes[sz.size_name] = (aggSizes[sz.size_name] || 0) + (Number(sz.quantity) || 0);
+                                        });
+                                    });
+                                    const sizeEntries = Object.entries(aggSizes);
                                     return (
                                         <tr key={idx} className="align-top hover:bg-gray-50/50">
                                             <td className="px-4 py-4 font-bold text-gray-900">{prod.product_name}</td>
-                                            <td className="px-4 py-4 text-gray-600">{prod.fabric_type}</td>
+                                            <td className="px-4 py-4 text-gray-600">{prod.fabric_type || '—'}</td>
                                             <td className="px-4 py-4">
                                                 <div className="flex flex-wrap gap-1.5">
-                                                    {prod.size_breakdown && Object.entries(prod.size_breakdown).map(([sz, r]) => (
-                                                        <span key={sz} className="flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-md min-w-[2.5rem] overflow-hidden">
-                                                            <span className="w-full text-center bg-indigo-100 text-indigo-800 text-[9px] font-bold uppercase py-0.5">{sz}</span>
-                                                            <span className="text-indigo-900 font-extrabold text-xs py-1">{r}</span>
+                                                    {sizeEntries.length > 0 ? sizeEntries.map(([name, qty]) => (
+                                                        <span key={name} className="flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-md min-w-[2.5rem] overflow-hidden">
+                                                            <span className="w-full text-center bg-indigo-100 text-indigo-800 text-[9px] font-bold uppercase py-0.5">{name}</span>
+                                                            <span className="text-indigo-900 font-extrabold text-xs py-1">{qty}</span>
                                                         </span>
-                                                    ))}
+                                                    )) : (
+                                                        <span className="text-xs text-gray-400 italic">—</span>
+                                                    )}
                                                 </div>
                                             </td>
                                             <td className="px-4 py-4">
@@ -830,12 +841,12 @@ const SalesOrderDetailsModal = ({ orderId, onClose }) => {
                                                                 <Palette size={12} className="text-gray-400 mr-1.5" />
                                                                 {c.color_name} <span className="text-gray-400 ml-1">({c.color_number})</span>
                                                             </span>
-                                                            <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs">{c.quantity} pcs</span>
+                                                            <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs">{Number(c.quantity || 0).toLocaleString()} pcs</span>
                                                         </div>
                                                     ))}
                                                 </div>
                                             </td>
-                                            <td className="px-4 py-4 text-right font-extrabold text-gray-800 text-lg">{total}</td>
+                                            <td className="px-4 py-4 text-right font-extrabold text-gray-800 text-lg">{total.toLocaleString()}</td>
                                         </tr>
                                     );
                                 })}
@@ -1053,27 +1064,32 @@ const SopDetailsModal = ({ sop, onClose, onViewPO, onViewBatch }) => {
                     {colors.length === 0 ? (
                         <p className="text-sm text-gray-400 italic px-2">No colors configured for this product.</p>
                     ) : (
-                        <div className="overflow-x-auto border border-gray-200 rounded-xl">
-                            <table className="w-full text-sm text-left">
-                                <thead className="bg-gray-100 text-gray-600 border-b border-gray-200">
-                                    <tr>
-                                        <th className="px-4 py-2.5 font-semibold uppercase text-xs tracking-wider">Color</th>
-                                        <th className="px-4 py-2.5 font-semibold uppercase text-xs tracking-wider">Number</th>
-                                        <th className="px-4 py-2.5 font-semibold uppercase text-xs tracking-wider">Fabric</th>
-                                        <th className="px-4 py-2.5 font-semibold uppercase text-xs tracking-wider text-right w-24">Qty</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100 bg-white">
-                                    {colors.map((c, i) => (
-                                        <tr key={c.id ?? i} className="hover:bg-gray-50/50">
-                                            <td className="px-4 py-3 font-bold text-gray-900">{c.color_name || '—'}</td>
-                                            <td className="px-4 py-3 text-gray-500 font-mono text-xs">{c.color_number || '—'}</td>
-                                            <td className="px-4 py-3 text-gray-600 text-xs">{c.fabric_type || c.fabric_type_name || '—'}</td>
-                                            <td className="px-4 py-3 text-right font-bold text-gray-800 tabular-nums">{Number(c.quantity || c.total_quantity || 0).toLocaleString()}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                        <div className="space-y-2">
+                            {colors.map((c, i) => {
+                                const sizes = c.sizes || [];
+                                const colorQty = Number(c.quantity || c.total_quantity || 0);
+                                return (
+                                    <div key={c.id ?? i} className="border border-gray-200 rounded-xl overflow-hidden">
+                                        <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b border-gray-100">
+                                            <div className="flex items-center gap-3">
+                                                <span className="font-bold text-gray-900">{c.color_name || '—'}</span>
+                                                {c.color_number && <span className="font-mono text-xs text-gray-400 bg-white border border-gray-200 px-1.5 py-0.5 rounded">{c.color_number}</span>}
+                                            </div>
+                                            <span className="text-sm font-bold text-gray-700 tabular-nums">{colorQty.toLocaleString()} pcs</span>
+                                        </div>
+                                        {sizes.length > 0 && (
+                                            <div className="flex flex-wrap gap-1.5 px-4 py-3 bg-white">
+                                                {sizes.map(sz => (
+                                                    <div key={sz.size_id} className="flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1 min-w-[2.75rem]">
+                                                        <span className="text-[9px] font-bold text-indigo-400 uppercase leading-none">{sz.size_name}</span>
+                                                        <span className="text-sm font-bold text-indigo-800 leading-tight mt-0.5">{sz.quantity}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
                 </div>
@@ -1422,12 +1438,20 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                                         <div>
                                             <p className="font-bold text-gray-400 uppercase mb-2">Sizes</p>
                                             <div className="flex flex-wrap gap-1">
-                                                {prod.size_breakdown && Object.entries(prod.size_breakdown).map(([sz, r]) => (
-                                                    <span key={sz} className="bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded flex flex-col items-center min-w-[2rem]">
-                                                        <span className="font-bold opacity-60 text-[8px]">{sz}</span>
-                                                        <span className="font-extrabold">{r}</span>
-                                                    </span>
-                                                ))}
+                                                {(() => {
+                                                    const agg = {};
+                                                    (prod.colors || []).forEach(c => {
+                                                        (c.sizes || []).forEach(sz => {
+                                                            agg[sz.size_name] = (agg[sz.size_name] || 0) + (Number(sz.quantity) || 0);
+                                                        });
+                                                    });
+                                                    return Object.entries(agg).map(([name, qty]) => (
+                                                        <span key={name} className="bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded flex flex-col items-center min-w-[2rem]">
+                                                            <span className="font-bold opacity-60 text-[8px]">{name}</span>
+                                                            <span className="font-extrabold">{qty}</span>
+                                                        </span>
+                                                    ));
+                                                })()}
                                             </div>
                                         </div>
                                         <div>
@@ -2227,7 +2251,6 @@ const ProductionWorkflowDashboard = () => {
         setLoading(true);
         try {
             const res    = await productionManagerApi.getWorkflowData();
-            console.log('Fetched workflow data:', res.data);    
             const rows   = res.data || [];
             const sorted = [...rows].sort((a, b) => {
                 if (a.sales_order_id && !b.sales_order_id) return -1;
@@ -2343,7 +2366,7 @@ const ProductionWorkflowDashboard = () => {
                     <div>
                         <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 block">Order Status</label>
                         <div className="space-y-1">
-                            {['ALL', 'DRAFT', 'PENDING', 'IN_PROGRESS', 'COMPLETED'].map(f => (
+                            {['ALL', 'DRAFT', 'CONFIRMED', 'IN_PRODUCTION', 'SHIPPED', 'CANCELLED'].map(f => (
                                 <button
                                     key={f}
                                     onClick={() => setFilterStatus(f)}

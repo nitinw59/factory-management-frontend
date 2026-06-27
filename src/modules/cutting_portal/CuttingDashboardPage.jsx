@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { cuttingPortalApi } from '../../api/cuttingPortalApi';
-import { 
-    CheckCircle, Loader2, Package, Filter, X, Eye, 
-    ChevronDown, Scissors, Ruler, AlertCircle, Box, CircleDashed 
+import {
+    CheckCircle, Loader2, Package, Filter, X, Eye,
+    ChevronDown, Scissors, Ruler, AlertCircle, Box, CircleDashed,
+    Layers, Clock
 } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import CuttingForm from './CuttingForm';
@@ -102,13 +103,30 @@ const BatchCard = ({ batch, onOpenCutForm }) => {
                                     <CircleDashed size={14} className="text-slate-300 shrink-0"/>
                                 )}
                                 <span className={`font-semibold text-sm truncate ${roll.is_cut ? 'text-slate-600' : 'text-slate-800'}`}>
-                                    {roll.roll_identifier}
-                                    {/* Added Color Number */}
+                                    {roll.color || roll.roll_identifier || `#${roll.id}`}
                                     {roll.color_number && <span className="text-slate-500 font-normal ml-1">({roll.color_number})</span>}
                                 </span>
+                                {roll.type && (
+                                    <span className="shrink-0 text-[9px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200">
+                                        {roll.type}
+                                    </span>
+                                )}
                             </div>
-                            <div className="text-xs text-slate-400 flex items-center mt-0.5 ml-5">
-                                <Ruler size={10} className="mr-1"/> {roll.meter}m
+                            <div className="flex items-center gap-2 mt-1 ml-5">
+                                <span className="text-xs text-slate-400 flex items-center">
+                                    <Ruler size={10} className="mr-1"/> {roll.meter}m
+                                </span>
+                                {roll.is_cut ? (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                        <Layers size={9}/>
+                                        {roll.lays ? `${roll.lays} lays` : 'Data saved'}
+                                    </span>
+                                ) : (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-400 border border-slate-200">
+                                        <Clock size={9}/>
+                                        Pending
+                                    </span>
+                                )}
                             </div>
                         </div>
                         
@@ -206,6 +224,7 @@ const CuttingDashboardPage = () => {
     cuttingPortalApi.getMyQueue()
       .then(res => {
         const fetchedBatches = res.data || [];
+        console.log("Fetched Batches:", fetchedBatches);
         setAllBatches(fetchedBatches);
         setFilteredBatches(fetchedBatches);
       })
@@ -217,6 +236,9 @@ const CuttingDashboardPage = () => {
       })
       .finally(() => setIsLoading(false));
   }, []);
+
+
+  
 
   useEffect(() => {
     fetchQueue();
