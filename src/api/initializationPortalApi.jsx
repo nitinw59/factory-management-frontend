@@ -34,6 +34,8 @@ export const initializationPortalApi = {
 
     getRollsReadyForNextCycle: () => api.get('/initialization-portal/rolls-ready-for-next-cycle'),
 
+    finalizeBatchCutting: (batchId) => api.post(`/initialization-portal/batch/${batchId}/finalize-cutting`),
+
     // EndBit inventory — list available + merge into a virtual fabric roll.
     // Optional query params on the list: { fabric_type_id?, fabric_color_id?, source_batch_id? }
     // Merge requires both endbit_ids and the sales_order_product_id the new

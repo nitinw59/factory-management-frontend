@@ -516,6 +516,10 @@ const TrimOrderDetailPage = () => {
     const [toast, setToast] = useState(null);
     const showToast = useCallback((kind, message) => setToast({ kind, message }), []);
 
+    // Reference data (BOM + cutting) — loaded together with order details
+    const [refData, setRefData] = useState({ bom: [], cutting: [] });
+    const [refDataLoaded, setRefDataLoaded] = useState(false);
+
     // Reservation info for the currently selected trim item
     const [trimReservation, setTrimReservation] = useState(null);
     const [trimResLoading, setTrimResLoading] = useState(false);
@@ -550,8 +554,24 @@ const TrimOrderDetailPage = () => {
         };
     }, [popoverAnchor]);
 
+    const fetchRefData = useCallback(async () => {
+        setRefDataLoaded(false);
+        try {
+            const res = await storeManagerApi.getOrderReferenceData(orderId);
+            console.log('[TrimOrderDetail] refData loaded:', res.data);
+            setRefData(res.data || { bom: [], cutting: [] });
+        } catch (err) {
+            console.error('[TrimOrderDetail] refData fetch failed:', err?.response?.data || err.message);
+            setRefData({ bom: [], cutting: [] });
+        } finally {
+            setRefDataLoaded(true);
+        }
+    }, [orderId]);
+
+    useEffect(() => { fetchRefData(); }, [fetchRefData]);
+
     const fetchDetails = useCallback(async () => {
-        setIsLoading(true); 
+        setIsLoading(true);
         setError(null);
         try {
             const response = await storeManagerApi.getTrimOrderDetails(orderId);
@@ -568,7 +588,6 @@ const TrimOrderDetailPage = () => {
             }));
             setItems(sanitizedItems);
             setMissingItems(response.data.missing_items || []);
-            
             setOrderInfo({
                 status: response.data.status,
                 batchId: response.data.production_batch_id,
@@ -645,13 +664,13 @@ const TrimOrderDetailPage = () => {
         };
     }, [overrides]);
 
-    // ── Group items by trim_item_name (= one card in the left pane) ──────────
+    // ── Group items by base trim item name (before " - <variant>") ──────────
     const trimItemGroups = useMemo(() => {
         const map = new Map();
         items.forEach(it => {
-            const key = it.item_name || `#${it.trim_item_variant_id}`;
-            if (!map.has(key)) map.set(key, { name: key, items: [] });
-            map.get(key).items.push(it);
+            const baseName = it.item_name?.split(' - ')[0]?.trim() || `#${it.trim_item_variant_id}`;
+            if (!map.has(baseName)) map.set(baseName, { name: baseName, items: [] });
+            map.get(baseName).items.push(it);
         });
         // Aggregate counts so the left card can show "12 ready / 5 sub / 3 missing"
         return [...map.values()].map(g => {
@@ -1076,7 +1095,7 @@ const TrimOrderDetailPage = () => {
                             </div>
                         </div>
 
-                        <div className="relative grid grid-cols-1 lg:grid-cols-12 gap-0 min-h-[60vh]">
+                        <div className="relative grid grid-cols-1 lg:grid-cols-12 gap-0 h-[75vh]">
                             {(isFulfillingAll || isReverting) && (
                                 <div className="absolute inset-0 z-20 bg-white/60 backdrop-blur-[1px] flex items-center justify-center">
                                     <div className="bg-white px-6 py-3 rounded-xl shadow-lg border flex items-center font-bold text-blue-700">
@@ -1086,8 +1105,9 @@ const TrimOrderDetailPage = () => {
                             )}
 
                             {/* LEFT PANE — trim item cards */}
-                            <div className="lg:col-span-4 lg:border-r border-gray-200 flex flex-col min-h-0">
-                                <div className="p-3 border-b border-gray-100 space-y-2">
+                            <div className="lg:col-span-4 lg:border-r border-gray-200 flex flex-col overflow-hidden">
+                                {/* sticky search + filter */}
+                                <div className="shrink-0 p-3 border-b border-gray-100 space-y-2 bg-white">
                                     <div className="relative">
                                         <input type="search" placeholder="Search trim items…"
                                             value={search} onChange={e => setSearch(e.target.value)}
@@ -1112,7 +1132,8 @@ const TrimOrderDetailPage = () => {
                                         })}
                                     </div>
                                 </div>
-                                <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                                {/* scrollable cards list */}
+                                <div className="pane-scroll flex-1 overflow-y-auto p-2 space-y-1.5">
                                     {visibleTrimItemGroups.length === 0 ? (
                                         <p className="text-center text-xs text-gray-400 italic py-8">
                                             {items.length === 0 ? 'No items in this order.' : 'No trim items match the filter.'}
@@ -1129,7 +1150,6 @@ const TrimOrderDetailPage = () => {
                                                         {group.total}
                                                     </span>
                                                 </div>
-                                                {/* Aggregate progress bar — proportional segments per intent */}
                                                 <div className="flex h-1.5 rounded-full overflow-hidden bg-gray-100 mb-1.5">
                                                     {c.fulfilled    > 0 && <div className="bg-emerald-500" style={{ width: `${(c.fulfilled    / group.total) * 100}%` }} />}
                                                     {c.exact        > 0 && <div className="bg-green-500"   style={{ width: `${(c.exact        / group.total) * 100}%` }} />}
@@ -1149,9 +1169,9 @@ const TrimOrderDetailPage = () => {
                             </div>
 
                             {/* RIGHT PANE — intent groups for the selected trim item */}
-                            <div className="lg:col-span-8 flex flex-col min-h-0">
+                            <div className="pane-scroll lg:col-span-8 overflow-y-auto">
                                 {!selectedTrimGroup ? (
-                                    <div className="flex-1 flex items-center justify-center text-gray-400 italic p-8">
+                                    <div className="flex items-center justify-center h-full text-gray-400 italic p-8">
                                         Pick a trim item on the left to see fulfillment plans.
                                     </div>
                                 ) : (
@@ -1165,31 +1185,85 @@ const TrimOrderDetailPage = () => {
                                                 {' · '}{selectedTrimGroup.counts.exact + selectedTrimGroup.counts.substitute} actionable
                                                 {selectedTrimGroup.counts.insufficient > 0 && <span className="text-red-600 font-bold"> · {selectedTrimGroup.counts.insufficient} blocked</span>}
                                             </p>
-                                            {/* Quantity summary across this trim item */}
+                                            {/* Unified stats + BOM cards */}
                                             {(() => {
                                                 const totalRequired  = selectedTrimGroup.items.reduce((s, it) => s + Number(it.quantity_required  || 0), 0);
                                                 const totalFulfilled = selectedTrimGroup.items.reduce((s, it) => s + Number(it.quantity_fulfilled || 0), 0);
                                                 const remaining      = Math.max(0, totalRequired - totalFulfilled);
                                                 const pct            = totalRequired > 0 ? Math.round((totalFulfilled / totalRequired) * 100) : 0;
+
+                                                const _selNorm   = selectedTrimGroup.name?.trim().toLowerCase() ?? '';
+                                                const bomEntry   = refDataLoaded
+                                                    ? refData.bom.find(b => b.item_name?.trim().toLowerCase() === _selNorm)
+                                                    : undefined;
+                                                const totalCut   = refData.cutting.reduce((s, c) => s + Number(c.total_cut || 0), 0);
+                                                const qtyPerPc   = bomEntry ? parseFloat(bomEntry.quantity_per_piece) : null;
+                                                const bomDerived = (qtyPerPc != null && totalCut > 0) ? Math.round(qtyPerPc * totalCut) : null;
+                                                const variance   = (bomDerived != null) ? totalRequired - bomDerived : null;
+                                                const pctOff     = (bomDerived && variance != null) ? Math.abs(Math.round((variance / bomDerived) * 100)) : 0;
+                                                const isMatch    = variance != null && Math.abs(variance) <= 1;
+                                                const isOver     = variance != null && variance > 0;
+
                                                 return (
-                                                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
-                                                        <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
-                                                            <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Required (qty)</p>
-                                                            <p className="text-base font-extrabold text-gray-900 tabular-nums">{totalRequired.toLocaleString()}</p>
+                                                    <div className="mt-3 space-y-2">
+                                                        {/* Row 1 — order quantities */}
+                                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                                            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
+                                                                <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Required</p>
+                                                                <p className="text-base font-extrabold text-gray-900 tabular-nums">{totalRequired.toLocaleString()}</p>
+                                                            </div>
+                                                            <div className="bg-white border border-emerald-200 rounded-lg px-3 py-2">
+                                                                <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-600">Fulfilled</p>
+                                                                <p className="text-base font-extrabold text-emerald-700 tabular-nums">{totalFulfilled.toLocaleString()}</p>
+                                                                <p className="text-[10px] text-gray-500">{pct}% of required</p>
+                                                            </div>
+                                                            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
+                                                                <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Remaining</p>
+                                                                <p className={`text-base font-extrabold tabular-nums ${remaining > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{remaining.toLocaleString()}</p>
+                                                            </div>
+                                                            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
+                                                                <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Variants done</p>
+                                                                <p className="text-base font-extrabold text-gray-900 tabular-nums">{selectedTrimGroup.counts.fulfilled} <span className="text-xs font-bold text-gray-400">/ {selectedTrimGroup.total}</span></p>
+                                                            </div>
                                                         </div>
-                                                        <div className="bg-white border border-emerald-200 rounded-lg px-3 py-2">
-                                                            <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-600">Fulfilled (qty)</p>
-                                                            <p className="text-base font-extrabold text-emerald-700 tabular-nums">{totalFulfilled.toLocaleString()}</p>
-                                                            <p className="text-[10px] text-gray-500">{pct}% of required</p>
-                                                        </div>
-                                                        <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
-                                                            <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Remaining (qty)</p>
-                                                            <p className={`text-base font-extrabold tabular-nums ${remaining > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{remaining.toLocaleString()}</p>
-                                                        </div>
-                                                        <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
-                                                            <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Variants fulfilled</p>
-                                                            <p className="text-base font-extrabold text-gray-900 tabular-nums">{selectedTrimGroup.counts.fulfilled} <span className="text-xs font-bold text-gray-400">/ {selectedTrimGroup.total}</span></p>
-                                                        </div>
+
+                                                        {/* Row 2 — BOM calculation (loads when refData is ready) */}
+                                                        {!refDataLoaded ? null : !bomEntry ? (
+                                                            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 flex items-center gap-2">
+                                                                <LuTriangleAlert className="h-4 w-4 text-red-500 shrink-0" />
+                                                                <div>
+                                                                    <p className="text-xs font-bold text-red-700">No BOM entry for this trim item</p>
+                                                                    <p className="text-[10px] text-red-500 mt-0.5">Required quantities cannot be verified against BOM. Add this item to the product BOM.</p>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                                                <div className="bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
+                                                                    <p className="text-[9px] font-bold uppercase tracking-wider text-violet-500">BOM Qty / Pc</p>
+                                                                    <p className="text-base font-extrabold text-violet-800 tabular-nums font-mono">{qtyPerPc.toFixed(4)}</p>
+                                                                    {bomEntry.notes && <p className="text-[9px] text-violet-400 truncate" title={bomEntry.notes}>{bomEntry.notes}</p>}
+                                                                </div>
+                                                                <div className="bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
+                                                                    <p className="text-[9px] font-bold uppercase tracking-wider text-violet-500">Total Cut</p>
+                                                                    <p className="text-base font-extrabold text-violet-800 tabular-nums">{totalCut > 0 ? totalCut.toLocaleString() : <span className="text-gray-400 text-sm font-sans">—</span>}</p>
+                                                                </div>
+                                                                <div className="bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
+                                                                    <p className="text-[9px] font-bold uppercase tracking-wider text-violet-500">BOM Derived</p>
+                                                                    <p className="text-base font-extrabold text-violet-800 tabular-nums">{bomDerived != null ? bomDerived.toLocaleString() : <span className="text-gray-400 text-sm font-sans">—</span>}</p>
+                                                                    {bomDerived != null && <p className="text-[9px] text-violet-400 font-mono">{qtyPerPc.toFixed(4)} × {totalCut.toLocaleString()}</p>}
+                                                                </div>
+                                                                <div className={`rounded-lg px-3 py-2 border ${variance == null ? 'bg-gray-50 border-gray-200' : isMatch ? 'bg-emerald-50 border-emerald-200' : isOver ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'}`}>
+                                                                    <p className={`text-[9px] font-bold uppercase tracking-wider ${variance == null ? 'text-gray-400' : isMatch ? 'text-emerald-600' : isOver ? 'text-amber-600' : 'text-red-600'}`}>Variance</p>
+                                                                    {variance == null
+                                                                        ? <p className="text-sm font-bold text-gray-400">No cut data</p>
+                                                                        : isMatch
+                                                                            ? <p className="text-base font-extrabold text-emerald-700">✓ Exact</p>
+                                                                            : <p className={`text-base font-extrabold tabular-nums ${isOver ? 'text-amber-700' : 'text-red-700'}`}>{isOver ? '+' : ''}{variance.toLocaleString()} <span className="text-xs">({pctOff}%)</span></p>
+                                                                    }
+                                                                    {variance != null && !isMatch && <p className={`text-[9px] ${isOver ? 'text-amber-500' : 'text-red-500'}`}>{isOver ? 'ordered extra' : 'short vs BOM'}</p>}
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 );
                                             })()}
@@ -1249,7 +1323,7 @@ const TrimOrderDetailPage = () => {
                                             )}
                                         </div>
 
-                                        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                                        <div className="p-4 space-y-3">
                                             {intentGroups.length === 0 && (
                                                 <p className="text-center text-xs text-gray-400 italic py-8">No variants on this trim item.</p>
                                             )}

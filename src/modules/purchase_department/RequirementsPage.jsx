@@ -865,7 +865,7 @@ const RequirementsPage = () => {
         .filter(g => g.items.length > 0);
 
     return (
-        <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-5">
+        <div className="p-4 sm:p-6 space-y-5">
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>

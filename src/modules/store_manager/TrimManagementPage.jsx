@@ -106,14 +106,26 @@ const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
         ...initialData 
     });
 
+    const isEditing = !!initialData.id;
+
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
-        setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+        const newValue = type === 'checkbox' ? checked : value;
+        setFormData(prev => {
+            const next = { ...prev, [name]: newValue };
+            if (!isEditing && (name === 'name' || name === 'brand')) {
+                const n = name === 'name'  ? newValue : prev.name;
+                const b = name === 'brand' ? newValue : prev.brand;
+                next.item_code   = [b, n].filter(Boolean).join(' ').trim().toUpperCase().replace(/\s+/g, '-');
+                next.description = n && b ? `${n} by ${b}` : n || '';
+            }
+            return next;
+        });
     };
 
-    const handleSubmit = (e) => { 
-        e.preventDefault(); 
-        onSave(formData); 
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onSave(formData);
     };
 
     return (
@@ -131,7 +143,7 @@ const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
 
             <div>
                 <label className="text-xs font-medium text-gray-500">Item Code / SKU</label>
-                <input name="item_code" value={formData.item_code} onChange={handleChange} placeholder="Item Code" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                <input name="item_code" value={formData.item_code} onChange={handleChange} placeholder="e.g. YKK-METAL-BUTTON" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
 
             <textarea name="description" value={formData.description} onChange={handleChange} placeholder="Description" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" rows="3"></textarea>
@@ -210,7 +222,8 @@ const VariantFormModal = ({ onSave, onClose, initialData = {}, isColorAgnostic, 
             <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label className="text-sm font-medium text-gray-700">Current Stock</label>
-                    <input type="number" name="main_store_stock" value={formData.main_store_stock} onChange={handleChange} placeholder="Current Stock" required className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                    <input type="number" name="main_store_stock" value={formData.main_store_stock} onChange={handleChange} placeholder="Current Stock" required disabled={isDefinitionDisabled} className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-200 disabled:cursor-not-allowed" />
+                    {isDefinitionDisabled && <p className="text-xs text-gray-500 mt-1">Only admins can edit stock quantity.</p>}
                 </div>
                 <div>
                     <label className="text-sm font-medium text-gray-700">Low Stock Threshold</label>
@@ -1282,7 +1295,7 @@ const TrimManagementPage = () => {
                                                         </button>
                                                         <button onClick={cancelEdit} disabled={savingEdit} className="p-0.5 bg-white hover:bg-gray-100 text-gray-500 border border-gray-200 rounded"><X size={10}/></button>
                                                     </span>
-                                                ) : (
+                                                ) : user.role === 'factory_admin' ? (
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); startEdit(variant, 'main_store_stock'); }}
                                                         title="Click to edit stock"
@@ -1291,6 +1304,11 @@ const TrimManagementPage = () => {
                                                         Stock: <span className="font-bold">{variant.main_store_stock}</span>
                                                         {tone.key !== 'ok' && <span className="ml-1 uppercase text-[9px] font-bold">{tone.key}</span>}
                                                     </button>
+                                                ) : (
+                                                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${tone.cls}`}>
+                                                        Stock: <span className="font-bold">{variant.main_store_stock}</span>
+                                                        {tone.key !== 'ok' && <span className="ml-1 uppercase text-[9px] font-bold">{tone.key}</span>}
+                                                    </span>
                                                 )}
                                                 {reservedNum > 0 && (
                                                     <span

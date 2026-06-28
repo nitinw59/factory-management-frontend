@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 // Added LuSettings to the import
 import { LuCircleUserRound, LuLogOut, LuChevronDown, LuPencil, LuSettings } from 'react-icons/lu';
 import MatrixBrand from './MatrixBrand';
+import NotificationBell from './NotificationBell';
 
 // A reusable dropdown component for the navbar
 const NavDropdown = ({ title, children }) => {
@@ -91,6 +92,7 @@ const ProductionManagerLayout = () => {
                 <NavDropdown title="Reports">
                   <NavLink to="/production-manager/reports/daily-costing" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Daily Costing Report</NavLink>
                   <NavLink to="/production-manager/reports/production-analytics" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Production Analytics</NavLink>
+                  <NavLink to="/production-manager/planning" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Production Planning</NavLink>
                 </NavDropdown>
 
                 <NavLink to="/production-manager/settings" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
@@ -104,15 +106,16 @@ const ProductionManagerLayout = () => {
             {user && (
               <>
                 <span className="text-sm font-medium text-gray-700">Welcome, {user.name}</span>
-                
-                {/* NEW: Settings Link */}
-                <NavLink 
-                  to="/production-manager/settings" 
+
+                <NavLink
+                  to="/production-manager/settings"
                   className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}
                 >
                   <LuSettings className="mr-1.5" />
                   Settings
                 </NavLink>
+
+                <NotificationBell />
 
                 <button onClick={handleLogout} className="flex items-center text-sm font-medium text-gray-600 hover:text-red-600 transition-colors">
                   <LuLogOut className="mr-1.5" />

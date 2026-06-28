@@ -23,6 +23,8 @@ const CrudForm = ({
     const [formData, setFormData] = useState({});
     const [dynamicOptions, setDynamicOptions] = useState({});
     const [isLoadingOptions, setIsLoadingOptions] = useState(false);
+    // Tracks auto-calculated fields the user has manually overridden
+    const [manuallyEdited, setManuallyEdited] = useState(new Set());
 
     // Effect 1: Fetch dynamic options for select dropdowns.
     // This runs only when the `fields` configuration changes.
@@ -69,15 +71,33 @@ const CrudForm = ({
             return acc;
         }, {});
         setFormData(formState);
+        // Reset manual overrides when the modal opens for a new/different item
+        setManuallyEdited(new Set());
     }, [initialData, fields]);
 
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
-        setFormData(prevData => ({
-            ...prevData,
-            [name]: type === 'checkbox' ? checked : value
-        }));
+        const newValue = type === 'checkbox' ? checked : value;
+
+        // If the user is directly editing a field that has autoCalculate, mark it as manually overridden
+        const editedField = fields.find(f => f.name === name);
+        let updatedManuallyEdited = manuallyEdited;
+        if (editedField?.autoCalculate) {
+            updatedManuallyEdited = new Set([...manuallyEdited, name]);
+            setManuallyEdited(updatedManuallyEdited);
+        }
+
+        setFormData(prevData => {
+            const updated = { ...prevData, [name]: newValue };
+            // Run autoCalculate for any fields that haven't been manually overridden
+            fields.forEach(field => {
+                if (field.autoCalculate && !updatedManuallyEdited.has(field.name)) {
+                    updated[field.name] = field.autoCalculate(updated);
+                }
+            });
+            return updated;
+        });
     };
 
    // Inside CrudForm.js

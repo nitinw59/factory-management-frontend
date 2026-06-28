@@ -1,16 +1,15 @@
 import api from '../utils/api';
 
 export const notificationApi = {
-  /**
-   * Fetches the list of unread notifications for the logged-in user.
-   * Corresponds to: GET /api/notifications
-   */
-  getUnread: () => api.get('shared/notifications/my-notifications'),
+  getMyNotifications: (params = {}) =>
+    api.get('shared/notifications/my-notifications', { params }),
 
-  /**
-   * Marks a specific notification as read.
-   * Corresponds to: PUT /api/notifications/:id/mark-read
-   * @param {number | string} notificationId - The ID of the notification to update.
-   */
-  markAsRead: (notificationId) => api.put(`shared/notifications/my-notifications/${notificationId}/mark-read`, {}),
+  markAsRead: (notificationId) =>
+    api.put(`shared/notifications/my-notifications/${notificationId}/mark-read`),
+
+  markAllRead: () =>
+    api.put('shared/notifications/mark-all-read'),
+
+  getLogs: (params = {}) =>
+    api.get('shared/notifications/logs', { params }),
 };

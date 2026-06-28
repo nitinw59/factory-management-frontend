@@ -61,7 +61,6 @@ import ProductManagementPage from './modules/products/ProductManagementPage';
 import ProductBrandsPage from './modules/products/ProductBrandsPage';
 import ProductTypesPage from './modules/products/ProductTypesPage';
 import ProductionLineTypesPage from './modules/production/ProductionLineTypesPage';
-import ProductionPlanningPage from './modules/production/ProductionPlanningPage';
 import CuttingDashboardPage from './modules/cutting_portal/CuttingDashboardPage'; // New
 import FactoryLayoutPlannerPage from './modules/production/FactoryLayoutPlannerPage';
 import UnifiedIntakeForm from './modules/store_manager/UnifiedIntakeForm'; 
@@ -287,6 +286,7 @@ function App() {
           <Route path="scorecard-detailed" element={<ScorecardDetailedPage />} />
           <Route path="bom-approvals" element={<BomApprovalPage />} />
           <Route path="job-work" element={<JobWorkDashboardPage />} />
+          <Route path="planning" element={<MerchandiserPlanningPage />} />
 
         </Route>
       </Route>

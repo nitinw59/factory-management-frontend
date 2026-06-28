@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LuLogOut } from 'react-icons/lu';
+import NotificationBell from './NotificationBell';
 
 const LineLoaderLayout = () => {
   const { user, logout } = useAuth();
@@ -29,10 +30,11 @@ const LineLoaderLayout = () => {
               
             </nav>
           </div>
-          <div className="flex items-center">
+          <div className="flex items-center gap-4">
             {user && (
               <>
-                <span className="text-sm font-medium mr-4">Welcome, {console.log(user)}</span>
+                <span className="text-sm font-medium text-gray-700">Welcome, {user.name}</span>
+                <NotificationBell />
                 <button onClick={handleLogout} className="flex items-center text-sm text-gray-600 hover:text-red-600">
                   <LuLogOut className="mr-1" />
                   Logout

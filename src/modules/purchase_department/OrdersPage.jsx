@@ -512,7 +512,7 @@ const OrdersPage = () => {
     };
 
     return (
-        <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
+        <div className="p-4 sm:p-6 space-y-6">
             <div className="flex items-start justify-between gap-3">
                 <div>
                     <h1 className="text-xl font-bold text-slate-800">Purchase Orders</h1>

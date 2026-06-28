@@ -13,6 +13,7 @@ export const bomApi = {
     reject:     (bomId, notes) => api.post(`/bom/${bomId}/reject`, { notes }),
     archive:    (bomId)        => api.post(`/bom/${bomId}/archive`),
     getHistory: (bomId)        => api.get(`/bom/${bomId}/history`),
+    getApprovalPreview: (bomId) => api.get(`/bom/${bomId}/approval-preview`),
     getMeasurementChart:    (bomId)       => api.get(`/bom/${bomId}/measurement-chart`),
     saveMeasurementChart:   (bomId, data) => api.put(`/bom/${bomId}/measurement-chart`, data),
     deleteMeasurementChart: (bomId)       => api.delete(`/bom/${bomId}/measurement-chart`),

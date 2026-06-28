@@ -82,9 +82,12 @@ const ProgressBar = ({ done, total, color = 'bg-indigo-500' }) => {
 // ─── TAB: OVERVIEW ────────────────────────────────────────────────────────────
 
 const OverviewTab = ({ data }) => {
-    const h = data.batch_header || {};
-    const sr = data.size_ratios || [];
-    const il = data.interlining_requirements || [];
+    const h   = data.batch_header || {};
+    const so  = h.sales_order || {};
+    const prd = h.product || {};
+    const sop = h.sales_order_product || {};
+    const sr  = data.size_ratios || [];
+    const il  = data.interlining_requirements || [];
 
     return (
         <div className="space-y-5">
@@ -93,10 +96,9 @@ const OverviewTab = ({ data }) => {
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Production Chain</p>
                 <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-600">
                     {[
-                        { icon: FileText,  label: h.sales_order?.order_number,  sub: 'Sales Order' },
-                        { icon: Package,   label: h.purchase_order?.po_code,     sub: 'PO' },
-                        { icon: Scissors,  label: h.product?.name,               sub: 'Product' },
-                        { icon: Box,       label: h.id,                  sub: 'Batch' },
+                        { icon: FileText, label: so.order_number, sub: 'Sales Order' },
+                        { icon: Scissors, label: prd.name,        sub: 'Product'     },
+                        { icon: Box,      label: h.batch_code,    sub: 'Batch'       },
                     ].map(({ icon: Icon, label, sub }, i) => (
                         <React.Fragment key={sub}>
                             {i > 0 && <span className="text-slate-300">→</span>}
@@ -113,17 +115,34 @@ const OverviewTab = ({ data }) => {
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-4 pt-4 border-t border-slate-200">
                     <div>
                         <p className="text-[10px] text-slate-400 font-bold uppercase">Customer</p>
-                        <p className="text-sm font-semibold text-slate-700">{h.sales_order?.customer?.name ?? h.customer_name ?? '—'}</p>
+                        <p className="text-sm font-semibold text-slate-700">{so.customer ?? '—'}</p>
                     </div>
                     <div>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase">Supplier</p>
-                        <p className="text-sm font-semibold text-slate-700">{h.purchase_order?.supplier?.name ?? h.supplier_name ?? '—'}</p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase">Buyer PO</p>
+                        <p className="text-sm font-semibold text-slate-700">{so.buyer_po_number ?? '—'}</p>
                     </div>
                     <div>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase">Status</p>
-                        <StatusBadge status={h.batch_status || h.status} />
+                        <p className="text-[10px] text-slate-400 font-bold uppercase">SO Status</p>
+                        <StatusBadge status={so.status} />
                     </div>
                 </div>
+            </div>
+
+            {/* Batch Details */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Batch Details</p>
+                <InfoGrid items={[
+                    { label: 'Batch Code',    value: h.batch_code },
+                    { label: 'Batch #',       value: h.batch_index != null ? `#${h.batch_index}` : '—' },
+                    { label: 'Product',       value: prd.name },
+                    { label: 'Brand',         value: prd.brand },
+                    { label: 'Style',         value: prd.type },
+                    { label: 'Assigned Line', value: h.assigned_line ?? 'Not assigned' },
+                    { label: 'Created By',    value: h.created_by },
+                    { label: 'Created At',    value: h.created_at ? new Date(h.created_at).toLocaleDateString() : '—' },
+                    { label: 'Order Date',    value: so.order_date ? new Date(so.order_date).toLocaleDateString() : '—' },
+                    { label: 'Readiness',     value: sop.production_readiness?.replace(/_/g, ' ') },
+                ]} />
             </div>
 
             {/* Size Ratios */}
@@ -174,7 +193,7 @@ const stageBarColor = (status) => {
     return 'bg-slate-200';
 };
 
-const CycleStagesTab = ({ stages }) => {
+const CycleStagesTab = ({ stages, partsPerGarment = 1, primaryPartsPerGarment = 1 }) => {
     if (!stages?.length) return <SectionEmpty label="No production cycles recorded." />;
 
     return (
@@ -182,12 +201,47 @@ const CycleStagesTab = ({ stages }) => {
             {stages.map((stage, idx) => {
                 const prog     = stage.progress || {};
                 const tracking = stage.tracking_data;
+                const stats    = tracking?.stats || {};
                 const status   = prog.status || (stage.assigned_line_id ? 'PENDING' : 'NOT_STARTED');
 
-                // Determine done/total from tracking stats or progress fields
-                const total = tracking?.stats?.total ?? prog.total_pieces ?? 0;
-                const done  = tracking?.stats?.passed ?? tracking?.stats?.completed ??
-                              (status === 'COMPLETED' ? total : 0);
+                const mode = stage.processing_mode?.toUpperCase();
+                const isPieceMode  = mode === 'PIECE';
+                const isBundleMode = mode === 'BUNDLE';
+
+                // BUNDLE mode: total_pieces / primary-parts-per-garment = garment count
+                let total, done, breakdownChips;
+                if (isBundleMode) {
+                    const totalBundles    = Number(stats.total_bundles)    || 0;
+                    const approvedBundles = Number(stats.approved_bundles) || (status === 'COMPLETED' ? totalBundles : 0);
+                    const totalPieces     = Number(stats.total_pieces)     || 0;
+                    // Garment count: one primary part's piece count = total_pieces / primaryPartsPerGarment
+                    total = primaryPartsPerGarment > 0 ? Math.round(totalPieces / primaryPartsPerGarment) : totalPieces;
+                    // Done: proportion of approved bundles applied to garment total
+                    done  = totalBundles > 0 ? Math.round(total * approvedBundles / totalBundles) : (status === 'COMPLETED' ? total : 0);
+                    const pending = Math.max(0, total - done);
+                    breakdownChips = [
+                        { label: 'Approved', count: done,    cls: 'text-emerald-700 bg-emerald-50 border-emerald-100' },
+                        { label: 'Pending',  count: pending, cls: 'text-slate-500   bg-slate-50   border-slate-100'   },
+                    ].filter(c => c.count > 0);
+                } else {
+                    // PIECE mode or default (garment-level)
+                    total = Number(stats.total) || Number(prog.total_pieces) || 0;
+                    const approved = Number(stats.approved) || 0;
+                    const repaired = Number(stats.repaired) || 0;
+                    done = approved + repaired || (status === 'COMPLETED' ? total : 0);
+                    const toGarments = (n) => isPieceMode ? Math.round(n / partsPerGarment) : n;
+                    breakdownChips = [
+                        { label: 'Approved',     count: toGarments(Number(stats.approved    || 0)), cls: 'text-emerald-700 bg-emerald-50 border-emerald-100' },
+                        { label: 'Repaired',     count: toGarments(Number(stats.repaired    || 0)), cls: 'text-amber-700   bg-amber-50   border-amber-100'   },
+                        { label: 'Needs Rework', count: toGarments(Number(stats.needs_rework|| 0)), cls: 'text-orange-700  bg-orange-50  border-orange-100'  },
+                        { label: 'QC Rejected',  count: toGarments(Number(stats.qc_rejected || 0)), cls: 'text-red-700     bg-red-50     border-red-100'     },
+                        { label: 'Pending',      count: toGarments(Number(stats.pending     || 0)), cls: 'text-slate-500   bg-slate-50   border-slate-100'   },
+                    ].filter(c => c.count > 0);
+                }
+
+                // For piece-mode stages, show garment counts on progress bar
+                const displayTotal = isPieceMode ? Math.round(total / partsPerGarment) : total;
+                const displayDone  = isPieceMode ? Math.round(done  / partsPerGarment) : done;
 
                 const startedAt   = prog.started_at   ? new Date(prog.started_at).toLocaleString()   : null;
                 const completedAt = prog.completed_at ? new Date(prog.completed_at).toLocaleString() : null;
@@ -201,30 +255,47 @@ const CycleStagesTab = ({ stages }) => {
                                         #{idx + 1}
                                     </span>
                                     <span className="text-sm font-bold text-slate-800">
-                                        {stage.line_type_name ?? stage.stage_name ?? `Stage ${idx + 1}`}
+                                        {stage.line_type_name
+                                            ?? stage.stage_name
+                                            ?? (stage.line_type
+                                                ? stage.line_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+                                                : null)
+                                            ?? `Stage ${idx + 1}`}
                                     </span>
                                 </div>
                                 <p className="text-[10px] text-slate-400">
-                                    {stage.line_name ? `Line: ${stage.line_name}` : 'No line assigned'}
+                                    {(prog.production_line_name ?? stage.line_name)
+                                        ? `Line: ${prog.production_line_name ?? stage.line_name}`
+                                        : 'No line assigned'}
                                     {stage.processing_mode && ` · Mode: ${stage.processing_mode}`}
                                 </p>
                             </div>
                             <StatusBadge status={status} />
                         </div>
 
-                        {/* Progress bar */}
-                        <ProgressBar done={done} total={total || 1} color={stageBarColor(status)} />
+                        {/* Progress bar — garment counts for piece-mode stages */}
+                        <ProgressBar done={displayDone} total={displayTotal || 1} color={stageBarColor(status)} />
 
                         {/* Tracking breakdown */}
-                        {tracking?.breakdown?.length > 0 && (
+                        {breakdownChips.length > 0 && (
                             <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-slate-100">
-                                {tracking.breakdown.map((item, bi) => (
-                                    <div key={bi} className="flex flex-col items-center bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5 min-w-[4rem]">
-                                        <span className="text-base font-black text-slate-800">{item.count ?? item.value ?? 0}</span>
-                                        <span className="text-[9px] text-slate-400 font-bold uppercase">{item.label ?? item.status ?? `Cat ${bi}`}</span>
+                                {breakdownChips.map((chip) => (
+                                    <div key={chip.label} className={`flex flex-col items-center border rounded-lg px-3 py-1.5 min-w-[4rem] ${chip.cls}`}>
+                                        <span className="text-base font-black">{chip.count.toLocaleString()}</span>
+                                        <span className="text-[9px] font-bold uppercase">{chip.label}</span>
                                     </div>
                                 ))}
                             </div>
+                        )}
+                        {isPieceMode && total > 0 && (
+                            <p className="text-[9px] text-slate-400 mt-2">
+                                Piece-level stage · {partsPerGarment} parts/garment · {total.toLocaleString()} pieces total
+                            </p>
+                        )}
+                        {isBundleMode && stats.total_pieces > 0 && (
+                            <p className="text-[9px] text-slate-400 mt-2">
+                                Bundle-level stage (primary parts only) · {primaryPartsPerGarment} primary part{primaryPartsPerGarment !== 1 ? 's' : ''}/garment · {Number(stats.total_pieces).toLocaleString()} pieces total
+                            </p>
                         )}
 
                         {/* Timeline */}
@@ -307,51 +378,201 @@ const RollsTab = ({ rolls }) => {
 
 // ─── TAB: CUT PIECES ──────────────────────────────────────────────────────────
 
-const LIFECYCLE_COLS = ['at_cut', 'numbered', 'prepared', 'sewn', 'assembled', 'approved', 'rejected'];
+const LIFECYCLE_COLS = ['total_cut', 'at_cut', 'numbered', 'prepared', 'sewn', 'assembled', 'finished', 'packed', 'shipped'];
 
 const CutPiecesTab = ({ summary }) => {
+    const allRollIds = (summary || []).map(r => r.roll_id);
+    const [expandedRolls, setExpandedRolls] = useState(() => new Set());
+
     if (!summary?.length) return <SectionEmpty label="No cut piece data available." />;
 
+    // Find the first PRIMARY part name used across any roll — use it as the garment proxy
+    const primaryPartName = (() => {
+        for (const roll of summary) {
+            const p = (roll.parts || []).find(p => p.part_type === 'PRIMARY');
+            if (p) return p.part_name;
+        }
+        return null;
+    })();
+
+    // Total garments = sum of total_cut for that one primary part across all rolls
+    const totalGarments = primaryPartName
+        ? summary.reduce((acc, roll) => {
+            const part = (roll.parts || []).find(p => p.part_name === primaryPartName);
+            if (!part) return acc;
+            return acc + (part.sizes || []).reduce((s, sz) => s + (sz.total_cut || 0), 0);
+        }, 0)
+        : 0;
+
+    // Aggregate one PRIMARY part across all rolls, per size, per lifecycle stage
+    const garmentBySize = (() => {
+        if (!primaryPartName) return null;
+        const map = {};
+        for (const roll of summary) {
+            const part = (roll.parts || []).find(p => p.part_name === primaryPartName);
+            if (!part) continue;
+            for (const sz of (part.sizes || [])) {
+                if (!map[sz.size]) { map[sz.size] = {}; for (const col of LIFECYCLE_COLS) map[sz.size][col] = 0; }
+                for (const col of LIFECYCLE_COLS) map[sz.size][col] += sz[col] || 0;
+            }
+        }
+        return map;
+    })();
+
+    const sortedSizes = garmentBySize
+        ? Object.keys(garmentBySize).sort((a, b) => Number(a) - Number(b) || a.localeCompare(b))
+        : [];
+
+    const colTotals = {};
+    for (const col of LIFECYCLE_COLS) {
+        colTotals[col] = sortedSizes.reduce((s, sz) => s + (garmentBySize[sz][col] || 0), 0);
+    }
+
+    const allExpanded = expandedRolls.size === allRollIds.length;
+
+    const toggleAll  = () => setExpandedRolls(allExpanded ? new Set() : new Set(allRollIds));
+    const toggleRoll = (id) => setExpandedRolls(prev => {
+        const next = new Set(prev);
+        next.has(id) ? next.delete(id) : next.add(id);
+        return next;
+    });
+
     return (
-        <div className="space-y-4">
-            {summary.map((rollSummary, ri) => (
-                <div key={ri} className="border border-slate-200 rounded-xl overflow-hidden">
-                    <div className="px-4 py-2 bg-slate-50 border-b border-slate-200">
-                        <span className="font-mono font-bold text-slate-700 text-sm">Roll #{rollSummary.roll_id}</span>
+        <div className="space-y-3">
+            {/* Header row: garment count + collapse toggle */}
+            <div className="flex items-center justify-between">
+                {primaryPartName ? (
+                    <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-2.5">
+                        <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">Total Garments</p>
+                        <p className="text-xl font-black text-indigo-700 leading-tight">{totalGarments.toLocaleString()}</p>
+                        <p className="text-[9px] text-indigo-400 mt-0.5">counted via <span className="font-bold">{primaryPartName}</span> (primary part)</p>
                     </div>
-                    {(rollSummary.parts || []).map((part, pi) => (
-                        <div key={pi} className="px-4 py-3 border-b border-slate-100 last:border-b-0">
-                            <p className="text-xs font-bold text-slate-600 mb-2">{part.part_name}</p>
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full text-[10px]">
-                                    <thead>
-                                        <tr className="text-slate-400 border-b border-slate-100">
-                                            <th className="text-left py-1 pr-3 font-bold">Size</th>
-                                            {LIFECYCLE_COLS.map(c => (
-                                                <th key={c} className="text-center py-1 px-2 font-bold uppercase">{c.replace('_', ' ')}</th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {(part.sizes || []).map((sz, si) => (
-                                            <tr key={si} className="border-b border-slate-50 hover:bg-slate-50">
-                                                <td className="py-1.5 pr-3 font-bold text-slate-700">{sz.size}</td>
-                                                {LIFECYCLE_COLS.map(col => (
-                                                    <td key={col} className="text-center py-1.5 px-2">
-                                                        <span className={`font-bold ${sz[col] > 0 ? 'text-slate-700' : 'text-slate-300'}`}>
-                                                            {sz[col] ?? 0}
-                                                        </span>
-                                                    </td>
+                ) : <div />}
+                <button
+                    onClick={toggleAll}
+                    className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-800 transition-colors"
+                >
+                    {allExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                    {allExpanded ? 'Collapse all' : 'Expand all'}
+                </button>
+            </div>
+
+            {/* Garment summary matrix by size */}
+            {garmentBySize && sortedSizes.length > 0 && (
+                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Garments by Size</span>
+                        <span className="text-[10px] text-slate-400">— via <span className="font-bold text-indigo-500">{primaryPartName}</span></span>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full text-[10px]">
+                            <thead>
+                                <tr className="text-slate-400 border-b border-slate-100 bg-slate-50">
+                                    <th className="text-left py-2 px-3 font-bold sticky left-0 bg-slate-50 z-10">Size</th>
+                                    {LIFECYCLE_COLS.map(col => (
+                                        <th key={col} className="text-center py-2 px-2 font-bold uppercase whitespace-nowrap">
+                                            {col.replace(/_/g, ' ')}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {sortedSizes.map(size => (
+                                    <tr key={size} className="border-b border-slate-50 hover:bg-indigo-50/30 transition-colors">
+                                        <td className="py-2 px-3 font-bold text-slate-700 sticky left-0 bg-white z-10">{size}</td>
+                                        {LIFECYCLE_COLS.map(col => {
+                                            const val = garmentBySize[size][col];
+                                            return (
+                                                <td key={col} className="text-center py-2 px-2">
+                                                    <span className={`font-bold ${val > 0 ? 'text-slate-800' : 'text-slate-300'}`}>
+                                                        {val.toLocaleString()}
+                                                    </span>
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ))}
+                                <tr className="border-t-2 border-slate-200 bg-indigo-50/50">
+                                    <td className="py-2 px-3 font-black text-slate-800 sticky left-0 bg-indigo-50/50 z-10">Total</td>
+                                    {LIFECYCLE_COLS.map(col => (
+                                        <td key={col} className="text-center py-2 px-2 font-black text-indigo-700">
+                                            {colTotals[col].toLocaleString()}
+                                        </td>
+                                    ))}
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* Roll-level detail divider */}
+            <div className="flex items-center gap-2 mt-1">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Roll-level detail</p>
+                <div className="flex-1 h-px bg-slate-100" />
+            </div>
+
+            {/* Per-roll cards */}
+            {summary.map((rollSummary) => {
+                const rollId = rollSummary.roll_id;
+                const isOpen = expandedRolls.has(rollId);
+
+                return (
+                    <div key={rollId} className="border border-slate-200 rounded-xl overflow-hidden">
+                        {/* Roll header — click to collapse */}
+                        <button
+                            onClick={() => toggleRoll(rollId)}
+                            className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors"
+                        >
+                            <span className="font-mono font-bold text-slate-700 text-sm">Roll #{rollId}</span>
+                            {isOpen
+                                ? <ChevronUp size={14} className="text-slate-400" />
+                                : <ChevronDown size={14} className="text-slate-400" />}
+                        </button>
+
+                        {isOpen && (rollSummary.parts || []).map((part, pi) => (
+                            <div key={pi} className="px-4 py-3 border-b border-slate-100 last:border-b-0">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <p className="text-xs font-bold text-slate-600">{part.part_name}</p>
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                        part.part_type === 'PRIMARY'
+                                            ? 'bg-indigo-100 text-indigo-600'
+                                            : 'bg-slate-100 text-slate-500'
+                                    }`}>
+                                        {part.part_type}
+                                    </span>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full text-[10px]">
+                                        <thead>
+                                            <tr className="text-slate-400 border-b border-slate-100">
+                                                <th className="text-left py-1 pr-3 font-bold">Size</th>
+                                                {LIFECYCLE_COLS.map(c => (
+                                                    <th key={c} className="text-center py-1 px-2 font-bold uppercase">{c.replace(/_/g, ' ')}</th>
                                                 ))}
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody>
+                                            {(part.sizes || []).map((sz, si) => (
+                                                <tr key={si} className="border-b border-slate-50 hover:bg-slate-50">
+                                                    <td className="py-1.5 pr-3 font-bold text-slate-700">{sz.size}</td>
+                                                    {LIFECYCLE_COLS.map(col => (
+                                                        <td key={col} className="text-center py-1.5 px-2">
+                                                            <span className={`font-bold ${sz[col] > 0 ? 'text-slate-700' : 'text-slate-300'}`}>
+                                                                {sz[col] ?? 0}
+                                                            </span>
+                                                        </td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
-                        </div>
-                    ))}
-                </div>
-            ))}
+                        ))}
+                    </div>
+                );
+            })}
         </div>
     );
 };
@@ -491,7 +712,7 @@ const BatchDrilldownModal = ({ batchId, batchCode, onClose }) => {
     useEffect(() => {
         setLoading(true);
         productionManagerApi.getBatchDrilldownFull(batchId)
-            .then(res => setData(res.data))
+            .then(res => { console.log('BatchDrilldownModal data:', res.data); setData(res.data); })
             .catch(err => setError(err?.response?.data?.error || err.message || 'Failed to load'))
             .finally(() => setLoading(false));
     }, [batchId]);
@@ -562,7 +783,11 @@ const BatchDrilldownModal = ({ batchId, batchCode, onClose }) => {
                     ) : (
                         <>
                             {activeTab === 'overview' && <OverviewTab data={data} />}
-                            {activeTab === 'cycles'   && <CycleStagesTab stages={data.cycle_stages} />}
+                            {activeTab === 'cycles'   && <CycleStagesTab
+                                stages={data.cycle_stages}
+                                partsPerGarment={(data.cut_piece_summary?.[0]?.parts?.length) || 1}
+                                primaryPartsPerGarment={(data.cut_piece_summary?.[0]?.parts || []).filter(p => p.part_type === 'PRIMARY').length || 1}
+                            />}
                             {activeTab === 'rolls'    && <RollsTab rolls={data.rolls} />}
                             {activeTab === 'pieces'   && <CutPiecesTab summary={data.cut_piece_summary} />}
                             {activeTab === 'defects'  && <DefectsTab defects={data.defects} />}

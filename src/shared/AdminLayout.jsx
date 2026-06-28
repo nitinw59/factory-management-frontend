@@ -3,6 +3,7 @@ import MatrixBrand from './MatrixBrand';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LuCircleUserRound, LuLogOut, LuChevronDown, LuMenu, LuX, LuSettings, LuBuilding2, LuChartLine, LuPackage } from 'react-icons/lu';
+import NotificationBell from './NotificationBell';
 
 // --- DESKTOP DROPDOWN (Popover style) ---
 const DesktopNavDropdown = ({ title, children }) => {
@@ -120,6 +121,10 @@ const AdminLayout = () => {
                   Line Config
                 </NavLink>
 
+                <NavLink to="/merchandiser/planning" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                  Planning
+                </NavLink>
+
                 <DesktopNavDropdown title="Spares">
                   <NavLink to="/admin/spares-analytics" className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                     <LuChartLine size={14} /> Spares Analytics
@@ -152,6 +157,11 @@ const AdminLayout = () => {
                   <span className="hidden lg:inline text-sm font-medium text-gray-700">{user.name}</span>
                 </div>
               )}
+
+              {/* Notification Bell */}
+              <div className="hidden md:flex">
+                <NotificationBell />
+              </div>
 
               {/* Desktop Logout Button */}
               <button onClick={handleLogout} className="hidden md:flex items-center text-sm text-gray-600 hover:text-red-600">
@@ -199,6 +209,10 @@ const AdminLayout = () => {
 
               <NavLink to="/admin/asset-management" onClick={closeMenu} className={({ isActive }) => `block py-2 text-base font-medium ${isActive ? 'text-blue-600' : 'text-gray-700'}`}>
                 Asset Management
+              </NavLink>
+
+              <NavLink to="/merchandiser/planning" onClick={closeMenu} className={({ isActive }) => `block py-2 text-base font-medium ${isActive ? 'text-blue-600' : 'text-gray-700'}`}>
+                Planning
               </NavLink>
 
               <MobileNavDropdown title={<span className="flex items-center gap-2"><LuPackage size={16} /> Spares</span>}>

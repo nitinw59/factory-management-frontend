@@ -424,8 +424,9 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
         const sub = (item.substitutes || []).find(s => String(s.substitute_variant_id) === sourceId);
         return Number(sub?.in_stock ?? 0);
     }, [item, sourceId]);
-    const trimQtyNum = parseFloat(trimQty) || 0;
-    const trimOver   = item.type === 'trim' && trimQtyNum > trimAvailable;
+    const trimQtyNum  = parseFloat(trimQty) || 0;
+    const trimNeeded  = Math.max(0, (item.quantity_required || 0) - (item.quantity_reserved || 0));
+    const trimOver    = item.type === 'trim' && trimQtyNum > trimAvailable;
 
     // ── Fabric: which rolls have been over-reserved past their free meters? ──
     const fabricOverRolls = useMemo(() => {
@@ -661,19 +662,46 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                         </div>
 
                         <div>
-                            <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">
-                                Quantity to Reserve ({item.unit})
-                                <span className="ml-2 text-slate-400 normal-case font-semibold">
-                                    max {Number.isFinite(trimAvailable) ? trimAvailable.toLocaleString() : '∞'} {item.unit}
-                                </span>
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                                <label className="text-[9px] font-bold text-slate-400 uppercase">
+                                    Quantity to Reserve ({item.unit})
+                                </label>
+                                <div className="flex items-center gap-1.5">
+                                    {trimNeeded > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setTrimQty(String(Math.min(trimNeeded, Number.isFinite(trimAvailable) ? trimAvailable : trimNeeded)))}
+                                            className="text-[9px] font-bold text-violet-600 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-full px-2 py-0.5 transition-colors"
+                                        >
+                                            Fill needed ({trimNeeded.toLocaleString()})
+                                        </button>
+                                    )}
+                                    {Number.isFinite(trimAvailable) && trimAvailable > 0 && trimAvailable < trimNeeded && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setTrimQty(String(trimAvailable))}
+                                            className="text-[9px] font-bold text-slate-500 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5 transition-colors"
+                                        >
+                                            Max in stock ({trimAvailable.toLocaleString()})
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
                             <input
-                                type="number" min={0} step="any" max={trimAvailable}
+                                type="number" min={0} step="any"
                                 value={trimQty} onChange={e => setTrimQty(e.target.value)}
+                                placeholder={`0 – ${trimNeeded.toLocaleString()} ${item.unit}`}
                                 className={`w-full text-sm border rounded-lg px-3 py-2 focus:outline-none ${trimOver ? 'border-red-300 focus:border-red-400 bg-red-50/40' : 'border-slate-200 focus:border-violet-400'}`}
                             />
+                            <p className="text-[10px] text-slate-400 mt-1">
+                                Up to {trimNeeded.toLocaleString()} {item.unit} needed
+                                {Number.isFinite(trimAvailable) && (trimAvailable >= trimNeeded
+                                    ? <span className="text-emerald-600"> · enough in stock</span>
+                                    : <span className="text-amber-600"> · only {trimAvailable.toLocaleString()} in stock</span>
+                                )}
+                            </p>
                             {trimOver && (
-                                <p className="text-[11px] text-red-600 mt-1.5 font-semibold">
+                                <p className="text-[11px] text-red-600 mt-1 font-semibold">
                                     Cannot reserve {trimQtyNum.toLocaleString()} {item.unit} — only {trimAvailable.toLocaleString()} available from the selected source.
                                 </p>
                             )}
@@ -703,6 +731,520 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
         </div>
     );
 };
+// ─── TRIM FUNNEL MODAL ──────────────────────────────────────────────────────────
+const TrimFunnelModal = ({ group, sop, onClose, onDone }) => {
+    const [view,           setView]           = useState('funnel'); // 'funnel' | 'calendar'
+    const [step,           setStep]           = useState(1);
+    const [pickedVariantId, setPickedVariantId] = useState(null);
+    const [allocations,    setAllocations]    = useState({});
+    const [excluded,       setExcluded]       = useState(new Set());
+    const [busy,           setBusy]           = useState(false);
+    const [err,            setErr]            = useState(null);
+
+    // ── Calendar state ──
+    const CAL_DAYS = 30;
+    const [calStart, setCalStart] = useState(() => {
+        const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 7); return d;
+    });
+    const calDays = Array.from({ length: CAL_DAYS }, (_, i) => {
+        const d = new Date(calStart); d.setDate(d.getDate() + i); return d;
+    });
+    const calEnd  = new Date(calDays[CAL_DAYS - 1]); calEnd.setDate(calEnd.getDate() + 1);
+    const calSpan = calEnd - calStart;
+    const calToday = new Date(); calToday.setHours(0, 0, 0, 0);
+    const todayPct = ((calToday - calStart) / calSpan) * 100;
+
+    const calBarStyle = (r) => {
+        const s    = r.ta_start_date ? new Date(r.ta_start_date) : null;
+        const eRaw = r.ta_end_date   ? new Date(r.ta_end_date)   : null;
+        if (!s && !eRaw) return null;
+        const sD   = s || eRaw;
+        const eInc = new Date(eRaw || s); eInc.setDate(eInc.getDate() + 1);
+        const left  = Math.max(0,   ((sD   - calStart) / calSpan)) * 100;
+        const right = Math.min(100, ((eInc - calStart) / calSpan)) * 100;
+        if (right <= 0 || left >= 100) return null;
+        return { left: `${left}%`, width: `${Math.max(1, right - left)}%` };
+    };
+
+    const evtPct = (dateStr) => {
+        if (!dateStr) return null;
+        const d = new Date(dateStr);
+        const p = ((d - calStart) / calSpan) * 100;
+        return p >= 0 && p <= 100 ? p : null;
+    };
+
+    const CAL_STATUS_CLS = {
+        pending:       'bg-amber-400',
+        'in-progress': 'bg-blue-400',
+        completed:     'bg-emerald-500',
+        delayed:       'bg-red-400',
+    };
+    const EVT_CLS = {
+        pending:      'bg-amber-400 ring-amber-200',
+        'in-transit': 'bg-blue-400  ring-blue-200',
+        received:     'bg-emerald-500 ring-emerald-200',
+        delayed:      'bg-red-500  ring-red-200',
+    };
+
+    // ── Funnel derived values ──
+    const pickedSub     = group.commonSubstitutes.find(s => Number(s.substitute_variant_id) === Number(pickedVariantId)) ?? null;
+    const coveredIds    = pickedSub ? new Set(pickedSub.matches_req_ids) : new Set();
+    const pendingReqs   = group.requirements.filter(r => !r.is_fulfilled && coveredIds.has(r.id));
+    const uncoveredReqs = group.requirements.filter(r => !r.is_fulfilled && !coveredIds.has(r.id));
+
+    const handlePickVariant = (sid) => {
+        setPickedVariantId(sid);
+        const sub     = group.commonSubstitutes.find(s => Number(s.substitute_variant_id) === sid);
+        const covered = sub ? new Set(sub.matches_req_ids) : new Set();
+        const allocs  = {};
+        group.requirements.forEach(r => {
+            if (!r.is_fulfilled && covered.has(r.id)) {
+                const pending = Math.max(0, Number(r.quantity_required || 0) - Number(r.quantity_reserved || 0));
+                allocs[r.id] = String(pending);
+            }
+        });
+        setAllocations(allocs);
+        setExcluded(new Set());
+        setErr(null);
+    };
+
+    const activeReqs    = pendingReqs.filter(r => !excluded.has(r.id));
+    const totalSelected = activeReqs.reduce((s, r) => {
+        const v = parseFloat(allocations[r.id] ?? 0);
+        return s + (Number.isFinite(v) ? v : 0);
+    }, 0);
+    const inStock   = Number(pickedSub?.in_stock ?? 0);
+    const overStock = inStock > 0 && totalSelected > inStock;
+
+    const handleReserve = async () => {
+        setBusy(true); setErr(null);
+        try {
+            for (const r of activeReqs) {
+                const qty = parseFloat(allocations[r.id] ?? 0);
+                if (!qty || qty <= 0) continue;
+                await planningApi.reserveTrim(r.id, {
+                    quantity_reserved:    qty,
+                    trim_item_variant_id: parseInt(pickedVariantId, 10),
+                });
+            }
+            onDone(); onClose();
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Reserve failed.');
+        } finally { setBusy(false); }
+    };
+
+    const handleRaisePR = async () => {
+        setBusy(true); setErr(null);
+        try {
+            for (const r of activeReqs) {
+                const qty = parseFloat(allocations[r.id] ?? 0);
+                if (!qty || qty <= 0) continue;
+                await purchaseDeptApi.raiseRequirement({
+                    sales_order_product_id:   sop.id,
+                    type:                     'trim',
+                    urgency:                  'normal',
+                    notes:                    `Bulk raised for ${group.trim_item_name}`,
+                    quantity_required:        qty,
+                    unit_of_measure:          r.unit_of_measure,
+                    trim_item_id:             r.trim_item_id,
+                    trim_item_variant_id:     parseInt(pickedVariantId, 10),
+                    plan_trim_requirement_id: r.id,
+                });
+            }
+            onDone(); onClose();
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Raise PR failed.');
+        } finally { setBusy(false); }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" onClick={onClose}>
+            <div
+                className="bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-200"
+                style={{ maxHeight: '85vh', width: view === 'calendar' ? '680px' : '512px', maxWidth: '95vw' }}
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Header */}
+                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100 shrink-0">
+                    <div>
+                        <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">
+                            {view === 'funnel' ? `Trim Funnel · Step ${step} of 2` : 'Trim Calendar'}
+                        </p>
+                        <h3 className="font-extrabold text-slate-800 text-base mt-0.5">{group.trim_item_name}</h3>
+                        {group.item_code && <p className="text-[10px] font-mono text-slate-400">{group.item_code}</p>}
+                        <p className="text-xs text-slate-500 mt-1">
+                            {group.requirements.length} colors
+                            {' · '}<span className="text-emerald-600 font-bold">{group.fulfilled} fulfilled</span>
+                            {' · '}<span className="text-amber-600 font-bold">{group.pendingCount} pending</span>
+                            {' · '}{group.totalRequired.toLocaleString()} {group.unit} total
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 mt-0.5">
+                        {/* View toggle */}
+                        <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden text-[10px] font-bold">
+                            <button
+                                onClick={() => setView('funnel')}
+                                className={`px-2.5 py-1.5 transition-colors ${view === 'funnel' ? 'bg-amber-500 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                            >
+                                Funnel
+                            </button>
+                            <button
+                                onClick={() => setView('calendar')}
+                                className={`px-2.5 py-1.5 transition-colors ${view === 'calendar' ? 'bg-violet-600 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                            >
+                                Calendar
+                            </button>
+                        </div>
+                        <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg">
+                            <X size={15} />
+                        </button>
+                    </div>
+                </div>
+
+                {/* ── FUNNEL VIEW ── */}
+                {view === 'funnel' && (<>
+                    {/* Step indicator */}
+                    <div className="flex items-center gap-2 px-5 pt-3 pb-1 shrink-0">
+                        {[{ n: 1, label: 'Pick Variant' }, { n: 2, label: 'Allocate Colors' }].map(({ n, label }, i, arr) => (
+                            <div key={n} className="flex items-center gap-2">
+                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 transition-colors ${
+                                    step === n ? 'border-amber-500 bg-amber-500 text-white'
+                                    : step > n  ? 'border-emerald-500 bg-emerald-500 text-white'
+                                    : 'border-slate-200 bg-white text-slate-400'
+                                }`}>
+                                    {step > n ? '✓' : n}
+                                </div>
+                                <span className={`text-[10px] font-bold ${step === n ? 'text-amber-600' : step > n ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                    {label}
+                                </span>
+                                {i < arr.length - 1 && <ChevronRight size={12} className="text-slate-300" />}
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Funnel body */}
+                    <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+
+                        {/* Step 1: Pick substitute variant */}
+                        {step === 1 && (
+                            <>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                    Available substitutes — each covers ≥2 colors in this group
+                                </p>
+                                {group.commonSubstitutes.map(s => {
+                                    const sid       = Number(s.substitute_variant_id);
+                                    const sel       = pickedVariantId === sid;
+                                    const coversAll = s.matches_count >= group.requirements.length;
+                                    return (
+                                        <button
+                                            key={sid}
+                                            onClick={() => handlePickVariant(sid)}
+                                            className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl border-2 text-left transition-all ${
+                                                sel ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-white hover:border-amber-200 hover:bg-amber-50/30'
+                                            }`}
+                                        >
+                                            <div className={`w-4 h-4 rounded-full border-2 shrink-0 transition-colors ${sel ? 'border-amber-500 bg-amber-500' : 'border-slate-300'}`} />
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-bold text-slate-800 truncate">
+                                                    {s.item_name}{s.color_name ? ` – ${s.color_name}` : ''}{s.color_number ? ` (${s.color_number})` : ''}
+                                                </p>
+                                                <p className="text-[10px] text-slate-500 mt-0.5">
+                                                    Variant #{sid}{s.variant_size ? ` · Size ${s.variant_size}` : ''}
+                                                </p>
+                                            </div>
+                                            <div className="flex flex-col items-end gap-1 shrink-0">
+                                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${coversAll ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                    {s.matches_count}/{group.requirements.length} colors
+                                                </span>
+                                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${(s.in_stock ?? 0) > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
+                                                    {s.in_stock != null ? `${Number(s.in_stock).toLocaleString()} in stock` : 'No stock data'}
+                                                </span>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </>
+                        )}
+
+                        {/* Step 2: Per-color allocation */}
+                        {step === 2 && pickedSub && (
+                            <>
+                                <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold text-amber-800 truncate">
+                                            {pickedSub.item_name}{pickedSub.color_name ? ` – ${pickedSub.color_name}` : ''}{pickedSub.color_number ? ` (${pickedSub.color_number})` : ''}
+                                        </p>
+                                        <p className="text-[10px] text-amber-600">
+                                            Variant #{Number(pickedVariantId)} · {inStock.toLocaleString()} {group.unit} in stock
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={() => { setStep(1); setPickedVariantId(null); setErr(null); }}
+                                        className="text-[10px] font-bold text-amber-600 hover:text-amber-800 underline shrink-0"
+                                    >Change</button>
+                                </div>
+
+                                <div className={`flex items-center justify-between rounded-xl px-3 py-2.5 border ${overStock ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total qty selected</span>
+                                    <span className={`text-sm font-extrabold tabular-nums ${overStock ? 'text-red-600' : 'text-slate-800'}`}>
+                                        {totalSelected.toLocaleString()} / {inStock.toLocaleString()} {group.unit}
+                                        {overStock && <span className="ml-1.5 text-[10px] text-red-500">⚠ over stock</span>}
+                                    </span>
+                                </div>
+
+                                <div>
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                                        Covered colors ({pendingReqs.length})
+                                    </p>
+                                    <div className="space-y-2">
+                                        {pendingReqs.map(r => {
+                                            const isExcluded = excluded.has(r.id);
+                                            const pending    = Math.max(0, Number(r.quantity_required || 0) - Number(r.quantity_reserved || 0));
+                                            const allocVal   = allocations[r.id] ?? String(pending);
+                                            return (
+                                                <div key={r.id} className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-all ${isExcluded ? 'bg-slate-50 border-slate-200 opacity-50' : 'bg-white border-slate-200'}`}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setExcluded(s => { const n = new Set(s); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })}
+                                                        className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isExcluded ? 'border-slate-300 bg-white' : 'border-amber-500 bg-amber-500'}`}
+                                                    >
+                                                        {!isExcluded && <span className="text-white text-[8px] font-bold leading-none">✓</span>}
+                                                    </button>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-xs font-bold text-slate-700 truncate">
+                                                            {r.color_name || `Req #${r.id}`}
+                                                            {r.color_number && <span className="font-mono text-slate-400 ml-1.5 text-[10px]">#{r.color_number}</span>}
+                                                        </p>
+                                                        <p className="text-[9px] text-slate-400">
+                                                            {Number(r.quantity_reserved || 0).toLocaleString()} / {Number(r.quantity_required || 0).toLocaleString()} {group.unit} reserved
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                        <input
+                                                            type="number" min={0} step="any" disabled={isExcluded}
+                                                            value={allocVal}
+                                                            onChange={e => setAllocations(a => ({ ...a, [r.id]: e.target.value }))}
+                                                            className="w-20 text-xs text-right border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-amber-400 disabled:bg-slate-50 disabled:text-slate-300"
+                                                        />
+                                                        <span className="text-[10px] text-slate-400 w-6 shrink-0">{group.unit}</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {uncoveredReqs.length > 0 && (
+                                    <div>
+                                        <p className="text-[10px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                                            Not covered by this variant ({uncoveredReqs.length}) — allocate individually in timeline
+                                        </p>
+                                        <div className="space-y-1">
+                                            {uncoveredReqs.map(r => (
+                                                <div key={r.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 opacity-60">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" />
+                                                    <p className="text-[10px] text-slate-500 truncate">
+                                                        {r.color_name || `Req #${r.id}`}
+                                                        {r.color_number ? ` · #${r.color_number}` : ''}
+                                                        {' · '}{Math.max(0, Number(r.quantity_required || 0) - Number(r.quantity_reserved || 0)).toLocaleString()} {group.unit} pending
+                                                    </p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+
+                    {err && <p className="px-5 pb-2 text-xs text-red-600 font-semibold shrink-0">{err}</p>}
+
+                    {/* Funnel footer */}
+                    <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
+                        <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 font-medium">Cancel</button>
+                        {step === 1 ? (
+                            <button
+                                onClick={() => setStep(2)}
+                                disabled={!pickedVariantId}
+                                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white text-sm font-bold rounded-xl hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            >
+                                Next: Allocate <ChevronRight size={14} />
+                            </button>
+                        ) : (
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={handleRaisePR}
+                                    disabled={busy || activeReqs.length === 0}
+                                    className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700 disabled:opacity-40 transition-colors"
+                                >
+                                    {busy && <Loader2 size={12} className="animate-spin" />}
+                                    Raise PR ({activeReqs.length})
+                                </button>
+                                <button
+                                    onClick={handleReserve}
+                                    disabled={busy || activeReqs.length === 0 || overStock}
+                                    title={overStock ? `${totalSelected.toLocaleString()} selected exceeds ${inStock.toLocaleString()} in stock` : undefined}
+                                    className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-40 transition-colors"
+                                >
+                                    {busy && <Loader2 size={12} className="animate-spin" />}
+                                    Reserve ({activeReqs.length})
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </>)}
+
+                {/* ── CALENDAR VIEW ── */}
+                {view === 'calendar' && (<>
+                    {/* Calendar nav */}
+                    <div className="flex items-center gap-2 px-5 py-2.5 border-b border-slate-100 shrink-0">
+                        <button
+                            onClick={() => setCalStart(p => { const d = new Date(p); d.setDate(d.getDate() - 14); return d; })}
+                            className="p-1 rounded hover:bg-slate-100 text-slate-500"
+                        ><ChevronLeft size={14} /></button>
+                        <button
+                            onClick={() => setCalStart(p => { const d = new Date(p); d.setDate(d.getDate() + 14); return d; })}
+                            className="p-1 rounded hover:bg-slate-100 text-slate-500"
+                        ><ChevronRight size={14} /></button>
+                        <button
+                            onClick={() => { const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - 7); setCalStart(d); }}
+                            className="text-[10px] font-bold text-violet-600 px-2 py-0.5 rounded bg-violet-50 hover:bg-violet-100 transition-colors"
+                        >Today</button>
+                        <span className="text-xs text-slate-500 ml-auto">
+                            {calDays[0].toLocaleDateString('en', { month: 'short', day: 'numeric' })}
+                            {' – '}
+                            {calDays[CAL_DAYS - 1].toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </span>
+                    </div>
+
+                    {/* Calendar body */}
+                    <div className="flex-1 overflow-y-auto px-4 py-3">
+                        {/* Date header */}
+                        <div className="flex mb-2 select-none">
+                            <div className="w-32 shrink-0" />
+                            <div className="flex-1 relative h-6">
+                                {calDays.filter((d, i) => i === 0 || d.getDay() === 1).map(d => {
+                                    const pct = ((d - calStart) / calSpan) * 100;
+                                    return (
+                                        <div key={d.toDateString()} className="absolute top-0 flex flex-col items-start" style={{ left: `${pct}%` }}>
+                                            {(d.getDate() <= 7 || d === calDays[0]) && (
+                                                <span className="text-[7px] font-bold text-violet-500 uppercase leading-none mb-0.5 whitespace-nowrap">
+                                                    {d.toLocaleDateString('en', { month: 'short' })}
+                                                </span>
+                                            )}
+                                            <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap">
+                                                {d.toLocaleDateString('en', { day: 'numeric' })}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                                {todayPct >= 0 && todayPct <= 100 && (
+                                    <div className="absolute top-0 bottom-0 flex flex-col items-center pointer-events-none" style={{ left: `${todayPct}%` }}>
+                                        <span className="text-[7px] font-bold text-violet-500 whitespace-nowrap" style={{ transform: 'translateX(-50%)' }}>today</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Rows: one per requirement */}
+                        <div className="space-y-1">
+                            {group.requirements.map(r => {
+                                const bStyle  = calBarStyle(r);
+                                const stCls   = CAL_STATUS_CLS[r.ta_status] || CAL_STATUS_CLS.pending;
+                                const events  = r.procurement_events || [];
+                                const isOverdue = r.ta_end_date && new Date(r.ta_end_date) < calToday && r.ta_status !== 'completed';
+                                return (
+                                    <div key={r.id} className="flex items-center">
+                                        {/* Label */}
+                                        <div className="w-32 shrink-0 pr-2">
+                                            <p className="text-[10px] font-bold text-slate-700 truncate leading-tight">
+                                                {r.color_name || `Req #${r.id}`}
+                                            </p>
+                                            <p className="text-[8px] text-slate-400 truncate">
+                                                {r.is_fulfilled
+                                                    ? <span className="text-emerald-600 font-bold">fulfilled</span>
+                                                    : <>{Number(r.quantity_reserved || 0).toLocaleString()}/{Number(r.quantity_required || 0).toLocaleString()} {group.unit}</>
+                                                }
+                                            </p>
+                                        </div>
+                                        {/* Bar track */}
+                                        <div className="flex-1 relative h-7">
+                                            {/* Weekend shading */}
+                                            {calDays.map((d, i) => (d.getDay() === 0 || d.getDay() === 6) && (
+                                                <div key={i} className="absolute top-0 bottom-0 bg-slate-50/80 pointer-events-none"
+                                                    style={{ left: `${(i / CAL_DAYS) * 100}%`, width: `${(1 / CAL_DAYS) * 100}%` }} />
+                                            ))}
+                                            {/* Today line */}
+                                            {todayPct >= 0 && todayPct <= 100 && (
+                                                <div className="absolute top-0 bottom-0 w-px bg-violet-400/60 z-10 pointer-events-none"
+                                                    style={{ left: `${todayPct}%` }} />
+                                            )}
+                                            {/* Gantt bar */}
+                                            {bStyle ? (
+                                                <div
+                                                    className={`absolute top-1.5 bottom-1.5 rounded-full ${isOverdue ? 'bg-red-400' : stCls} opacity-75`}
+                                                    style={bStyle}
+                                                    title={`${r.ta_start_date || '?'} → ${r.ta_end_date || '?'} · ${r.ta_status || 'pending'}`}
+                                                />
+                                            ) : (
+                                                <div className="absolute inset-0 flex items-center pointer-events-none">
+                                                    <div className="flex-1 border-t border-dashed border-slate-200" />
+                                                </div>
+                                            )}
+                                            {/* Procurement event dots */}
+                                            {events.map((evt, ei) => {
+                                                const p = evtPct(evt.event_date);
+                                                if (p === null) return null;
+                                                const eCls = EVT_CLS[evt.status] || EVT_CLS.pending;
+                                                return (
+                                                    <div
+                                                        key={ei}
+                                                        title={`${evt.status || 'event'} · ${evt.event_date}`}
+                                                        className={`absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full ring-1 z-20 ${eCls}`}
+                                                        style={{ left: `${p}%`, transform: 'translate(-50%, -50%)' }}
+                                                    />
+                                                );
+                                            })}
+                                        </div>
+                                        {/* Status badge */}
+                                        <div className="w-16 shrink-0 flex justify-end pl-2">
+                                            <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full text-white ${isOverdue ? 'bg-red-400' : stCls}`}>
+                                                {isOverdue ? 'Overdue' : (r.ta_status || 'pending').replace('-', ' ')}
+                                            </span>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* Legend */}
+                        <div className="flex items-center gap-3 mt-4 pt-3 border-t border-slate-100 flex-wrap">
+                            {[
+                                { cls: 'bg-amber-400',   label: 'Pending' },
+                                { cls: 'bg-blue-400',    label: 'In Progress' },
+                                { cls: 'bg-emerald-500', label: 'Completed' },
+                                { cls: 'bg-red-400',     label: 'Delayed/Overdue' },
+                            ].map(({ cls, label }) => (
+                                <span key={label} className="flex items-center gap-1 text-[9px] text-slate-500">
+                                    <span className={`w-2 h-2 rounded-full ${cls}`} />{label}
+                                </span>
+                            ))}
+                            <span className="flex items-center gap-1 text-[9px] text-slate-500">
+                                <span className="w-2 h-2 rounded-full bg-blue-400 ring-1 ring-blue-200" />Procurement event
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* Calendar footer */}
+                    <div className="flex items-center justify-end px-5 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
+                        <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 font-medium">Close</button>
+                    </div>
+                </>)}
+            </div>
+        </div>
+    );
+};
+
 // ─── PRODUCTION TRACKING MODAL ──────────────────────────────────────────────────
 
 const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh }) => {
@@ -734,6 +1276,7 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
     const [procExpanded,       setProcExpanded]       = useState(false);
     // Per-group, per-requirement exclusions: { [trim_item_id]: Set<requirement_id> }
     const [excludedReqsByTrim, setExcludedReqsByTrim] = useState({});
+    const [funnelGroup,        setFunnelGroup]        = useState(null);
 
     const refetchLocal = useCallback(() => {
         planningApi.getRequirements(sop.id)
@@ -1788,8 +2331,11 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                         <div
                                                             key={item.id}
                                                             onClick={() => {
-                                                                if (multiVariant) { toggleTrimGroup(item.trim_item_id); }
-                                                                else { const v = item.variants[0]; if (v) { setSelId(selId === v.id ? null : v.id); setActionMode(null); setErr(null); } }
+                                                                toggleTrimGroup(item.trim_item_id);
+                                                                if (!multiVariant) {
+                                                                    const v = item.variants[0];
+                                                                    if (v) { setSelId(selId === v.id ? null : v.id); setActionMode(null); setErr(null); }
+                                                                }
                                                             }}
                                                             className={`flex items-center cursor-pointer rounded-lg transition-all hover:bg-slate-50 ${item.overdue ? 'bg-red-50/30' : ''}`}
                                                         >
@@ -1797,7 +2343,7 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                                 <span className={`w-2 h-2 rounded-full shrink-0 ${item.overdue ? 'bg-red-500' : groupSt.bg}`} />
                                                                 <div className="min-w-0 flex-1">
                                                                     <p className="text-[10px] font-bold text-slate-700 break-words leading-tight">{item.trim_item_name}</p>
-                                                                    <p className="text-[8px] text-slate-400">{item.variants.length} color{item.variants.length !== 1 ? 's' : ''}</p>
+                                                                    <p className="text-[8px] text-slate-400">{multiVariant ? `${item.variants.length} colors` : 'color agnostic'}</p>
                                                                 </div>
                                                                 {totalReq > 0 && (
                                                                     <span title={`${totalRes.toLocaleString()} of ${totalReq.toLocaleString()} ${item.unit || ''} reserved (${pct}%)`}
@@ -1805,9 +2351,20 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                                         {totalRes.toLocaleString()}/{totalReq.toLocaleString()} {item.unit || ''}
                                                                     </span>
                                                                 )}
-                                                                {multiVariant && (
-                                                                    <ChevronRight size={12} className={`shrink-0 text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-                                                                )}
+                                                                {(() => {
+                                                                    const fg = trimGroups.find(g => g.trim_item_id === item.trim_item_id);
+                                                                    if (!fg) return null;
+                                                                    return (
+                                                                        <button
+                                                                            onClick={e => { e.stopPropagation(); setFunnelGroup(fg); }}
+                                                                            title="Open allocation funnel for this trim"
+                                                                            className="shrink-0 text-[8px] font-bold text-amber-700 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-full px-1.5 py-0.5 transition-colors"
+                                                                        >
+                                                                            Funnel
+                                                                        </button>
+                                                                    );
+                                                                })()}
+                                                                <ChevronRight size={12} className={`shrink-0 text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
                                                             </div>
                                                             <div className="flex-1 relative h-7">
                                                                 {days.map((d, i) => (d.getDay() === 0 || d.getDay() === 6) && (
@@ -2547,6 +3104,14 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                     </div>
                 );
             })()}
+            {funnelGroup && (
+                <TrimFunnelModal
+                    group={funnelGroup}
+                    sop={sop}
+                    onClose={() => setFunnelGroup(null)}
+                    onDone={() => { refetchLocal(); onRefresh(); }}
+                />
+            )}
         </div>
     );
 };

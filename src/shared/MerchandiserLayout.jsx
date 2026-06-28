@@ -6,6 +6,7 @@ import {
     LuLogOut, LuMenu, LuX, LuFileText,
     LuLayoutDashboard, LuPackage, LuClipboardList, LuLayers,
 } from 'react-icons/lu';
+import NotificationBell from './NotificationBell';
 
 const NAV = [
     { to: '/merchandiser/bom',                 icon: LuFileText,        label: 'BOM Management'       },
@@ -42,6 +43,7 @@ const MerchandiserLayout = () => {
                                 </NavLink>
                             ))}
                         </nav>
+                        <NotificationBell />
                         <button
                             onClick={handleLogout}
                             className="flex items-center text-sm font-medium text-slate-500 hover:text-rose-600 transition-colors bg-slate-50 hover:bg-rose-50 px-3 py-1.5 rounded-lg gap-1.5"

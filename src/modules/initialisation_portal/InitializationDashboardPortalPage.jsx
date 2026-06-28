@@ -4,9 +4,10 @@ import { initializationPortalApi } from '../../api/initializationPortalApi';
 import Modal from '../../shared/Modal';
 import CuttingForm from '../cutting_portal/CuttingForm'; 
 import {
-    Play, Layers, Info, MoreHorizontal, Square, CheckSquare,
-    ChevronDown, ChevronRight, Loader2, AlertCircle, Box,
-    BarChart2, Scissors, ShoppingBag, Package, Wrench, FileText, Eye, Ruler, Filter, X, Clock
+    Play, Layers, MoreHorizontal, Square, CheckSquare,
+    ChevronDown, ChevronRight, Loader2, AlertCircle,
+    BarChart2, Scissors, ShoppingBag, Package, Wrench, FileText, Eye, Ruler, Filter, X, Clock,
+    CheckCircle
 } from 'lucide-react';
 
 // --- SHARED COMPONENTS ---
@@ -352,12 +353,17 @@ const StartBatchModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave })
 
 // --- BATCH CARD COMPONENT ---
 // Updated to include detailed Roll List and Cut Action
-const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll }) => {
+const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll, onFinalizeCutting }) => {
     const progress = batch.progress_for_seq1;
     const status = progress ? progress.status : 'N/A';
     const isPending = status === 'PENDING';
     const isCompleted = status === 'COMPLETED';
     const isInProgress = status === 'IN_PROGRESS';
+
+    const allRollsCut = (batch.rolls?.length > 0) && batch.rolls.every(r => r.is_cut);
+    const [ratiosOpen, setRatiosOpen] = useState(isPending);
+
+    const displayNotes = batch.notes && !batch.notes.trim().startsWith('[System') ? batch.notes.trim() : null;
 
     // Pastel Status Styling
     let statusBadge = "bg-slate-100 text-slate-600 border-slate-200";
@@ -376,10 +382,10 @@ const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll }) => {
     
     return (
         <div className={`bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-all duration-300 border-t-[6px] ${accentColor}`}>
-            <div className="p-5 border-b border-slate-50 relative">
-                {/* --- Hierarchy Context --- */}
+            <div className="p-4 border-b border-slate-100">
+                {/* SO / PO tags */}
                 {(batch.sales_order_number || batch.po_code) && (
-                    <div className="mb-3 flex flex-wrap gap-2 text-[10px] font-bold tracking-wide uppercase">
+                    <div className="mb-2 flex flex-wrap gap-1.5 text-[10px] font-bold tracking-wide uppercase">
                         {batch.sales_order_number && (
                             <span className="flex items-center text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
                                 <FileText size={10} className="mr-1"/> {batch.sales_order_number}
@@ -392,74 +398,75 @@ const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll }) => {
                         )}
                     </div>
                 )}
-                
-                <div className="flex justify-between items-start mb-3">
-                    <div className="flex items-center">
-                        {/* Batch ID */}
-<div className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg border border-blue-200 flex items-center shadow-sm">
-  <Box size={14} className="mr-2 opacity-70" />
-  <span className="text-sm font-bold font-mono tracking-tight">
-    #{batch.batch_id}
-  </span>
-</div>
 
-{/* Batch Code */}
-<div className="bg-green-50 text-green-600 px-3 py-1.5 rounded-lg border border-green-200 flex items-center shadow-sm">
-  <Box size={14} className="mr-2 opacity-70" />
-  <span className="text-sm font-bold font-mono tracking-tight">
-    #{batch.batch_code || batch.batch_id}
-  </span>
-</div>
-
+                {/* ID · Code  +  Status badge */}
+                <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                            #{batch.batch_id}
+                        </span>
+                        <span className="text-slate-300 text-xs">·</span>
+                        <span className="font-mono text-xs font-bold text-slate-700">{batch.batch_code || batch.batch_id}</span>
                     </div>
-                    <span className={`px-3 py-1 text-[10px] uppercase font-bold tracking-wider rounded-full border ${statusBadge}`}>
+                    <span className={`px-2.5 py-0.5 text-[10px] uppercase font-bold tracking-wider rounded-full border shrink-0 ${statusBadge}`}>
                         {status.replace('_', ' ')}
                     </span>
                 </div>
 
-                <div>
-                    <h2 className="font-bold text-lg text-slate-800 leading-tight mb-1">{batch.product_name}</h2>
-                    <div className="flex items-center justify-between">
-                        {progress?.line_name && (
-                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
-                                {progress.line_name}
-                            </span>
-                        )}
-                    </div>
+                {/* Product name + layer length */}
+                <div className="flex items-start justify-between gap-2">
+                    <h2 className="font-bold text-base text-slate-800 leading-tight">{batch.product_name}</h2>
+                    {batch.length_of_layer_inches && (
+                        <span className="text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-100 px-1.5 py-0.5 rounded shrink-0">
+                            {batch.length_of_layer_inches}" layer
+                        </span>
+                    )}
+                </div>
+
+                {/* Line name + notes */}
+                <div className="mt-1.5 flex flex-col gap-1">
+                    {progress?.line_name && (
+                        <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 w-fit">
+                            {progress.line_name}
+                        </span>
+                    )}
+                    {displayNotes && (
+                        <p className="text-[10px] italic text-slate-400 truncate">{displayNotes}</p>
+                    )}
                 </div>
             </div>
             
-            <div className="p-5 space-y-4 flex-1 text-sm bg-slate-50/30">
-                {/* Details Section */}
-                <div className="flex items-start space-x-3 group">
-                    <div className="p-2 bg-sky-50 text-sky-600 rounded-lg shrink-0 mt-0.5 border border-sky-100 group-hover:bg-sky-100 transition-colors">
-                        <Info size={14} />
-                    </div>
-                    <div className="flex-1">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wide">Specs</p>
-                        <div className="grid grid-cols-2 gap-2 text-slate-600">
-                            <div><span className="text-slate-400 text-xs">Layer:</span> <span className="font-medium bg-white px-1.5 py-0.5 rounded border border-slate-100">{batch.length_of_layer_inches ? `${batch.length_of_layer_inches}"` : '-'}</span></div>
-                            <div className="col-span-2 truncate"><span className="text-slate-400 text-xs">Note:</span> <span className="italic text-slate-500">{batch.notes || 'None'}</span></div>
+            <div className="p-4 space-y-3 flex-1 text-sm bg-slate-50/30">
+                {/* Ratios Section — collapsible */}
+                <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
+                    <button
+                        onClick={() => setRatiosOpen(o => !o)}
+                        className="w-full flex items-center justify-between px-3 py-2 hover:bg-slate-50 transition-colors"
+                    >
+                        <div className="flex items-center gap-2">
+                            <MoreHorizontal size={13} className="text-violet-500"/>
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Size Ratios</span>
+                            <span className="text-[10px] bg-violet-50 text-violet-600 border border-violet-200 px-1.5 py-0.5 rounded font-bold">
+                                {batch.size_ratios?.length || 0}
+                            </span>
                         </div>
-                    </div>
-                </div>
-
-                {/* Ratios Section */}
-                <div className="flex items-start space-x-3 group">
-                    <div className="p-2 bg-violet-50 text-violet-600 rounded-lg shrink-0 mt-0.5 border border-violet-100 group-hover:bg-violet-100 transition-colors">
-                        <MoreHorizontal size={14} />
-                    </div>
-                    <div className="flex-1">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wide">Ratios</p>
-                        <div className="flex flex-wrap gap-1.5">
+                        {ratiosOpen
+                            ? <ChevronDown size={13} className="text-slate-400"/>
+                            : <ChevronRight size={13} className="text-slate-400"/>
+                        }
+                    </button>
+                    {ratiosOpen && (
+                        <div className="px-3 pb-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-2">
                             {(batch.size_ratios || []).map(sr => (
-                                <span key={sr.size} className="text-xs bg-white text-slate-600 border border-slate-200 px-2 py-0.5 rounded-md shadow-sm">
+                                <span key={sr.size} className="text-xs bg-slate-50 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-md">
                                     <strong className="text-violet-600">{sr.size}:</strong> {sr.ratio}
                                 </span>
                             ))}
-                            {(!batch.size_ratios || batch.size_ratios.length === 0) && <span className="text-xs text-slate-400">None defined</span>}
+                            {(!batch.size_ratios || batch.size_ratios.length === 0) && (
+                                <span className="text-xs text-slate-400">None defined</span>
+                            )}
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 {/* Rolls Section */}
@@ -483,7 +490,7 @@ const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll }) => {
                             </span>
                         </p>
                         
-                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                             {(batch.rolls || []).map((roll) => (
                                 <div key={roll.id} className={`bg-white p-2.5 rounded-lg border shadow-sm flex items-center justify-between transition-colors ${roll.is_cut ? 'border-emerald-100' : 'border-slate-100 hover:border-indigo-100'}`}>
                                     <div className="flex flex-col min-w-0 pr-2">
@@ -543,6 +550,22 @@ const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll }) => {
                     </button>
                 )}
 
+                {/* FINALISE CUTTING - Show for IN_PROGRESS, enabled only when all rolls are cut */}
+                {isInProgress && (
+                    <button
+                        onClick={() => allRollsCut && onFinalizeCutting(batch.batch_id)}
+                        disabled={!allRollsCut}
+                        title={allRollsCut ? 'All rolls cut — finalise this batch' : 'Some rolls still have pending cut data'}
+                        className={`flex-1 px-4 py-2.5 text-sm font-bold rounded-xl flex items-center justify-center transition-all ${
+                            allRollsCut
+                                ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm hover:shadow-md'
+                                : 'bg-slate-100 text-slate-300 cursor-not-allowed'
+                        }`}
+                    >
+                        <CheckCircle className="mr-2 w-4 h-4"/> Finalise
+                    </button>
+                )}
+
                 {/* START BATCH - Show only for PENDING */}
                 {isPending && (
                     <button 
@@ -582,7 +605,7 @@ const BatchStatusGroup = ({ title, count, headerBg, countBg, countText, children
             
             {isOpen && (
                 <div className="p-6 animate-in slide-in-from-top-4 duration-300 ease-out">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {children}
                     </div>
                 </div>
@@ -661,6 +684,16 @@ const InitializationDashboardPortalPage = () => {
         setCuttingModal({ batchId, rollId, meter });
     };
 
+    const handleFinalizeCutting = async (batchId) => {
+        if (!window.confirm('All rolls are cut. Finalise cutting for this batch?')) return;
+        try {
+            await initializationPortalApi.finalizeBatchCutting(batchId);
+            fetchDashboardData();
+        } catch (err) {
+            alert(err.response?.data?.error || 'Failed to finalise cutting. Please try again.');
+        }
+    };
+
     // Callback after cutting is saved
     const handleCutSaved = () => {
         setCuttingModal(null);
@@ -712,6 +745,7 @@ const InitializationDashboardPortalPage = () => {
                                     onStartClick={() => setModalState({ type: 'start', data: batch })}
                                     onViewProgress={() => setModalState({ type: 'progress', data: batch })}
                                     onCutRoll={handleCutRollClick}
+                                    onFinalizeCutting={handleFinalizeCutting}
                                 />
                             ))}
                         </BatchStatusGroup>
@@ -735,6 +769,7 @@ const InitializationDashboardPortalPage = () => {
                                     onStartClick={() => setModalState({ type: 'start', data: batch })}
                                     onViewProgress={() => setModalState({ type: 'progress', data: batch })}
                                     onCutRoll={handleCutRollClick}
+                                    onFinalizeCutting={handleFinalizeCutting}
                                 />
                             ))}
                         </BatchStatusGroup>
@@ -758,6 +793,7 @@ const InitializationDashboardPortalPage = () => {
                                     onStartClick={() => setModalState({ type: 'start', data: batch })}
                                     onViewProgress={() => setModalState({ type: 'progress', data: batch })}
                                     onCutRoll={handleCutRollClick}
+                                    onFinalizeCutting={handleFinalizeCutting}
                                 />
                             ))}
                         </BatchStatusGroup>
@@ -780,7 +816,8 @@ const InitializationDashboardPortalPage = () => {
                 <BatchProgressModal
                     batchId={modalState.data.batch_id}
                     onClose={() => setModalState({ type: null, data: null })}
-                    onCutRoll={handleCutRollClick} // Pass the handler
+                    onCutRoll={handleCutRollClick}
+                                    onFinalizeCutting={handleFinalizeCutting} // Pass the handler
                 />
             )}
 

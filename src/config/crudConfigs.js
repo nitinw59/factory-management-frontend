@@ -101,8 +101,14 @@ export const trimItemConfig = {
     { name: 'brand', label: 'Brand', type: 'text', required: true },
     // ✅ NEW FIELD
     { name: 'is_color_agnostic', label: 'Common Across All Colors?', type: 'checkbox' },
-    { name: 'description', label: 'Description', type: 'textarea' },
-    { name: 'item_code', label: 'Item Code / SKU', type: 'text' },
+    { name: 'description', label: 'Description', type: 'textarea', autoCalculate: (data) => {
+      if (data.name && data.brand) return `${data.name} by ${data.brand}`;
+      return data.name || '';
+    }},
+    { name: 'item_code', label: 'Item Code / SKU', type: 'text', autoCalculate: (data) => {
+      const parts = [data.brand, data.name].filter(Boolean);
+      return parts.length ? parts.join(' ').trim().toUpperCase().replace(/\s+/g, '-') : '';
+    }},
     { name: 'unit_of_measure', label: 'Unit of Measure', type: 'select', required: true, options: ['pieces', 'meters', 'spools', 'packets'] },
   ],
   columns: [ 

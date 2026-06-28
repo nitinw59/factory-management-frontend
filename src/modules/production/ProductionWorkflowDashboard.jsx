@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
     Search, Plus, Box, FileText, ShoppingCart,
     Scissors, ChevronDown, Loader2, X,
-    LayoutList, ChevronUp, DollarSign, Palette,
+    ChevronUp, DollarSign, Palette,
     Package, Truck, Layers, Trash2, Printer, Warehouse
 } from 'lucide-react';
 import { productionManagerApi } from '../../api/productionManagerApi';
@@ -95,11 +95,11 @@ const Connector = ({ start, end }) => {
 
 // ─── GRAPH CONSTANTS ──────────────────────────────────────────────────────────
 
-const NODE_W_SO            = 155;
+const NODE_W_SO            = 165;
 const NODE_W_SOP           = 205;   // wider — embeds PO mini-cards
 const NODE_W_BATCH         = 215;
 const NODE_W_DISPATCH_WIDE = 295;
-const NODE_H_SO            = 160;
+const NODE_H_SO            = 190;
 const NODE_H_SOP_BASE      = 76;    // base height (no embedded POs)
 const NODE_H_SOP_PO_SEC    = 18;    // "Purchase Orders" header strip
 const NODE_H_PO_ROW        = 54;    // per embedded PO mini-row
@@ -145,7 +145,10 @@ const StagePipelineChip = ({ stage, onClick }) => {
 
 // ─── NODE COMPONENTS ──────────────────────────────────────────────────────────
 
-const SalesOrderNode = ({ data, x, y, poCount, onAddPO, onEditSO, onShowDetails }) => (
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
+const fmtAmt  = (a) => a != null ? `$${parseFloat(a).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : null;
+
+const SalesOrderNode = ({ data, x, y, poCount, sopCount, batchCount, onAddPO, onEditSO, onShowDetails }) => (
     <div
         role={onShowDetails ? 'button' : undefined}
         tabIndex={onShowDetails ? 0 : undefined}
@@ -155,34 +158,63 @@ const SalesOrderNode = ({ data, x, y, poCount, onAddPO, onEditSO, onShowDetails 
         className={`absolute bg-white rounded-lg shadow-sm border border-l-4 border-l-blue-500 border-slate-200 p-2.5 flex flex-col ${onShowDetails ? 'cursor-pointer hover:shadow-md hover:border-blue-300 hover:bg-blue-50/30 transition-all' : ''}`}
         style={{ width: NODE_W_SO, height: NODE_H_SO, left: x, top: y }}
     >
-        <div className="flex items-center gap-1.5 mb-1.5">
+        <div className="flex items-center gap-1.5 mb-1">
             <FileText size={11} className="text-blue-500 shrink-0" />
             <span className="font-bold text-slate-700 text-xs font-mono truncate">{data.order_number}</span>
         </div>
         <StatusBadge status={data.so_status} />
         <p className="text-[10px] text-slate-700 font-semibold truncate mt-1.5" title={data.customer_name}>{data.customer_name}</p>
         {data.buyer_po_number && (
-            <p className="text-[9px] text-slate-400 mt-0.5 truncate">PO: {data.buyer_po_number}</p>
+            <p className="text-[9px] text-slate-400 mt-0.5 truncate">BPO: {data.buyer_po_number}</p>
         )}
-        <p className="text-[9px] text-slate-400 mt-auto mb-1.5 pt-1.5 border-t border-slate-100">
-            {poCount} purchase order{poCount !== 1 ? 's' : ''}
-        </p>
-        {onAddPO && (
-            <button
-                onClick={(e) => { e.stopPropagation(); onAddPO(); }}
-                className="flex items-center justify-center gap-1 w-full py-1 px-2 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors mb-1"
-            >
-                <Plus size={10} /> Add PO
-            </button>
+
+        {/* summary stats */}
+        <div className="mt-1.5 pt-1.5 border-t border-slate-100 grid grid-cols-3 gap-x-1 text-center">
+            <div>
+                <p className="text-[10px] font-bold text-slate-700">{sopCount ?? 0}</p>
+                <p className="text-[8px] text-slate-400 leading-tight">products</p>
+            </div>
+            <div>
+                <p className="text-[10px] font-bold text-slate-700">{poCount ?? 0}</p>
+                <p className="text-[8px] text-slate-400 leading-tight">POs</p>
+            </div>
+            <div>
+                <p className="text-[10px] font-bold text-slate-700">{batchCount ?? 0}</p>
+                <p className="text-[8px] text-slate-400 leading-tight">batches</p>
+            </div>
+        </div>
+
+        {data.delivery_date && (
+            <p className="text-[9px] text-slate-500 mt-1.5 flex items-center gap-0.5">
+                <Truck size={9} className="shrink-0 text-slate-400" />
+                {fmtDate(data.delivery_date)}
+            </p>
         )}
-        {onEditSO && (
-            <button
-                onClick={(e) => { e.stopPropagation(); onEditSO(data.sales_order_id); }}
-                className="flex items-center justify-center gap-1 w-full py-1 px-2 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
-            >
-                <FileText size={10} /> Edit SO
-            </button>
+        {fmtAmt(data.total_amount) && (
+            <p className="text-[9px] text-slate-500 mt-0.5 flex items-center gap-0.5">
+                <DollarSign size={9} className="shrink-0 text-slate-400" />
+                {fmtAmt(data.total_amount)}
+            </p>
         )}
+
+        <div className="mt-auto flex gap-1 pt-1.5 border-t border-slate-100">
+            {onAddPO && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); onAddPO(); }}
+                    className="flex-1 flex items-center justify-center gap-0.5 py-1 px-1.5 rounded text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
+                >
+                    <Plus size={9} /> PO
+                </button>
+            )}
+            {onEditSO && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); onEditSO(data.sales_order_id); }}
+                    className="flex-1 flex items-center justify-center gap-0.5 py-1 px-1.5 rounded text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
+                >
+                    <FileText size={9} /> Edit
+                </button>
+            )}
+        </div>
     </div>
 );
 
@@ -489,7 +521,7 @@ const SopNode = ({ data, x, y, pos = [], sopH, onAddPO, onInward, onShowDetails 
 // ─── WORKFLOW GRAPH ───────────────────────────────────────────────────────────
 
 const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onOpenEndBitBatch, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders, onShowSODetails, onShowSopDetails }) => {
-    const { nodes, connectors, height, totalWidth, totalPoCount } = useMemo(() => {
+    const { nodes, connectors, height, totalWidth, totalPoCount, totalBatchCount, totalSopCount } = useMemo(() => {
         const nodesList  = [];
         const connList   = [];
         const hasSO      = !!so.sales_order_id;
@@ -633,6 +665,8 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
             height: contentH + 2 * MARGIN,
             totalWidth: dispatchX + NODE_W_DISPATCH_WIDE + MARGIN,
             totalPoCount: pos.length,
+            totalBatchCount: allBatches.length,
+            totalSopCount: sops.length,
         };
     }, [so]);
 
@@ -642,7 +676,7 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
                 {connectors.map((c, i) => <Connector key={i} start={c.start} end={c.end} />)}
             </svg>
             {nodes.map((node, i) => {
-                if (node.type === 'SO')                  return <SalesOrderNode       key={i} {...node} poCount={totalPoCount} onAddPO={onAddPO} onEditSO={onEditSO} onShowDetails={onShowSODetails} />;
+                if (node.type === 'SO')                  return <SalesOrderNode       key={i} {...node} poCount={totalPoCount} batchCount={totalBatchCount} sopCount={totalSopCount} onAddPO={onAddPO} onEditSO={onEditSO} onShowDetails={onShowSODetails} />;
                 if (node.type === 'SOP')                 return <SopNode              key={i} {...node} onAddPO={onAddSopPO} onInward={onInward} onShowDetails={onShowSopDetails} />;
                 if (node.type === 'CREATE_BATCH_CIRCLE')         return <CreateBatchCircleNode       key={i} {...node} so={so} onCreateBatch={onCreateBatch} />;
                 if (node.type === 'CREATE_ENDBIT_BATCH_CIRCLE')  return <CreateEndBitBatchCircleNode key={i} {...node} so={so} onOpenEndBitBatch={onOpenEndBitBatch} />;
@@ -1483,9 +1517,13 @@ const BatchStageDrilldownModal = ({ batchId, flowId, stageName, onClose }) => {
     const [openRolls, setOpenRolls] = useState(new Set());
 
     useEffect(() => {
+
+
+        console.log('Fetching drilldownnnn for batchId:', batchId);
         productionManagerApi.getBatchDrilldownFull(batchId)
             .then(res => {
                 // handle both { data: {...} } and raw-body responses
+                console.log('getBatchDrilldownFull response:', res.data);
                 setDrilldown(res.data?.data ?? res.data);
             })
             .catch(err => setError(err?.response?.data?.error || err.message || 'Failed to load'))
@@ -2235,7 +2273,7 @@ const ProductionWorkflowDashboard = () => {
     const [filteredData, setFilteredData]       = useState([]);
     const [loading, setLoading]                 = useState(true);
     const [filterStatus, setFilterStatus]       = useState('ALL');
-    const [searchText, setSearchText]           = useState('');
+    const [topBarOpen, setTopBarOpen]           = useState(false);
     const [selectedSOId, setSelectedSOId]       = useState(null);
     const [selectedPOId, setSelectedPOId]       = useState(null);
     const [poModalSOId, setPoModalSOId]         = useState(null);
@@ -2271,21 +2309,8 @@ const ProductionWorkflowDashboard = () => {
     useEffect(() => {
         let result = data;
         if (filterStatus !== 'ALL') result = result.filter(so => so.so_status === filterStatus);
-        if (searchText) {
-            const lower = searchText.toLowerCase();
-            result = result.filter(so =>
-                (so.order_number    || '').toLowerCase().includes(lower) ||
-                (so.customer_name   || '').toLowerCase().includes(lower) ||
-                (so.buyer_po_number || '').toLowerCase().includes(lower) ||
-                allPosOf(so).some(po => (po.po_code || '').toLowerCase().includes(lower)) ||
-                allBatchesOf(so).some(b =>
-                    (b.batch_code || '').toLowerCase().includes(lower) ||
-                    String(b.batch_id) === lower
-                )
-            );
-        }
         setFilteredData(result);
-    }, [data, filterStatus, searchText]);
+    }, [data, filterStatus]);
 
     const basePath = location.pathname.startsWith('/initialization-portal') ? '/initialization-portal' : '/production-manager';
 
@@ -2316,7 +2341,7 @@ const ProductionWorkflowDashboard = () => {
         } catch { alert('Failed to create Purchase Order.'); }
     };
 
-    const canManage     = user && ['accountant', 'sales_manager','production_manager', 'admin', 'factory_admin'].includes(user.role);
+    const canManage     = user && ['accountant', 'sales_manager', 'admin', 'factory_admin'].includes(user.role);
     const canProduction = user && ['cutting_manager', 'production_manager', 'admin', 'factory_admin'].includes(user.role);
     const canInward     = user?.role === 'accountant';
     const canTrimOrders = user && ['production_manager', 'admin', 'factory_admin'].includes(user.role);
@@ -2325,72 +2350,73 @@ const ProductionWorkflowDashboard = () => {
     const handleTrimOrders  = (batchId) => setTrimOrdersBatch(batchId);
 
     return (
-        <div className="flex h-screen bg-slate-50 overflow-hidden">
-            {/* ── Sidebar ── */}
-            <div className="w-64 bg-white border-r border-slate-200 p-6 flex flex-col shrink-0 h-full overflow-y-auto print:hidden">
-                <h2 className="text-xl font-extrabold text-slate-800 mb-6 flex items-center">
-                    <LayoutList className="mr-2 text-indigo-600" size={22} /> Workflow
-                </h2>
-
-                {canManage && (
+        <div className="h-screen bg-slate-50 overflow-hidden flex flex-col">
+            {/* ── Top bar ── */}
+            <div className="shrink-0 bg-white border-b border-slate-200 print:hidden">
+                {/* always-visible strip */}
+                <div className="flex items-center gap-3 px-6 py-2">
                     <button
-                        onClick={() => navigate('/accounts/sales/new')}
-                        className="w-full mb-3 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm px-4 py-3 rounded-xl shadow-sm transition-all active:scale-95"
+                        onClick={() => setTopBarOpen(o => !o)}
+                        className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 transition-colors"
                     >
-                        <Plus size={16} /> Create Sales Order
+                        {topBarOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                        <span>{topBarOpen ? 'Hide filters' : 'Filters & actions'}</span>
                     </button>
-                )}
-                {canProduction && (
-                    <button
-                        onClick={() => handleCreateBatch(null)}
-                        className="w-full mb-6 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm px-4 py-3 rounded-xl shadow-sm transition-all active:scale-95"
-                    >
-                        <Plus size={16} /> Create Batch
-                    </button>
-                )}
+                    {!topBarOpen && filterStatus !== 'ALL' && (
+                        <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-indigo-100 text-indigo-700 border border-indigo-200">
+                            {filterStatus.replace(/_/g, ' ')}
+                        </span>
+                    )}
+                    <span className="ml-auto text-xs text-slate-400 tabular-nums">
+                        {filteredData.length} order{filteredData.length !== 1 ? 's' : ''}
+                    </span>
+                </div>
 
-                <div className="space-y-6">
-                    <div>
-                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Search</label>
-                        <div className="relative">
-                            <Search className="absolute left-3 top-2.5 text-slate-400 w-4 h-4" />
-                            <input
-                                type="text"
-                                placeholder="SO, PO, Customer, Batch…"
-                                value={searchText}
-                                onChange={e => setSearchText(e.target.value)}
-                                className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                            />
-                        </div>
-                    </div>
-                    <div>
-                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 block">Order Status</label>
-                        <div className="space-y-1">
+                {/* collapsible content */}
+                {topBarOpen && (
+                    <div className="flex items-center gap-3 px-6 pb-3 flex-wrap border-t border-slate-100">
+                        <GlobalSearch
+                            data={data}
+                            onDispatch={handleDispatch}
+                            onBatchDrilldown={handleBatchDrilldown}
+                        />
+
+                        <div className="flex items-center gap-1 flex-wrap">
                             {['ALL', 'DRAFT', 'CONFIRMED', 'IN_PRODUCTION', 'SHIPPED', 'CANCELLED'].map(f => (
                                 <button
                                     key={f}
                                     onClick={() => setFilterStatus(f)}
-                                    className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === f ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${filterStatus === f ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                                 >
-                                    {f === 'ALL' ? 'All Orders' : f.replace(/_/g, ' ')}
+                                    {f === 'ALL' ? 'All' : f.replace(/_/g, ' ')}
                                 </button>
                             ))}
                         </div>
+
+                        <div className="ml-auto flex items-center gap-2">
+                            {canManage && (
+                                <button
+                                    onClick={() => navigate('/accounts/sales/new')}
+                                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-2 rounded-lg shadow-sm transition-colors"
+                                >
+                                    <Plus size={13} /> Create SO
+                                </button>
+                            )}
+                            {canProduction && (
+                                <button
+                                    onClick={() => handleCreateBatch(null)}
+                                    className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-2 rounded-lg shadow-sm transition-colors"
+                                >
+                                    <Plus size={13} /> Create Batch
+                                </button>
+                            )}
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
 
             {/* ── Main ── */}
             <div className="flex-1 overflow-auto p-8 print:p-0">
-                {/* Global search bar */}
-                <div className="flex items-center justify-between mb-4">
-                    <GlobalSearch
-                        data={data}
-                        onDispatch={handleDispatch}
-                        onBatchDrilldown={handleBatchDrilldown}
-                    />
-                    <span className="text-xs text-slate-400">{filteredData.length} order{filteredData.length !== 1 ? 's' : ''}</span>
-                </div>
 
                 {loading ? (
                     <div className="h-full flex items-center justify-center">

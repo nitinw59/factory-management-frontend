@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
-// Added LuMenu for the hamburger icon
-import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuCircle, LuClipboardList, LuBell, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag } from 'react-icons/lu';
-import { notificationApi } from '../api/notificationApi';
+import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag } from 'react-icons/lu';
+import NotificationBell from './NotificationBell';
 
 // No changes to NavDropdown component
 const NavDropdown = ({ title, children }) => {
@@ -38,34 +37,7 @@ const NavDropdown = ({ title, children }) => {
 const StoreManagerLayout = () => {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
-    const [notifications, setNotifications] = useState([]);
-    
-    // 1. STATE FOR MOBILE MENU
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-    const fetchNotifications = useCallback(async () => {
-        try {
-            const response = await notificationApi.getUnread();
-            setNotifications(response.data);
-        } catch (error) {
-            console.error("Failed to fetch notifications", error);
-        }
-    }, []);
-    
-    useEffect(() => {
-        fetchNotifications();
-        const interval = setInterval(fetchNotifications, 60000);
-        return () => clearInterval(interval);
-    }, [fetchNotifications]);
-
-    const handleNotificationClick = async (notificationId) => {
-        try {
-            await notificationApi.markAsRead(notificationId);
-            setNotifications(prev => prev.filter(n => n.id !== notificationId));
-        } catch (error) {
-            console.error("Failed to mark notification as read", error);
-        }
-    };
 
     const handleLogout = () => {
         logout();
@@ -136,28 +108,7 @@ const StoreManagerLayout = () => {
                         </nav>
                     </div>
                     <div className="flex items-center space-x-4">
-                        <NavDropdown title={
-                            <div className="relative">
-                                <LuBell size={20} />
-                                {notifications.length > 0 && (
-                                <span className="absolute -top-1 -right-1 flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span></span>
-                                )}
-                            </div>
-                        }>
-                            <div className="w-80">
-                                <div className="font-bold p-2 border-b">Notifications</div>
-                                {notifications.length > 0 ? (
-                                notifications.map(n => (
-                                    <NavLink key={n.id} to={n.link_to} onClick={() => handleNotificationClick(n.id)} className="block p-3 text-sm text-gray-700 hover:bg-gray-100 border-b">
-                                        {n.message}
-                                        <div className="text-xs text-gray-400 mt-1">{new Date(n.created_at).toLocaleString()}</div>
-                                    </NavLink>
-                                ))
-                                ) : (
-                                <div className="p-4 text-sm text-center text-gray-500">No new notifications</div>
-                                )}
-                            </div>
-                        </NavDropdown>
+                        <NotificationBell />
                         {user && (
                             // Hide user name on smaller screens to save space
                             <div className="hidden md:flex items-center space-x-4">

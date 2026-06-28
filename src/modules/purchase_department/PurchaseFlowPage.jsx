@@ -400,7 +400,7 @@ export default function PurchaseFlowPage() {
 
     return (
         <div className="min-h-screen bg-slate-50">
-            <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5">
+            <div className="px-4 sm:px-6 py-5">
                 {/* Header */}
                 <div className="flex items-start justify-between gap-3 mb-5">
                     <div className="flex items-start gap-3">
@@ -629,7 +629,7 @@ export default function PurchaseFlowPage() {
                                 No inwards yet. Click "Add Inward" to record the first GRN.
                             </div>
                         ) : (
-                            <div className="space-y-4 max-w-3xl mx-auto">
+                            <div className="space-y-4">
                                 {inwards.map(iw => {
                                     const invoice = inwardInvoiceMap[iw.id];
                                     return (

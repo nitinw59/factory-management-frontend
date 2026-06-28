@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { trimsApi } from '../../api/trimsApi';
 import CrudManager from '../../shared/CrudManager';
-import { trimItemConfig, trimItemVariantConfig } from '../../config/crudConfigs';
+import { trimItemVariantConfig } from '../../config/crudConfigs';
+import TrimItemsPage from './TrimItemsPage';
 import {  FileSpreadsheet, Loader2 } from 'lucide-react';
 
 
@@ -115,7 +116,7 @@ const TrimsDashboardPage = () => {
 
   const tabs = {
     analytics: { label: 'Analytics Overview', component: <AnalyticsTab /> },
-    items: { label: 'Manage Item Catalog', component: <CrudManager config={trimItemConfig} /> },
+    items: { label: 'Manage Item Catalog', component: <TrimItemsPage /> },
     variants: { label: 'Manage Stock Variants', component: <CrudManager config={trimItemVariantConfig} /> },
   };
 
