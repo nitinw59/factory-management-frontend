@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { trimsApi } from '../../api/trimsApi';
 import { useAuth } from '../../context/AuthContext';
 import {
-    Plus, Edit2, Trash2, ChevronRight, Search, Package, Layers, Repeat,
+    Plus, Edit2, Trash2, Archive, ChevronRight, Search, Package, Layers, Repeat,
     FileSpreadsheet, Loader2, Upload, X, Check, AlertCircle, CheckCircle2,
     Palette, RefreshCw, GitMerge,
 } from 'lucide-react';
@@ -358,6 +358,7 @@ const TrimManagementPage = () => {
     const [quickFilter,      setQuickFilter]      = useState('all');  // 'all' | 'low' | 'out'
     const [toast,            setToast]            = useState(null);   // { kind, message }
     const [confirmDelete,    setConfirmDelete]    = useState(null);   // { type, id }
+    const [confirmArchive,   setConfirmArchive]   = useState(null);   // item id
     const [editing,          setEditing]          = useState(null);   // { variantId, field, value }
     const [savingEdit,       setSavingEdit]       = useState(false);
     // Phase 2 additions
@@ -648,6 +649,18 @@ const TrimManagementPage = () => {
     };
     // Trigger the inline confirm popover instead of window.confirm.
     const handleDelete = (type, id) => setConfirmDelete({ type, id });
+
+    const handleArchive = async (id) => {
+        try {
+            await trimsApi.archiveItem(id);
+            fetchData();
+            showToast('success', 'Item archived.');
+        } catch {
+            showToast('error', 'Failed to archive item.');
+        } finally {
+            setConfirmArchive(null);
+        }
+    };
 
     // ── Phase 2: bulk operations on variants ──
     const toggleVariantSelected = (id) => {
@@ -1028,6 +1041,7 @@ const TrimManagementPage = () => {
                             filteredItems.map(item => {
                                 const summary = itemSummary(item.id);
                                 const isConfirming = confirmDelete?.type === 'item' && confirmDelete.id === item.id;
+                                const isArchiving = confirmArchive === item.id;
                                 return (
                                     <div
                                         key={item.id}
@@ -1069,11 +1083,18 @@ const TrimManagementPage = () => {
                                                     <button onClick={(e) => { e.stopPropagation(); performDelete('item', item.id); }} className="p-1 bg-red-500 hover:bg-red-600 text-white rounded"><Check size={11}/></button>
                                                     <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(null); }} className="p-1 bg-white hover:bg-gray-100 text-gray-500 border border-gray-200 rounded"><X size={11}/></button>
                                                 </span>
+                                            ) : isArchiving ? (
+                                                <span className="flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-md px-1 py-0.5">
+                                                    <span className="text-[10px] font-bold text-amber-700 px-1">Archive?</span>
+                                                    <button onClick={(e) => { e.stopPropagation(); handleArchive(item.id); }} className="p-1 bg-amber-500 hover:bg-amber-600 text-white rounded"><Check size={11}/></button>
+                                                    <button onClick={(e) => { e.stopPropagation(); setConfirmArchive(null); }} className="p-1 bg-white hover:bg-gray-100 text-gray-500 border border-gray-200 rounded"><X size={11}/></button>
+                                                </span>
                                             ) : (
                                                 <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                                     {user.role === 'factory_admin' && (
                                                         <>
                                                             <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'item', data: item }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200"><Edit2 size={12}/></button>
+                                                            <button onClick={(e) => { e.stopPropagation(); setConfirmArchive(item.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-amber-600 shadow-sm border border-transparent hover:border-gray-200"><Archive size={12}/></button>
                                                             <button onClick={(e) => { e.stopPropagation(); handleDelete('item', item.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200"><Trash2 size={12}/></button>
                                                         </>
                                                     )}

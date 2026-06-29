@@ -132,6 +132,7 @@ function LeftPane({ selectedItemId, selectedVariantId, onSelectItem, onSelectVar
   const [expandedItemId, setExpandedItemId] = useState(null);
   const [variantsByItem, setVariantsByItem] = useState({});
   const [loadingVariants, setLoadingVariants] = useState({});
+  const [showZeroStockFor, setShowZeroStockFor] = useState(new Set());
 
   useEffect(() => {
     setLoadingItems(true);
@@ -242,24 +243,48 @@ function LeftPane({ selectedItemId, selectedVariantId, onSelectItem, onSelectVar
                         >
                           <span className="text-xs text-blue-600 font-medium">All variants</span>
                         </div>
-                        {variants.map(v => {
-                          const isVSelected = selectedVariantId === v.id;
-                          const stock = v.in_stock ?? v.main_store_stock ?? 0;
-                          const label = [v.color_name, v.color_number].filter(Boolean).join(' ') || `Variant ${v.id}`;
-                          const sizePart = v.variant_size ? ` · ${v.variant_size}` : '';
+                        {(() => {
+                          const showZero = showZeroStockFor.has(item.id);
+                          const zeroCount = variants.filter(v => (v.in_stock ?? v.main_store_stock ?? 0) === 0).length;
+                          const visible = showZero ? variants : variants.filter(v => (v.in_stock ?? v.main_store_stock ?? 0) !== 0);
                           return (
-                            <div
-                              key={v.id}
-                              onClick={() => onSelectVariant(item, v)}
-                              className={`px-5 py-2 cursor-pointer hover:bg-blue-50 flex items-center justify-between ${isVSelected ? 'ring-2 ring-inset ring-blue-400 bg-blue-50' : ''}`}
-                            >
-                              <div className="min-w-0">
-                                <p className="text-xs font-medium text-gray-700 truncate">{label}{sizePart}</p>
-                              </div>
-                              <span className="text-xs text-gray-500 ml-2 shrink-0">{formatNumber(stock)}</span>
-                            </div>
+                            <>
+                              {visible.map(v => {
+                                const isVSelected = selectedVariantId === v.id;
+                                const stock = v.in_stock ?? v.main_store_stock ?? 0;
+                                const label = [v.color_name, v.color_number].filter(Boolean).join(' ') || `Variant ${v.id}`;
+                                const sizePart = v.variant_size ? ` · ${v.variant_size}` : '';
+                                return (
+                                  <div
+                                    key={v.id}
+                                    onClick={() => onSelectVariant(item, v)}
+                                    className={`px-5 py-2 cursor-pointer hover:bg-blue-50 flex items-center justify-between ${isVSelected ? 'ring-2 ring-inset ring-blue-400 bg-blue-50' : ''}`}
+                                  >
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-medium text-gray-700 truncate">{label}{sizePart}</p>
+                                    </div>
+                                    <span className="text-xs text-gray-500 ml-2 shrink-0">{formatNumber(stock)}</span>
+                                  </div>
+                                );
+                              })}
+                              {zeroCount > 0 && (
+                                <button
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setShowZeroStockFor(prev => {
+                                      const next = new Set(prev);
+                                      showZero ? next.delete(item.id) : next.add(item.id);
+                                      return next;
+                                    });
+                                  }}
+                                  className="w-full px-5 py-1.5 text-left text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                                >
+                                  {showZero ? `Hide ${zeroCount} zero-stock` : `Show ${zeroCount} zero-stock`}
+                                </button>
+                              )}
+                            </>
                           );
-                        })}
+                        })()}
                       </>
                     )}
                   </div>

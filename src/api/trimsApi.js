@@ -44,6 +44,9 @@ export const trimsApi = {
     getItemStockLedger: (itemId, params = {}) =>
         api.get(`/trims/items/${itemId}/stock-ledger`, { params }),
 
+    archiveItem: (id) => api.post(`/trims/items/${id}/archive`),
+    unarchiveItem: (id) => api.post(`/trims/items/${id}/unarchive`),
+
     // Supplier color code mappings — per-variant CRUD and per-supplier reverse lookup.
     // Optional ?supplier_id= filters down to a single supplier's mapping for the variant.
     getVariantSupplierCodes: (variantId, params = {}) =>
