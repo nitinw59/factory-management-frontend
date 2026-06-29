@@ -3,6 +3,8 @@ import { LuSearch, LuChevronDown, LuChevronRight, LuRefreshCw, LuChevronLeft, Lu
 import { Loader2 } from 'lucide-react';
 import { trimsApi } from '../../api/trimsApi';
 
+console.log('[TrimStockLedger] MODULE LOADED — trimsApi:', trimsApi);
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -79,13 +81,30 @@ function truncate(str, n) {
   return str.length > n ? str.slice(0, n) + '…' : str;
 }
 
+// #8 — Reference priority is now event-type-aware
 function getReference(row) {
-  if (row.grn_number) return row.grn_number;
-  if (row.so_number)  return row.so_number;
+  const kind = row.source_kind || '';
+  if (kind.startsWith('inward_') && row.grn_number)                                           return row.grn_number;
+  if ((kind.startsWith('fulfill') || kind.startsWith('auto_fulfill')) && row.so_number)       return row.so_number;
+  if ((kind.startsWith('reservation')) && row.so_number)                                       return row.so_number;
+  if (kind.startsWith('bill_') && row.bill_number)                                            return row.bill_number;
+  // Generic fallback chain
+  if (row.grn_number)  return row.grn_number;
+  if (row.so_number)   return row.so_number;
   if (row.bill_number) return row.bill_number;
-  if (row.batch_code) return row.batch_code;
-  if (row.reference)  return row.reference;
+  if (row.batch_code)  return row.batch_code;
+  if (row.reference)   return row.reference;
   return '—';
+}
+
+// #6 — Only treat a variant as zero-stock when the field is explicitly 0,
+// not when it is null/undefined (unknown stock).
+function getVariantStock(v) {
+  return v.in_stock ?? v.main_store_stock;   // null = unknown
+}
+function isDefinitelyZero(v) {
+  const s = getVariantStock(v);
+  return s !== null && s !== undefined && Number(s) === 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,14 +154,19 @@ function LeftPane({ selectedItemId, selectedVariantId, onSelectItem, onSelectVar
   const [showZeroStockFor, setShowZeroStockFor] = useState(new Set());
 
   useEffect(() => {
+    console.log('[TrimStockLedger] LEFT PANE MOUNTED — calling trimsApi.getItems()');
     setLoadingItems(true);
     trimsApi.getItems()
       .then(res => {
-        console.log('[TrimStockLedger] items loaded', res.data);
-        setItems(res.data?.data ?? res.data ?? []);
+        const parsed = res.data?.data ?? res.data ?? [];
+        console.log('[TrimStockLedger] items — HTTP', res.status);
+        console.log('[TrimStockLedger] items — raw res.data', res.data);
+        console.log('[TrimStockLedger] items — parsed count', parsed.length);
+        if (parsed.length > 0) console.log('[TrimStockLedger] items — first record keys:', Object.keys(parsed[0]), parsed[0]);
+        setItems(parsed);
       })
       .catch((err) => {
-        console.error('[TrimStockLedger] failed to load items', err);
+        console.error('[TrimStockLedger] items — FETCH ERROR', err?.response?.status, err?.response?.data ?? err.message);
         setItems([]);
       })
       .finally(() => setLoadingItems(false));
@@ -159,11 +183,15 @@ function LeftPane({ selectedItemId, selectedVariantId, onSelectItem, onSelectVar
       setLoadingVariants(prev => ({ ...prev, [id]: true }));
       trimsApi.getVariants(id)
         .then(res => {
-          console.log('[TrimStockLedger] variants loaded for item', id, res.data);
-          setVariantsByItem(prev => ({ ...prev, [id]: res.data?.data ?? res.data ?? [] }));
+          const parsed = res.data?.data ?? res.data ?? [];
+          console.log('[TrimStockLedger] variants — HTTP', res.status, '| item', id);
+          console.log('[TrimStockLedger] variants — raw res.data', res.data);
+          console.log('[TrimStockLedger] variants — parsed count', parsed.length);
+          if (parsed.length > 0) console.log('[TrimStockLedger] variants — first record keys:', Object.keys(parsed[0]), parsed[0]);
+          setVariantsByItem(prev => ({ ...prev, [id]: parsed }));
         })
         .catch((err) => {
-          console.error('[TrimStockLedger] failed to load variants for item', id, err);
+          console.error('[TrimStockLedger] variants — FETCH ERROR item', id, err?.response?.status, err?.response?.data ?? err.message);
           setVariantsByItem(prev => ({ ...prev, [id]: [] }));
         })
         .finally(() => setLoadingVariants(prev => ({ ...prev, [id]: false })));
@@ -200,10 +228,15 @@ function LeftPane({ selectedItemId, selectedVariantId, onSelectItem, onSelectVar
           <div className="text-center text-gray-400 text-sm py-10">No items found</div>
         ) : (
           filtered.map(item => {
-            const isExpanded = expandedItemId === item.id;
-            const isItemSelected = selectedItemId === item.id && selectedVariantId === null;
-            const variants = variantsByItem[item.id] || [];
-            const loadingV = loadingVariants[item.id];
+            const isExpanded      = expandedItemId === item.id;
+            const isItemSelected  = selectedItemId === item.id && selectedVariantId === null;
+            const variants        = variantsByItem[item.id] || [];
+            const loadingV        = loadingVariants[item.id];
+
+            // #7 — IIFE removed; logic computed as plain variables
+            const showZero        = showZeroStockFor.has(item.id);
+            const zeroCount       = variants.filter(isDefinitelyZero).length;
+            const visibleVariants = showZero ? variants : variants.filter(v => !isDefinitelyZero(v));
 
             return (
               <div key={item.id}>
@@ -211,8 +244,10 @@ function LeftPane({ selectedItemId, selectedVariantId, onSelectItem, onSelectVar
                 <div
                   className={`flex items-center justify-between px-3 py-2.5 cursor-pointer hover:bg-blue-50 border-b border-gray-100 ${isItemSelected ? 'ring-2 ring-inset ring-blue-400 bg-blue-50' : ''}`}
                   onClick={() => {
+                    // #5 — Don't re-fetch if already in item mode for this item
+                    const alreadyInItemMode = selectedItemId === item.id && selectedVariantId === null;
                     toggleItem(item);
-                    onSelectItem(item);
+                    if (!alreadyInItemMode) onSelectItem(item);
                   }}
                 >
                   <div className="flex-1 min-w-0">
@@ -243,48 +278,41 @@ function LeftPane({ selectedItemId, selectedVariantId, onSelectItem, onSelectVar
                         >
                           <span className="text-xs text-blue-600 font-medium">All variants</span>
                         </div>
-                        {(() => {
-                          const showZero = showZeroStockFor.has(item.id);
-                          const zeroCount = variants.filter(v => (v.in_stock ?? v.main_store_stock ?? 0) === 0).length;
-                          const visible = showZero ? variants : variants.filter(v => (v.in_stock ?? v.main_store_stock ?? 0) !== 0);
+
+                        {visibleVariants.map(v => {
+                          const isVSelected = selectedVariantId === v.id;
+                          const stock = getVariantStock(v) ?? 0;
+                          const label = [v.color_name, v.color_number].filter(Boolean).join(' ') || `Variant ${v.id}`;
+                          const sizePart = v.variant_size ? ` · ${v.variant_size}` : '';
                           return (
-                            <>
-                              {visible.map(v => {
-                                const isVSelected = selectedVariantId === v.id;
-                                const stock = v.in_stock ?? v.main_store_stock ?? 0;
-                                const label = [v.color_name, v.color_number].filter(Boolean).join(' ') || `Variant ${v.id}`;
-                                const sizePart = v.variant_size ? ` · ${v.variant_size}` : '';
-                                return (
-                                  <div
-                                    key={v.id}
-                                    onClick={() => onSelectVariant(item, v)}
-                                    className={`px-5 py-2 cursor-pointer hover:bg-blue-50 flex items-center justify-between ${isVSelected ? 'ring-2 ring-inset ring-blue-400 bg-blue-50' : ''}`}
-                                  >
-                                    <div className="min-w-0">
-                                      <p className="text-xs font-medium text-gray-700 truncate">{label}{sizePart}</p>
-                                    </div>
-                                    <span className="text-xs text-gray-500 ml-2 shrink-0">{formatNumber(stock)}</span>
-                                  </div>
-                                );
-                              })}
-                              {zeroCount > 0 && (
-                                <button
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setShowZeroStockFor(prev => {
-                                      const next = new Set(prev);
-                                      showZero ? next.delete(item.id) : next.add(item.id);
-                                      return next;
-                                    });
-                                  }}
-                                  className="w-full px-5 py-1.5 text-left text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-                                >
-                                  {showZero ? `Hide ${zeroCount} zero-stock` : `Show ${zeroCount} zero-stock`}
-                                </button>
-                              )}
-                            </>
+                            <div
+                              key={v.id}
+                              onClick={() => onSelectVariant(item, v)}
+                              className={`px-5 py-2 cursor-pointer hover:bg-blue-50 flex items-center justify-between ${isVSelected ? 'ring-2 ring-inset ring-blue-400 bg-blue-50' : ''}`}
+                            >
+                              <div className="min-w-0">
+                                <p className="text-xs font-medium text-gray-700 truncate">{label}{sizePart}</p>
+                              </div>
+                              <span className="text-xs text-gray-500 ml-2 shrink-0">{formatNumber(stock)}</span>
+                            </div>
                           );
-                        })()}
+                        })}
+
+                        {zeroCount > 0 && (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              setShowZeroStockFor(prev => {
+                                const next = new Set(prev);
+                                showZero ? next.delete(item.id) : next.add(item.id);
+                                return next;
+                              });
+                            }}
+                            className="w-full px-5 py-1.5 text-left text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                          >
+                            {showZero ? `Hide ${zeroCount} zero-stock` : `Show ${zeroCount} zero-stock`}
+                          </button>
+                        )}
                       </>
                     )}
                   </div>
@@ -380,12 +408,12 @@ function LedgerRow({ row, isItemMode }) {
 // ---------------------------------------------------------------------------
 
 function RightPane({ selectedItem, selectedVariant, isItemMode }) {
-  const [rows, setRows]                   = useState([]);
-  const [loading, setLoading]             = useState(false);
+  const [rows, setRows]                         = useState([]);
+  const [loading, setLoading]                   = useState(false);
   const [sourceKindFilter, setSourceKindFilter] = useState('');
-  const [limit, setLimit]                 = useState(50);
-  const [offset, setOffset]               = useState(0);
-  const [totalCount, setTotalCount]       = useState(null);
+  const [limit, setLimit]                       = useState(50);
+  const [offset, setOffset]                     = useState(0);
+  const [totalCount, setTotalCount]             = useState(null);
   const fetchIdRef = useRef(0);
 
   // Reset offset whenever filters or selection change
@@ -412,14 +440,21 @@ function RightPane({ selectedItem, selectedVariant, isItemMode }) {
       .then(res => {
         if (fetchId !== fetchIdRef.current) return;
         const data = res.data;
-        console.log('[TrimStockLedger] ledger response', data);
+        console.log('[TrimStockLedger] ledger — HTTP', res.status);
+        console.log('[TrimStockLedger] ledger — raw res.data', data);
+        console.log('[TrimStockLedger] ledger — shape:', Array.isArray(data) ? 'bare array' : `object with keys: ${Object.keys(data).join(', ')}`);
+        let newRows, total;
         if (Array.isArray(data)) {
-          setRows(data);
-          setTotalCount(null);
+          newRows = data;
+          total = null;
         } else {
-          setRows(data.rows || data.results || data.data || []);
-          setTotalCount(data.total ?? data.count ?? null);
+          newRows = data.rows || data.results || data.data || [];
+          total = data.total ?? data.count ?? null;
         }
+        console.log('[TrimStockLedger] ledger — parsed count', newRows.length, '| total:', total);
+        if (newRows.length > 0) console.log('[TrimStockLedger] ledger — first row keys:', Object.keys(newRows[0]), newRows[0]);
+        setRows(newRows);
+        setTotalCount(total);
       })
       .catch((err) => {
         if (fetchId !== fetchIdRef.current) return;
@@ -436,11 +471,18 @@ function RightPane({ selectedItem, selectedVariant, isItemMode }) {
     fetchLedger();
   }, [fetchLedger]);
 
-  // Derived stats
+  // #2 — currentStock from the chronologically newest row, not positional rows[0]
   const currentStock = rows.length > 0
-    ? (rows[0].stock_after ?? rows[0].quantity_after ?? null)
+    ? rows.reduce((latest, r) => {
+        const t = new Date(r.created_at || r.timestamp || 0).getTime();
+        return t > new Date(latest.created_at || latest.timestamp || 0).getTime() ? r : latest;
+      }, rows[0])
+    : null;
+  const currentStockValue = currentStock
+    ? (currentStock.stock_after ?? currentStock.quantity_after ?? null)
     : null;
 
+  // #3 — Stats are page-scoped; label says so
   const totalIn = rows.reduce((sum, r) => {
     const d = Number(r.delta ?? r.quantity_delta ?? 0);
     return sum + (d > 0 ? d : 0);
@@ -450,6 +492,24 @@ function RightPane({ selectedItem, selectedVariant, isItemMode }) {
     const d = Number(r.delta ?? r.quantity_delta ?? 0);
     return sum + (d < 0 ? Math.abs(d) : 0);
   }, 0);
+
+  // #9 — Count text that handles both paginated and bare-array responses
+  const countText = loading
+    ? '…'   // #4 — Don't show "No rows" while loading
+    : rows.length === 0
+      ? 'No rows'
+      : totalCount !== null
+        ? `${offset + 1}–${offset + rows.length} of ${totalCount}`
+        : rows.length < limit
+          ? `${offset + 1}–${offset + rows.length} (last page)`
+          : `${offset + 1}–${offset + rows.length}`;
+
+  // #10 — Next disabled when we know from totalCount that there's nothing more
+  const nextDisabled = loading || (
+    totalCount !== null
+      ? offset + rows.length >= totalCount
+      : rows.length < limit
+  );
 
   if (!selectedItem) {
     return (
@@ -481,14 +541,15 @@ function RightPane({ selectedItem, selectedVariant, isItemMode }) {
           )}
         </div>
         <div className="flex items-center gap-3">
-          {currentStock !== null && (
+          {currentStockValue !== null && (
             <div className="flex flex-col items-center bg-white border border-gray-200 rounded-lg px-4 py-2 min-w-[100px]">
-              <span className="text-lg font-semibold font-mono text-gray-800">{formatNumber(currentStock)}</span>
+              <span className="text-lg font-semibold font-mono text-gray-800">{formatNumber(currentStockValue)}</span>
               <span className="text-xs text-gray-500 mt-0.5">Current Stock</span>
             </div>
           )}
-          <StatChip label="Total In" value={totalIn} colorCls="text-emerald-600" />
-          <StatChip label="Total Out" value={totalOut} colorCls="text-red-500" />
+          {/* #3 — Labels clarify these are page-scoped */}
+          <StatChip label="In (page)" value={totalIn} colorCls="text-emerald-600" />
+          <StatChip label="Out (page)" value={totalOut} colorCls="text-red-500" />
         </div>
       </div>
 
@@ -523,11 +584,8 @@ function RightPane({ selectedItem, selectedVariant, isItemMode }) {
           Refresh
         </button>
 
-        <span className="ml-auto text-xs text-gray-400">
-          {rows.length > 0
-            ? `Showing ${offset + 1}–${offset + rows.length}${totalCount !== null ? ` of ${totalCount}` : ''}`
-            : 'No rows'}
-        </span>
+        {/* #4 + #9 — Single source of truth for count text */}
+        <span className="ml-auto text-xs text-gray-400">{countText}</span>
       </div>
 
       {/* Table */}
@@ -577,13 +635,10 @@ function RightPane({ selectedItem, selectedVariant, isItemMode }) {
         >
           <LuChevronLeft size={14} /> Prev
         </button>
-        <span className="text-xs text-gray-400">
-          {rows.length > 0
-            ? `${offset + 1}–${offset + rows.length}${totalCount !== null ? ` of ${totalCount}` : ''}`
-            : '—'}
-        </span>
+        <span className="text-xs text-gray-400">{countText}</span>
+        {/* #10 — Next ddccisabled correctly using totalCount when available */}
         <button
-          disabled={rows.length < limit || loading}
+          disabled={nextDisabled}
           onClick={() => setOffset(offset + limit)}
           className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
         >
@@ -599,6 +654,7 @@ function RightPane({ selectedItem, selectedVariant, isItemMode }) {
 // ---------------------------------------------------------------------------
 
 export default function TrimStockLedgerPage() {
+  console.log('[TrimStockLedger] PAGE COMPONENT RENDERED');
   const [selectedItem, setSelectedItem]       = useState(null);
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [isItemMode, setIsItemMode]           = useState(false);
@@ -617,8 +673,9 @@ export default function TrimStockLedgerPage() {
     setIsItemMode(false);
   }, []);
 
+  // #1 — -m-6 cancels the layout's p-6 wrapper; height fills the full main area
   return (
-    <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
+    <div className="flex overflow-hidden -m-6" style={{ height: 'calc(100% + 3rem)' }}>
       <LeftPane
         selectedItemId={selectedItem?.id ?? null}
         selectedVariantId={selectedVariant?.id ?? null}

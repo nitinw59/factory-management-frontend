@@ -47,7 +47,7 @@ export const labelFromGroup = (g) => {
     return { name: g.trim_item_name || 'Trim', details: parts.join(' · ') };
 };
 
-// ── Roll helpers ────────────────────────────────────────────────────────────
+// ── Roll helpers (fabric) ────────────────────────────────────────────────────
 export const rk = () => Math.random().toString(36).slice(2);
 
 export const newRoll = (init = {}) => ({
@@ -68,9 +68,33 @@ export const mapRolls = (rolls) => (rolls || [])
         uom:     r.uom || 'meter',
     }));
 
+// ── Box helpers (trim) ───────────────────────────────────────────────────────
+// Trim items are received in boxes: N boxes × Q per box = total qty.
+export const newTrimBox = (init = {}) => ({
+    _k:          rk(),
+    box_count:   init.box_count   != null ? String(init.box_count)   : '',
+    qty_per_box: init.qty_per_box != null ? String(init.qty_per_box) : '',
+});
+
+export const sumTrimBoxes = (boxes) =>
+    (boxes || []).reduce((s, b) => s + (parseFloat(b.box_count) || 0) * (parseFloat(b.qty_per_box) || 0), 0);
+
+export const mapTrimBoxes = (boxes) =>
+    (boxes || [])
+        .filter(b => (parseFloat(b.box_count) || 0) > 0 && (parseFloat(b.qty_per_box) || 0) > 0)
+        .map(b => ({ box_count: parseFloat(b.box_count), qty_per_box: parseFloat(b.qty_per_box) }));
+
 // ── Pending qty maps ────────────────────────────────────────────────────────
 // Pending qty per requirement, excluding the inward being edited (if any).
-export const pendingByReqMap = (allRequirements, allInwards, currentInward) => {
+// Baseline is the parent PO item's ordered quantity, NOT the requirement's own qty.
+export const pendingByReqMap = (allRequirements, allInwards, currentInward, poItems = []) => {
+    // Build req id → parent PO item ordered qty
+    const reqToPoQty = {};
+    (poItems || []).forEach(p => {
+        const poQty = parseFloat(p.quantity ?? 0);
+        (p.requirements || []).forEach(r => { reqToPoQty[r.id] = poQty; });
+    });
+
     const otherReceived = {};
     (allInwards || []).forEach(iw => {
         if (currentInward && iw.id === currentInward.id) return;
@@ -81,7 +105,8 @@ export const pendingByReqMap = (allRequirements, allInwards, currentInward) => {
     });
     const map = {};
     (allRequirements || []).forEach(r => {
-        map[r.id] = Math.max(0, reqTotal(r) - (otherReceived[r.id] || 0));
+        const baseline = reqToPoQty[r.id] ?? reqTotal(r); // fallback to req qty if lookup fails
+        map[r.id] = Math.max(0, baseline - (otherReceived[r.id] || 0));
     });
     return map;
 };
@@ -109,12 +134,47 @@ export const pendingByPoItemMap = (poItems, allInwards, currentInward) => {
 
 // ── Build API items from form state ─────────────────────────────────────────
 // Returns { items, error }. error non-null means validation failed.
+//
+// Each trim entry supports two modes:
+//   Total-only  — no boxes entered; uses trimTotalByReq[reqId] as qty_received
+//   Box breakdown — boxes exist; qty_received = sum(box_count × qty_per_box), boxes sent too
+//
+// State shape:
+//   trimTotalByReq      { [reqId]:    string }                             ← total-only mode
+//   trimBoxesByReq      { [reqId]:    [{ _k, box_count, qty_per_box }] }  ← breakdown mode
+//   fabricRollsByReq    { [reqId]:    [{ _k, bale_no, meter, uom }]   }
+//   freeFormTrimTotals  { [poItemId]: string }
+//   freeFormTrimBoxes   { [poItemId]: [{ _k, box_count, qty_per_box }] }
+//   freeFormFabricRolls { [poItemId]: [{ _k, bale_no, meter, uom }]   }
+//   customGroups        [{ type, lines: [{ trim_item_variant_id, total, boxes }|{ fabric_color_id, rolls }] }]
 export const buildItemsFromState = (state) => {
-    const { items, fabricRollsByReq, freeFormItems, freeFormFabricRolls, customGroups } = state;
+    const {
+        trimTotalByReq, trimBoxesByReq,
+        fabricRollsByReq,
+        freeFormTrimTotals, freeFormTrimBoxes,
+        freeFormFabricRolls,
+        customGroups,
+    } = state;
 
-    const reqEntries = Object.entries(items || {})
-        .filter(([, v]) => v !== '' && v != null && parseFloat(v) > 0)
-        .map(([reqId, v]) => ({ requirement_id: parseInt(reqId, 10), qty_received: parseFloat(v) }));
+    // Trim req entries — box breakdown takes priority over total-only
+    const reqIds = new Set([
+        ...Object.keys(trimBoxesByReq || {}),
+        ...Object.keys(trimTotalByReq || {}),
+    ]);
+    const reqEntries = [];
+    for (const reqId of reqIds) {
+        const boxes = mapTrimBoxes((trimBoxesByReq || {})[reqId]);
+        if (boxes.length > 0) {
+            reqEntries.push({
+                requirement_id: parseInt(reqId, 10),
+                qty_received:   boxes.reduce((s, b) => s + b.box_count * b.qty_per_box, 0),
+                boxes,
+            });
+        } else {
+            const q = parseFloat(((trimTotalByReq || {})[reqId]) ?? 0);
+            if (q > 0) reqEntries.push({ requirement_id: parseInt(reqId, 10), qty_received: q });
+        }
+    }
 
     const fabricReqEntries = Object.entries(fabricRollsByReq || {})
         .map(([reqId, rolls]) => ({ reqId: parseInt(reqId, 10), rolls: mapRolls(rolls) }))
@@ -125,9 +185,25 @@ export const buildItemsFromState = (state) => {
             rolls:          x.rolls,
         }));
 
-    const freeEntries = Object.entries(freeFormItems || {})
-        .filter(([, v]) => v !== '' && v != null && parseFloat(v) > 0)
-        .map(([poItemId, v]) => ({ purchase_order_item_id: parseInt(poItemId, 10), qty_received: parseFloat(v) }));
+    // Free-form trim entries — same dual-mode
+    const poIds = new Set([
+        ...Object.keys(freeFormTrimBoxes || {}),
+        ...Object.keys(freeFormTrimTotals || {}),
+    ]);
+    const freeEntries = [];
+    for (const poItemId of poIds) {
+        const boxes = mapTrimBoxes((freeFormTrimBoxes || {})[poItemId]);
+        if (boxes.length > 0) {
+            freeEntries.push({
+                purchase_order_item_id: parseInt(poItemId, 10),
+                qty_received:           boxes.reduce((s, b) => s + b.box_count * b.qty_per_box, 0),
+                boxes,
+            });
+        } else {
+            const q = parseFloat(((freeFormTrimTotals || {})[poItemId]) ?? 0);
+            if (q > 0) freeEntries.push({ purchase_order_item_id: parseInt(poItemId, 10), qty_received: q });
+        }
+    }
 
     const fabricFreeEntries = Object.entries(freeFormFabricRolls || {})
         .map(([poItemId, rolls]) => ({ poItemId: parseInt(poItemId, 10), rolls: mapRolls(rolls) }))
@@ -157,17 +233,22 @@ export const buildItemsFromState = (state) => {
                     description:     g.description || null,
                 });
             } else {
-                const q = parseFloat(ln.qty_received);
+                const boxes = mapTrimBoxes(ln.boxes);
+                const q = boxes.length > 0
+                    ? boxes.reduce((s, b) => s + b.box_count * b.qty_per_box, 0)
+                    : parseFloat(ln.total ?? 0);
                 if (!q || q <= 0) continue;
                 if (!g.trim_item_id)          return { items: null, error: `${groupLabel}: pick a trim item.` };
                 if (!ln.trim_item_variant_id) return { items: null, error: `${groupLabel}, line ${li + 1}: pick a variant.` };
-                customEntries.push({
+                const entry = {
                     item_type:            'trim',
                     qty_received:         q,
                     trim_item_variant_id: parseInt(ln.trim_item_variant_id, 10),
                     unit_price:           unitPrice,
                     description:          g.description || null,
-                });
+                };
+                if (boxes.length > 0) entry.boxes = boxes;
+                customEntries.push(entry);
             }
         }
     }

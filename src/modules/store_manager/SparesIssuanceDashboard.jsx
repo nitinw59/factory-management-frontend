@@ -104,10 +104,13 @@ export default function SparesIssuanceDashboard() {
     const [invoiceToView, setInvoiceToView] = useState(null);
 
     // Direct Issuance Form States
+    const [directIsUnregistered, setDirectIsUnregistered] = useState(false);
     const [directUserId, setDirectUserId] = useState('');
+    const [directUnregisteredName, setDirectUnregisteredName] = useState('');
     const [directItems, setDirectItems] = useState([{ spare_part_id: '', quantity: 1 }]);
     const [directNotes, setDirectNotes] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [directPriceError, setDirectPriceError] = useState(null);
 
     // Initial Fetch
     useEffect(() => { loadData(); }, []);
@@ -266,28 +269,41 @@ export default function SparesIssuanceDashboard() {
     // --- DIRECT ISSUANCE SUBMIT ---
     const handleDirectIssue = async (e) => {
         e.preventDefault();
-        if (!directUserId) return alert("Please select a user to issue spares to.");
-        
+        setDirectPriceError(null);
+
+        if (directIsUnregistered) {
+            if (!directUnregisteredName.trim()) return alert("Please enter the recipient's name.");
+        } else {
+            if (!directUserId) return alert("Please select a user to issue spares to.");
+        }
+
         const validItems = directItems.filter(i => i.spare_part_id && i.quantity > 0);
         if (validItems.length === 0) return alert("Please add at least one valid spare part with a quantity greater than 0.");
 
+        // Block invoice if any selected part has no price set
+        const unpricedParts = validItems
+            .map(i => storeSpares.find(s => s.id === i.spare_part_id))
+            .filter(s => s && !(s.unit_cost > 0));
+        if (unpricedParts.length > 0) {
+            setDirectPriceError(`Cannot generate invoice: the following parts have no price set — ${unpricedParts.map(s => s.name).join(', ')}.`);
+            return;
+        }
+
         setIsSubmitting(true);
         try {
-            const payload = {
-                target_user_id: directUserId,
-                items: validItems,
-                notes: directNotes
-            };
-            
+            const payload = directIsUnregistered
+                ? { unregistered_user_name: directUnregisteredName.trim(), items: validItems, notes: directNotes }
+                : { target_user_id: directUserId, items: validItems, notes: directNotes };
+
             await storeManagerApi.generateInvoice(payload);
             alert("Direct Issuance Logged & Invoice Generated Successfully!");
-            
+
             // Reset Form
             setDirectUserId('');
+            setDirectUnregisteredName('');
             setDirectItems([{ spare_part_id: '', quantity: 1 }]);
             setDirectNotes('');
-            
-            // Refresh Dashboard to update stock levels
+
             loadData();
         } catch (err) {
             console.error("Direct Issuance Error:", err);
@@ -471,27 +487,65 @@ export default function SparesIssuanceDashboard() {
                             <p className="text-sm text-gray-500 font-medium">Bypass requests to issue stock directly to any registered factory user. This automatically deducts from the main store and logs the invoice.</p>
                         </div>
 
+                        {/* Receiver Type Toggle */}
+                        <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-xl w-max mb-6">
+                            <button
+                                type="button"
+                                onClick={() => { setDirectIsUnregistered(false); setDirectUnregisteredName(''); }}
+                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${!directIsUnregistered ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                            >
+                                <Users className="inline w-4 h-4 mr-1.5 -mt-0.5"/>Registered User
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => { setDirectIsUnregistered(true); setDirectUserId(''); }}
+                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${directIsUnregistered ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                            >
+                                <User className="inline w-4 h-4 mr-1.5 -mt-0.5"/>Unregistered Person
+                            </button>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
                             <div>
-                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Issue To (Receiver) *</label>
-                                <SearchableDropdown 
-                                    options={users} 
-                                    value={directUserId} 
-                                    onChange={setDirectUserId} 
-                                    placeholder="Search by name or role..." 
-                                />
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                                    Issue To (Receiver) *
+                                </label>
+                                {directIsUnregistered ? (
+                                    <input
+                                        type="text"
+                                        value={directUnregisteredName}
+                                        onChange={e => setDirectUnregisteredName(e.target.value)}
+                                        placeholder="Enter recipient's full name..."
+                                        className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition-all bg-gray-50 focus:bg-white font-medium"
+                                    />
+                                ) : (
+                                    <SearchableDropdown
+                                        options={users}
+                                        value={directUserId}
+                                        onChange={setDirectUserId}
+                                        placeholder="Search by name or role..."
+                                    />
+                                )}
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Notes / Reference</label>
-                                <input 
-                                    type="text" 
-                                    value={directNotes} 
-                                    onChange={e => setDirectNotes(e.target.value)} 
-                                    placeholder="e.g., General supply for Line 2..." 
+                                <input
+                                    type="text"
+                                    value={directNotes}
+                                    onChange={e => setDirectNotes(e.target.value)}
+                                    placeholder="e.g., General supply for Line 2..."
                                     className="w-full p-3.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition-all bg-gray-50 focus:bg-white"
                                 />
                             </div>
                         </div>
+
+                        {/* Price validation error */}
+                        {directPriceError && (
+                            <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+                                <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                                <p className="text-sm font-medium text-red-700">{directPriceError}</p>
+                            </div>
+                        )}
 
                         <div className="space-y-4 mb-8">
                             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Line Items *</label>
@@ -502,19 +556,20 @@ export default function SparesIssuanceDashboard() {
                                 return (
                                     <div key={idx} className="flex flex-col sm:flex-row items-center gap-3 bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm">
                                         <div className="flex-1 w-full">
-                                            <SearchableDropdown 
-                                                options={storeSpares.map(s => ({ 
-                                                    label: `${s.name} (${s.part_number}) - Stock: ${s.current_stock}`, 
-                                                    value: s.id 
-                                                }))} 
-                                                value={item.spare_part_id} 
+                                            <SearchableDropdown
+                                                options={storeSpares.map(s => ({
+                                                    label: `${s.name} (${s.part_number}) - Stock: ${s.current_stock}${!(s.unit_cost > 0) ? ' ⚠ No price' : ''}`,
+                                                    value: s.id
+                                                }))}
+                                                value={item.spare_part_id}
                                                 onChange={(val) => {
                                                     const newItems = [...directItems];
                                                     newItems[idx].spare_part_id = val;
-                                                    newItems[idx].quantity = 1; // reset qty on part change
+                                                    newItems[idx].quantity = 1;
                                                     setDirectItems(newItems);
-                                                }} 
-                                                placeholder="Search Store Catalog..." 
+                                                    setDirectPriceError(null);
+                                                }}
+                                                placeholder="Search Store Catalog..."
                                             />
                                         </div>
                                         <div className="w-full sm:w-40 flex items-center bg-white border border-gray-300 rounded-xl overflow-hidden shrink-0 shadow-sm">

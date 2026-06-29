@@ -40,6 +40,10 @@ const OrdersPage = () => {
     const [inwardStep,        setInwardStep]        = useState(null);   // null | 'create' | 'review'
     const [inwardCtx,         setInwardCtx]         = useState(null);   // { po, items, inwards, snapshot?, payload?, lookups }
     const [openingInwardId,   setOpeningInwardId]   = useState(null);
+    const [checkingFulfilment, setCheckingFulfilment] = useState(false);
+    const [fulfilledPoIds,     setFulfilledPoIds]     = useState(null); // null=not evaluated, []|[...]=result
+    const [selectedForBulk,   setSelectedForBulk]    = useState(new Set());
+    const [bulkBusy,          setBulkBusy]           = useState(false);
 
     // Cache of getOrderById detail per PO. Loaded eagerly for all orders on
     // the list so we can read items.length (for the inline-chip threshold)
@@ -98,13 +102,27 @@ const OrdersPage = () => {
 
         if (inwardsByPoId[expandedId] === undefined) {
             purchaseDeptApi.getInwards(expandedId)
-                .then(r => { if (!cancelled) setInwardsByPoId(prev => ({ ...prev, [expandedId]: r.data?.data ?? r.data ?? [] })); })
+                .then(r => {
+                    const data = r.data?.data ?? r.data ?? [];
+                    console.log(`[PO ${expandedId}] inwards fetched:`, data);
+                    if (!cancelled) setInwardsByPoId(prev => ({ ...prev, [expandedId]: data }));
+                })
                 .catch(() => { if (!cancelled) setInwardsByPoId(prev => ({ ...prev, [expandedId]: [] })); });
+        }
+
+        // Log PO detail items so we can inspect their fields (purchase_requirement_id etc.)
+        const cachedDetail = detailsByPoId[expandedId];
+        if (cachedDetail) {
+            console.log(`[PO ${expandedId}] detail items:`, cachedDetail.items || []);
         }
 
         if (invoicesByPoId[expandedId] === undefined) {
             purchaseDeptApi.getInvoices(expandedId)
-                .then(r => { if (!cancelled) setInvoicesByPoId(prev => ({ ...prev, [expandedId]: r.data?.data ?? r.data ?? [] })); })
+                .then(r => {
+                    const data = r.data?.data ?? r.data ?? [];
+                    console.log(`[PO ${expandedId}] invoices fetched:`, data);
+                    if (!cancelled) setInvoicesByPoId(prev => ({ ...prev, [expandedId]: data }));
+                })
                 .catch(() => { if (!cancelled) setInvoicesByPoId(prev => ({ ...prev, [expandedId]: [] })); });
         }
 
@@ -112,17 +130,6 @@ const OrdersPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [expandedId]);
 
-    const handleMarkReceived = async (orderId) => {
-        setBusy(orderId); setErr(null);
-        try {
-            await purchaseDeptApi.updateOrderStatus(orderId, 'COMPLETED');
-            setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'COMPLETED' } : o));
-        } catch (e) {
-            setErr(e?.response?.data?.error || 'Failed to update status');
-        } finally {
-            setBusy(null);
-        }
-    };
 
     const handleCancelOrder = async (order) => {
         const label = order.po_code || `PO #${order.id}`;
@@ -193,6 +200,75 @@ const OrdersPage = () => {
     };
 
     const closeInward = () => { setInwardStep(null); setInwardCtx(null); };
+
+    const calcFulfilmentPct = (items, inwards) => {
+        const reqIdToItemId = {};
+        items.forEach(it => (it.requirements || []).forEach(req => { reqIdToItemId[req.id] = it.id; }));
+        const receivedById = {};
+        (inwards || []).forEach(iw => {
+            (iw.items || []).forEach(line => {
+                const id = line.purchase_order_item_id ?? reqIdToItemId[line.purchase_requirement_id];
+                if (id != null) receivedById[id] = (receivedById[id] || 0) + (Number(line.qty_received) || 0);
+            });
+        });
+        let totalOrdered = 0, totalReceived = 0;
+        items.forEach(it => {
+            const ord = Number(it.quantity) || 0;
+            totalOrdered  += ord;
+            totalReceived += Math.min(receivedById[it.id] || 0, ord || (receivedById[it.id] || 0));
+        });
+        return totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0;
+    };
+
+    const checkFulfilment = async () => {
+        setCheckingFulfilment(true);
+        setErr(null);
+        try {
+            const allPending = orders.filter(o => o.status !== 'COMPLETED' && o.status !== 'CANCELLED');
+            const toFetch = allPending.filter(o => inwardsByPoId[o.id] === undefined);
+            const freshInwards = {};
+            if (toFetch.length > 0) {
+                const results = await Promise.all(toFetch.map(o =>
+                    purchaseDeptApi.getInwards(o.id)
+                        .then(r => [o.id, r.data?.data ?? r.data ?? []])
+                        .catch(() => [o.id, []])
+                ));
+                results.forEach(([id, data]) => { freshInwards[id] = data; });
+                setInwardsByPoId(prev => ({ ...prev, ...freshInwards }));
+            }
+            const allInwards = { ...inwardsByPoId, ...freshInwards };
+            const fulfilled = allPending
+                .filter(o => {
+                    const detail = detailsByPoId[o.id];
+                    if (!detail || !(detail.items || []).length) return false;
+                    return calcFulfilmentPct(detail.items, allInwards[o.id] || []) >= 100;
+                })
+                .map(o => o.id);
+            setFulfilledPoIds(fulfilled);
+            setSelectedForBulk(new Set(fulfilled));
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Failed to evaluate fulfilment');
+        } finally {
+            setCheckingFulfilment(false);
+        }
+    };
+
+    const markSelectedComplete = async () => {
+        setBulkBusy(true);
+        setErr(null);
+        try {
+            await Promise.all([...selectedForBulk].map(id =>
+                purchaseDeptApi.updateOrderStatus(id, 'COMPLETED')
+            ));
+            setOrders(prev => prev.map(o => selectedForBulk.has(o.id) ? { ...o, status: 'COMPLETED' } : o));
+            setFulfilledPoIds(null);
+            setSelectedForBulk(new Set());
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Failed to mark orders as received');
+        } finally {
+            setBulkBusy(false);
+        }
+    };
 
     const renderOrder = (order) => {
         const isExpanded = expandedId === order.id;
@@ -299,19 +375,6 @@ const OrdersPage = () => {
                         </button>
                         {canChangeLifecycle && order.status !== 'COMPLETED' && order.status !== 'CANCELLED' && (
                             <button
-                                onClick={e => { e.stopPropagation(); handleMarkReceived(order.id); }}
-                                disabled={busy === order.id}
-                                className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors"
-                            >
-                                {busy === order.id
-                                    ? <Loader2 size={12} className="animate-spin" />
-                                    : <CheckCircle2 size={12} />
-                                }
-                                Mark Received
-                            </button>
-                        )}
-                        {canChangeLifecycle && order.status !== 'COMPLETED' && order.status !== 'CANCELLED' && (
-                            <button
                                 onClick={e => { e.stopPropagation(); handleCancelOrder(order); }}
                                 disabled={busy === order.id}
                                 title="Cancel this PO — linked requirements revert to PENDING"
@@ -371,11 +434,18 @@ const OrdersPage = () => {
                             if (items.length === 0) {
                                 return <p className="text-[11px] text-slate-400 italic">No line items on this PO.</p>;
                             }
-                            // Aggregate received qty per po_item_id from inwards.
+                            // Some inward lines are linked via purchase_requirement_id instead of
+                            // purchase_order_item_id (when the PO item was created from a requirement).
+                            // Build a fallback map so those lines still count toward the right PO item.
+                            // Build requirement_id → po_item_id from the nested requirements array on each item.
+                            const reqIdToItemId = {};
+                            items.forEach(it => {
+                                (it.requirements || []).forEach(req => { reqIdToItemId[req.id] = it.id; });
+                            });
                             const receivedById = {};
                             (inwards || []).forEach(iw => {
                                 (iw.items || []).forEach(line => {
-                                    const id = line.purchase_order_item_id;
+                                    const id = line.purchase_order_item_id ?? reqIdToItemId[line.purchase_requirement_id];
                                     if (id == null) return;
                                     receivedById[id] = (receivedById[id] || 0) + (Number(line.qty_received) || 0);
                                 });
@@ -569,7 +639,74 @@ const OrdersPage = () => {
                             <div className="flex items-center gap-2 mb-3">
                                 <Clock size={14} className="text-amber-500" />
                                 <span className="text-sm font-bold text-slate-700">Open Orders · {pending.length}</span>
+                                {canChangeLifecycle && (
+                                    <button
+                                        onClick={checkFulfilment}
+                                        disabled={checkingFulfilment}
+                                        className="ml-auto flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-white hover:bg-emerald-600 border border-emerald-200 hover:border-emerald-600 px-3 py-1 rounded-lg transition-colors disabled:opacity-40"
+                                    >
+                                        {checkingFulfilment
+                                            ? <Loader2 size={12} className="animate-spin" />
+                                            : <CheckCircle2 size={12} />}
+                                        {checkingFulfilment ? 'Checking…' : 'Check Fulfilment'}
+                                    </button>
+                                )}
                             </div>
+
+                            {fulfilledPoIds !== null && (
+                                <div className="mb-3 border border-emerald-200 rounded-xl bg-emerald-50 p-4">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm font-bold text-emerald-800">
+                                            {fulfilledPoIds.length === 0
+                                                ? 'No open POs are fully fulfilled yet'
+                                                : `${fulfilledPoIds.length} PO${fulfilledPoIds.length === 1 ? '' : 's'} fully fulfilled`}
+                                        </span>
+                                        <button
+                                            onClick={() => { setFulfilledPoIds(null); setSelectedForBulk(new Set()); }}
+                                            className="text-[10px] font-bold text-emerald-600 hover:text-emerald-800 uppercase tracking-wider"
+                                        >
+                                            Dismiss
+                                        </button>
+                                    </div>
+                                    {fulfilledPoIds.length > 0 && (
+                                        <>
+                                            <div className="space-y-1.5 mb-3">
+                                                {fulfilledPoIds.map(id => {
+                                                    const o = orders.find(p => p.id === id);
+                                                    if (!o) return null;
+                                                    return (
+                                                        <label key={id} className="flex items-center gap-2.5 cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedForBulk.has(id)}
+                                                                onChange={e => setSelectedForBulk(prev => {
+                                                                    const next = new Set(prev);
+                                                                    e.target.checked ? next.add(id) : next.delete(id);
+                                                                    return next;
+                                                                })}
+                                                                className="accent-emerald-600"
+                                                            />
+                                                            <span className="text-xs font-bold text-slate-700">{o.po_code || `PO #${o.id}`}</span>
+                                                            <span className="text-xs text-slate-500">{o.supplier_name || '—'}</span>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+                                            <button
+                                                onClick={markSelectedComplete}
+                                                disabled={bulkBusy || selectedForBulk.size === 0}
+                                                className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 px-4 py-1.5 rounded-lg transition-colors"
+                                            >
+                                                {bulkBusy
+                                                    ? <Loader2 size={12} className="animate-spin" />
+                                                    : <CheckCircle2 size={12} />}
+                                                Mark {selectedForBulk.size} as Received
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+
                             <div className="space-y-2">{pending.map(renderOrder)}</div>
                         </div>
                     )}

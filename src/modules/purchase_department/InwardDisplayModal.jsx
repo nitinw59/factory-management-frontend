@@ -19,6 +19,8 @@ export default function InwardDisplayModal({
     poItems = [],
     supplierId,
     supplierName,
+    poCode,
+    poId,
     onClose,
     onDeleted,
 }) {
@@ -128,6 +130,11 @@ export default function InwardDisplayModal({
                             <FileText size={16} className="text-emerald-500" />
                             Inward · {inward.grn_number || `#${inward.id}`}
                         </h2>
+                        {(poCode || poId) && (
+                            <p className="text-[11px] font-semibold text-emerald-700 mt-0.5">
+                                PO · {poCode || `#${poId}`}
+                            </p>
+                        )}
                         <p className="text-xs text-slate-500 mt-0.5">
                             {inward.received_date ? new Date(inward.received_date).toLocaleDateString('en', { dateStyle: 'medium' }) : '—'}
                             {inward.created_by_name ? ` · Recorded by ${inward.created_by_name}` : ''}

@@ -19,6 +19,7 @@ import SupplierCodePill from './SupplierCodePill';
  */
 export default function InwardReviewModal({
     poId,
+    poCode,
     inward = null,
     payload,
     poItems = [],
@@ -153,6 +154,7 @@ export default function InwardReviewModal({
                     qty:      it.qty_received,
                     unit:     it._label.unit || 'pcs',
                     rolls:    it.rolls || null,
+                    boxes:    it.boxes || null,
                     isTrim:   it.item_type !== 'fabric',
                     variantId: it.trim_item_variant_id ?? null,
                 };
@@ -169,6 +171,7 @@ export default function InwardReviewModal({
                     qty:      it.qty_received,
                     unit:     isFabric ? 'm' : (g?.uom || 'pcs'),
                     rolls:    it.rolls || null,
+                    boxes:    it.boxes || null,
                     isTrim:   !isFabric,
                     variantId: g?.trim_item_variant_id ?? null,
                 };
@@ -186,6 +189,7 @@ export default function InwardReviewModal({
                     qty:      it.qty_received,
                     unit:     isFabric ? 'm' : (p?.uom || 'pcs'),
                     rolls:    it.rolls || null,
+                    boxes:    it.boxes || null,
                     isTrim:   !isFabric,
                     variantId: p?.trim_item_variant_id ?? null,
                 };
@@ -223,6 +227,7 @@ export default function InwardReviewModal({
                 qty:      it.qty_received,
                 unit:     isFabric ? 'm' : 'pcs',
                 rolls:    it.rolls || null,
+                boxes:    it.boxes || null,
                 isTrim:   !isFabric,
                 variantId: it.trim_item_variant_id ?? null,
             };
@@ -299,6 +304,11 @@ export default function InwardReviewModal({
                             <CheckCircle2 size={16} className="text-emerald-500" />
                             Review before saving
                         </h2>
+                        {(poCode || poId) && (
+                            <p className="text-[11px] font-semibold text-emerald-700 mt-0.5">
+                                PO · {poCode || `#${poId}`}
+                            </p>
+                        )}
                         <p className="text-xs text-slate-500 mt-0.5">
                             {summary.length} line{summary.length !== 1 ? 's' : ''} will be {isCreate ? 'recorded' : 'updated'} on GRN {payload?.grnNumber || '(auto)'} dated {payload?.receivedDate}.
                         </p>
@@ -347,6 +357,11 @@ export default function InwardReviewModal({
                                                     ))}
                                                 </ul>
                                             )}
+                                            {row.boxes && row.boxes.length > 0 && (
+                                                <p className="mt-1 text-[10px] text-slate-500 font-mono">
+                                                    {row.boxes.map(b => `${b.box_count} × ${Number(b.qty_per_box).toLocaleString()}`).join(' + ')}
+                                                </p>
+                                            )}
                                         </div>
                                         <div className="shrink-0 text-right">
                                             <p className="text-sm font-bold text-emerald-700 tabular-nums">
@@ -354,6 +369,9 @@ export default function InwardReviewModal({
                                             </p>
                                             {row.rolls && row.rolls.length > 0 && (
                                                 <p className="text-[9px] text-slate-400">{row.rolls.length} roll{row.rolls.length !== 1 ? 's' : ''}</p>
+                                            )}
+                                            {row.boxes && row.boxes.length > 0 && (
+                                                <p className="text-[9px] text-slate-400">{row.boxes.reduce((s, b) => s + (parseFloat(b.box_count) || 0), 0)} box{row.boxes.reduce((s, b) => s + (parseFloat(b.box_count) || 0), 0) !== 1 ? 'es' : ''}</p>
                                             )}
                                         </div>
                                     </div>

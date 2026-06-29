@@ -6,10 +6,12 @@ import { trimsApi } from '../../api/trimsApi';
 import api from '../../utils/api';
 import SupplierCodePill from './SupplierCodePill';
 import SearchableSelect from '../../shared/SearchableSelect';
+import BoxBreakdownModal from './BoxBreakdownModal';
 import {
     TYPE_ICON,
     reqTotal, reqUnit, reqLabel,
     newRoll, sumRolls, rk,
+    sumTrimBoxes,
     pendingByReqMap, pendingByPoItemMap,
     buildItemsFromState, labelFromGroup,
 } from './inwardShared';
@@ -32,6 +34,7 @@ import {
  */
 export default function InwardCreateModal({
     poId,                            // eslint-disable-line no-unused-vars
+    poCode,
     poItems = [],
     supplierId,
     supplierName,
@@ -42,6 +45,7 @@ export default function InwardCreateModal({
 }) {
     const [busy, setBusy] = useState(false);
     const [err,  setErr]  = useState(null);
+    const [boxModal, setBoxModal] = useState(null); // { title, uom, initialBoxes, onSave }
 
     // ── Header fields ───────────────────────────────────────────────────────
     const [grnNumber,    setGrnNumber]    = useState(initialSnapshot?.grnNumber    ?? '');
@@ -55,7 +59,7 @@ export default function InwardCreateModal({
         () => (poItems || []).flatMap(i => i.requirements || []),
         [poItems]
     );
-    const pendingByReq    = useMemo(() => pendingByReqMap(allRequirements, allInwards, null), [allRequirements, allInwards]);
+    const pendingByReq    = useMemo(() => pendingByReqMap(allRequirements, allInwards, null, poItems), [allRequirements, allInwards, poItems]);
     const pendingByPoItem = useMemo(() => pendingByPoItemMap(poItems, allInwards, null), [poItems, allInwards]);
 
     const fabricReqIds = useMemo(
@@ -64,11 +68,23 @@ export default function InwardCreateModal({
     );
 
     // ── Form state ──────────────────────────────────────────────────────────
-    const [items, setItems] = useState(() => initialSnapshot?.items ?? (() => {
+    // Trim total (simple qty, no breakdown) — primary entry mode
+    const [trimTotalByReq, setTrimTotalByReq] = useState(() => initialSnapshot?.trimTotalByReq ?? (() => {
         const m = {};
         allRequirements.forEach(r => {
             if ((r.item_type || r.type) === 'fabric') return;
-            if ((pendingByReq[r.id] || 0) > 0) m[r.id] = pendingByReq[r.id];
+            const pending = pendingByReq[r.id] || 0;
+            if (pending > 0) m[r.id] = String(pending);
+        });
+        return m;
+    })());
+
+    // Trim boxes (optional breakdown) — empty until user clicks "+ Add box breakdown"
+    const [trimBoxesByReq, setTrimBoxesByReq] = useState(() => initialSnapshot?.trimBoxesByReq ?? (() => {
+        const m = {};
+        allRequirements.forEach(r => {
+            if ((r.item_type || r.type) === 'fabric') return;
+            m[r.id] = [];
         });
         return m;
     })());
@@ -82,13 +98,23 @@ export default function InwardCreateModal({
         return m;
     })());
 
-    const [freeFormItems, setFreeFormItems] = useState(() => initialSnapshot?.freeFormItems ?? (() => {
+    const [freeFormTrimTotals, setFreeFormTrimTotals] = useState(() => initialSnapshot?.freeFormTrimTotals ?? (() => {
         const m = {};
         (poItems || []).forEach(p => {
             if ((p.requirements || []).length > 0) return;
             if (p.item_type === 'fabric') return;
             const pend = pendingByPoItem[p.id] || 0;
-            if (pend > 0) m[p.id] = pend;
+            if (pend > 0) m[p.id] = String(pend);
+        });
+        return m;
+    })());
+
+    const [freeFormTrimBoxes, setFreeFormTrimBoxes] = useState(() => initialSnapshot?.freeFormTrimBoxes ?? (() => {
+        const m = {};
+        (poItems || []).forEach(p => {
+            if ((p.requirements || []).length > 0) return;
+            if (p.item_type === 'fabric') return;
+            m[p.id] = [];
         });
         return m;
     })());
@@ -130,24 +156,31 @@ export default function InwardCreateModal({
     };
 
     // ── Setters ─────────────────────────────────────────────────────────────
-    const setItemQty = (reqId, val) => setItems(prev => {
-        const next = { ...prev };
-        if (val === '' || val == null) delete next[reqId]; else next[reqId] = val;
-        return next;
-    });
-    const setFreeFormQty = (poItemId, val) => setFreeFormItems(prev => {
-        const next = { ...prev };
-        if (val === '' || val == null) delete next[poItemId]; else next[poItemId] = val;
-        return next;
-    });
+    // Trim total setters (total-only mode, no breakdown)
+    const setTrimTotalForReq    = (rid, val) => setTrimTotalByReq(prev => ({ ...prev, [rid]: val }));
+    const setTrimTotalForPoItem = (pid, val) => setFreeFormTrimTotals(prev => ({ ...prev, [pid]: val }));
 
-    const addRollToReq        = (rid)            => setFabricRollsByReq(prev => ({ ...prev, [rid]: [...(prev[rid] || []), newRoll()] }));
-    const removeRollFromReq   = (rid, k)         => setFabricRollsByReq(prev => ({ ...prev, [rid]: (prev[rid] || []).filter(r => r._k !== k) }));
-    const setRollFieldOnReq   = (rid, k, f, v)   => setFabricRollsByReq(prev => ({ ...prev, [rid]: (prev[rid] || []).map(r => r._k === k ? { ...r, [f]: v } : r) }));
+    // Trim box setters (breakdown mode — managed via BoxBreakdownModal)
+    const clearTrimBoxesForReq = (rid, computedTotal) => {
+        setTrimBoxesByReq(prev => ({ ...prev, [rid]: [] }));
+        if (computedTotal > 0) setTrimTotalByReq(prev => ({ ...prev, [rid]: String(computedTotal) }));
+    };
 
-    const addRollToPoItem        = (pid)            => setFreeFormFabricRolls(prev => ({ ...prev, [pid]: [...(prev[pid] || []), newRoll()] }));
-    const removeRollFromPoItem   = (pid, k)         => setFreeFormFabricRolls(prev => ({ ...prev, [pid]: (prev[pid] || []).filter(r => r._k !== k) }));
-    const setRollFieldOnPoItem   = (pid, k, f, v)   => setFreeFormFabricRolls(prev => ({ ...prev, [pid]: (prev[pid] || []).map(r => r._k === k ? { ...r, [f]: v } : r) }));
+    // Trim box setters (free-form PO item — managed via BoxBreakdownModal)
+    const clearTrimBoxesForPoItem = (pid, computedTotal) => {
+        setFreeFormTrimBoxes(prev => ({ ...prev, [pid]: [] }));
+        if (computedTotal > 0) setFreeFormTrimTotals(prev => ({ ...prev, [pid]: String(computedTotal) }));
+    };
+
+    // Fabric roll setters (requirement-linked)
+    const addRollToReq      = (rid)          => setFabricRollsByReq(prev => ({ ...prev, [rid]: [...(prev[rid] || []), newRoll()] }));
+    const removeRollFromReq = (rid, k)       => setFabricRollsByReq(prev => ({ ...prev, [rid]: (prev[rid] || []).filter(r => r._k !== k) }));
+    const setRollFieldOnReq = (rid, k, f, v) => setFabricRollsByReq(prev => ({ ...prev, [rid]: (prev[rid] || []).map(r => r._k === k ? { ...r, [f]: v } : r) }));
+
+    // Fabric roll setters (free-form PO item)
+    const addRollToPoItem      = (pid)          => setFreeFormFabricRolls(prev => ({ ...prev, [pid]: [...(prev[pid] || []), newRoll()] }));
+    const removeRollFromPoItem = (pid, k)       => setFreeFormFabricRolls(prev => ({ ...prev, [pid]: (prev[pid] || []).filter(r => r._k !== k) }));
+    const setRollFieldOnPoItem = (pid, k, f, v) => setFreeFormFabricRolls(prev => ({ ...prev, [pid]: (prev[pid] || []).map(r => r._k === k ? { ...r, [f]: v } : r) }));
 
     // Custom groups
     const addCustomGroup = (type) => setCustomGroups(prev => [...prev, {
@@ -157,7 +190,7 @@ export default function InwardCreateModal({
         unit_price: '', description: '',
         lines: type === 'fabric'
             ? [{ _k: rk(), fabric_color_id: '', rolls: [newRoll()] }]
-            : [{ _k: rk(), trim_item_variant_id: '', qty_received: '' }],
+            : [{ _k: rk(), trim_item_variant_id: '', total: '', boxes: [] }],
     }]);
     const removeCustomGroup = (gk) => setCustomGroups(prev => prev.filter(g => g._k !== gk));
     const setCustomGroupField = (gk, field, value) => setCustomGroups(prev => prev.map(g => {
@@ -173,15 +206,14 @@ export default function InwardCreateModal({
         if (g._k !== gk) return g;
         const ln = g.type === 'fabric'
             ? { _k: rk(), fabric_color_id: '', rolls: [newRoll()] }
-            : { _k: rk(), trim_item_variant_id: '', qty_received: '' };
+            : { _k: rk(), trim_item_variant_id: '', total: '', boxes: [] };
         return { ...g, lines: [...g.lines, ln] };
     }));
-    const removeCustomLine     = (gk, lk)         => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.filter(ln => ln._k !== lk) }));
-    const setCustomLineField   = (gk, lk, f, v)   => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, [f]: v } : ln) }));
-    const addRollToCustomLine  = (gk, lk)         => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: [...(ln.rolls || []), newRoll()] } : ln) }));
-    const removeRollFromCustomLine = (gk, lk, rK) => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: (ln.rolls || []).filter(r => r._k !== rK) } : ln) }));
-    const setRollOnCustomLine  = (gk, lk, rK, f, v) => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: (ln.rolls || []).map(r => r._k === rK ? { ...r, [f]: v } : r) } : ln) }));
-
+    const removeCustomLine         = (gk, lk)            => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.filter(ln => ln._k !== lk) }));
+    const setCustomLineField       = (gk, lk, f, v)      => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, [f]: v } : ln) }));
+    const addRollToCustomLine      = (gk, lk)            => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: [...(ln.rolls || []), newRoll()] } : ln) }));
+    const removeRollFromCustomLine = (gk, lk, rK)        => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: (ln.rolls || []).filter(r => r._k !== rK) } : ln) }));
+    const setRollOnCustomLine      = (gk, lk, rK, f, v)  => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: (ln.rolls || []).map(r => r._k === rK ? { ...r, [f]: v } : r) } : ln) }));
     // ── Review handoff ──────────────────────────────────────────────────────
     // Resolve a per-item display label (name + details + unit) using whatever
     // lookups this modal already has loaded. Stamping it onto the payload means
@@ -243,7 +275,7 @@ export default function InwardCreateModal({
     const handleReview = () => {
         setErr(null);
         if (!receivedDate) { setErr('Received date is required.'); return; }
-        const state = { items, fabricRollsByReq, freeFormItems, freeFormFabricRolls, customGroups };
+        const state = { trimTotalByReq, trimBoxesByReq, fabricRollsByReq, freeFormTrimTotals, freeFormTrimBoxes, freeFormFabricRolls, customGroups };
         const { items: built, error } = buildItemsFromState(state);
         if (error) { setErr(error); return; }
         setBusy(true);
@@ -251,7 +283,7 @@ export default function InwardCreateModal({
         const payload = { items: decorated, grnNumber, receivedDate, condition, notes, scanFile };
         const snapshot = {
             grnNumber, receivedDate, condition, notes, scanFile,
-            items, fabricRollsByReq, freeFormItems, freeFormFabricRolls, customGroups,
+            trimTotalByReq, trimBoxesByReq, fabricRollsByReq, freeFormTrimTotals, freeFormTrimBoxes, freeFormFabricRolls, customGroups,
             removedReqIds: [...removedReqIds],
             removedPoItemIds: [...removedPoItemIds],
         };
@@ -263,6 +295,15 @@ export default function InwardCreateModal({
     void fabricReqIds;
 
     return (
+        <>
+        <BoxBreakdownModal
+            open={!!boxModal}
+            title={boxModal?.title}
+            uom={boxModal?.uom}
+            initialBoxes={boxModal?.initialBoxes || []}
+            onSave={boxModal?.onSave || (() => {})}
+            onClose={() => setBoxModal(null)}
+        />
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
                 {/* Header */}
@@ -272,6 +313,11 @@ export default function InwardCreateModal({
                             <FileText size={16} className="text-emerald-500" />
                             New Inward (GRN)
                         </h2>
+                        {(poCode || poId) && (
+                            <p className="text-[11px] font-semibold text-emerald-700 mt-0.5">
+                                PO · {poCode || `#${poId}`}
+                            </p>
+                        )}
                         <p className="text-xs text-slate-500 mt-0.5">Fill in qty per requirement, rolls per fabric line, or add free-form items.</p>
                     </div>
                     <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-full transition shrink-0">
@@ -361,7 +407,7 @@ export default function InwardCreateModal({
                                     <div className="p-2 space-y-1.5">
                                         {(group.requirements || []).filter(r => !removedReqIds.has(r.id)).map(r => {
                                             const isFabricReq = group.item_type === 'fabric';
-                                            const total = reqTotal(r);
+                                            const total = parseFloat(group.quantity ?? 0) || reqTotal(r);
                                             const unit = reqUnit(r);
                                             const pending = pendingByReq[r.id] ?? 0;
 
@@ -425,32 +471,86 @@ export default function InwardCreateModal({
                                                 );
                                             }
 
-                                            const cur = items[r.id];
-                                            const inThis = cur === undefined || cur === '' ? 0 : parseFloat(cur);
-                                            const over = inThis > pending + 0.001;
+                                            const boxes  = trimBoxesByReq[r.id] || [];
+                                            const rawTotal = trimTotalByReq[r.id] ?? '';
+                                            const inThis = boxes.length > 0 ? sumTrimBoxes(boxes) : (parseFloat(rawTotal) || 0);
+                                            const over   = inThis > pending + 0.001;
                                             return (
-                                                <div key={r.id} className={`flex items-center gap-3 rounded-lg p-2 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100'}`}>
-                                                    <div className="flex-1 min-w-0">
-                                                        <p className="text-xs font-bold text-slate-700 truncate">
-                                                            {reqLabel(r)}
-                                                            {r.product_name ? <span className="text-slate-400 font-normal"> · {r.product_name}</span> : null}
-                                                        </p>
-                                                        <p className="text-[10px] text-slate-500">
-                                                            Total {total.toLocaleString()} {unit}
-                                                            {' · '}<span className="font-bold text-emerald-600">Pending {pending.toLocaleString()} {unit}</span>
-                                                        </p>
+                                                <div key={r.id} className={`rounded-lg p-2 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100'}`}>
+                                                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-xs font-bold text-slate-700 truncate">
+                                                                {reqLabel(r)}
+                                                                {r.product_name ? <span className="text-slate-400 font-normal"> · {r.product_name}</span> : null}
+                                                            </p>
+                                                            <p className="text-[10px] text-slate-500">
+                                                                Total {total.toLocaleString()} {unit}
+                                                                {' · '}<span className="font-bold text-emerald-600">Pending {pending.toLocaleString()} {unit}</span>
+                                                            </p>
+                                                        </div>
+                                                        <button type="button" onClick={() => {
+                                                            setTrimBoxesByReq(prev => ({ ...prev, [r.id]: [] }));
+                                                            setRemovedReqIds(prev => new Set(prev).add(r.id));
+                                                        }} title="Remove from this inward"
+                                                            className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
+                                                            <Trash2 size={12} />
+                                                        </button>
                                                     </div>
-                                                    <div className="shrink-0">
-                                                        <input type="number" min="0" step="any" value={cur ?? ''}
-                                                            onChange={e => setItemQty(r.id, e.target.value)} placeholder="0"
-                                                            className={`w-28 text-xs text-right border rounded-lg px-2 py-1.5 focus:outline-none ${over ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-emerald-400'}`} />
-                                                        <p className="text-[9px] text-slate-400 text-right mt-0.5">{unit}</p>
-                                                    </div>
-                                                    <button type="button" onClick={() => { setItemQty(r.id, ''); setRemovedReqIds(prev => new Set(prev).add(r.id)); }}
-                                                        title="Remove from this inward"
-                                                        className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
-                                                        <Trash2 size={12} />
-                                                    </button>
+                                                    {boxes.length === 0 ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <input type="number" min="0" step="any" placeholder="0"
+                                                                value={rawTotal}
+                                                                onChange={e => setTrimTotalForReq(r.id, e.target.value)}
+                                                                className={`w-36 text-sm font-bold text-right border rounded-lg px-2 py-1.5 focus:outline-none tabular-nums ${over ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-amber-400'}`}
+                                                            />
+                                                            <span className="text-xs text-slate-500">{unit}</span>
+                                                            <button type="button"
+                                                                onClick={() => setBoxModal({
+                                                                    title: reqLabel(r),
+                                                                    uom: unit,
+                                                                    initialBoxes: [],
+                                                                    onSave: (saved) => {
+                                                                        if (saved.length > 0) setTrimBoxesByReq(prev => ({ ...prev, [r.id]: saved }));
+                                                                        setBoxModal(null);
+                                                                    },
+                                                                })}
+                                                                className="ml-auto flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-2 py-1 rounded-md transition">
+                                                                <Plus size={11} /> Add box breakdown
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <span className={`text-sm font-bold tabular-nums ${over ? 'text-red-600' : 'text-amber-700'}`}>
+                                                                    {inThis.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
+                                                                </span>
+                                                                <button type="button"
+                                                                    onClick={() => setBoxModal({
+                                                                        title: reqLabel(r),
+                                                                        uom: unit,
+                                                                        initialBoxes: boxes,
+                                                                        onSave: (saved) => {
+                                                                            if (saved.length > 0) {
+                                                                                setTrimBoxesByReq(prev => ({ ...prev, [r.id]: saved }));
+                                                                            } else {
+                                                                                clearTrimBoxesForReq(r.id, inThis);
+                                                                            }
+                                                                            setBoxModal(null);
+                                                                        },
+                                                                    })}
+                                                                    className="text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md transition">
+                                                                    Edit
+                                                                </button>
+                                                                <button type="button" onClick={() => clearTrimBoxesForReq(r.id, inThis)}
+                                                                    className="text-[10px] text-slate-400 hover:text-red-500 transition">
+                                                                    Remove
+                                                                </button>
+                                                            </div>
+                                                            <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                                                {boxes.map(b => `${b.box_count}×${b.qty_per_box}`).join(' + ')}
+                                                            </p>
+                                                        </>
+                                                    )}
                                                 </div>
                                             );
                                         })}
@@ -523,31 +623,86 @@ export default function InwardCreateModal({
                             );
                         }
 
-                        // Free-form trim — single qty
-                        const cur = freeFormItems[group.id];
-                        const inThis = cur === undefined || cur === '' ? 0 : parseFloat(cur);
-                        const over = inThis > pending + 0.001;
+                        // Free-form trim — total-first, optional box breakdown
+                        const boxes    = freeFormTrimBoxes[group.id] || [];
+                        const rawTotal = freeFormTrimTotals[group.id] ?? '';
+                        const inThis   = boxes.length > 0 ? sumTrimBoxes(boxes) : (parseFloat(rawTotal) || 0);
+                        const over     = inThis > pending + 0.001;
                         return (
-                            <div key={`free-${group.id}`} className={`flex items-center gap-3 rounded-xl p-3 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
-                                <Icon size={13} className="text-slate-500 shrink-0" />
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-bold text-slate-700">{groupLabel} <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 ml-1">Free-form</span></p>
-                                    {!isFabricGroup && group.trim_item_variant_id && (
-                                        <SupplierCodePill supplierId={supplierId} supplierName={supplierName} variantId={group.trim_item_variant_id} className="mt-0.5" />
-                                    )}
-                                    <p className="text-[10px] text-slate-500">Pending {pending.toLocaleString()} {groupUom}</p>
+                            <div key={`free-${group.id}`} className={`rounded-xl p-3 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
+                                <div className="flex items-start justify-between gap-2 mb-1.5">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold text-slate-700">{groupLabel} <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 ml-1">Free-form</span></p>
+                                        {!isFabricGroup && group.trim_item_variant_id && (
+                                            <SupplierCodePill supplierId={supplierId} supplierName={supplierName} variantId={group.trim_item_variant_id} className="mt-0.5" />
+                                        )}
+                                        <p className="text-[10px] text-slate-500">
+                                            <span className="font-bold text-emerald-600">Pending {pending.toLocaleString()} {groupUom}</span>
+                                        </p>
+                                    </div>
+                                    <button type="button" onClick={() => {
+                                        setFreeFormTrimBoxes(prev => ({ ...prev, [group.id]: [] }));
+                                        setRemovedPoItemIds(prev => new Set(prev).add(group.id));
+                                    }} title="Remove from this inward"
+                                        className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
+                                        <Trash2 size={12} />
+                                    </button>
                                 </div>
-                                <div className="shrink-0">
-                                    <input type="number" min="0" step="any" value={cur ?? ''}
-                                        onChange={e => setFreeFormQty(group.id, e.target.value)} placeholder="0"
-                                        className={`w-28 text-xs text-right border rounded-lg px-2 py-1.5 focus:outline-none ${over ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-emerald-400'}`} />
-                                    <p className="text-[9px] text-slate-400 text-right mt-0.5">{groupUom}</p>
-                                </div>
-                                <button type="button" onClick={() => { setFreeFormQty(group.id, ''); setRemovedPoItemIds(prev => new Set(prev).add(group.id)); }}
-                                    title="Remove from this inward"
-                                    className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
-                                    <Trash2 size={12} />
-                                </button>
+                                {boxes.length === 0 ? (
+                                    <div className="flex items-center gap-2">
+                                        <input type="number" min="0" step="any" placeholder="0"
+                                            value={rawTotal}
+                                            onChange={e => setTrimTotalForPoItem(group.id, e.target.value)}
+                                            className={`w-36 text-sm font-bold text-right border rounded-lg px-2 py-1.5 focus:outline-none tabular-nums ${over ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-amber-400'}`}
+                                        />
+                                        <span className="text-xs text-slate-500">{groupUom}</span>
+                                        <button type="button"
+                                            onClick={() => setBoxModal({
+                                                title: groupLabel,
+                                                uom: groupUom,
+                                                initialBoxes: [],
+                                                onSave: (saved) => {
+                                                    if (saved.length > 0) setFreeFormTrimBoxes(prev => ({ ...prev, [group.id]: saved }));
+                                                    setBoxModal(null);
+                                                },
+                                            })}
+                                            className="ml-auto flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-2 py-1 rounded-md transition">
+                                            <Plus size={11} /> Add box breakdown
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className={`text-sm font-bold tabular-nums ${over ? 'text-red-600' : 'text-amber-700'}`}>
+                                                {inThis.toLocaleString(undefined, { maximumFractionDigits: 2 })} {groupUom}
+                                            </span>
+                                            <button type="button"
+                                                onClick={() => setBoxModal({
+                                                    title: groupLabel,
+                                                    uom: groupUom,
+                                                    initialBoxes: boxes,
+                                                    onSave: (saved) => {
+                                                        if (saved.length > 0) {
+                                                            setFreeFormTrimBoxes(prev => ({ ...prev, [group.id]: saved }));
+                                                        } else {
+                                                            clearTrimBoxesForPoItem(group.id, inThis);
+                                                        }
+                                                        setBoxModal(null);
+                                                    },
+                                                })}
+                                                className="text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md transition">
+                                                Edit
+                                            </button>
+                                            <button type="button" onClick={() => clearTrimBoxesForPoItem(group.id, inThis)}
+                                                className="text-[10px] text-slate-400 hover:text-red-500 transition">
+                                                Remove
+                                            </button>
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                            {boxes.map(b => `${b.box_count}×${b.qty_per_box}`).join(' + ')}
+                                        </p>
+                                    </>
+                                )}
                             </div>
                         );
                     })}
@@ -578,7 +733,10 @@ export default function InwardCreateModal({
                                     const variants = !isFabric ? (variantsByTrim[g.trim_item_id] || []) : [];
                                     const groupSum = isFabric
                                         ? g.lines.reduce((s, ln) => s + sumRolls(ln.rolls), 0)
-                                        : g.lines.reduce((s, ln) => s + (parseFloat(ln.qty_received) || 0), 0);
+                                        : g.lines.reduce((s, ln) => {
+                                            const boxes = ln.boxes || [];
+                                            return s + (boxes.length > 0 ? sumTrimBoxes(boxes) : (parseFloat(ln.total) || 0));
+                                        }, 0);
                                     return (
                                         <div key={g._k} className={`rounded-lg p-2 border ${isFabric ? 'bg-violet-50/40 border-violet-200' : 'bg-amber-50/40 border-amber-200'}`}>
                                             <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -685,27 +843,78 @@ export default function InwardCreateModal({
                                                                 </div>
                                                             </>
                                                         ) : (
-                                                            <div className="flex items-center gap-2">
-                                                                <SearchableSelect
-                                                                    value={ln.trim_item_variant_id}
-                                                                    onChange={v => setCustomLineField(g._k, ln._k, 'trim_item_variant_id', v)}
-                                                                    options={variants.map(v => ({ value: v.id, label: `${v.color_number ? `${v.color_number} · ` : ''}${v.color_name || v.name || `Variant #${v.id}`}${v.variant_size ? ` · Sz ${v.variant_size}` : ''}` }))}
-                                                                    placeholder={g.trim_item_id ? '— Variant —' : '— Pick trim first —'}
-                                                                    disabled={!g.trim_item_id}
-                                                                    className="flex-1 min-w-0"
-                                                                    size="xs"
-                                                                    accentColor="amber"
-                                                                />
-                                                                <input type="number" min="0" step="any" placeholder="Qty" value={ln.qty_received}
-                                                                    onChange={e => setCustomLineField(g._k, ln._k, 'qty_received', e.target.value)}
-                                                                    className="w-24 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums" />
-                                                                {g.lines.length > 1 && (
-                                                                    <button onClick={() => removeCustomLine(g._k, ln._k)} title="Remove line"
-                                                                        className="p-1 text-slate-300 hover:text-red-500 transition">
-                                                                        <Trash2 size={11} />
-                                                                    </button>
+                                                            <div className="space-y-1.5">
+                                                                <div className="flex items-center gap-2">
+                                                                    <SearchableSelect
+                                                                        value={ln.trim_item_variant_id}
+                                                                        onChange={v => setCustomLineField(g._k, ln._k, 'trim_item_variant_id', v)}
+                                                                        options={variants.map(v => ({ value: v.id, label: `${v.color_number ? `${v.color_number} · ` : ''}${v.color_name || v.name || `Variant #${v.id}`}${v.variant_size ? ` · Sz ${v.variant_size}` : ''}` }))}
+                                                                        placeholder={g.trim_item_id ? '— Variant —' : '— Pick trim first —'}
+                                                                        disabled={!g.trim_item_id}
+                                                                        className="flex-1 min-w-0"
+                                                                        size="xs"
+                                                                        accentColor="amber"
+                                                                    />
+                                                                    {g.lines.length > 1 && (
+                                                                        <button onClick={() => removeCustomLine(g._k, ln._k)} title="Remove line"
+                                                                            className="p-1 text-slate-300 hover:text-red-500 transition">
+                                                                            <Trash2 size={11} />
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                                {(ln.boxes || []).length === 0 ? (
+                                                                    <div className="flex items-center gap-2 mt-1">
+                                                                        <input type="number" min="0" step="any" placeholder="0"
+                                                                            value={ln.total || ''}
+                                                                            onChange={e => setCustomLineField(g._k, ln._k, 'total', e.target.value)}
+                                                                            className="w-28 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums focus:outline-none focus:border-amber-400" />
+                                                                        <span className="text-[10px] text-slate-400">{g.uom || 'pcs'}</span>
+                                                                        <button type="button"
+                                                                            onClick={() => setBoxModal({
+                                                                                title: ln.trim_item_variant_id ? `Variant #${ln.trim_item_variant_id}` : 'Custom trim line',
+                                                                                uom: g.uom || 'pcs',
+                                                                                initialBoxes: [],
+                                                                                onSave: (saved) => {
+                                                                                    if (saved.length > 0) setCustomGroups(prev => prev.map(g2 => g2._k !== g._k ? g2 : { ...g2, lines: g2.lines.map(l => l._k !== ln._k ? l : { ...l, boxes: saved }) }));
+                                                                                    setBoxModal(null);
+                                                                                },
+                                                                            })}
+                                                                            className="ml-auto flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded-md transition">
+                                                                            <Plus size={10} /> Add box breakdown
+                                                                        </button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <>
+                                                                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                                                            <span className="text-[11px] font-bold text-amber-700 tabular-nums">
+                                                                                {sumTrimBoxes(ln.boxes).toLocaleString(undefined, { maximumFractionDigits: 2 })} {g.uom || 'pcs'}
+                                                                            </span>
+                                                                            <button type="button"
+                                                                                onClick={() => setBoxModal({
+                                                                                    title: ln.trim_item_variant_id ? `Variant #${ln.trim_item_variant_id}` : 'Custom trim line',
+                                                                                    uom: g.uom || 'pcs',
+                                                                                    initialBoxes: ln.boxes,
+                                                                                    onSave: (saved) => {
+                                                                                        const computed = sumTrimBoxes(ln.boxes);
+                                                                                        setCustomGroups(prev => prev.map(g2 => g2._k !== g._k ? g2 : { ...g2, lines: g2.lines.map(l => l._k !== ln._k ? l : saved.length > 0 ? { ...l, boxes: saved } : { ...l, boxes: [], total: computed > 0 ? String(computed) : '' }) }));
+                                                                                        setBoxModal(null);
+                                                                                    },
+                                                                                })}
+                                                                                className="text-[10px] font-bold text-amber-600 hover:bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded-md transition">
+                                                                                Edit
+                                                                            </button>
+                                                                            <button type="button" onClick={() => {
+                                                                                const computed = sumTrimBoxes(ln.boxes);
+                                                                                setCustomGroups(prev => prev.map(g2 => g2._k !== g._k ? g2 : { ...g2, lines: g2.lines.map(l => l._k !== ln._k ? l : { ...l, boxes: [], total: computed > 0 ? String(computed) : '' }) }));
+                                                                            }} className="text-[10px] text-slate-400 hover:text-red-500 transition">
+                                                                                Remove
+                                                                            </button>
+                                                                        </div>
+                                                                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                                                            {(ln.boxes || []).map(b => `${b.box_count}×${b.qty_per_box}`).join(' + ')}
+                                                                        </p>
+                                                                    </>
                                                                 )}
-                                                                <span className="text-[10px] text-slate-400 w-10 text-right">{g.uom || 'pcs'}</span>
                                                             </div>
                                                         )}
                                                     </div>
@@ -733,5 +942,6 @@ export default function InwardCreateModal({
                 </div>
             </div>
         </div>
+        </>
     );
 }

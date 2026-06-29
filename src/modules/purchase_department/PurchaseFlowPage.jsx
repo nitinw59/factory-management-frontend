@@ -706,6 +706,8 @@ export default function PurchaseFlowPage() {
                     poItems={po?.items || []}
                     supplierId={po?.supplier_id}
                     supplierName={po?.supplier_name}
+                    poCode={po?.po_code}
+                    poId={po?.id}
                     onClose={() => setOpenInward(null)}
                     onDeleted={() => { setOpenInward(null); handleSavedInward?.(); }}
                 />
@@ -713,6 +715,7 @@ export default function PurchaseFlowPage() {
             {creatingInward && po && inwardStep === 'create' && (
                 <InwardCreateModal
                     poId={po.id}
+                    poCode={po.po_code}
                     poItems={po.items || []}
                     supplierId={po.supplier_id}
                     supplierName={po.supplier_name}
@@ -729,6 +732,7 @@ export default function PurchaseFlowPage() {
             {creatingInward && po && inwardStep === 'review' && inwardPayload && (
                 <InwardReviewModal
                     poId={po.id}
+                    poCode={po.po_code}
                     payload={inwardPayload}
                     poItems={po.items || []}
                     supplierId={po.supplier_id}

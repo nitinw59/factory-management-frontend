@@ -6,6 +6,7 @@ import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { trimsApi } from '../../api/trimsApi';
 import api, { IMAGE_BASE_URL } from '../../utils/api';
 import SearchableSelect from '../../shared/SearchableSelect';
+import BoxBreakdownModal from './BoxBreakdownModal';
 
 const TYPE_ICON = { fabric: Package, trim: Scissors, other: Tag };
 
@@ -34,6 +35,7 @@ const reqLabel = (r) => {
 
 export default function InwardModal({
     poId,
+    poCode,
     poItems = [],              // PO items grouped (po.items[]); each item carries .requirements[]
     allInwards = [],           // all inwards for this PO (so we can compute pending)
     inward = null,             // existing inward (edit/view), null = create
@@ -46,6 +48,7 @@ export default function InwardModal({
     const [mode, setMode] = useState(isCreate ? 'create' : initialMode);
     const [busy, setBusy] = useState(false);
     const [err,  setErr]  = useState(null);
+    const [boxModal, setBoxModal] = useState(null);
 
     // Form state
     const [grnNumber,    setGrnNumber]    = useState(inward?.grn_number || '');
@@ -62,8 +65,14 @@ export default function InwardModal({
         [poItems]
     );
 
-    // Pending qty per requirement (excludes this inward's own items if editing)
+    // Pending qty per requirement (excludes this inward's own items if editing).
+    // Baseline is the parent PO item's ordered quantity, not the requirement's own qty.
     const pendingByReq = useMemo(() => {
+        const reqToPoQty = {};
+        (poItems || []).forEach(p => {
+            const poQty = parseFloat(p.quantity ?? 0);
+            (p.requirements || []).forEach(r => { reqToPoQty[r.id] = poQty; });
+        });
         const otherReceived = {};
         allInwards.forEach(iw => {
             if (inward && iw.id === inward.id) return;
@@ -74,10 +83,11 @@ export default function InwardModal({
         });
         const map = {};
         allRequirements.forEach(r => {
-            map[r.id] = Math.max(0, reqTotal(r) - (otherReceived[r.id] || 0));
+            const baseline = reqToPoQty[r.id] ?? reqTotal(r);
+            map[r.id] = Math.max(0, baseline - (otherReceived[r.id] || 0));
         });
         return map;
-    }, [allRequirements, allInwards, inward]);
+    }, [allRequirements, allInwards, inward, poItems]);
 
     // Pending qty per free-form PO item (items with no requirements)
     const pendingByPoItem = useMemo(() => {
@@ -110,31 +120,69 @@ export default function InwardModal({
         meter:   init.meter   != null ? String(init.meter) : '',
         uom:     init.uom     ?? 'meter',
     });
+    const newTrimBox = (init = {}) => ({
+        _k:          Math.random().toString(36).slice(2),
+        box_count:   init.box_count   != null ? String(init.box_count)   : '',
+        qty_per_box: init.qty_per_box != null ? String(init.qty_per_box) : '',
+    });
+    const sumTrimBoxes = (boxes) =>
+        (boxes || []).reduce((s, b) => s + (parseFloat(b.box_count) || 0) * (parseFloat(b.qty_per_box) || 0), 0);
+    const mapTrimBoxes = (boxes) =>
+        (boxes || [])
+            .filter(b => (parseFloat(b.box_count) || 0) > 0 && (parseFloat(b.qty_per_box) || 0) > 0)
+            .map(b => ({ box_count: parseFloat(b.box_count), qty_per_box: parseFloat(b.qty_per_box) }));
 
     // Determine if an existing inward item came from fabric (by linked req or PO line)
     const fabricReqIds  = new Set(allRequirements.filter(r => (r.item_type || r.type) === 'fabric').map(r => r.id));
     const fabricPoItemIds = new Set((poItems || []).filter(g => g.item_type === 'fabric').map(g => g.id));
 
-    // Items state for TRIM (qty per requirement only) — fabric uses fabricRollsByReq
-    const [items, setItems] = useState(() => {
+    // Trim total per requirement (total-only mode) — primary entry
+    const [trimTotalByReq, setTrimTotalByReq] = useState(() => {
         if (inward) {
             const m = {};
             (inward.items || []).forEach(it => {
                 if (it.purchase_requirement_id != null && !fabricReqIds.has(it.purchase_requirement_id)) {
-                    m[it.purchase_requirement_id] = parseFloat(it.qty_received || 0);
+                    // Only set total when there's no box breakdown (box mode handles its own display)
+                    if (!(it.boxes || []).length) m[it.purchase_requirement_id] = String(it.qty_received || 0);
+                }
+            });
+            return m;
+        }
+        const reqToPoQty = {};
+        (poItems || []).forEach(p => {
+            const poQty = parseFloat(p.quantity ?? 0);
+            (p.requirements || []).forEach(r => { reqToPoQty[r.id] = poQty; });
+        });
+        const m = {};
+        allRequirements.forEach(r => {
+            if ((r.item_type || r.type) === 'fabric') return;
+            const baseline = reqToPoQty[r.id] ?? reqTotal(r);
+            const totalAlready = (allInwards || []).reduce((s, iw) =>
+                s + (iw.items || [])
+                    .filter(it => it.purchase_requirement_id === r.id)
+                    .reduce((s2, it) => s2 + parseFloat(it.qty_received || 0), 0), 0);
+            const pending = Math.max(0, baseline - totalAlready);
+            if (pending > 0) m[r.id] = String(pending);
+        });
+        return m;
+    });
+
+    // Trim boxes per requirement — empty by default; populated when user adds breakdown
+    const [trimBoxesByReq, setTrimBoxesByReq] = useState(() => {
+        if (inward) {
+            const m = {};
+            (inward.items || []).forEach(it => {
+                if (it.purchase_requirement_id != null && !fabricReqIds.has(it.purchase_requirement_id)) {
+                    if ((it.boxes || []).length > 0) m[it.purchase_requirement_id] = it.boxes.map(b => newTrimBox(b));
+                    else m[it.purchase_requirement_id] = [];
                 }
             });
             return m;
         }
         const m = {};
         allRequirements.forEach(r => {
-            if ((r.item_type || r.type) === 'fabric') return;     // fabric handled via rolls
-            const totalAlready = (allInwards || []).reduce((s, iw) =>
-                s + (iw.items || [])
-                    .filter(it => it.purchase_requirement_id === r.id)
-                    .reduce((s2, it) => s2 + parseFloat(it.qty_received || 0), 0), 0);
-            const pending = Math.max(0, reqTotal(r) - totalAlready);
-            if (pending > 0) m[r.id] = pending;
+            if ((r.item_type || r.type) === 'fabric') return;
+            m[r.id] = [];
         });
         return m;
     });
@@ -165,13 +213,13 @@ export default function InwardModal({
         return m;
     });
 
-    // Free-form trim qty (per PO line item) — fabric uses freeFormFabricRolls
-    const [freeFormItems, setFreeFormItems] = useState(() => {
+    // Free-form trim totals (per PO line item) — total-only mode
+    const [freeFormTrimTotals, setFreeFormTrimTotals] = useState(() => {
         if (inward) {
             const m = {};
             (inward.items || []).forEach(it => {
                 if (it.purchase_order_item_id != null && it.purchase_requirement_id == null && !fabricPoItemIds.has(it.purchase_order_item_id)) {
-                    m[it.purchase_order_item_id] = parseFloat(it.qty_received || 0);
+                    if (!(it.boxes || []).length) m[it.purchase_order_item_id] = String(it.qty_received || 0);
                 }
             });
             return m;
@@ -179,14 +227,35 @@ export default function InwardModal({
         const m = {};
         (poItems || []).forEach(p => {
             if ((p.requirements || []).length > 0) return;
-            if (p.item_type === 'fabric') return;                 // handled via rolls
+            if (p.item_type === 'fabric') return;
             const total = parseFloat(p.quantity ?? 0);
             const totalAlready = (allInwards || []).reduce((s, iw) =>
                 s + (iw.items || [])
                     .filter(it => it.purchase_order_item_id === p.id)
                     .reduce((s2, it) => s2 + parseFloat(it.qty_received || 0), 0), 0);
             const pending = Math.max(0, total - totalAlready);
-            if (pending > 0) m[p.id] = pending;
+            if (pending > 0) m[p.id] = String(pending);
+        });
+        return m;
+    });
+
+    // Free-form trim boxes (per PO line item) — empty by default
+    const [freeFormTrimBoxes, setFreeFormTrimBoxes] = useState(() => {
+        if (inward) {
+            const m = {};
+            (inward.items || []).forEach(it => {
+                if (it.purchase_order_item_id != null && it.purchase_requirement_id == null && !fabricPoItemIds.has(it.purchase_order_item_id)) {
+                    if ((it.boxes || []).length > 0) m[it.purchase_order_item_id] = it.boxes.map(b => newTrimBox(b));
+                    else m[it.purchase_order_item_id] = [];
+                }
+            });
+            return m;
+        }
+        const m = {};
+        (poItems || []).forEach(p => {
+            if ((p.requirements || []).length > 0) return;
+            if (p.item_type === 'fabric') return;
+            m[p.id] = [];
         });
         return m;
     });
@@ -252,7 +321,9 @@ export default function InwardModal({
                     lines: [
                         isFabric
                             ? { _k: rk(), fabric_color_id: it.fabric_color_id ?? '', rolls }
-                            : { _k: rk(), trim_item_variant_id: it.trim_item_variant_id ?? '', qty_received: it.qty_received != null ? String(it.qty_received) : '' },
+                            : { _k: rk(), trim_item_variant_id: it.trim_item_variant_id ?? '',
+                                total: (it.boxes || []).length > 0 ? '' : String(it.qty_received ?? ''),
+                                boxes: (it.boxes || []).length > 0 ? it.boxes.map(b => newTrimBox(b)) : [] },
                     ],
                 };
             });
@@ -290,72 +361,24 @@ export default function InwardModal({
 
     const editable = mode === 'create' || mode === 'edit';
 
-    const setItemQty = (reqId, val) => {
-        setItems(prev => {
-            const next = { ...prev };
-            if (val === '' || val == null) delete next[reqId];
-            else next[reqId] = val;
-            return next;
-        });
+    // ── Trim total helpers (total-only mode) ───────────────────────────────
+    const setTrimTotalForReq    = (reqId, val)    => setTrimTotalByReq(prev => ({ ...prev, [reqId]: val }));
+    const setTrimTotalForPoItem = (poItemId, val) => setFreeFormTrimTotals(prev => ({ ...prev, [poItemId]: val }));
+
+    // ── Trim box helpers (breakdown managed via BoxBreakdownModal) ────────────
+    const clearTrimBoxesForReq = (reqId, computedTotal) => {
+        setTrimBoxesByReq(prev => ({ ...prev, [reqId]: [] }));
+        if (computedTotal > 0) setTrimTotalByReq(prev => ({ ...prev, [reqId]: String(computedTotal) }));
     };
 
-    const setFreeFormQty = (poItemId, val) => {
-        setFreeFormItems(prev => {
-            const next = { ...prev };
-            if (val === '' || val == null) delete next[poItemId];
-            else next[poItemId] = val;
-            return next;
-        });
+    const clearTrimBoxesForPoItem = (poItemId, computedTotal) => {
+        setFreeFormTrimBoxes(prev => ({ ...prev, [poItemId]: [] }));
+        if (computedTotal > 0) setFreeFormTrimTotals(prev => ({ ...prev, [poItemId]: String(computedTotal) }));
     };
 
     // ── Fabric roll helpers ─────────────────────────────────────────────────
     const sumRolls = (rolls) =>
         (rolls || []).reduce((s, r) => s + (parseFloat(r.meter) || 0), 0);
-
-    // Raw typed value for the per-group total trim input (so users can type decimals without flicker).
-    const [trimGroupRaw, setTrimGroupRaw] = useState({});
-
-    // Distribute a group total across its requirements proportionally to pending qty.
-    const distributeTrimTotal = (group, totalRaw) => {
-        setTrimGroupRaw(prev => ({ ...prev, [group.id]: totalRaw }));
-        const reqs = group.requirements || [];
-        if (reqs.length === 0) return;
-
-        if (totalRaw === '' || totalRaw == null) {
-            // Empty input clears every req in this group
-            setItems(prev => {
-                const next = { ...prev };
-                reqs.forEach(r => { delete next[r.id]; });
-                return next;
-            });
-            return;
-        }
-        const total = parseFloat(totalRaw);
-        if (!isFinite(total) || total < 0) return;
-
-        const pendings = reqs.map(r => Math.max(0, pendingByReq[r.id] || 0));
-        const sumP     = pendings.reduce((a, b) => a + b, 0);
-        const raw      = sumP > 0
-            ? pendings.map(p => (p / sumP) * total)
-            : reqs.map(() => total / reqs.length);
-        // Round to 2 decimals; push the rounding remainder onto the largest share so the sum matches exactly.
-        const rounded = raw.map(s => Math.round(s * 100) / 100);
-        const diff    = Math.round((total - rounded.reduce((a, b) => a + b, 0)) * 100) / 100;
-        if (Math.abs(diff) > 0.001 && rounded.length > 0) {
-            let maxIdx = 0;
-            rounded.forEach((_, i) => { if (rounded[i] > rounded[maxIdx]) maxIdx = i; });
-            rounded[maxIdx] = Math.round((rounded[maxIdx] + diff) * 100) / 100;
-        }
-        setItems(prev => {
-            const next = { ...prev };
-            reqs.forEach((r, i) => {
-                const v = rounded[i];
-                if (v > 0) next[r.id] = String(v);
-                else delete next[r.id];
-            });
-            return next;
-        });
-    };
 
     const addRollToReq = (reqId) => setFabricRollsByReq(prev => ({
         ...prev,
@@ -394,7 +417,7 @@ export default function InwardModal({
         description:    '',
         lines: type === 'fabric'
             ? [{ _k: rk(), fabric_color_id: '', rolls: [newRoll()] }]
-            : [{ _k: rk(), trim_item_variant_id: '', qty_received: '' }],
+            : [{ _k: rk(), trim_item_variant_id: '', total: '', boxes: [] }],
     }]);
 
     const removeCustomGroup = (gk) =>
@@ -416,7 +439,7 @@ export default function InwardModal({
         if (g._k !== gk) return g;
         const ln = g.type === 'fabric'
             ? { _k: rk(), fabric_color_id: '', rolls: [newRoll()] }
-            : { _k: rk(), trim_item_variant_id: '', qty_received: '' };
+            : { _k: rk(), trim_item_variant_id: '', total: '', boxes: [] };
         return { ...g, lines: [...g.lines, ln] };
     }));
 
@@ -445,6 +468,7 @@ export default function InwardModal({
         return { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: (ln.rolls || []).map(r => r._k === rKey ? { ...r, [field]: value } : r) } : ln) };
     }));
 
+
     // Build the items array from current form state. Returns { items, error }.
     // The summary screen calls this for preview; final submit re-uses the items
     // so we never re-validate / re-build twice.
@@ -457,9 +481,18 @@ export default function InwardModal({
                 uom:     r.uom || 'meter',
             }));
 
-        const reqEntries = Object.entries(items)
-            .filter(([, v]) => v !== '' && v != null && parseFloat(v) > 0)
-            .map(([reqId, v]) => ({ requirement_id: parseInt(reqId, 10), qty_received: parseFloat(v) }));
+        // Trim req entries — box breakdown takes priority over total-only
+        const reqIds = new Set([...Object.keys(trimBoxesByReq), ...Object.keys(trimTotalByReq)]);
+        const reqEntries = [];
+        for (const reqId of reqIds) {
+            const boxes = mapTrimBoxes(trimBoxesByReq[reqId]);
+            if (boxes.length > 0) {
+                reqEntries.push({ requirement_id: parseInt(reqId, 10), qty_received: boxes.reduce((s, b) => s + b.box_count * b.qty_per_box, 0), boxes });
+            } else {
+                const q = parseFloat(trimTotalByReq[reqId] ?? 0);
+                if (q > 0) reqEntries.push({ requirement_id: parseInt(reqId, 10), qty_received: q });
+            }
+        }
 
         const fabricReqEntries = Object.entries(fabricRollsByReq)
             .map(([reqId, rolls]) => ({ reqId: parseInt(reqId, 10), rolls: mapRolls(rolls) }))
@@ -470,9 +503,18 @@ export default function InwardModal({
                 rolls:          x.rolls,
             }));
 
-        const freeEntries = Object.entries(freeFormItems)
-            .filter(([, v]) => v !== '' && v != null && parseFloat(v) > 0)
-            .map(([poItemId, v]) => ({ purchase_order_item_id: parseInt(poItemId, 10), qty_received: parseFloat(v) }));
+        // Free-form trim entries — same dual-mode
+        const poIds = new Set([...Object.keys(freeFormTrimBoxes), ...Object.keys(freeFormTrimTotals)]);
+        const freeEntries = [];
+        for (const poItemId of poIds) {
+            const boxes = mapTrimBoxes(freeFormTrimBoxes[poItemId]);
+            if (boxes.length > 0) {
+                freeEntries.push({ purchase_order_item_id: parseInt(poItemId, 10), qty_received: boxes.reduce((s, b) => s + b.box_count * b.qty_per_box, 0), boxes });
+            } else {
+                const q = parseFloat(freeFormTrimTotals[poItemId] ?? 0);
+                if (q > 0) freeEntries.push({ purchase_order_item_id: parseInt(poItemId, 10), qty_received: q });
+            }
+        }
 
         const fabricFreeEntries = Object.entries(freeFormFabricRolls)
             .map(([poItemId, rolls]) => ({ poItemId: parseInt(poItemId, 10), rolls: mapRolls(rolls) }))
@@ -504,17 +546,22 @@ export default function InwardModal({
                         description:     g.description || null,
                     });
                 } else {
-                    const q = parseFloat(ln.qty_received);
+                    const boxes = mapTrimBoxes(ln.boxes);
+                    const q = boxes.length > 0
+                        ? boxes.reduce((s, b) => s + b.box_count * b.qty_per_box, 0)
+                        : parseFloat(ln.total ?? 0);
                     if (!q || q <= 0) continue;
-                    if (!g.trim_item_id)         return { items: null, error: `${groupLabel}: pick a trim item.` };
+                    if (!g.trim_item_id)          return { items: null, error: `${groupLabel}: pick a trim item.` };
                     if (!ln.trim_item_variant_id) return { items: null, error: `${groupLabel}, line ${li + 1}: pick a variant.` };
-                    customEntries.push({
+                    const entry = {
                         item_type:            'trim',
                         qty_received:         q,
                         trim_item_variant_id: parseInt(ln.trim_item_variant_id, 10),
                         unit_price:           unitPrice,
                         description:          g.description || null,
-                    });
+                    };
+                    if (boxes.length > 0) entry.boxes = boxes;
+                    customEntries.push(entry);
                 }
             }
         }
@@ -672,6 +719,15 @@ export default function InwardModal({
     })();
 
     return (
+        <>
+        <BoxBreakdownModal
+            open={!!boxModal}
+            title={boxModal?.title}
+            uom={boxModal?.uom}
+            initialBoxes={boxModal?.initialBoxes || []}
+            onSave={boxModal?.onSave || (() => {})}
+            onClose={() => setBoxModal(null)}
+        />
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
                 {/* Header */}
@@ -681,6 +737,11 @@ export default function InwardModal({
                             <FileText size={16} className="text-emerald-500" />
                             {mode === 'create' ? 'New Inward (GRN)' : `Inward · ${inward.grn_number || `#${inward.id}`}`}
                         </h2>
+                        {(poCode || poId) && (
+                            <p className="text-[11px] font-semibold text-emerald-700 mt-0.5">
+                                PO · {poCode || `#${poId}`}
+                            </p>
+                        )}
                         {!isCreate && inward.created_by_name && (
                             <p className="text-xs text-slate-500 mt-0.5">Recorded by {inward.created_by_name}</p>
                         )}
@@ -841,45 +902,18 @@ export default function InwardModal({
                                             </div>
                                         </div>
 
-                                        {/* Trim group-level total — auto-splits across requirements */}
-                                        {group.item_type === 'trim' && (group.requirements || []).length > 1 && (() => {
-                                            const reqs       = group.requirements || [];
-                                            const groupSum   = reqs.reduce((s, r) => s + (parseFloat(items[r.id]) || 0), 0);
-                                            const groupPend  = reqs.reduce((s, r) => s + (pendingByReq[r.id] || 0), 0);
-                                            const inputValue = trimGroupRaw[group.id] !== undefined
-                                                ? trimGroupRaw[group.id]
-                                                : (groupSum > 0 ? String(groupSum) : '');
-                                            const over       = groupSum > groupPend + 0.001;
-                                            return (
-                                                <div className={`flex items-center gap-3 px-3 py-2 border-b ${over ? 'bg-red-50 border-red-200' : 'bg-amber-50/40 border-amber-100'}`}>
-                                                    <div className="flex-1 min-w-0">
-                                                        <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">Total received in this inward</p>
-                                                        <p className="text-[10px] text-slate-500">
-                                                            Auto-distributed across <span className="font-bold">{reqs.length}</span> requirements proportional to pending qty. Tweak rows below to override.
-                                                            {' · '}<span className="font-bold text-emerald-600">Group pending {groupPend.toLocaleString()} {groupUom}</span>
-                                                        </p>
-                                                    </div>
-                                                    <div className="shrink-0 text-right">
-                                                        <input
-                                                            type="number"
-                                                            min="0"
-                                                            step="any"
-                                                            value={inputValue}
-                                                            onChange={e => distributeTrimTotal(group, e.target.value)}
-                                                            disabled={!editable}
-                                                            placeholder="0"
-                                                            className={`w-32 text-sm font-bold text-right border rounded-lg px-2 py-1.5 disabled:bg-white disabled:text-slate-700 focus:outline-none tabular-nums ${over ? 'border-red-300 focus:border-red-400' : 'border-amber-300 focus:border-amber-500'}`}
-                                                        />
-                                                        <p className="text-[9px] text-slate-400 text-right mt-0.5">{groupUom}</p>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()}
+                                        {group.item_type === 'trim' && (group.requirements || []).length > 1 && (
+                                            <div className="px-3 py-2 border-b bg-amber-50/40 border-amber-100">
+                                                <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">
+                                                    {group.requirements.length} requirements — enter boxes per requirement below
+                                                </p>
+                                            </div>
+                                        )}
 
                                         <div className="p-2 space-y-1.5">
                                             {(group.requirements || []).filter(r => !removedReqIds.has(r.id)).map(r => {
                                                 const isFabricReq = group.item_type === 'fabric';
-                                                const total   = reqTotal(r);
+                                                const total   = parseFloat(group.quantity ?? 0) || reqTotal(r);
                                                 const unit    = reqUnit(r);
                                                 const pending = pendingByReq[r.id] ?? 0;
 
@@ -978,49 +1012,85 @@ export default function InwardModal({
                                                     );
                                                 }
 
-                                                // Trim: keep the single qty input
-                                                const cur = items[r.id];
-                                                const inThis = cur === undefined || cur === '' ? 0 : parseFloat(cur);
-                                                const over = inThis > pending + 0.001;
+                                                // Trim: total-first UX with optional box breakdown
+                                                const boxes    = trimBoxesByReq[r.id] || [];
+                                                const rawTotal = trimTotalByReq[r.id] ?? '';
+                                                const inThis   = boxes.length > 0 ? sumTrimBoxes(boxes) : (parseFloat(rawTotal) || 0);
+                                                const over     = inThis > pending + 0.001;
                                                 return (
-                                                    <div key={r.id} className={`flex items-center gap-3 rounded-lg p-2 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100'}`}>
-                                                        <div className="flex-1 min-w-0">
-                                                            <p className="text-xs font-bold text-slate-700 truncate">
-                                                                {reqLabel(r)}
-                                                                {r.product_name ? <span className="text-slate-400 font-normal"> · {r.product_name}</span> : null}
-                                                            </p>
-                                                            <p className="text-[10px] text-slate-500">
-                                                                Total {total.toLocaleString()} {unit}
-                                                                {' · '}<span className="font-bold text-emerald-600">Pending {pending.toLocaleString()} {unit}</span>
-                                                                {r.unit_price != null && <span> · @ {parseFloat(r.unit_price).toFixed(2)}</span>}
-                                                                {r.is_substitute === true && <span className="text-amber-700 font-bold"> · 🔄 sub</span>}
-                                                            </p>
+                                                    <div key={r.id} className={`rounded-lg p-2 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100'}`}>
+                                                        <div className="flex items-start justify-between gap-2 mb-1.5">
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="text-xs font-bold text-slate-700 truncate">
+                                                                    {reqLabel(r)}
+                                                                    {r.product_name ? <span className="text-slate-400 font-normal"> · {r.product_name}</span> : null}
+                                                                </p>
+                                                                <p className="text-[10px] text-slate-500">
+                                                                    Total {total.toLocaleString()} {unit}
+                                                                    {' · '}<span className="font-bold text-emerald-600">Pending {pending.toLocaleString()} {unit}</span>
+                                                                    {boxes.length > 0 && <>{' · '}<span className={`font-bold ${over ? 'text-red-600' : 'text-violet-700'}`}>In this inward {inThis.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}</span></>}
+                                                                    {r.unit_price != null && <span> · @ {parseFloat(r.unit_price).toFixed(2)}</span>}
+                                                                    {r.is_substitute === true && <span className="text-amber-700 font-bold"> · 🔄 sub</span>}
+                                                                </p>
+                                                            </div>
+                                                            {editable && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setRemovedReqIds(prev => new Set(prev).add(r.id))}
+                                                                    title="Remove from this inward"
+                                                                    className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                                                >
+                                                                    <Trash2 size={12} />
+                                                                </button>
+                                                            )}
                                                         </div>
-                                                        <div className="shrink-0">
-                                                            <input
-                                                                type="number"
-                                                                min="0"
-                                                                step="any"
-                                                                value={cur ?? ''}
-                                                                onChange={e => setItemQty(r.id, e.target.value)}
-                                                                disabled={!editable}
-                                                                placeholder="0"
-                                                                className={`w-28 text-xs text-right border rounded-lg px-2 py-1.5 disabled:bg-white disabled:text-slate-700 focus:outline-none ${over ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-emerald-400'}`}
-                                                            />
-                                                            <p className="text-[9px] text-slate-400 text-right mt-0.5">{unit}</p>
-                                                        </div>
-                                                        {editable && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setItemQty(r.id, '');
-                                                                    setRemovedReqIds(prev => new Set(prev).add(r.id));
-                                                                }}
-                                                                title="Remove from this inward"
-                                                                className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
-                                                            >
-                                                                <Trash2 size={12} />
-                                                            </button>
+                                                        {boxes.length === 0 ? (
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="number" min="0" step="any" placeholder="0"
+                                                                    value={rawTotal}
+                                                                    onChange={e => setTrimTotalForReq(r.id, e.target.value)}
+                                                                    disabled={!editable}
+                                                                    className={`w-32 text-xs text-right border rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-400 disabled:bg-white disabled:text-slate-700 ${over ? 'border-red-300' : 'border-slate-200'}`}
+                                                                />
+                                                                <span className="text-xs text-slate-400">{unit}</span>
+                                                                {editable && (
+                                                                    <button type="button"
+                                                                        onClick={() => setBoxModal({ title: reqLabel(r), uom: unit, initialBoxes: [], onSave: (saved) => { if (saved.length > 0) setTrimBoxesByReq(prev => ({ ...prev, [r.id]: saved })); setBoxModal(null); } })}
+                                                                        className="ml-auto flex items-center gap-1 text-[10px] font-bold text-emerald-600 hover:bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md transition">
+                                                                        <Plus size={10} /> Add box breakdown
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                <div className="flex items-center gap-2 flex-wrap">
+                                                                    <span className={`text-xs font-bold tabular-nums ${over ? 'text-red-600' : 'text-emerald-700'}`}>
+                                                                        {inThis.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
+                                                                    </span>
+                                                                    {editable && (
+                                                                        <>
+                                                                            <button type="button"
+                                                                                onClick={() => setBoxModal({ title: reqLabel(r), uom: unit, initialBoxes: boxes, onSave: (saved) => { if (saved.length > 0) { setTrimBoxesByReq(prev => ({ ...prev, [r.id]: saved })); } else { clearTrimBoxesForReq(r.id, inThis); } setBoxModal(null); } })}
+                                                                                className="text-[10px] font-bold text-emerald-600 hover:bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md transition">
+                                                                                Edit
+                                                                            </button>
+                                                                            <button type="button" onClick={() => clearTrimBoxesForReq(r.id, inThis)}
+                                                                                className="text-[10px] text-slate-400 hover:text-red-500 transition">
+                                                                                Remove
+                                                                            </button>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                                <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                                                    {boxes.map(b => `${b.box_count}×${b.qty_per_box}`).join(' + ')}
+                                                                </p>
+                                                                {editable && (
+                                                                    <div className="flex items-center gap-3 mt-1.5">
+                                                                        <span />
+                                                                    </div>
+                                                                )}
+                                                            </>
                                                         )}
                                                     </div>
                                                 );
@@ -1059,7 +1129,10 @@ export default function InwardModal({
                                                 const variants  = !isFabric ? (variantsByTrim[g.trim_item_id] || []) : [];
                                                 const groupSum  = isFabric
                                                     ? g.lines.reduce((s, ln) => s + sumRolls(ln.rolls), 0)
-                                                    : g.lines.reduce((s, ln) => s + (parseFloat(ln.qty_received) || 0), 0);
+                                                    : g.lines.reduce((s, ln) => {
+                                                        const boxes = ln.boxes || [];
+                                                        return s + (boxes.length > 0 ? sumTrimBoxes(boxes) : (parseFloat(ln.total) || 0));
+                                                    }, 0);
                                                 return (
                                                     <div key={g._k} className={`rounded-lg p-2 border ${isFabric ? 'bg-violet-50/40 border-violet-200' : 'bg-amber-50/40 border-amber-200'}`}>
                                                         {/* Card header */}
@@ -1195,29 +1268,66 @@ export default function InwardModal({
                                                                             </div>
                                                                         </>
                                                                     ) : (
-                                                                        <div className="flex items-center gap-2">
-                                                                            <SearchableSelect
-                                                                                value={ln.trim_item_variant_id}
-                                                                                onChange={v => setCustomLineField(g._k, ln._k, 'trim_item_variant_id', v)}
-                                                                                options={variants.map(v => ({ value: v.id, label: `${v.color_number ? `${v.color_number} · ` : ''}${v.color_name || v.name || `Variant #${v.id}`}${v.variant_size ? ` · Sz ${v.variant_size}` : ''}` }))}
-                                                                                placeholder={g.trim_item_id ? '— Variant —' : '— Pick trim first —'}
-                                                                                disabled={!editable || !g.trim_item_id}
-                                                                                className="flex-1 min-w-0"
-                                                                                size="xs"
-                                                                                accentColor="amber"
-                                                                            />
-                                                                            <input type="number" min="0" step="any" placeholder="Qty"
-                                                                                value={ln.qty_received}
-                                                                                onChange={e => setCustomLineField(g._k, ln._k, 'qty_received', e.target.value)}
-                                                                                disabled={!editable}
-                                                                                className="w-24 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums" />
-                                                                            {editable && g.lines.length > 1 && (
-                                                                                <button onClick={() => removeCustomLine(g._k, ln._k)} title="Remove line"
-                                                                                    className="p-1 text-slate-300 hover:text-red-500 transition">
-                                                                                    <Trash2 size={11} />
-                                                                                </button>
+                                                                        <div className="space-y-1">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <SearchableSelect
+                                                                                    value={ln.trim_item_variant_id}
+                                                                                    onChange={v => setCustomLineField(g._k, ln._k, 'trim_item_variant_id', v)}
+                                                                                    options={variants.map(v => ({ value: v.id, label: `${v.color_number ? `${v.color_number} · ` : ''}${v.color_name || v.name || `Variant #${v.id}`}${v.variant_size ? ` · Sz ${v.variant_size}` : ''}` }))}
+                                                                                    placeholder={g.trim_item_id ? '— Variant —' : '— Pick trim first —'}
+                                                                                    disabled={!editable || !g.trim_item_id}
+                                                                                    className="flex-1 min-w-0"
+                                                                                    size="xs"
+                                                                                    accentColor="amber"
+                                                                                />
+                                                                                {editable && g.lines.length > 1 && (
+                                                                                    <button onClick={() => removeCustomLine(g._k, ln._k)} title="Remove line"
+                                                                                        className="p-1 text-slate-300 hover:text-red-500 transition">
+                                                                                        <Trash2 size={11} />
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+                                                                            {(ln.boxes || []).length === 0 ? (
+                                                                                <div className="flex items-center gap-2 pl-1 mt-1">
+                                                                                    <input type="number" min="0" step="any" placeholder="0"
+                                                                                        value={ln.total || ''}
+                                                                                        onChange={e => setCustomLineField(g._k, ln._k, 'total', e.target.value)}
+                                                                                        disabled={!editable}
+                                                                                        className="w-24 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums" />
+                                                                                    <span className="text-[10px] text-slate-400">{g.uom || 'pcs'}</span>
+                                                                                    {editable && (
+                                                                                        <button type="button"
+                                                                                            onClick={() => setBoxModal({ title: ln.trim_item_variant_id ? `Variant #${ln.trim_item_variant_id}` : 'Custom trim line', uom: g.uom || 'pcs', initialBoxes: [], onSave: (saved) => { if (saved.length > 0) setCustomGroups(prev => prev.map(g2 => g2._k !== g._k ? g2 : { ...g2, lines: g2.lines.map(l => l._k !== ln._k ? l : { ...l, boxes: saved }) })); setBoxModal(null); } })}
+                                                                                            className="ml-auto flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md transition">
+                                                                                            <Plus size={10} /> Add box breakdown
+                                                                                        </button>
+                                                                                    )}
+                                                                                </div>
+                                                                            ) : (
+                                                                                <>
+                                                                                    <div className="flex items-center gap-2 pl-1 mt-1 flex-wrap">
+                                                                                        <span className="text-[11px] font-bold text-amber-700 tabular-nums">
+                                                                                            {sumTrimBoxes(ln.boxes).toLocaleString(undefined, { maximumFractionDigits: 2 })} {g.uom || 'pcs'}
+                                                                                        </span>
+                                                                                        {editable && (
+                                                                                            <>
+                                                                                                <button type="button"
+                                                                                                    onClick={() => setBoxModal({ title: ln.trim_item_variant_id ? `Variant #${ln.trim_item_variant_id}` : 'Custom trim line', uom: g.uom || 'pcs', initialBoxes: ln.boxes, onSave: (saved) => { const computed = sumTrimBoxes(ln.boxes); setCustomGroups(prev => prev.map(g2 => g2._k !== g._k ? g2 : { ...g2, lines: g2.lines.map(l => l._k !== ln._k ? l : saved.length > 0 ? { ...l, boxes: saved } : { ...l, boxes: [], total: computed > 0 ? String(computed) : '' }) })); setBoxModal(null); } })}
+                                                                                                    className="text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md transition">
+                                                                                                    Edit
+                                                                                                </button>
+                                                                                                <button type="button" onClick={() => { const computed = sumTrimBoxes(ln.boxes); setCustomGroups(prev => prev.map(g2 => g2._k !== g._k ? g2 : { ...g2, lines: g2.lines.map(l => l._k !== ln._k ? l : { ...l, boxes: [], total: computed > 0 ? String(computed) : '' }) })); }}
+                                                                                                    className="text-[10px] text-slate-400 hover:text-red-500 transition">
+                                                                                                    Remove
+                                                                                                </button>
+                                                                                            </>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    <p className="text-[10px] text-slate-400 font-mono pl-1 mt-0.5">
+                                                                                        {(ln.boxes || []).map(b => `${b.box_count}×${b.qty_per_box}`).join(' + ')}
+                                                                                    </p>
+                                                                                </>
                                                                             )}
-                                                                            <span className="text-[10px] text-slate-400 w-10 text-right">{g.uom || 'pcs'}</span>
                                                                         </div>
                                                                     )}
                                                                     <span className="hidden">{li}</span>
@@ -1339,10 +1449,11 @@ export default function InwardModal({
                                     );
                                 }
 
-                                // Trim free-form: keep single qty input
-                                const cur    = freeFormItems[group.id];
-                                const inThis = cur === undefined || cur === '' ? 0 : parseFloat(cur);
-                                const over   = inThis > pending + 0.001;
+                                // Trim free-form: total-first UX with optional box breakdown
+                                const boxes    = freeFormTrimBoxes[group.id] || [];
+                                const rawTotal = freeFormTrimTotals[group.id] ?? '';
+                                const inThis   = boxes.length > 0 ? sumTrimBoxes(boxes) : (parseFloat(rawTotal) || 0);
+                                const over     = inThis > pending + 0.001;
                                 return (
                                     <div key={`free-${group.id}`} className="border border-slate-200 rounded-xl overflow-hidden">
                                         <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
@@ -1357,42 +1468,65 @@ export default function InwardModal({
                                                 <p className="text-[10px] text-slate-500">
                                                     {groupQty.toLocaleString()} {groupUom} on PO
                                                     {' · '}<span className="font-bold text-emerald-600">Pending {pending.toLocaleString()} {groupUom}</span>
+                                                    {boxes.length > 0 && <>{' · '}<span className={`font-bold ${over ? 'text-red-600' : 'text-violet-700'}`}>In this inward {inThis.toLocaleString(undefined, { maximumFractionDigits: 2 })} {groupUom}</span></>}
                                                     {' · item #'}{group.id}
                                                 </p>
                                             </div>
+                                            {editable && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setRemovedPoItemIds(prev => new Set(prev).add(group.id))}
+                                                    title="Remove from this inward"
+                                                    className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                                >
+                                                    <Trash2 size={12} />
+                                                </button>
+                                            )}
                                         </div>
-                                        <div className="p-2">
-                                            <div className={`flex items-center gap-3 rounded-lg p-2 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100'}`}>
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-[10px] text-slate-500 italic">No requirement to receive against — qty applied directly to this line item.</p>
-                                                </div>
-                                                <div className="shrink-0">
+                                        <div className={`p-2 ${over ? 'bg-red-50' : ''}`}>
+                                            {boxes.length === 0 ? (
+                                                <div className="flex items-center gap-2">
                                                     <input
-                                                        type="number"
-                                                        min="0"
-                                                        step="any"
-                                                        value={cur ?? ''}
-                                                        onChange={e => setFreeFormQty(group.id, e.target.value)}
+                                                        type="number" min="0" step="any" placeholder="0"
+                                                        value={rawTotal}
+                                                        onChange={e => setTrimTotalForPoItem(group.id, e.target.value)}
                                                         disabled={!editable}
-                                                        placeholder="0"
-                                                        className={`w-28 text-xs text-right border rounded-lg px-2 py-1.5 disabled:bg-white disabled:text-slate-700 focus:outline-none ${over ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-emerald-400'}`}
+                                                        className={`w-32 text-xs text-right border rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-400 disabled:bg-white disabled:text-slate-700 ${over ? 'border-red-300' : 'border-slate-200'}`}
                                                     />
-                                                    <p className="text-[9px] text-slate-400 text-right mt-0.5">{groupUom}</p>
+                                                    <span className="text-xs text-slate-400">{groupUom}</span>
+                                                    {editable && (
+                                                        <button type="button"
+                                                            onClick={() => setBoxModal({ title: groupLabel, uom: groupUom, initialBoxes: [], onSave: (saved) => { if (saved.length > 0) setFreeFormTrimBoxes(prev => ({ ...prev, [group.id]: saved })); setBoxModal(null); } })}
+                                                            className="ml-auto flex items-center gap-1 text-[10px] font-bold text-emerald-600 hover:bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md transition">
+                                                            <Plus size={10} /> Add box breakdown
+                                                        </button>
+                                                    )}
                                                 </div>
-                                                {editable && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setFreeFormQty(group.id, '');
-                                                            setRemovedPoItemIds(prev => new Set(prev).add(group.id));
-                                                        }}
-                                                        title="Remove from this inward"
-                                                        className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
-                                                    >
-                                                        <Trash2 size={12} />
-                                                    </button>
-                                                )}
-                                            </div>
+                                            ) : (
+                                                <>
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className={`text-xs font-bold tabular-nums ${over ? 'text-red-600' : 'text-emerald-700'}`}>
+                                                            {inThis.toLocaleString(undefined, { maximumFractionDigits: 2 })} {groupUom}
+                                                        </span>
+                                                        {editable && (
+                                                            <>
+                                                                <button type="button"
+                                                                    onClick={() => setBoxModal({ title: groupLabel, uom: groupUom, initialBoxes: boxes, onSave: (saved) => { if (saved.length > 0) { setFreeFormTrimBoxes(prev => ({ ...prev, [group.id]: saved })); } else { clearTrimBoxesForPoItem(group.id, inThis); } setBoxModal(null); } })}
+                                                                    className="text-[10px] font-bold text-emerald-600 hover:bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md transition">
+                                                                    Edit
+                                                                </button>
+                                                                <button type="button" onClick={() => clearTrimBoxesForPoItem(group.id, inThis)}
+                                                                    className="text-[10px] text-slate-400 hover:text-red-500 transition">
+                                                                    Remove
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                                        {boxes.map(b => `${b.box_count}×${b.qty_per_box}`).join(' + ')}
+                                                    </p>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 );
@@ -1470,5 +1604,6 @@ export default function InwardModal({
                 </div>
             </div>
         </div>
+        </>
     );
 }

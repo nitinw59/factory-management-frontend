@@ -101,6 +101,7 @@ import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
 import CuttingDailyReportPage from './modules/initialisation_portal/CuttingDailyReportPage';
 import InterliningManagerPage from './modules/initialisation_portal/InterliningManagerPage';
 import FabricRollManagementPage from './modules/accounts/purchase/FabricIntakeForm';
+import PurchaseInvoicesPage from './modules/accounts/purchase/PurchaseInvoicesPage';
 
 import MechanicsLayout from './shared/MechanicsLayout';
 import MechanicsProtectedRoute from './shared/MechanicsProtectedRoute';
@@ -306,6 +307,7 @@ function App() {
             {/* Purchase Department pages rendered inside AccountsLayout */}
             <Route path="purchase/orders" element={<OrdersPage />} />
             <Route path="purchase/orders/:id" element={<PurchaseFlowPage />} />
+            <Route path="purchase/invoices" element={<PurchaseInvoicesPage />} />
             <Route path="purchase/trims-ledger" element={<TrimsLedgerPage />} />
             <Route path="purchase/supplier-color-codes" element={<SupplierColorCodesPage />} />
             <Route path="job-work" element={<AccountsJobWorkPage />} />

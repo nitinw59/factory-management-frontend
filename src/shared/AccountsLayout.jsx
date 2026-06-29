@@ -8,6 +8,7 @@ const SALES_NAV = [
 
 const PURCHASE_NAV = [
     { to: '/accounts/purchase/orders',               label: 'Orders'         },
+    { to: '/accounts/purchase/invoices',             label: 'Invoices'       },
     { to: '/accounts/fabric-rolls',                  label: 'Fabric Rolls'   },
     { to: '/accounts/purchase/trims-ledger',         label: 'Trims Ledger'   },
     { to: '/accounts/purchase/supplier-color-codes', label: 'Supplier Codes' },
