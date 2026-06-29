@@ -654,9 +654,9 @@ const TrimManagementPage = () => {
         try {
             await trimsApi.archiveItem(id);
             fetchData();
-            showToast('success', 'Item archived.');
+            showToast('success', 'Item deleted.');
         } catch {
-            showToast('error', 'Failed to archive item.');
+            showToast('error', 'Failed to delete item.');
         } finally {
             setConfirmArchive(null);
         }
@@ -1085,7 +1085,7 @@ const TrimManagementPage = () => {
                                                 </span>
                                             ) : isArchiving ? (
                                                 <span className="flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-md px-1 py-0.5">
-                                                    <span className="text-[10px] font-bold text-amber-700 px-1">Archive?</span>
+                                                    <span className="text-[10px] font-bold text-amber-700 px-1">Delete?</span>
                                                     <button onClick={(e) => { e.stopPropagation(); handleArchive(item.id); }} className="p-1 bg-amber-500 hover:bg-amber-600 text-white rounded"><Check size={11}/></button>
                                                     <button onClick={(e) => { e.stopPropagation(); setConfirmArchive(null); }} className="p-1 bg-white hover:bg-gray-100 text-gray-500 border border-gray-200 rounded"><X size={11}/></button>
                                                 </span>
@@ -1094,8 +1094,7 @@ const TrimManagementPage = () => {
                                                     {user.role === 'factory_admin' && (
                                                         <>
                                                             <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'item', data: item }); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-gray-200"><Edit2 size={12}/></button>
-                                                            <button onClick={(e) => { e.stopPropagation(); setConfirmArchive(item.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-amber-600 shadow-sm border border-transparent hover:border-gray-200"><Archive size={12}/></button>
-                                                            <button onClick={(e) => { e.stopPropagation(); handleDelete('item', item.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200"><Trash2 size={12}/></button>
+                                                            <button onClick={(e) => { e.stopPropagation(); setConfirmArchive(item.id); }} className="p-1.5 hover:bg-white rounded-md text-gray-400 hover:text-red-600 shadow-sm border border-transparent hover:border-gray-200"><Archive size={12}/></button>
                                                         </>
                                                     )}
                                                     <ChevronRight className={`w-4 h-4 text-gray-300 ${selectedItem?.id === item.id ? 'text-blue-400' : ''}`}/>
