@@ -6,7 +6,7 @@ export const trimsApi = {
    * @returns {Promise<object>}
    */
     getAnalyticsData: () => api.get('/admin/trims/analytics'),
-    getItems: () => api.get('trims/items'),
+    getItems: () => api.get('/trims/items'),
     createItem: (data) => api.post('trims/items', data),
     updateItem: (id, data) => api.put(`trims/items/${id}`, data),
     deleteItem: (id) => api.delete(`trims/items/${id}`),

@@ -411,14 +411,7 @@ const FulfillmentModal = ({ item, sopId, onClose, onSubmit, apiError }) => {
                         <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 text-sm text-red-700">
                             <p className="font-semibold flex items-center gap-1.5"><LuTriangleAlert size={14} /> {apiError.message}</p>
                             {apiError.sopId && apiError.trimId && (
-                                <a
-                                    href="/merchandiser/planning"
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="mt-1.5 inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline"
-                                >
-                                    Ask buyer to reserve on the planning page →
-                                </a>
+                                <p className="mt-1 text-xs text-red-600">Ask buyer to reserve the required trim stock before placing this order.</p>
                             )}
                         </div>
                     )}
@@ -516,9 +509,12 @@ const TrimOrderDetailPage = () => {
     const [toast, setToast] = useState(null);
     const showToast = useCallback((kind, message) => setToast({ kind, message }), []);
 
-    // Reference data (BOM + cutting) — loaded together with order details
+    // Reference data (BOM + cutting) — loaded on mount
     const [refData, setRefData] = useState({ bom: [], cutting: [] });
     const [refDataLoaded, setRefDataLoaded] = useState(false);
+
+    // Billed composite keys (item_name|color_name|color_number) — fulfillment log entries matching these cannot be reverted
+    const [billedKeys, setBilledKeys] = useState(new Set());
 
     // Reservation info for the currently selected trim item
     const [trimReservation, setTrimReservation] = useState(null);
@@ -558,8 +554,9 @@ const TrimOrderDetailPage = () => {
         setRefDataLoaded(false);
         try {
             const res = await storeManagerApi.getOrderReferenceData(orderId);
-            console.log('[TrimOrderDetail] refData loaded:', res.data);
-            setRefData(res.data || { bom: [], cutting: [] });
+            const refRaw = res.data || { bom: [], cutting: [] };
+            console.log('[TrimOrderDetail] refData loaded:', refRaw);
+            setRefData(refRaw);
         } catch (err) {
             console.error('[TrimOrderDetail] refData fetch failed:', err?.response?.data || err.message);
             setRefData({ bom: [], cutting: [] });
@@ -569,6 +566,26 @@ const TrimOrderDetailPage = () => {
     }, [orderId]);
 
     useEffect(() => { fetchRefData(); }, [fetchRefData]);
+
+    const billKey = (itemName, colorName, colorNumber) =>
+        `${String(itemName || '').trim().toLowerCase()}|${String(colorName || '').trim().toLowerCase()}|${String(colorNumber || '').toLowerCase()}`;
+
+    const fetchBills = useCallback(async () => {
+        try {
+            const res = await storeManagerApi.getTrimBillsForOrder(orderId);
+            const bills = res.data || [];
+            console.log('[TrimBilling] raw bills from API:', bills);
+            const keys = new Set(
+                bills.flatMap(b => (b.items || []).map(i => billKey(i.item_name, i.color_name, i.color_number)))
+            );
+            console.log('[TrimBilling] billed composite keys:', [...keys]);
+            setBilledKeys(keys);
+        } catch (err) {
+            console.warn('[TrimBilling] failed to load bills — revert buttons remain enabled:', err?.response?.data || err.message);
+        }
+    }, [orderId]);
+
+    useEffect(() => { fetchBills(); }, [fetchBills]);
 
     const fetchDetails = useCallback(async () => {
         setIsLoading(true);
@@ -1192,17 +1209,49 @@ const TrimOrderDetailPage = () => {
                                                 const remaining      = Math.max(0, totalRequired - totalFulfilled);
                                                 const pct            = totalRequired > 0 ? Math.round((totalFulfilled / totalRequired) * 100) : 0;
 
-                                                const _selNorm   = selectedTrimGroup.name?.trim().toLowerCase() ?? '';
-                                                const bomEntry   = refDataLoaded
-                                                    ? refData.bom.find(b => b.item_name?.trim().toLowerCase() === _selNorm)
-                                                    : undefined;
+                                                // Each order item carries trim_item_id directly — use it to match BOM entries by ID (reliable, name-independent)
+                                                const groupItemIds = new Set(
+                                                    selectedTrimGroup.items.map(it => String(it.trim_item_id)).filter(Boolean)
+                                                );
+                                                const idMatchResult = refData.bom.find(b => groupItemIds.has(String(b.trim_item_id)));
+                                                console.log('[BOM match] group trim_item_ids:', [...groupItemIds], '| BOM match:', idMatchResult ? `FOUND — ${idMatchResult.item_name} (id=${idMatchResult.trim_item_id})` : 'NO MATCH');
+
+                                                const bomEntry = refDataLoaded ? idMatchResult : undefined;
                                                 const totalCut   = refData.cutting.reduce((s, c) => s + Number(c.total_cut || 0), 0);
+                                                const wastage    = bomEntry ? parseFloat(bomEntry.wastage_percentage || 0) : 0;
+                                                const wasteFactor = 1 + wastage / 100;
+                                                const calcType   = bomEntry?.calculation_type || 'FIXED';
                                                 const qtyPerPc   = bomEntry ? parseFloat(bomEntry.quantity_per_piece) : null;
-                                                const bomDerived = (qtyPerPc != null && totalCut > 0) ? Math.round(qtyPerPc * totalCut) : null;
-                                                const variance   = (bomDerived != null) ? totalRequired - bomDerived : null;
-                                                const pctOff     = (bomDerived && variance != null) ? Math.abs(Math.round((variance / bomDerived) * 100)) : 0;
-                                                const isMatch    = variance != null && Math.abs(variance) <= 1;
-                                                const isOver     = variance != null && variance > 0;
+
+                                                // Parse "28: 5, 30: 5, ..." per cutting roll, aggregate by size
+                                                const sizeCutMap = {};
+                                                refData.cutting.forEach(c => {
+                                                    (c.sizes || '').split(',').forEach(part => {
+                                                        const [sz, qty] = part.trim().split(':').map(s => s.trim());
+                                                        if (sz && qty) sizeCutMap[sz] = (sizeCutMap[sz] || 0) + Number(qty);
+                                                    });
+                                                });
+
+                                                let bomDerived = null;
+                                                let bomFormula = null;
+                                                if (bomEntry && totalCut > 0) {
+                                                    if (calcType === 'PER_SIZE' && (bomEntry.size_consumptions || []).length > 0) {
+                                                        const raw = (bomEntry.size_consumptions || []).reduce((sum, sc) => {
+                                                            const cut = sizeCutMap[String(sc.size)] || 0;
+                                                            return sum + sc.quantity * cut;
+                                                        }, 0);
+                                                        bomDerived = Math.round(raw * wasteFactor);
+                                                        bomFormula = `Σ(size qty × cut) × ${wasteFactor.toFixed(4)}`;
+                                                    } else if (calcType === 'FIXED' && qtyPerPc != null) {
+                                                        bomDerived = Math.round(qtyPerPc * totalCut * wasteFactor);
+                                                        bomFormula = `${qtyPerPc.toFixed(4)} × ${totalCut.toLocaleString()} × ${wasteFactor.toFixed(4)}`;
+                                                    }
+                                                }
+
+                                                const variance = bomDerived != null ? totalRequired - bomDerived : null;
+                                                const pctOff   = (bomDerived && variance != null) ? Math.abs(Math.round((variance / bomDerived) * 100)) : 0;
+                                                const isMatch  = variance != null && Math.abs(variance) <= 1;
+                                                const isOver   = variance != null && variance > 0;
 
                                                 return (
                                                     <div className="mt-3 space-y-2">
@@ -1227,7 +1276,7 @@ const TrimOrderDetailPage = () => {
                                                             </div>
                                                         </div>
 
-                                                        {/* Row 2 — BOM calculation (loads when refData is ready) */}
+                                                        {/* Row 2 — BOM calculation */}
                                                         {!refDataLoaded ? null : !bomEntry ? (
                                                             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 flex items-center gap-2">
                                                                 <LuTriangleAlert className="h-4 w-4 text-red-500 shrink-0" />
@@ -1240,17 +1289,23 @@ const TrimOrderDetailPage = () => {
                                                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                                                 <div className="bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
                                                                     <p className="text-[9px] font-bold uppercase tracking-wider text-violet-500">BOM Qty / Pc</p>
-                                                                    <p className="text-base font-extrabold text-violet-800 tabular-nums font-mono">{qtyPerPc.toFixed(4)}</p>
-                                                                    {bomEntry.notes && <p className="text-[9px] text-violet-400 truncate" title={bomEntry.notes}>{bomEntry.notes}</p>}
+                                                                    {calcType === 'PER_SIZE'
+                                                                        ? <p className="text-sm font-bold text-violet-700">Per Size</p>
+                                                                        : <p className="text-base font-extrabold text-violet-800 tabular-nums font-mono">{qtyPerPc != null ? qtyPerPc.toFixed(4) : '—'}</p>
+                                                                    }
+                                                                    {wastage > 0 && <p className="text-[9px] text-violet-400">+{wastage}% wastage</p>}
                                                                 </div>
                                                                 <div className="bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
                                                                     <p className="text-[9px] font-bold uppercase tracking-wider text-violet-500">Total Cut</p>
                                                                     <p className="text-base font-extrabold text-violet-800 tabular-nums">{totalCut > 0 ? totalCut.toLocaleString() : <span className="text-gray-400 text-sm font-sans">—</span>}</p>
+                                                                    {calcType === 'PER_SIZE' && Object.keys(sizeCutMap).length > 0 && (
+                                                                        <p className="text-[9px] text-violet-400">{Object.keys(sizeCutMap).length} sizes</p>
+                                                                    )}
                                                                 </div>
                                                                 <div className="bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
                                                                     <p className="text-[9px] font-bold uppercase tracking-wider text-violet-500">BOM Derived</p>
                                                                     <p className="text-base font-extrabold text-violet-800 tabular-nums">{bomDerived != null ? bomDerived.toLocaleString() : <span className="text-gray-400 text-sm font-sans">—</span>}</p>
-                                                                    {bomDerived != null && <p className="text-[9px] text-violet-400 font-mono">{qtyPerPc.toFixed(4)} × {totalCut.toLocaleString()}</p>}
+                                                                    {bomFormula && <p className="text-[9px] text-violet-400 font-mono truncate" title={bomFormula}>{bomFormula}</p>}
                                                                 </div>
                                                                 <div className={`rounded-lg px-3 py-2 border ${variance == null ? 'bg-gray-50 border-gray-200' : isMatch ? 'bg-emerald-50 border-emerald-200' : isOver ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'}`}>
                                                                     <p className={`text-[9px] font-bold uppercase tracking-wider ${variance == null ? 'text-gray-400' : isMatch ? 'text-emerald-600' : isOver ? 'text-amber-600' : 'text-red-600'}`}>Variance</p>
@@ -1421,20 +1476,29 @@ const TrimOrderDetailPage = () => {
                                                                     {it.color_name} {it.color_number} · {it.quantity_fulfilled} / {it.quantity_required}
                                                                 </p>
                                                                 <div className="space-y-1">
-                                                                    {it.fulfillment_log.map(log => (
+                                                                    {it.fulfillment_log.map(log => {
+                                                                        console.log('[TrimBilling] raw log entry:', log);
+                                                                        const logKey = billKey(log.fulfilled_item_name, log.fulfilled_color_name, log.fulfilled_color_number);
+                                                                        const isBilled = billedKeys.has(logKey);
+                                                                        console.log('[TrimBilling] log row check:', { logId: log.id, logKey, isBilled, billedKeys: [...billedKeys] });
+                                                                        return (
                                                                         <div key={log.id} className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded text-[11px]">
                                                                             <span className="truncate">
                                                                                 <span className="bg-gray-200 text-gray-700 px-1 rounded mr-1">{log.quantity_fulfilled}×</span>
                                                                                 {log.fulfilled_color_name} {log.fulfilled_color_number}
                                                                                 {log.used_substitute && <span className="text-purple-600 font-bold ml-1.5 bg-purple-50 px-1 rounded">sub</span>}
+                                                                                {isBilled && <span className="text-amber-700 font-bold ml-1.5 bg-amber-50 border border-amber-200 px-1 rounded">billed</span>}
                                                                             </span>
-                                                                            <button onClick={() => handleRevertFulfillment(log.id)}
-                                                                                className="text-red-400 hover:text-white hover:bg-red-500 p-1 rounded transition-colors"
-                                                                                title="Undo this specific fulfillment">
+                                                                            <button
+                                                                                onClick={() => handleRevertFulfillment(log.id)}
+                                                                                disabled={isBilled}
+                                                                                className={`p-1 rounded transition-colors ${isBilled ? 'text-gray-300 cursor-not-allowed' : 'text-red-400 hover:text-white hover:bg-red-500'}`}
+                                                                                title={isBilled ? 'Cannot revert — this variant has been billed' : 'Undo this specific fulfillment'}>
                                                                                 <LuTrash2 size={11} />
                                                                             </button>
                                                                         </div>
-                                                                    ))}
+                                                                        );
+                                                                    })}
                                                                 </div>
                                                             </div>
                                                         ))}

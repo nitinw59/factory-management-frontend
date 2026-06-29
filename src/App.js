@@ -113,6 +113,7 @@ import SparePartsPage from './modules/store_manager/SparePartsPage';
 import SparesAnalyticsPage from './modules/store_manager/SparesAnalyticsPage';
 import TrimReservationsPage from './modules/store_manager/TrimReservationsPage';
 import SupplierColorCodesPage from './modules/store_manager/SupplierColorCodesPage';
+import TrimStockLedgerPage from './modules/store_manager/TrimStockLedgerPage';
 
 
 import DispatchLayout from './shared/DispatchLayout';
@@ -241,6 +242,7 @@ function App() {
           <Route path="trim-orders/:orderId/billing" element={<TrimBillingPage />} />
           <Route path="trim-reservations" element={<TrimReservationsPage />} />
           <Route path="supplier-color-codes" element={<SupplierColorCodesPage />} />
+          <Route path="trim-stock-ledger" element={<TrimStockLedgerPage />} />
 
           <Route path="spare-parts" element={<SparePartsPage />} />
           <Route path="spare-parts-issuance" element={<SparesIssuanceDashboard />} />

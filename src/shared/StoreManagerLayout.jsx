@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
-import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag } from 'react-icons/lu';
+import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag, LuScrollText } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
 
 // No changes to NavDropdown component
@@ -70,6 +70,9 @@ const StoreManagerLayout = () => {
                                 </NavLink>
                                 <NavLink to="/store-manager/supplier-color-codes" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuTag className="mr-2" /> Supplier Codes
+                                </NavLink>
+                                <NavLink to="/store-manager/trim-stock-ledger" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuScrollText className="mr-2" /> Stock Ledger
                                 </NavLink>
                             </NavDropdown>
                             
@@ -146,6 +149,9 @@ const StoreManagerLayout = () => {
                             </NavLink>
                             <NavLink to="/store-manager/supplier-color-codes" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuTag className="mr-2" /> Supplier Codes
+                            </NavLink>
+                            <NavLink to="/store-manager/trim-stock-ledger" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuScrollText className="mr-2" /> Stock Ledger
                             </NavLink>
                             <NavLink to="/store-manager/orders" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuClipboardList className="mr-2" /> Orders

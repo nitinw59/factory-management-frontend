@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import { FiClock, FiCheckCircle, FiList, FiPackage } from 'react-icons/fi'; 
-import { FileText, ChevronRight, Search, RefreshCw, AlertCircle, Receipt, IndianRupee, Loader2 } from 'lucide-react';
+import { ChevronRight, Search, RefreshCw, AlertCircle, Receipt, IndianRupee, Loader2 } from 'lucide-react';
 
 const Spinner = () => <div className="flex justify-center items-center p-12"><Loader2 className="animate-spin h-10 w-10 text-blue-600" /></div>;
 
@@ -101,15 +101,8 @@ const OrderCard = ({ order }) => {
             {/* FOOTER ACTIONS WITH BILLING LINK */}
             <div className="px-4 py-3 bg-gray-50/80 border-t border-gray-100 rounded-b-xl flex flex-wrap justify-between items-center gap-2">
                 <div className="flex gap-1">
-                    <Link 
-                        to={`/store-manager/trim-orders/${order.id}/summary`} 
-                        className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center transition-colors px-2 py-1.5 rounded hover:bg-indigo-50"
-                        title="View Summary"
-                    >
-                        <FileText size={14} className="mr-1" /> Summary
-                    </Link>
-                    <Link 
-                        to={`/store-manager/trim-orders/${order.id}/billing`} 
+                    <Link
+                        to={`/store-manager/trim-orders/${order.id}/billing`}
                         className="text-xs font-bold text-emerald-600 hover:text-emerald-800 flex items-center transition-colors px-2 py-1.5 rounded hover:bg-emerald-50"
                         title="Manage Billing"
                     >

@@ -1239,6 +1239,7 @@ const TrimManagementPage = () => {
                                 const isEditingStock = editing?.variantId === variant.id && editing.field === 'main_store_stock';
                                 const isConfirming = confirmDelete?.type === 'variant' && confirmDelete.id === variant.id;
                                 const isPicked = selectedVariants.has(variant.id);
+                                const missingCost = !variant.cost_price || Number(variant.cost_price) === 0;
                                 return (
                                     <div
                                         key={variant.id}
@@ -1246,6 +1247,7 @@ const TrimManagementPage = () => {
                                         className={`group flex justify-between items-center p-3 rounded-lg cursor-pointer border transition-all duration-200
                                         ${isPicked ? 'border-blue-300 bg-blue-50/60 ring-1 ring-blue-300'
                                           : selectedVariant?.id === variant.id ? 'border-blue-200 bg-blue-50/80 ring-1 ring-blue-200'
+                                          : missingCost ? 'border-red-200 bg-red-50/60 hover:bg-red-50 hover:border-red-300'
                                           : 'border-transparent hover:bg-gray-50 hover:border-gray-100'}`}
                                     >
                                         <div className="flex items-start gap-2 min-w-0 flex-1">
