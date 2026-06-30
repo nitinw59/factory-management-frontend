@@ -642,7 +642,7 @@ const TrimManagementPage = () => {
             }
             showToast('success', `${type[0].toUpperCase()}${type.slice(1)} deleted.`);
         } catch (error) {
-            showToast('error', `Failed to delete ${type}.`);
+            showToast('error', error?.response?.data?.error || `Failed to delete ${type}.`);
         } finally {
             setConfirmDelete(null);
         }
@@ -655,8 +655,8 @@ const TrimManagementPage = () => {
             await trimsApi.archiveItem(id);
             fetchData();
             showToast('success', 'Item deleted.');
-        } catch {
-            showToast('error', 'Failed to delete item.');
+        } catch (error) {
+            showToast('error', error?.response?.data?.error || 'Failed to delete item.');
         } finally {
             setConfirmArchive(null);
         }

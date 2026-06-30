@@ -69,12 +69,20 @@ const BomDetailModal = ({ bomId, onClose }) => {
                     {bom && (
                         <div className="space-y-5">
                             {/* Rejection banner */}
-                            {bom.status === 'REJECTED' && bom.rejection_notes && (
+                            {bom.status === 'REJECTED' && (bom.rejection?.notes || bom.rejection_notes) && (
                                 <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
                                     <XCircle size={13} className="text-red-500 shrink-0 mt-0.5" />
                                     <div>
-                                        <p className="text-[9px] font-bold text-red-500 uppercase tracking-wider mb-0.5">Rejection Reason</p>
-                                        <p className="text-xs text-red-700">{bom.rejection_notes}</p>
+                                        <p className="text-[9px] font-bold text-red-500 uppercase tracking-wider mb-0.5">
+                                            Rejection Reason
+                                            {bom.rejection?.rejected_by?.name && (
+                                                <span className="ml-1.5 normal-case font-normal text-red-400">
+                                                    · by {bom.rejection.rejected_by.name}
+                                                    {bom.rejection.rejected_at && ` on ${new Date(bom.rejection.rejected_at).toLocaleDateString('en', { dateStyle: 'medium' })}`}
+                                                </span>
+                                            )}
+                                        </p>
+                                        <p className="text-xs text-red-700">{bom.rejection?.notes || bom.rejection_notes}</p>
                                     </div>
                                 </div>
                             )}
@@ -207,6 +215,16 @@ const BomDetailModal = ({ bomId, onClose }) => {
                             )}
                         </div>
                     )}
+
+                    {/* Raw API response */}
+                    {bom && (
+                        <div>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Raw Data</p>
+                            <pre className="bg-slate-900 text-emerald-300 text-[10px] font-mono rounded-xl p-4 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
+                                {JSON.stringify(bom, null, 2)}
+                            </pre>
+                        </div>
+                    )}
                 </div>
                 <div className="border-t border-slate-100 px-6 py-4 flex justify-end bg-slate-50 rounded-b-2xl">
                     <button onClick={onClose} className="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-bold text-sm transition-colors">Close</button>
@@ -220,9 +238,13 @@ const BomDetailModal = ({ bomId, onClose }) => {
 
 const BomCard = ({ bom, onEdit, onView, onSubmit, onDelete }) => {
     const { border } = STATUS_CFG[bom.status] || {};
+    const isRejected = bom.status === 'REJECTED';
     return (
         <div className={`bg-white rounded-xl border border-slate-200 border-l-4 ${border} shadow-sm hover:shadow-md transition-shadow`}>
-            <div className="p-4">
+            <div
+                className={`p-4${isRejected ? ' cursor-pointer' : ''}`}
+                onClick={isRejected ? () => onView(bom.id) : undefined}
+            >
                 <div className="flex items-start justify-between mb-2">
                     <div className="min-w-0 mr-2">
                         <p className="font-bold text-slate-800 text-sm leading-tight truncate">{bom.bom_name}</p>
