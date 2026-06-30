@@ -233,6 +233,7 @@ const CreateProductionBatchForm = () => {
 
     // ── Core form state ───────────────────────────────────────────────────
     const [productId,       setProductId]       = useState('');
+    const [lineId,          setLineId]          = useState('');
     const [layerLength,     setLayerLength]     = useState('');
     const [notes,           setNotes]           = useState('');
     const [plannedCutQty,   setPlannedCutQty]   = useState('');
@@ -293,34 +294,45 @@ const CreateProductionBatchForm = () => {
                 if (isEditMode) {
                     const res  = await productionManagerApi.getBatchForEdit(batchId);
                     const data = res.data;
-                    if (!data?.batchDetails) throw new Error('Batch data not found.');
 
-                    setProductId(String(data.batchDetails.product_id || ''));
-                    setLayerLength(data.batchDetails.length_of_layer_inches || '');
-                    setNotes(data.batchDetails.notes || '');
+                    // Handle both API shapes: { batchDetails, ... } or { batch, ... }
+                    const batchDetails = data?.batchDetails ?? data?.batch ?? data;
+                    if (!batchDetails) throw new Error('Batch data not found.');
+
+                    setProductId(String(batchDetails.product_id || ''));
+                    setLineId(String(batchDetails.assigned_production_line_id || ''));
+                    setLayerLength(batchDetails.length_of_layer_inches || '');
+                    setNotes(batchDetails.notes || '');
                     setSelectedTemplateId(
-                        data.batchDetails.interlining_template_id
-                            ? String(data.batchDetails.interlining_template_id)
+                        batchDetails.interlining_template_id
+                            ? String(batchDetails.interlining_template_id)
                             : ''
                     );
-                    const notesMatch = (data.batchDetails.notes || '').match(/Planned Qty: (\d+)/);
+                    const notesMatch = (batchDetails.notes || '').match(/Planned Qty: (\d+)/);
                     if (notesMatch) setPlannedCutQty(notesMatch[1]);
-                    if (data.batchDetails.interlining_template_id) setInterliningConfirmed(true);
+                    if (batchDetails.interlining_template_id) setInterliningConfirmed(true);
 
-                    const savedRatios = data.size_ratios || [];
+                    const savedRatios = data.size_ratios || batchDetails.size_ratios || [];
                     setSizeRatios(apiSizes.map(s => {
                         const found = savedRatios.find(r => String(r.size) === String(s.name));
                         return { size: s.name, ratio: found ? String(found.ratio) : '' };
                     }));
 
                     const available   = data.available_rolls   || [];
-                    const assignedIds = data.assigned_roll_ids || [];
+                    const assignedIds = data.assigned_roll_ids
+                        || (batchDetails.rolls || []).map(r => (typeof r === 'object' ? r.id : r));
                     const shellIds    = assignedIds.filter(id => {
                         const roll = available.find(r => r.id === id);
                         return roll && !(roll.type || '').toLowerCase().includes('interlining');
                     });
                     setSelectedShellRolls(shellIds);
-                    setOptions({ ...commonOptions, products: data.products || [], availableRolls: available, productionLines: [], fabricColors: commonOptions.fabricColors });
+                    setOptions({
+                        ...commonOptions,
+                        products:        data.products        || [],
+                        availableRolls:  available,
+                        productionLines: data.production_lines || [],
+                        fabricColors:    commonOptions.fabricColors,
+                    });
 
                 } else {
                     const formDataRes = await productionManagerApi.getFormData({
@@ -465,13 +477,13 @@ const CreateProductionBatchForm = () => {
     // ── Submit (payload unchanged) ────────────────────────────────────────
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!prefillSalesOrderId || !prefillSalesOrderProductId) {
+        if (!isEditMode && (!prefillSalesOrderId || !prefillSalesOrderProductId)) {
             setError('Sales order context is required. Please open this form from the workflow dashboard.');
             return;
         }
         if (!productId)                { setError('Product selection is required.'); return; }
         if (!selectedShellRolls.length){ setError('At least one shell fabric roll must be selected.'); return; }
-        if (selectedTemplateId && !interliningConfirmed) {
+        if (!isEditMode && selectedTemplateId && !interliningConfirmed) {
             setError('Please approve the interlining requirements in the Interlining tab.');
             setActiveTab('interlining');
             return;
@@ -480,27 +492,36 @@ const CreateProductionBatchForm = () => {
         setIsSaving(true);
         setError(null);
         try {
-            const metaNotes = `\n[System Info] Planned Qty: ${Math.round(interliningRequirements.reduce((acc, r) => acc + r.potentialPieces, 0))} | Interlining Template: ${selectedTemplate?.interlining_type || 'None'}`;
-
-            const payload = {
-                sales_order_id:           parseInt(prefillSalesOrderId, 10),
-                sales_order_product_id:   parseInt(prefillSalesOrderProductId, 10),
-                product_id:               productId,
-                length_of_layer_inches:   layerLength || null,
-                notes:                    (notes || '') + metaNotes,
-                interlining_template_id:  selectedTemplateId || null,
-                interlining_requirements: interliningRequirements.map(req => ({
-                    interlining_color_id: req.id,
-                    required_meters:      req.required.toFixed(2),
-                })),
-                size_ratios: sizeRatios
-                    .map(r => ({ ...r, ratio: parseInt(r.ratio, 10) }))
-                    .filter(r => !isNaN(r.ratio) && r.ratio > 0),
-                rolls: selectedShellRolls,
-            };
-
-            if (isEditMode) await productionManagerApi.updateBatch(batchId, payload);
-            else            await productionManagerApi.create(payload);
+            if (isEditMode) {
+                await productionManagerApi.updateBatch(batchId, {
+                    product_id:                  parseInt(productId, 10),
+                    assigned_production_line_id: lineId ? parseInt(lineId, 10) : null,
+                    length_of_layer_inches:      layerLength ? parseFloat(layerLength) : null,
+                    notes:                       notes || null,
+                    size_ratios: sizeRatios
+                        .map(r => ({ ...r, ratio: parseInt(r.ratio, 10) }))
+                        .filter(r => !isNaN(r.ratio) && r.ratio > 0),
+                    rolls: selectedShellRolls.map(id => parseInt(id, 10)),
+                });
+            } else {
+                const metaNotes = `\n[System Info] Planned Qty: ${Math.round(interliningRequirements.reduce((acc, r) => acc + r.potentialPieces, 0))} | Interlining Template: ${selectedTemplate?.interlining_type || 'None'}`;
+                await productionManagerApi.create({
+                    sales_order_id:           parseInt(prefillSalesOrderId, 10),
+                    sales_order_product_id:   parseInt(prefillSalesOrderProductId, 10),
+                    product_id:               productId,
+                    length_of_layer_inches:   layerLength || null,
+                    notes:                    (notes || '') + metaNotes,
+                    interlining_template_id:  selectedTemplateId || null,
+                    interlining_requirements: interliningRequirements.map(req => ({
+                        interlining_color_id: req.id,
+                        required_meters:      req.required.toFixed(2),
+                    })),
+                    size_ratios: sizeRatios
+                        .map(r => ({ ...r, ratio: parseInt(r.ratio, 10) }))
+                        .filter(r => !isNaN(r.ratio) && r.ratio > 0),
+                    rolls: selectedShellRolls,
+                });
+            }
             navigate(returnPath);
         } catch (err) {
             setError(err.response?.data?.error || err.message || 'An unexpected error occurred.');
@@ -566,6 +587,17 @@ const CreateProductionBatchForm = () => {
                                     </select>
                                 )}
                             </div>
+
+                            {/* Production Line (edit mode only) */}
+                            {isEditMode && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Production Line</label>
+                                    <select value={lineId} onChange={e => setLineId(e.target.value)} className="mt-1 p-2 w-full border rounded-md">
+                                        <option value="">Select Line</option>
+                                        {options.productionLines.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                                    </select>
+                                </div>
+                            )}
 
                             {/* Batch settings */}
                             <div>

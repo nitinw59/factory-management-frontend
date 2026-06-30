@@ -4,7 +4,8 @@ import {
     Search, Plus, Box, FileText, ShoppingCart,
     Scissors, ChevronDown, Loader2, X,
     ChevronUp, DollarSign, Palette,
-    Package, Truck, Layers, Trash2, Printer, Warehouse
+    Package, Truck, Layers, Trash2, Printer, Warehouse,
+    Edit2, AlertTriangle,
 } from 'lucide-react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { accountingApi } from '../../api/accountingApi';
@@ -219,7 +220,7 @@ const SalesOrderNode = ({ data, x, y, poCount, sopCount, batchCount, onAddPO, on
 );
 
 
-const BatchNode = ({ data, x, y, onStageClick, onDrilldown, onTrimOrders }) => {
+const BatchNode = ({ data, x, y, onStageClick, onDrilldown, onTrimOrders, onEditBatch }) => {
     const done  = data.stage_progress?.completed || 0;
     const total = data.stage_progress?.total     || 0;
     const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -237,6 +238,15 @@ const BatchNode = ({ data, x, y, onStageClick, onDrilldown, onTrimOrders }) => {
                    {data.batch_id ? `BATCH #${data.batch_id}` : '—'}
                 </button>
                 <div className="flex items-center gap-1 shrink-0">
+                    {onEditBatch && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onEditBatch(data.batch_id); }}
+                            title="Edit batch"
+                            className="p-0.5 text-indigo-400 hover:text-indigo-700 hover:bg-indigo-50 rounded transition-colors"
+                        >
+                            <Edit2 size={11} />
+                        </button>
+                    )}
                     {onTrimOrders && (
                         <button
                             onClick={(e) => { e.stopPropagation(); onTrimOrders(data.batch_id); }}
@@ -520,7 +530,7 @@ const SopNode = ({ data, x, y, pos = [], sopH, onAddPO, onInward, onShowDetails 
 
 // ─── WORKFLOW GRAPH ───────────────────────────────────────────────────────────
 
-const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onOpenEndBitBatch, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders, onShowSODetails, onShowSopDetails }) => {
+const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onOpenEndBitBatch, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders, onEditBatch, onShowSODetails, onShowSopDetails }) => {
     const { nodes, connectors, height, totalWidth, totalPoCount, totalBatchCount, totalSopCount } = useMemo(() => {
         const nodesList  = [];
         const connList   = [];
@@ -680,7 +690,7 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
                 if (node.type === 'SOP')                 return <SopNode              key={i} {...node} onAddPO={onAddSopPO} onInward={onInward} onShowDetails={onShowSopDetails} />;
                 if (node.type === 'CREATE_BATCH_CIRCLE')         return <CreateBatchCircleNode       key={i} {...node} so={so} onCreateBatch={onCreateBatch} />;
                 if (node.type === 'CREATE_ENDBIT_BATCH_CIRCLE')  return <CreateEndBitBatchCircleNode key={i} {...node} so={so} onOpenEndBitBatch={onOpenEndBitBatch} />;
-                if (node.type === 'BATCH')               return <BatchNode            key={i} {...node} onStageClick={onStageClick} onDrilldown={onDrilldown} onTrimOrders={onTrimOrders} />;
+                if (node.type === 'BATCH')               return <BatchNode            key={i} {...node} onStageClick={onStageClick} onDrilldown={onDrilldown} onTrimOrders={onTrimOrders} onEditBatch={onEditBatch} />;
                 if (node.type === 'DISPATCH')            return <DispatchNode         key={i} {...node} onDispatch={onDispatch} />;
                 return null;
             })}
@@ -690,7 +700,7 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
 
 // ─── TABLE ROW ────────────────────────────────────────────────────────────────
 
-const SalesOrderTableRow = ({ so, onSODetails, onSopDetails, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onOpenEndBitBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders }) => {
+const SalesOrderTableRow = ({ so, onSODetails, onSopDetails, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onOpenEndBitBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders, onEditBatch }) => {
     const [expanded, setExpanded] = useState(false);
 
     const pos         = allPosOf(so);
@@ -758,6 +768,7 @@ const SalesOrderTableRow = ({ so, onSODetails, onSopDetails, onStageClick, onAdd
                                 onDrilldown={onDrilldown}
                                 onDispatch={onDispatch}
                                 onTrimOrders={onTrimOrders}
+                                onEditBatch={onEditBatch}
                                 onShowSODetails={onSODetails}
                                 onShowSopDetails={onSopDetails}
                             />
@@ -2031,6 +2042,9 @@ const TrimOrderDetailModal = ({ orderId, onBack, onClose }) => {
     );
 };
 
+// ─── EDIT BATCH MODAL ─────────────────────────────────────────────────────────
+
+
 // ─── BATCH TRIM ORDERS MODAL ──────────────────────────────────────────────────
 
 const BatchTrimOrdersModal = ({ batchId, onClose }) => {
@@ -2345,9 +2359,11 @@ const ProductionWorkflowDashboard = () => {
     const canProduction = user && ['cutting_manager', 'production_manager', 'admin', 'factory_admin'].includes(user.role);
     const canInward     = user?.role === 'accountant';
     const canTrimOrders = user && ['production_manager', 'admin', 'factory_admin'].includes(user.role);
+    const canEditBatch  = user?.role === 'production_manager';
 
     const handleInward      = (po) => setInwardPO({ ...po, id: po.po_id });
     const handleTrimOrders  = (batchId) => setTrimOrdersBatch(batchId);
+    const handleEditBatch   = (batchId) => navigate(`/production-manager/batches/edit/${batchId}`);
 
     return (
         <div className="h-screen bg-slate-50 overflow-hidden flex flex-col">
@@ -2453,6 +2469,7 @@ const ProductionWorkflowDashboard = () => {
                                         onDrilldown={handleBatchDrilldown}
                                         onDispatch={handleDispatch}
                                         onTrimOrders={canTrimOrders ? handleTrimOrders : null}
+                                        onEditBatch={canEditBatch ? handleEditBatch : null}
                                     />
                                 )) : (
                                     <tr>
