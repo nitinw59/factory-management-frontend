@@ -8,6 +8,7 @@ import autoTable from 'jspdf-autotable';
 
 // Assuming you have your api utility configured
 import { storeManagerApi } from '../../api/storeManagerApi';
+import { sparesErrorMessage } from '../../utils/sparesErrors';
 
 // ==========================================
 // SHARED COMPONENTS
@@ -177,7 +178,7 @@ export default function SparesIssuanceDashboard() {
                 loadData(); // Refresh the main dashboard
             } catch (err) {
                 console.error("Fulfillment Error:", err);
-                alert(err.response?.data?.error || "Failed to process issuance.");
+                alert(sparesErrorMessage(err, 'Failed to process issuance.'));
             } finally {
                 setProcessing(false);
             }
@@ -307,7 +308,7 @@ export default function SparesIssuanceDashboard() {
             loadData();
         } catch (err) {
             console.error("Direct Issuance Error:", err);
-            alert(err.response?.data?.error || "Failed to issue spares. Ensure sufficient stock.");
+            alert(sparesErrorMessage(err, 'Failed to issue spares.'));
         } finally {
             setIsSubmitting(false);
         }

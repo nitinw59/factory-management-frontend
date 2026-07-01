@@ -679,6 +679,7 @@ const BomApprovalModal = ({ bom, onClose, onApproved }) => {
     const [previewErr,   setPreviewErr]   = useState(null);
     const [tab,          setTab]          = useState('changes');
     const [acknowledged, setAcknowledged] = useState(false);
+    const [approveNotes, setApproveNotes] = useState('');
     const [approving,    setApproving]    = useState(false);
     const [approveErr,   setApproveErr]   = useState(null);
 
@@ -693,7 +694,7 @@ const BomApprovalModal = ({ bom, onClose, onApproved }) => {
         setApproving(true);
         setApproveErr(null);
         try {
-            await bomApi.approve(bom.id);
+            await bomApi.approve(bom.id, approveNotes.trim() || null);
             onApproved(bom.id);
             onClose();
         } catch (e) {
@@ -806,6 +807,18 @@ const BomApprovalModal = ({ bom, onClose, onApproved }) => {
                             )}
                         </span>
                     </label>
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                            Approval notes <span className="font-normal normal-case text-slate-300">(optional)</span>
+                        </label>
+                        <textarea
+                            value={approveNotes}
+                            onChange={e => setApproveNotes(e.target.value)}
+                            placeholder="Add any notes for the team (e.g. conditions, observations)…"
+                            rows={2}
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-300 resize-none bg-white"
+                        />
+                    </div>
                     <div className="flex items-center justify-end gap-2">
                         <button onClick={onClose} disabled={approving}
                             className="px-4 py-2 text-sm font-bold text-slate-500 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition-colors">

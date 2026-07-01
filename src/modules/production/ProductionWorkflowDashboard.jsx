@@ -2108,7 +2108,7 @@ const BatchTrimOrdersModal = ({ batchId, onClose }) => {
 
 // ─── GLOBAL SEARCH ───────────────────────────────────────────────────────────
 
-const GlobalSearch = ({ data, onDispatch, onBatchDrilldown }) => {
+const GlobalSearch = ({ data, onDispatch, onBatchDrilldown, onSOClick, onPOClick }) => {
     const [open, setOpen]   = useState(false);
     const [q, setQ]         = useState('');
     const inputRef          = useRef(null);
@@ -2201,14 +2201,14 @@ const GlobalSearch = ({ data, onDispatch, onBatchDrilldown }) => {
                                         <div className="pb-2">
                                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1.5">Sales Orders</p>
                                             {results.sos.map(so => (
-                                                <div key={so.sales_order_id} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50">
+                                                <button key={so.sales_order_id} onClick={() => { onSOClick && onSOClick(so.sales_order_id); close(); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-left">
                                                     <FileText size={13} className="text-blue-500 shrink-0" />
                                                     <div className="flex-1 min-w-0">
                                                         <p className="font-mono font-bold text-slate-800 text-sm">{so.order_number}</p>
                                                         <p className="text-xs text-slate-500 truncate">{so.customer_name}</p>
                                                     </div>
                                                     <StatusBadge status={so.so_status} />
-                                                </div>
+                                                </button>
                                             ))}
                                         </div>
                                     )}
@@ -2218,14 +2218,14 @@ const GlobalSearch = ({ data, onDispatch, onBatchDrilldown }) => {
                                         <div className="py-2">
                                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1.5">Purchase Orders</p>
                                             {results.pos.map(po => (
-                                                <div key={po.po_id} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50">
+                                                <button key={po.po_id} onClick={() => { onPOClick && onPOClick(po.po_id); close(); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-left">
                                                     <Package size={13} className="text-amber-500 shrink-0" />
                                                     <div className="flex-1 min-w-0">
                                                         <p className="font-mono font-bold text-slate-800 text-sm">{po.po_code}</p>
                                                         <p className="text-xs text-slate-500 truncate">{po.so?.order_number} · {po.supplier_name}</p>
                                                     </div>
                                                     <StatusBadge status={po.po_status} />
-                                                </div>
+                                                </button>
                                             ))}
                                         </div>
                                     )}
@@ -2395,6 +2395,8 @@ const ProductionWorkflowDashboard = () => {
                             data={data}
                             onDispatch={handleDispatch}
                             onBatchDrilldown={handleBatchDrilldown}
+                            onSOClick={setSelectedSOId}
+                            onPOClick={setSelectedPOId}
                         />
 
                         <div className="flex items-center gap-1 flex-wrap">

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 
 import { sparesApi } from '../../api/sparesApi';
+import { sparesErrorMessage } from '../../utils/sparesErrors';
 import { useAuth } from '../../context/AuthContext';
 import SpareInwardModal from './SpareInwardModal';
 // --- SHARED COMPONENTS ---
@@ -133,10 +134,13 @@ const SparePartsPage = () => {
 
     // Handlers
     const handleCreate = async (data) => {
-        await sparesApi.createSparePart(data);
-        // In a real app, you'd re-fetch or update local state. Mocking update:
-        fetchData();
-        setActiveModal(null);
+        try {
+            await sparesApi.createSparePart(data);
+            fetchData();
+            setActiveModal(null);
+        } catch (err) {
+            setToast({ kind: 'error', message: sparesErrorMessage(err, 'Failed to create spare part.') });
+        }
     };
 
     const handleInwardSuccess = (payload) => {

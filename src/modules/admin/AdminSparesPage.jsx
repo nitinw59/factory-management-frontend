@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Loader2, Pencil, X, AlertTriangle, Search, Package, AlertCircle } from 'lucide-react';
 import { sparesApi } from '../../api/sparesApi';
+import { sparesErrorMessage } from '../../utils/sparesErrors';
 
 // ── Edit Modal ────────────────────────────────────────────────────────────────
 function EditSpareModal({ spare, categories, onClose, onSaved }) {
@@ -32,9 +33,7 @@ function EditSpareModal({ spare, categories, onClose, onSaved }) {
             await sparesApi.updateSpare(spare.id, payload);
             onSaved();
         } catch (ex) {
-            const status = ex?.response?.status;
-            if (status === 409) setErr('Part number is already taken by another spare.');
-            else setErr(ex?.response?.data?.error || 'Failed to save changes.');
+            setErr(sparesErrorMessage(ex, 'Failed to save changes.'));
             setBusy(false);
         }
     };

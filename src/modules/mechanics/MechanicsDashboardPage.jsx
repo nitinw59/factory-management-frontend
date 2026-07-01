@@ -7,6 +7,7 @@ import {
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { mechanicApi } from '../../api/mechanicApi'; // Ensure this uses the updated endpoints via your api util
 import { sparesApi } from '../../api/sparesApi';
+import { sparesErrorMessage } from '../../utils/sparesErrors';
 
 
 const Spinner = () => <Loader2 className="animate-spin text-blue-600" />;
@@ -358,7 +359,7 @@ const RequestInventoryView = ({ myInventory, globalSpares }) => {
             setSelectedItems([]);
             setNotes('');
         } catch (err) {
-            alert("Failed to submit request.");
+            alert(sparesErrorMessage(err, 'Failed to submit request.'));
         } finally {
             submitLock.current = false;
             setIsSubmitting(false);

@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 
 import { sparesApi } from '../../api/sparesApi';
+import { sparesErrorMessage } from '../../utils/sparesErrors';
 
 // --- helpers ---
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -71,7 +72,7 @@ const DrilldownModal = ({ spareId, onClose }) => {
             const r = await sparesApi.getSpareDrilldown(spareId, { days, recent_limit: 25 });
             setData(r.data?.data ?? r.data);
         } catch (e) {
-            setError(e.response?.data?.error || e.message || 'Failed to load drilldown.');
+            setError(sparesErrorMessage(e, 'Failed to load drilldown.'));
         } finally {
             setLoading(false);
         }
