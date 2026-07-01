@@ -126,6 +126,9 @@ const AdminLayout = () => {
                 </NavLink>
 
                 <DesktopNavDropdown title="Spares">
+                  <NavLink to="/admin/spares" className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                    <LuPackage size={14} /> Manage Spares
+                  </NavLink>
                   <NavLink to="/admin/spares-analytics" className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                     <LuChartLine size={14} /> Spares Analytics
                   </NavLink>
@@ -216,6 +219,9 @@ const AdminLayout = () => {
               </NavLink>
 
               <MobileNavDropdown title={<span className="flex items-center gap-2"><LuPackage size={16} /> Spares</span>}>
+                <NavLink to="/admin/spares" onClick={closeMenu} className="flex items-center gap-2 py-2 text-sm text-gray-600 hover:text-blue-600">
+                  <LuPackage size={14} /> Manage Spares
+                </NavLink>
                 <NavLink to="/admin/spares-analytics" onClick={closeMenu} className="flex items-center gap-2 py-2 text-sm text-gray-600 hover:text-blue-600">
                   <LuChartLine size={14} /> Spares Analytics
                 </NavLink>

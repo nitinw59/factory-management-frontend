@@ -109,6 +109,7 @@ import MechanicsDashboardPage from './modules/mechanics/MechanicsDashboardPage';
 import TrimBillingPage from './modules/store_manager/TrimBillingPage';
 
 import AdminMaintenanceDashboard from './modules/admin/AdminMaintenanceDashboard';
+import AdminSparesPage from './modules/admin/AdminSparesPage';
 import MaintenanceSchedulePage from './modules/maintenance/MaintenanceSchedulePage';
 import SparePartsPage from './modules/store_manager/SparePartsPage';
 import SparesAnalyticsPage from './modules/store_manager/SparesAnalyticsPage';
@@ -223,6 +224,7 @@ function App() {
           <Route path="company-profile" element={<CompanyProfilePage />} />
           <Route path="trim-clusters" element={<TrimClustersPage />} />
           <Route path="spares-analytics" element={<SparesAnalyticsPage />} />
+          <Route path="spares" element={<AdminSparesPage />} />
       </Route>
 
               {/* Store Manager Portal */}

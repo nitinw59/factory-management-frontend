@@ -24,6 +24,7 @@ export const sparesApi = {
         const response = await api.post('/spares/', data);
         return response.data;
     },
+    updateSpare: (spareId, data) => api.put(`/spares/${spareId}`, data),
     // Spare inward (replaces the removed /spares/restock).
     // Free-form payload: { received_date, supplier_id?, grn_number?, condition?, notes?, items: [{ spare_part_id, qty_received, unit_price?, description? }] }
     // PO-linked payload: { purchase_order_id, received_date, grn_number?, condition?, notes?, items: [{ purchase_order_item_id, qty_received, unit_price? }] }
