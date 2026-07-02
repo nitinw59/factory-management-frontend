@@ -79,6 +79,33 @@ const fmtMoney = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFraction
 const fmtQty   = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
 const fmtDate  = (d) => d ? new Date(d).toLocaleDateString('en', { dateStyle: 'medium' }) : '—';
 
+// ── Amount in words ───────────────────────────────────────────────────────────
+
+const _ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+               'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
+               'Seventeen', 'Eighteen', 'Nineteen'];
+const _tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+const _intToWords = (n) => {
+    if (n === 0) return 'Zero';
+    let w = '';
+    if (n >= 1_000_000) { w += _intToWords(Math.floor(n / 1_000_000)) + ' Million '; n %= 1_000_000; }
+    if (n >= 1_000)     { w += _intToWords(Math.floor(n / 1_000)) + ' Thousand ';     n %= 1_000;     }
+    if (n >= 100)       { w += _ones[Math.floor(n / 100)] + ' Hundred ';               n %= 100;       }
+    if (n >= 20)        { w += _tens[Math.floor(n / 10)] + (n % 10 ? ' ' + _ones[n % 10] : '') + ' '; }
+    else if (n > 0)     { w += _ones[n] + ' '; }
+    return w.trim();
+};
+
+const amountInWords = (amount) => {
+    const rounded = Math.round(Math.abs(amount) * 100);
+    const dollars = Math.floor(rounded / 100);
+    const cents   = rounded % 100;
+    let w = _intToWords(dollars) + (dollars === 1 ? ' Dollar' : ' Dollars');
+    if (cents > 0) w += ' and ' + _intToWords(cents) + (cents === 1 ? ' Cent' : ' Cents');
+    return w + ' Only';
+};
+
 // ── Generator ────────────────────────────────────────────────────────────────
 
 export async function generatePoPdf({ po, company, version = 1, supplierCodes = new Map() }) {
@@ -448,11 +475,35 @@ export async function generatePoPdf({ po, company, version = 1, supplierCodes = 
         }
         y += isGrand ? 22 : 14;
     };
-    drawTotalsRow('Subtotal', `₹ ${fmtMoney(subtotal)}`);
-    drawTotalsRow('Total', `₹ ${fmtMoney(subtotal)}`, true);
+    drawTotalsRow('Subtotal', `$ ${fmtMoney(subtotal)}`);
+    drawTotalsRow('Total', `$ ${fmtMoney(subtotal)}`, true);
+
+    // ── Amount in words ──────────────────────────────────────────────────────
+    const wordsText = amountInWords(subtotal);
+    const wordsBoxW = totalsX - MARGIN - 8;
+    const wordsBoxX = MARGIN;
+    const wordsBoxY = y - 18;   // align vertically with the grand total band
+
+    doc.setFillColor(241, 245, 249);    // slate-100
+    doc.setDrawColor(...line);
+    doc.setLineWidth(0.4);
+    doc.rect(wordsBoxX, wordsBoxY, wordsBoxW, 32, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...muted);
+    doc.text('AMOUNT IN WORDS', wordsBoxX + 8, wordsBoxY + 10);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...accent);
+    const wordsLines = doc.splitTextToSize(wordsText, wordsBoxW - 16);
+    wordsLines.slice(0, 2).forEach((ln, i) => {
+        doc.text(ln, wordsBoxX + 8, wordsBoxY + 22 + i * 10);
+    });
 
     // ── Terms & Bank details (two columns) ───────────────────────────────────
-    y += 8;
+    y = wordsBoxY + 32 + 14;   // below the amount-in-words box + gap
     const colW = (PAGE_W - 2 * MARGIN - 12) / 2;
 
     // Terms

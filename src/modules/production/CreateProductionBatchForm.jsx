@@ -256,6 +256,7 @@ const CreateProductionBatchForm = () => {
     const [isLoading, setIsLoading]         = useState(true);
     const [isSaving,  setIsSaving]          = useState(false);
     const [error,     setError]             = useState(null);
+    const [success,   setSuccess]           = useState(null);
     const [fabricTypeFilter,  setFabricTypeFilter]  = useState('');
     const [fabricColorFilter, setFabricColorFilter] = useState('');
     const [activeTab, setActiveTab]         = useState('overview');
@@ -294,6 +295,7 @@ const CreateProductionBatchForm = () => {
                 if (isEditMode) {
                     const res  = await productionManagerApi.getBatchForEdit(batchId);
                     const data = res.data;
+                    console.log('[EditBatch] raw API response:', JSON.parse(JSON.stringify(data)));
 
                     // Handle both API shapes: { batchDetails, ... } or { batch, ... }
                     const batchDetails = data?.batchDetails ?? data?.batch ?? data;
@@ -491,6 +493,7 @@ const CreateProductionBatchForm = () => {
 
         setIsSaving(true);
         setError(null);
+        setSuccess(null);
         try {
             if (isEditMode) {
                 await productionManagerApi.updateBatch(batchId, {
@@ -503,6 +506,9 @@ const CreateProductionBatchForm = () => {
                         .filter(r => !isNaN(r.ratio) && r.ratio > 0),
                     rolls: selectedShellRolls.map(id => parseInt(id, 10)),
                 });
+                setSuccess('Batch updated successfully.');
+                setIsSaving(false);
+                return;
             } else {
                 const metaNotes = `\n[System Info] Planned Qty: ${Math.round(interliningRequirements.reduce((acc, r) => acc + r.potentialPieces, 0))} | Interlining Template: ${selectedTemplate?.interlining_type || 'None'}`;
                 await productionManagerApi.create({
@@ -563,6 +569,11 @@ const CreateProductionBatchForm = () => {
 
                 <div className="p-6">
                     {error && <ErrorDisplay message={error} />}
+                    {success && (
+                        <div className="mb-4 p-3 rounded-md bg-green-50 border border-green-200 text-green-800 text-sm font-medium">
+                            {success}
+                        </div>
+                    )}
 
                     {/* ── OVERVIEW ───────────────────────────────────── */}
                     {activeTab === 'overview' && (
