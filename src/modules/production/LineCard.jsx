@@ -20,6 +20,26 @@ export const dhuColor = (dhu) => {
 
 export const fmt2 = (n) => (Math.round(n * 100) / 100).toFixed(2);
 
+// ── Collapse same-named parts (different part_ids across products) ─────────────
+
+function collapseByName(parts) {
+    const byName = new Map();
+    for (const part of parts) {
+        const key = (part.part_name || '').trim().toLowerCase();
+        if (!byName.has(key)) {
+            byName.set(key, { ...part, part_name: (part.part_name || '').trim() });
+        } else {
+            const rep = byName.get(key);
+            rep.target_quantity += part.target_quantity || 0;
+            rep.actual          += part.actual          || 0;
+            rep.achievement_pct  = rep.target_quantity > 0
+                ? Math.round(rep.actual / rep.target_quantity * 100)
+                : null;
+        }
+    }
+    return Array.from(byName.values());
+}
+
 // ── Data merge: combines targetFormData + targetSummary + lineOutput ──────────
 
 export function buildLineData(formLines = [], summaryRows = [], outputLines = []) {
@@ -51,7 +71,7 @@ export function buildLineData(formLines = [], summaryRows = [], outputLines = []
     return formLines.map(line => {
         const id  = String(line.line_id);
         const out = outputByLine.get(id) ?? { total_output: 0, total_defects: 0, total_approved: 0, total_rework: 0 };
-        let parts = summaryByLine.get(id) ?? [];
+        let parts = collapseByName(summaryByLine.get(id) ?? []);
 
         // Fallback if summary API returned no target parts at all
         if (parts.length === 0) {
@@ -86,7 +106,7 @@ export function buildLineData(formLines = [], summaryRows = [], outputLines = []
                         partMap[pp.part_id].target_quantity += pp.existing_quantity ?? 0;
                     }
                 }
-                parts = Object.values(partMap);
+                parts = collapseByName(Object.values(partMap));
             }
         }
 

@@ -1578,12 +1578,14 @@ const UniversalWorkstationDashboard = () => {
     const uniquePartNames = useMemo(() => {
         const names = new Set();
         batches.forEach(batch => {
-            (batch.bundles || []).forEach(b => { if (b.part_name) names.add(b.part_name); });
+            (batch.bundles || []).forEach(b => { if (b.part_name) names.add(b.part_name.trim().toLowerCase()); });
             (batch.rolls || []).forEach(r => {
-                (r.parts_details || []).forEach(p => { if (p.part_name) names.add(p.part_name); });
+                (r.parts_details || []).forEach(p => { if (p.part_name) names.add(p.part_name.trim().toLowerCase()); });
             });
         });
-        return [...names].sort();
+        const result = [...names].sort();
+        console.log('[PartFilter] dropdown options:', result);
+        return result;
     }, [batches]);
 
     useEffect(() => {
@@ -1606,7 +1608,7 @@ const UniversalWorkstationDashboard = () => {
         return next;
     });
 
-    const isPartVisible = (partName) => selectedParts.size === 0 || selectedParts.has(partName);
+    const isPartVisible = (partName) => selectedParts.size === 0 || selectedParts.has((partName || '').trim().toLowerCase());
 
     // ── Auth / navigation ─────────────────────────────────────────────────────
     const { user, logout } = useAuth();

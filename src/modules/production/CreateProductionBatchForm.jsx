@@ -259,6 +259,7 @@ const CreateProductionBatchForm = () => {
     const [success,   setSuccess]           = useState(null);
     const [fabricTypeFilter,  setFabricTypeFilter]  = useState('');
     const [fabricColorFilter, setFabricColorFilter] = useState('');
+    const [rollSearch,        setRollSearch]        = useState('');
     const [activeTab, setActiveTab]         = useState('overview');
 
     // ── 1. Initial data load ──────────────────────────────────────────────
@@ -399,15 +400,24 @@ const CreateProductionBatchForm = () => {
 
     // Shell roll filtering
     const filteredShellRolls = useMemo(() => {
+        const q = rollSearch.trim().toLowerCase();
         return (options.availableRolls || []).filter(roll => {
             const rollType = (roll.type || roll.fabric_type || '').toLowerCase();
             if (rollType.includes('interlining') || rollType.includes('fusing')) return false;
             const rollColor = roll.color || roll.color_name || roll.fabric_color;
             const typeMatch  = !fabricTypeFilter  || rollType === fabricTypeFilter.toLowerCase();
             const colorMatch = !fabricColorFilter || rollColor === fabricColorFilter;
-            return typeMatch && colorMatch;
+            if (!typeMatch || !colorMatch) return false;
+            if (!q) return true;
+            return (
+                String(roll.id).includes(q) ||
+                (roll.bale_no || '').toLowerCase().includes(q) ||
+                rollType.includes(q) ||
+                (rollColor || '').toLowerCase().includes(q) ||
+                (roll.reference_number || '').toLowerCase().includes(q)
+            );
         });
-    }, [options.availableRolls, fabricTypeFilter, fabricColorFilter]);
+    }, [options.availableRolls, fabricTypeFilter, fabricColorFilter, rollSearch]);
 
     // Group rolls by color (SOP context) or reference number (plain mode)
     const shellGroups = useMemo(() => {
@@ -723,6 +733,14 @@ const CreateProductionBatchForm = () => {
                                     ))}
                                 </div>
                             )}
+
+                            <input
+                                type="text"
+                                value={rollSearch}
+                                onChange={e => setRollSearch(e.target.value)}
+                                placeholder="Search rolls by ID, bale no, type, color, reference…"
+                                className="w-full p-2 border rounded-md bg-white text-sm"
+                            />
 
                             <div className="max-h-96 overflow-y-auto p-2 border rounded-md bg-gray-50/50">
                                 {Object.keys(shellGroups).sort().length > 0

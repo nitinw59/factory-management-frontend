@@ -24,19 +24,52 @@ const tKeyGarment = (lineId) => `G_${lineId}`;
  * Take existing_quantity from whichever batch already has a saved target.
  */
 function getUniquePartsForLine(line) {
-    const seen = new Map(); // part_id → part object
+    // Build part_id → owning batch_id (IN_PROGRESS > PENDING > first, last write wins)
+    const partBatchMap = new Map();
+    const ordered = [
+        ...line.batches.filter(b => b.batch_status !== 'IN_PROGRESS' && b.batch_status !== 'PENDING'),
+        ...line.batches.filter(b => b.batch_status === 'PENDING'),
+        ...line.batches.filter(b => b.batch_status === 'IN_PROGRESS'),
+    ];
+    for (const batch of ordered) {
+        for (const part of batch.piece_parts ?? []) {
+            partBatchMap.set(part.part_id, batch.batch_id);
+        }
+    }
+
+    // Pass 1: dedup by part_id, keep max existing_quantity
+    const byId = new Map();
     for (const batch of line.batches) {
         for (const part of batch.piece_parts ?? []) {
-            if (!seen.has(part.part_id)) {
-                seen.set(part.part_id, { ...part });
-            } else if (parseInt(part.existing_quantity) > 0) {
-                // Prefer the entry that already has a saved target
-                seen.get(part.part_id).existing_quantity = part.existing_quantity;
-                seen.get(part.part_id).target_id = part.target_id;
+            const qty = parseInt(part.existing_quantity) || 0;
+            if (!byId.has(part.part_id)) {
+                byId.set(part.part_id, { ...part, existing_quantity: qty });
+            } else {
+                const prev = byId.get(part.part_id);
+                if (qty > (parseInt(prev.existing_quantity) || 0)) {
+                    prev.existing_quantity = qty;
+                    prev.target_id = part.target_id;
+                }
             }
         }
     }
-    return Array.from(seen.values());
+
+    // Pass 2: collapse by normalized name across all products.
+    // existing_quantity is SUMMED — inverse of the equal-split on save,
+    // so if 300 was saved as 100+100+100, the pre-fill shows 300 again.
+    const byName = new Map();
+    for (const part of byId.values()) {
+        const key = (part.part_name || '').trim().toLowerCase();
+        if (!byName.has(key)) {
+            byName.set(key, { ...part, _allPartIds: [part.part_id], _partBatchMap: partBatchMap });
+        } else {
+            const rep = byName.get(key);
+            rep._allPartIds.push(part.part_id);
+            rep.existing_quantity = (parseInt(rep.existing_quantity) || 0) + (parseInt(part.existing_quantity) || 0);
+            if (!rep.target_id && part.target_id) rep.target_id = part.target_id;
+        }
+    }
+    return Array.from(byName.values());
 }
 
 /** Primary batch to associate PIECE targets with when saving */
@@ -293,7 +326,14 @@ function LineCard({ line, targets, onQtyChange, onManpowerClick }) {
                             <tbody>
                                 {uniqueParts.map(part => (
                                     <tr key={part.part_id} className="border-b border-gray-50 last:border-b-0">
-                                        <td className="py-2.5 text-gray-700 font-medium">{part.part_name}</td>
+                                        <td className="py-2.5 text-gray-700 font-medium">
+                                            {(part.part_name || '').trim()}
+                                            {(part._allPartIds?.length ?? 1) > 1 && (
+                                                <span className="ml-1.5 text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">
+                                                    ×{part._allPartIds.length}
+                                                </span>
+                                            )}
+                                        </td>
                                         <td className="py-2.5">
                                             <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PART_TYPE_BADGE[part.part_type] ?? 'bg-gray-100 text-gray-500'}`}>
                                                 {part.part_type}
@@ -416,6 +456,7 @@ export default function ProductionTargetPage() {
             const res     = await productionManagerApi.getTargetFormData(targetDate);
             console.log('Loaded target form data:', res.data);
             const fetched = res.data?.lines ?? [];
+            console.log('[ProductionTargets] fetched lines:', JSON.parse(JSON.stringify(fetched)));
             setLines(fetched);
             setTargets(buildInitialTargets(fetched));
         } catch (err) {
@@ -440,20 +481,23 @@ export default function ProductionTargetPage() {
             if (line.target_type === 'SKIP') continue;
 
             if (line.target_type === 'PIECE') {
-                const primaryBatch = getPrimaryBatch(line);
-                if (!primaryBatch) continue;
-
                 const uniqueParts = getUniquePartsForLine(line);
                 for (const part of uniqueParts) {
                     const qty = parseInt(targets[tKeyPiece(line.line_id, part.part_id)]);
-                    if (qty > 0) {
+                    if (!(qty > 0)) continue;
+                    const ids = part._allPartIds ?? [part.part_id];
+                    const base = Math.floor(qty / ids.length);
+                    const remainder = qty % ids.length;
+                    ids.forEach((pid, i) => {
+                        const batchId = part._partBatchMap?.get(pid) ?? getPrimaryBatch(line)?.batch_id;
+                        if (!batchId) return;
                         entries.push({
                             line_id:  parseInt(line.line_id),
-                            batch_id: parseInt(primaryBatch.batch_id),
-                            part_id:  parseInt(part.part_id),
-                            quantity: qty,
+                            batch_id: parseInt(batchId),
+                            part_id:  parseInt(pid),
+                            quantity: base + (i === 0 ? remainder : 0),
                         });
-                    }
+                    });
                 }
             } else if (line.target_type === 'GARMENT') {
                 const primaryBatch = getPrimaryBatch(line);
