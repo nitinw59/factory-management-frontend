@@ -137,9 +137,11 @@ import MerchandiserPlanningPage from './modules/merchandiser/MerchandiserPlannin
 import PurchaseDepartmentProtectedRoute from './shared/PurchaseDepartmentProtectedRoute';
 import PurchaseDepartmentLayout from './shared/PurchaseDepartmentLayout';
 import RequirementsPage from './modules/purchase_department/RequirementsPage';
+import RaiseRequirementPage from './modules/purchase_department/RaiseRequirementPage';
 import OrdersPage from './modules/purchase_department/OrdersPage';
 import TrimsLedgerPage from './modules/purchase_department/TrimsLedgerPage';
 import PurchaseFlowPage from './modules/purchase_department/PurchaseFlowPage';
+import InwardsPage from './modules/purchase_department/InwardsPage';
 
 
 
@@ -252,6 +254,8 @@ function App() {
           <Route path="spares-analytics" element={<SparesAnalyticsPage />} />
           <Route path="orders" element={<OrdersPage />} />
           <Route path="orders/:id" element={<PurchaseFlowPage />} />
+          <Route path="inwards" element={<InwardsPage />} />
+          <Route path="raise-requirement" element={<RaiseRequirementPage />} />
           <Route path="planning" element={<MerchandiserPlanningPage />} />
           <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
         </Route>
@@ -312,6 +316,7 @@ function App() {
             <Route path="purchase/invoices" element={<PurchaseInvoicesPage />} />
             <Route path="purchase/trims-ledger" element={<TrimsLedgerPage />} />
             <Route path="purchase/supplier-color-codes" element={<SupplierColorCodesPage />} />
+            <Route path="purchase/inwards" element={<InwardsPage />} />
             <Route path="job-work" element={<AccountsJobWorkPage />} />
         </Route>
 
@@ -469,11 +474,13 @@ function App() {
     <Route path="/purchase-department" element={<PurchaseDepartmentProtectedRoute><PurchaseDepartmentLayout /></PurchaseDepartmentProtectedRoute>}>
         <Route index element={<Navigate to="requirements" replace />} />
         <Route path="requirements" element={<RequirementsPage />} />
+        <Route path="raise-requirement" element={<RaiseRequirementPage />} />
         <Route path="orders" element={<OrdersPage />} />
         <Route path="orders/:id" element={<PurchaseFlowPage />} />
         <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
         <Route path="trims-ledger" element={<TrimsLedgerPage />} />
         <Route path="supplier-color-codes" element={<SupplierColorCodesPage />} />
+        <Route path="inwards" element={<InwardsPage />} />
     </Route>
 
     {/* Receiver Portal */}

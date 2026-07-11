@@ -13,6 +13,7 @@ const buildFormData = (data, fileField, file) => {
 export const purchaseDeptApi = {
     getRequirements: (params) => api.get('/purchase-department/requirements', { params }),
     raiseRequirement: (data) => api.post('/purchase-department/requirements', data),
+    raiseStandaloneRequirement: (data) => api.post('/purchase-department/requirements/standalone', data),
     cancelRequirement: (id) => api.patch(`/purchase-department/requirements/${id}/cancel`),
 
     // PO line items (DRAFT-only)
@@ -38,6 +39,13 @@ export const purchaseDeptApi = {
             ? api.patch(`/purchase-department/inwards/${id}`, buildFormData(data, 'scan', scanFile))
             : api.patch(`/purchase-department/inwards/${id}`, data),
     deleteInward: (id) => api.delete(`/purchase-department/inwards/${id}`),
+    listAllInwards: (params) => api.get('/purchase-department/inwards', { params }),
+    createStandaloneInward: (data, scanFile) =>
+        scanFile
+            ? api.post('/purchase-department/inwards', buildFormData(data, 'scan', scanFile))
+            : api.post('/purchase-department/inwards', data),
+    approveInward: (id) => api.patch(`/purchase-department/inwards/${id}/approve`),
+    rejectInward: (id, notes) => api.patch(`/purchase-department/inwards/${id}/reject`, { notes }),
 
     // PO documents — generated PDFs (TODO backend):
     //   POST   /purchase-department/orders/:id/po-document   (multipart: file=<pdf>, version, generated_at)

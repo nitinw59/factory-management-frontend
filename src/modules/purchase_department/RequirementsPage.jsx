@@ -3,6 +3,7 @@ import {
     Loader2, Filter, CheckSquare, Square, ShoppingCart,
     AlertTriangle, ChevronDown, ChevronUp, X, Search,
     Package, Scissors, Tag, Layers, List, Maximize2, Minimize2, Ban,
+    Wrench, FileText,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import api from '../../utils/api';
@@ -36,9 +37,10 @@ const STATUS_TABS = [
 ];
 
 const TYPE_CFG = {
-    fabric: { icon: Package,  cls: 'bg-violet-100 text-violet-700', label: 'Fabric' },
-    trim:   { icon: Scissors, cls: 'bg-amber-100 text-amber-700',   label: 'Trim'   },
-    other:  { icon: Tag,      cls: 'bg-slate-100 text-slate-600',   label: 'Other'  },
+    fabric: { icon: Package,   cls: 'bg-violet-100 text-violet-700', label: 'Fabric' },
+    trim:   { icon: Scissors,  cls: 'bg-amber-100 text-amber-700',   label: 'Trim'   },
+    spare:  { icon: Wrench,    cls: 'bg-blue-100 text-blue-700',     label: 'Spare'  },
+    other:  { icon: FileText,  cls: 'bg-slate-100 text-slate-600',   label: 'Other'  },
 };
 
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en', { dateStyle: 'medium' }) : '—';
@@ -100,6 +102,14 @@ const reqTitle = (req) => {
         const base = req.trim_item_name || 'Trim requirement';
         return req.variant_size ? `${base} · Sz ${req.variant_size}` : base;
     }
+    if (req.type === 'spare') {
+        return req.spare_part_name
+            ? `${req.spare_part_name}${req.spare_part_number ? ` (${req.spare_part_number})` : ''}`
+            : 'Spare part requirement';
+    }
+    if (req.type === 'other') {
+        return req.description || 'Other requirement';
+    }
     return 'Requirement';
 };
 
@@ -118,6 +128,10 @@ const LeafRow = ({ req, isFabric, isSelected, onToggle, onOpenPo, openingPo, onR
                 {req.is_free_form ? (
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
                         Custom PO
+                    </span>
+                ) : req.is_standalone ? (
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                        Standalone
                     </span>
                 ) : (
                     <span className="text-[11px] font-mono text-slate-600">{req.order_number || '—'}</span>
@@ -194,32 +208,40 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
     const groups = useMemo(() => {
         const map = new Map();
         requirements.forEach(req => {
-            // Trim: one bucket per trim_item_variant_id (so substitute vs exact stay separate).
-            // Fabric: one bucket per (fabric_type_id, fabric_color_id) — what the backend expects.
             const key =
                 req.type === 'fabric'
                     ? `fabric:${req.fabric_type_id ?? 't?'}:${req.fabric_color_id ?? 'c?'}`
                     : req.type === 'trim'
                         ? `trim:${req.trim_item_variant_id ?? `req-${req.id}`}`
-                        : `other:${req.id}`;
+                        : req.type === 'spare'
+                            ? `spare:${req.spare_part_id ?? `req-${req.id}`}`
+                            : `other:${req.description ?? req.id}`;
             if (!map.has(key)) {
+                let label;
+                if (req.type === 'fabric') {
+                    label = `${req.fabric_type_name || 'Fabric'}${req.fabric_color_name ? ` · ${req.fabric_color_name}` : ''}${req.fabric_color_number ? ` (${req.fabric_color_number})` : ''}`;
+                } else if (req.type === 'trim') {
+                    label = `${req.trim_item_name || 'Trim'}${req.variant_color_name ? ` · ${req.variant_color_name}` : ''}${req.variant_color_number ? ` · ${req.variant_color_number}` : ''}${req.variant_size ? ` · Sz ${req.variant_size}` : ''}${req.is_substitute ? ' (sub)' : ''}`;
+                } else if (req.type === 'spare') {
+                    label = req.spare_part_name
+                        ? `${req.spare_part_name}${req.spare_part_number ? ` (${req.spare_part_number})` : ''}`
+                        : 'Spare Part';
+                } else {
+                    label = req.description || 'Other';
+                }
                 map.set(key, {
                     key,
                     type: req.type,
-                    label:
-                        req.type === 'fabric'
-                            ? `${req.fabric_type_name || 'Fabric'}${req.fabric_color_name ? ` · ${req.fabric_color_name}` : ''}${req.fabric_color_number ? ` (${req.fabric_color_number})` : ''}`
-                            : req.type === 'trim'
-                                ? `${req.trim_item_name || 'Trim'}${req.variant_color_name ? ` · ${req.variant_color_name}` : ''}${req.variant_color_number ? ` · ${req.variant_color_number}` : ''}${req.variant_size ? ` · Sz ${req.variant_size}` : ''}${req.is_substitute ? ' (sub)' : ''}`
-                                : 'Other',
+                    label,
                     items: [],
                     totalMeters: 0,
                     totalQty: 0,
                     unitOfMeasure: req.unit_of_measure || req.trim_uom,
-                    // Payload identifiers, captured from the first member
                     fabric_type_id:       req.fabric_type_id ?? null,
                     fabric_color_id:      req.fabric_color_id ?? null,
                     trim_item_variant_id: req.trim_item_variant_id ?? null,
+                    spare_part_id:        req.spare_part_id ?? null,
+                    description:          req.description ?? null,
                 });
             }
             const g = map.get(key);
@@ -250,6 +272,14 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
     const handleSubmit = async () => {
         if (!supplierId)    { setErr('Please select a supplier'); return; }
         if (!deliveryDate)  { setErr('Please set an expected delivery date'); return; }
+
+        const hasStandalone = requirements.some(r => r.is_standalone);
+        const hasSoLinked   = requirements.some(r => !r.is_standalone && !r.is_free_form);
+        if (hasStandalone && hasSoLinked) {
+            setErr('Cannot mix standalone and sales-order requirements in one PO. Create separate POs.');
+            return;
+        }
+
         setBusy(true); setErr(null);
         try {
             const items = groups.map(g => {
@@ -269,21 +299,44 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
                         requirement_ids,
                     };
                 }
+                if (g.type === 'trim') {
+                    return {
+                        type:                 'trim',
+                        trim_item_variant_id: g.trim_item_variant_id,
+                        quantity,
+                        uom:                  g.unitOfMeasure || 'pcs',
+                        unit_price,
+                        requirement_ids,
+                    };
+                }
+                if (g.type === 'spare') {
+                    return {
+                        type:          'spare',
+                        spare_part_id: g.spare_part_id,
+                        quantity,
+                        uom:           g.unitOfMeasure || 'pcs',
+                        unit_price,
+                        requirement_ids,
+                    };
+                }
                 return {
-                    type:                 'trim',
-                    trim_item_variant_id: g.trim_item_variant_id,
+                    type:        'other',
+                    description: g.description,
                     quantity,
-                    uom:                  g.unitOfMeasure || 'pcs',
+                    uom:         g.unitOfMeasure || 'pcs',
                     unit_price,
                     requirement_ids,
                 };
             });
 
-            await purchaseDeptApi.createOrder({
+            const payload = {
                 supplier_id:            supplierId ? parseInt(supplierId) : null,
                 expected_delivery_date: deliveryDate || null,
                 items,
-            });
+            };
+            // Standalone requirements produce a CUSTOM-PO — no sales_order_id needed.
+
+            await purchaseDeptApi.createOrder(payload);
             onCreated();
         } catch (e) {
             setErr(e?.response?.data?.error || 'Failed to create purchase order');
@@ -614,6 +667,7 @@ const RequirementsPage = () => {
                 r.variant_color_name, r.variant_color_number, r.variant_size,
                 r.customer_name, r.order_number, r.buyer_po_number,
                 r.raised_by_name, r.po_code,
+                r.spare_part_name, r.spare_part_number, r.description,
             ].some(v => (v || '').toLowerCase().includes(q));
           })
         : requirements;
@@ -626,12 +680,16 @@ const RequirementsPage = () => {
         return new Date(b.created_at) - new Date(a.created_at);
     });
 
-    // Material buckets: two-tier for both types.
-    //   trim  : trim_item   → trim_item_variant → rows
-    //   fabric: fabric_type → fabric_color      → rows
+    // Material buckets:
+    //   fabric: fabric_type → fabric_color      → rows  (two-tier)
+    //   trim  : trim_item   → trim_item_variant → rows  (two-tier)
+    //   spare : spare_part                      → rows  (flat)
+    //   other : description                     → rows  (flat)
     const materialBuckets = useMemo(() => {
         const fabricItemMap = new Map();
         const trimItemMap   = new Map();
+        const spareItemMap  = new Map();
+        const otherItemMap  = new Map();
 
         sorted.forEach(req => {
             if (req.type === 'fabric') {
@@ -686,6 +744,30 @@ const RequirementsPage = () => {
                     });
                 }
                 item.variantMap.get(subKey).rows.push(req);
+            } else if (req.type === 'spare') {
+                const itemKey = req.spare_part_id ?? req.spare_part_name ?? `spare-${req.id}`;
+                if (!spareItemMap.has(itemKey)) {
+                    spareItemMap.set(itemKey, {
+                        type:  'spare',
+                        key:   `spare-item:${itemKey}`,
+                        label: req.spare_part_name
+                            ? `${req.spare_part_name}${req.spare_part_number ? ` (${req.spare_part_number})` : ''}`
+                            : 'Spare Part',
+                        rows: [],
+                    });
+                }
+                spareItemMap.get(itemKey).rows.push(req);
+            } else {
+                const itemKey = req.description ?? `other-${req.id}`;
+                if (!otherItemMap.has(itemKey)) {
+                    otherItemMap.set(itemKey, {
+                        type:  'other',
+                        key:   `other-item:${itemKey}`,
+                        label: req.description || 'Other',
+                        rows:  [],
+                    });
+                }
+                otherItemMap.get(itemKey).rows.push(req);
             }
         });
 
@@ -710,10 +792,21 @@ const RequirementsPage = () => {
             };
         };
 
+        const buildFlatBucket = (item, type) => ({
+            type,
+            key:    item.key,
+            label:  item.label,
+            isFlat: true,
+            rows:   item.rows,
+            stats:  bucketStats(item.rows),
+        });
+
         const fabricBuckets = [...fabricItemMap.values()].map(item => buildBucket(item, 'fabric'));
         const trimBuckets   = [...trimItemMap.values()].map(item => buildBucket(item, 'trim'));
+        const spareBuckets  = [...spareItemMap.values()].map(item => buildFlatBucket(item, 'spare'));
+        const otherBuckets  = [...otherItemMap.values()].map(item => buildFlatBucket(item, 'other'));
 
-        const all = [...trimBuckets, ...fabricBuckets];
+        const all = [...trimBuckets, ...fabricBuckets, ...spareBuckets, ...otherBuckets];
         all.sort((a, b) => {
             const ua = URGENCY_RANK[a.stats.urgency] ?? 1;
             const ub = URGENCY_RANK[b.stats.urgency] ?? 1;
@@ -785,7 +878,7 @@ const RequirementsPage = () => {
         const keys = [];
         visibleBuckets.forEach(b => {
             keys.push(b.key);
-            b.variants.forEach(v => keys.push(v.key));
+            if (b.variants) b.variants.forEach(v => keys.push(v.key));
         });
         return keys;
     }, [visibleBuckets]);
@@ -919,9 +1012,9 @@ const RequirementsPage = () => {
                         className="w-full text-sm border border-slate-200 rounded-xl pl-9 pr-3 py-2 focus:outline-none focus:border-orange-400"
                     />
                 </div>
-                <div className="flex items-center gap-1.5 text-sm">
+                <div className="flex items-center gap-1.5 text-sm flex-wrap">
                     <Filter size={13} className="text-slate-400" />
-                    {['', 'fabric', 'trim'].map(t => (
+                    {['', 'fabric', 'trim', 'spare', 'other'].map(t => (
                         <button
                             key={t}
                             onClick={() => setTypeFilter(t)}
@@ -1016,21 +1109,21 @@ const RequirementsPage = () => {
                         </div>
                     )}
                     {visibleBuckets.map(bucket => {
-                        const allRows  = bucket.variants.flatMap(v => v.rows);
+                        const allRows  = bucket.isFlat ? bucket.rows : bucket.variants.flatMap(v => v.rows);
                         const sel      = bucketSelection(allRows);
                         const isOpen   = expandedKeys.has(bucket.key);
                         const ucfg     = URGENCY_CFG[bucket.stats.urgency] || URGENCY_CFG.normal;
                         const isFabric = bucket.type === 'fabric';
-                        const typeCfg  = TYPE_CFG[isFabric ? 'fabric' : 'trim'];
+                        const typeCfg  = TYPE_CFG[bucket.type] || TYPE_CFG.other;
                         const TypeIcon = typeCfg.icon;
                         const pendable = allRows.filter(r => r.status === 'PENDING').length;
-                        // Both types now have variants → sum their in_stock for a head-level signal.
-                        const headStock = bucket.variants.reduce((s, v) => s + (Number(v.in_stock) || 0), 0);
+                        const headStock = bucket.isFlat ? 0 : bucket.variants.reduce((s, v) => s + (Number(v.in_stock) || 0), 0);
                         const headPending = isFabric ? bucket.stats.pendingMeters : bucket.stats.pendingQty;
                         const headOnOrder = isFabric ? bucket.stats.onOrderMeters : bucket.stats.onOrderQty;
-                        // Shortfall = what still needs covering after current stock + already-on-order.
                         const headShortfall = Math.max(0, headPending - headStock - headOnOrder);
                         const subLabel = isFabric ? 'color' : 'variant';
+                        const variantCount = bucket.isFlat ? bucket.rows.length : bucket.variants.length;
+                        const subLabelText = bucket.isFlat ? 'request' : subLabel;
 
                         return (
                             <div
@@ -1072,7 +1165,7 @@ const RequirementsPage = () => {
                                                 {ucfg.label}
                                             </span>
                                             <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                                                {bucket.variants.length} {subLabel}{bucket.variants.length !== 1 ? 's' : ''}
+                                                {variantCount} {subLabelText}{variantCount !== 1 ? 's' : ''}
                                             </span>
                                             {bucket.stats.substituteCount > 0 && !isFabric && (
                                                 <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">
@@ -1131,7 +1224,26 @@ const RequirementsPage = () => {
                                     </div>
                                 </div>
 
-                                {isOpen && (
+                                {isOpen && bucket.isFlat && (
+                                    <div className="px-4 pb-3 pt-0 border-t border-slate-100">
+                                        <div className="space-y-1 pt-3">
+                                            {bucket.rows.map(r => (
+                                                <LeafRow
+                                                    key={r.id}
+                                                    req={r}
+                                                    isFabric={false}
+                                                    isSelected={selected.has(r.id)}
+                                                    onToggle={toggleSelect}
+                                                    onOpenPo={openPoFromReq}
+                                                    openingPo={loadingPoCode === r.po_code}
+                                                    onReject={handleRejectReq}
+                                                />
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {isOpen && !bucket.isFlat && (
                                     <div className="px-4 pb-3 pt-0 border-t border-slate-100">
                                         <div className="space-y-2 pt-3">
                                             {bucket.variants.map(v => {
@@ -1303,7 +1415,9 @@ const RequirementsPage = () => {
                                                             )}
                                                         </div>
                                                         <p className="text-xs text-slate-500 mt-0.5">
-                                                            {req.order_number || 'No SO linked'}
+                                                            {req.is_standalone
+                                                                ? <span className="text-emerald-700 font-semibold">Standalone</span>
+                                                                : (req.order_number || 'No SO linked')}
                                                             {req.customer_name ? ` · ${req.customer_name}` : ''}
                                                             {req.product_name ? ` · ${req.product_name}` : ''}
                                                             {req.raised_by_name ? ` · by ${req.raised_by_name}` : ''}
@@ -1435,6 +1549,26 @@ const RequirementsPage = () => {
                                                             )}
                                                         </div>
 
+                                                        {req.type === 'spare' && req.spare_part_name && (
+                                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Spare Part</p>
+                                                                    <p className="font-medium text-slate-700">{req.spare_part_name}</p>
+                                                                </div>
+                                                                {req.spare_part_number && (
+                                                                    <div>
+                                                                        <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Part Number</p>
+                                                                        <p className="font-mono text-slate-700">{req.spare_part_number}</p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                        {req.type === 'other' && req.description && (
+                                                            <div>
+                                                                <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Description</p>
+                                                                <p className="text-xs text-slate-700">{req.description}</p>
+                                                            </div>
+                                                        )}
                                                         {req.notes && (
                                                             <div>
                                                                 <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Notes</p>

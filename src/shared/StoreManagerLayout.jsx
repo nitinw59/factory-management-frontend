@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
-import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag, LuScrollText } from 'react-icons/lu';
+import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag, LuScrollText, LuInbox, LuFilePlus } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
 
 // No changes to NavDropdown component
@@ -94,6 +94,14 @@ const StoreManagerLayout = () => {
                                 <LuClipboardList className="mr-1" /> Orders
                             </NavLink>
 
+                            <NavLink to="/store-manager/inwards" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
+                                <LuInbox className="mr-1" /> Inwards
+                            </NavLink>
+
+                            <NavLink to="/store-manager/raise-requirement" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
+                                <LuFilePlus className="mr-1" /> Raise Request
+                            </NavLink>
+
                               <NavDropdown title="Spares">
                             <NavLink to="/store-manager/spare-parts" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                 <LuPackage className="mr-2" /> Spare Inventory
@@ -155,6 +163,12 @@ const StoreManagerLayout = () => {
                             </NavLink>
                             <NavLink to="/store-manager/orders" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuClipboardList className="mr-2" /> Orders
+                            </NavLink>
+                            <NavLink to="/store-manager/inwards" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuInbox className="mr-2" /> Inwards
+                            </NavLink>
+                            <NavLink to="/store-manager/raise-requirement" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuFilePlus className="mr-2" /> Raise Request
                             </NavLink>
                             <NavLink to="/store-manager/spare-parts" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuPackage className="mr-2" /> Spare Parts
