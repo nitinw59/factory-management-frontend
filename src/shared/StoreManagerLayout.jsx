@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
-import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag, LuScrollText, LuInbox, LuFilePlus } from 'react-icons/lu';
+import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag, LuScrollText, LuInbox, LuFilePlus, LuBoxes } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
 
 // No changes to NavDropdown component
@@ -90,6 +90,22 @@ const StoreManagerLayout = () => {
 
 
 
+                            <NavLink to="/store-manager/general-items" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
+                                <LuBoxes className="mr-1" /> General Items
+                            </NavLink>
+
+                            <NavDropdown title="Spares">
+                                <NavLink to="/store-manager/spare-parts" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuPackage className="mr-2" /> Spare Inventory
+                                </NavLink>
+                                <NavLink to="/store-manager/spare-parts-issuance" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuPackage className="mr-2" /> Spare Billing
+                                </NavLink>
+                                <NavLink to="/store-manager/spares-analytics" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuChartLine className="mr-2" /> Spares Analytics
+                                </NavLink>
+                            </NavDropdown>
+
                             <NavLink to="/store-manager/orders" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
                                 <LuClipboardList className="mr-1" /> Orders
                             </NavLink>
@@ -102,17 +118,6 @@ const StoreManagerLayout = () => {
                                 <LuFilePlus className="mr-1" /> Raise Request
                             </NavLink>
 
-                              <NavDropdown title="Spares">
-                            <NavLink to="/store-manager/spare-parts" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                                <LuPackage className="mr-2" /> Spare Inventory
-                            </NavLink>
-                            <NavLink to="/store-manager/spare-parts-issuance" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                                <LuPackage className="mr-2" /> Spare Billing
-                            </NavLink>
-                            <NavLink to="/store-manager/spares-analytics" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                                <LuChartLine className="mr-2" /> Spares Analytics
-                            </NavLink>
-                            </NavDropdown>
                             <NavLink to="/store-manager/planning" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
                                 <LuCalendarClock className="mr-1" /> Production Planning
                             </NavLink>
@@ -161,6 +166,15 @@ const StoreManagerLayout = () => {
                             <NavLink to="/store-manager/trim-stock-ledger" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuScrollText className="mr-2" /> Stock Ledger
                             </NavLink>
+                            <NavLink to="/store-manager/general-items" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuBoxes className="mr-2" /> General Items
+                            </NavLink>
+                            <NavLink to="/store-manager/spare-parts" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuPackage className="mr-2" /> Spare Parts
+                            </NavLink>
+                            <NavLink to="/store-manager/spares-analytics" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuChartLine className="mr-2" /> Spares Analytics
+                            </NavLink>
                             <NavLink to="/store-manager/orders" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuClipboardList className="mr-2" /> Orders
                             </NavLink>
@@ -169,12 +183,6 @@ const StoreManagerLayout = () => {
                             </NavLink>
                             <NavLink to="/store-manager/raise-requirement" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuFilePlus className="mr-2" /> Raise Request
-                            </NavLink>
-                            <NavLink to="/store-manager/spare-parts" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
-                                <LuPackage className="mr-2" /> Spare Parts
-                            </NavLink>
-                            <NavLink to="/store-manager/spares-analytics" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
-                                <LuChartLine className="mr-2" /> Spares Analytics
                             </NavLink>
                             <NavLink to="/store-manager/planning" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuCalendarClock className="mr-2" /> Production Planning

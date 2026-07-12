@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Loader2, AlertTriangle, Receipt, Check } from 'lucide-react';
 import { accountingApi } from '../../../api/accountingApi';
 import { purchaseDeptApi } from '../../../api/purchaseDeptApi';
-import InvoiceModal, { PaymentPill } from '../../purchase_department/InvoiceModal';
+import InvoiceModal, { PaymentPill, MatchPill } from '../../purchase_department/InvoiceModal';
 import InwardDisplayModal from '../../purchase_department/InwardDisplayModal';
 
 const STATUS_FILTERS = [
@@ -415,6 +415,7 @@ export default function PurchaseInvoicesPage() {
                                                             {inv.invoice_number || `Invoice #${inv.id}`}
                                                         </p>
                                                         <PaymentPill status={inv.payment_status} />
+                                                        <MatchPill status={inv.match_status} />
                                                     </div>
                                                     <p className="text-[11px] text-slate-500 mt-0.5">
                                                         {inv._po.po_code || `PO #${inv._po.id}`}

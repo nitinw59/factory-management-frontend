@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
-import { CheckCircle2, Loader2, AlertTriangle, Plus, ArrowLeft } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { CheckCircle2, Loader2, AlertTriangle, Plus, ArrowLeft, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import { trimsApi } from '../../api/trimsApi';
 import { sparesApi } from '../../api/sparesApi';
+import { generalItemsApi } from '../../api/generalItemsApi';
 import SearchableSelect from '../../shared/SearchableSelect';
 
 const TYPES = [
@@ -37,10 +38,19 @@ const RaiseRequirementPage = () => {
     const [metersRequired, setMeters]       = useState('');
     const [trimItemId,    setTrimItemId]    = useState('');
     const [trimVariantId, setTrimVariantId] = useState('');
-    const [spareId,       setSpareId]       = useState('');
-    const [quantity,      setQuantity]      = useState('');
-    const [uom,           setUom]           = useState('');
-    const [description,   setDescription]   = useState('');
+    const [spareId,         setSpareId]         = useState('');
+    const [generalItemId,   setGeneralItemId]   = useState('');
+    const [generalItems,    setGeneralItems]    = useState([]);
+    const [quantity,        setQuantity]        = useState('');
+    const [uom,             setUom]             = useState('');
+    const [description,     setDescription]     = useState(''); // notes only
+
+    // Quick-create general item
+    const [showQuickCreate,    setShowQuickCreate]    = useState(false);
+    const [quickCreateName,    setQuickCreateName]    = useState('');
+    const [quickCreateCode,    setQuickCreateCode]    = useState('');
+    const [quickCreateBusy,    setQuickCreateBusy]    = useState(false);
+    const [quickCreateErr,     setQuickCreateErr]     = useState(null);
     const [urgency,       setUrgency]       = useState('NORMAL');
     const [notes,         setNotes]         = useState('');
     const [unitPrice,     setUnitPrice]     = useState('');
@@ -62,6 +72,9 @@ const RaiseRequirementPage = () => {
         sparesApi.getAllSpares()
             .then(data => setSpareParts(Array.isArray(data) ? data : (data?.data || [])))
             .catch(() => {});
+        generalItemsApi.getItems({ active: true })
+            .then(r => setGeneralItems(r.data?.data ?? r.data ?? []))
+            .catch(() => {});
     }, []);
 
     useEffect(() => {
@@ -74,6 +87,25 @@ const RaiseRequirementPage = () => {
             .catch(() => {})
             .finally(() => setLoadingVars(false));
     }, [trimItemId]);
+
+    const handleQuickCreate = useCallback(async () => {
+        if (!quickCreateName.trim()) { setQuickCreateErr('Name is required.'); return; }
+        setQuickCreateBusy(true); setQuickCreateErr(null);
+        try {
+            const r = await generalItemsApi.createItem({
+                name: quickCreateName.trim(),
+                ...(quickCreateCode.trim() ? { item_code: quickCreateCode.trim() } : {}),
+            });
+            const newItem = r.data?.data ?? r.data;
+            setGeneralItems(prev => [...prev, newItem]);
+            setGeneralItemId(String(newItem.id));
+            setShowQuickCreate(false);
+        } catch (e) {
+            setQuickCreateErr(e?.response?.data?.error || 'Failed to create item.');
+        } finally {
+            setQuickCreateBusy(false);
+        }
+    }, [quickCreateName, quickCreateCode]);
 
     const resetForm = () => {
         setFabricTypeId(''); setFabricColorId(''); setMeters('');
@@ -108,11 +140,12 @@ const RaiseRequirementPage = () => {
             body.spare_part_id     = parseInt(spareId);
             body.quantity_required = parseFloat(quantity);
         } else {
-            if (!description.trim()) { setErr('Please enter a description.'); return; }
+            if (!generalItemId) { setErr('Please select an item.'); return; }
             if (!quantity || parseFloat(quantity) <= 0) { setErr('Enter quantity required.'); return; }
-            body.description       = description.trim();
+            body.general_item_id   = parseInt(generalItemId);
             body.quantity_required = parseFloat(quantity);
-            if (uom.trim()) body.unit_of_measure = uom.trim();
+            if (uom.trim())         body.unit_of_measure = uom.trim();
+            if (description.trim()) body.description     = description.trim();
         }
 
         setBusy(true);
@@ -155,6 +188,7 @@ const RaiseRequirementPage = () => {
     }
 
     return (
+        <>
         <div className="p-4 sm:p-6 max-w-2xl mx-auto space-y-5">
             <div className="flex items-center gap-3">
                 <button
@@ -315,13 +349,28 @@ const RaiseRequirementPage = () => {
                 {type === 'other' && (
                     <>
                         <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Description *</label>
-                            <input
-                                type="text" value={description}
-                                onChange={e => setDescription(e.target.value)}
-                                placeholder="e.g. Needle #14 × 5 boxes, packaging tape, etc."
-                                className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400"
-                            />
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Item *</label>
+                            <div className="flex gap-1.5">
+                                <div className="flex-1">
+                                    <SearchableSelect
+                                        value={generalItemId}
+                                        onChange={setGeneralItemId}
+                                        options={generalItems.map(i => ({
+                                            value: i.id,
+                                            label: `${i.name}${i.item_code ? ` (${i.item_code})` : ''}`,
+                                        }))}
+                                        placeholder="— Select general item —"
+                                    />
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => { setQuickCreateName(''); setQuickCreateCode(''); setQuickCreateErr(null); setShowQuickCreate(true); }}
+                                    title="Create new general item"
+                                    className="shrink-0 p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-500 transition-colors"
+                                >
+                                    <Plus size={14} />
+                                </button>
+                            </div>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                             <div>
@@ -341,6 +390,17 @@ const RaiseRequirementPage = () => {
                                     className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400"
                                 />
                             </div>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                                Description / Notes <span className="text-slate-300 normal-case font-normal">(optional)</span>
+                            </label>
+                            <input
+                                type="text" value={description}
+                                onChange={e => setDescription(e.target.value)}
+                                placeholder="Additional details about this request…"
+                                className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400"
+                            />
                         </div>
                     </>
                 )}
@@ -409,6 +469,61 @@ const RaiseRequirementPage = () => {
                 </div>
             </div>
         </div>
+
+            {/* Quick-create general item mini-modal */}
+            {showQuickCreate && (
+                <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-4" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-bold text-slate-800">New General Item</h3>
+                            <button onClick={() => setShowQuickCreate(false)} className="p-1 hover:bg-slate-100 rounded-full">
+                                <X size={14} className="text-slate-400" />
+                            </button>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Name *</label>
+                            <input
+                                autoFocus
+                                type="text" value={quickCreateName} onChange={e => setQuickCreateName(e.target.value)}
+                                placeholder="e.g. Sewing Needle #14"
+                                className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                Item Code <span className="text-slate-300 normal-case font-normal">(optional)</span>
+                            </label>
+                            <input
+                                type="text" value={quickCreateCode} onChange={e => setQuickCreateCode(e.target.value)}
+                                placeholder="e.g. GI-001"
+                                className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400"
+                            />
+                        </div>
+                        {quickCreateErr && (
+                            <p className="text-xs text-red-600 flex items-center gap-1">
+                                <AlertTriangle size={12} /> {quickCreateErr}
+                            </p>
+                        )}
+                        <div className="flex justify-end gap-2 pt-1">
+                            <button
+                                onClick={() => setShowQuickCreate(false)}
+                                className="text-xs font-medium text-slate-500 border border-slate-200 hover:bg-slate-50 px-3 py-1.5 rounded-lg transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleQuickCreate}
+                                disabled={quickCreateBusy}
+                                className="text-xs font-bold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-40 px-4 py-1.5 rounded-lg transition flex items-center gap-1.5"
+                            >
+                                {quickCreateBusy ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                                Create & Select
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
     );
 };
 

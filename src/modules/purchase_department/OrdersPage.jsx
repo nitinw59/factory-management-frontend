@@ -156,6 +156,12 @@ const OrdersPage = () => {
             const num   = it.fabric_color_number ? ` (${it.fabric_color_number})` : '';
             return `${type}${color}${num}${qtyTxt}`;
         }
+        if (it.item_type === 'spare') {
+            return `${it.spare_part_name || 'Spare'}${it.spare_part_number ? ` (${it.spare_part_number})` : ''}${qtyTxt}`;
+        }
+        if (it.item_type === 'other') {
+            return `${it.general_item_name || 'Other'}${it.general_item_code ? ` (${it.general_item_code})` : ''}${qtyTxt}`;
+        }
         const name    = it.trim_item_name || 'Trim';
         const variant = it.variant_color_name ? ` · ${it.variant_color_name}` : '';
         const num     = it.variant_color_number ? ` (${it.variant_color_number})` : '';
@@ -276,6 +282,8 @@ const OrdersPage = () => {
         const reqCount   = Number(order.requirement_count ?? 0);
         const fabCount   = Number(order.fabric_req_count ?? 0);
         const trimCount  = Number(order.trim_req_count ?? 0);
+        const spareCount = Number(order.spare_req_count ?? 0);
+        const otherCount = Number(order.other_req_count ?? 0);
         const isCustom   = reqCount === 0 || order.order_number == null;
         const isOverdue  = order.expected_delivery_date && new Date(order.expected_delivery_date) < new Date() && order.status !== 'COMPLETED';
 
@@ -320,7 +328,7 @@ const OrdersPage = () => {
                         <p className="text-xs text-slate-500 mt-0.5">
                             {order.supplier_name || 'No supplier'}
                             {reqCount > 0 && ` · ${reqCount} requirement${reqCount !== 1 ? 's' : ''}`}
-                            {reqCount > 0 && (fabCount > 0 || trimCount > 0) && ` (${[fabCount && `${fabCount} fabric`, trimCount && `${trimCount} trim`].filter(Boolean).join(', ')})`}
+                            {reqCount > 0 && (fabCount > 0 || trimCount > 0 || spareCount > 0 || otherCount > 0) && ` (${[fabCount && `${fabCount} fabric`, trimCount && `${trimCount} trim`, spareCount && `${spareCount} spare`, otherCount && `${otherCount} other`].filter(Boolean).join(', ')})`}
                             {order.order_number ? ` · SO ${order.order_number}` : ''}
                             {order.customer_name ? ` · ${order.customer_name}` : ''}
                             {order.expected_delivery_date ? ` · Due ${fmtDate(order.expected_delivery_date)}` : ''}
@@ -339,7 +347,11 @@ const OrdersPage = () => {
                                             className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md border ${
                                                 it.item_type === 'fabric'
                                                     ? 'bg-violet-50 text-violet-700 border-violet-100'
-                                                    : 'bg-amber-50 text-amber-700 border-amber-100'
+                                                    : it.item_type === 'spare'
+                                                        ? 'bg-blue-50 text-blue-700 border-blue-100'
+                                                        : it.item_type === 'other'
+                                                            ? 'bg-slate-50 text-slate-600 border-slate-200'
+                                                            : 'bg-amber-50 text-amber-700 border-amber-100'
                                             }`}
                                             title={itemChipLabel(it)}
                                         >

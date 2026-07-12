@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     X, Loader2, Plus, Trash2, Package, Scissors, Wrench, Tag, Upload,
     FileText, AlertTriangle, CheckCircle2, ChevronDown,
@@ -7,9 +7,11 @@ import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import { trimsApi } from '../../api/trimsApi';
 import { sparesApi } from '../../api/sparesApi';
+import { generalItemsApi } from '../../api/generalItemsApi';
 import { newRoll, sumRolls, mapRolls, rk } from './inwardShared';
 import InwardCreateModal from './InwardCreateModal';
 import InwardReviewModal from './InwardReviewModal';
+import SearchableSelect from '../../shared/SearchableSelect';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -36,8 +38,9 @@ const emptyLine = (type = 'trim') => ({
     // spare
     spare_part_id:       '',
     spare_qty:           '',
-    // other
-    description:         '',
+    // other (general item)
+    general_item_id:     '',
+    description:         '',   // optional notes
     other_qty:           '',
     uom:                 'pcs',
     // shared
@@ -81,7 +84,7 @@ function RollRow({ roll, onChange, onRemove, removable }) {
 
 // ── Single line-item card ─────────────────────────────────────────────────────
 
-function LineCard({ line, index, fabricTypes, fabricColors, trimItems, variantsByTrim, spareParts, onChange, onRemove }) {
+function LineCard({ line, index, fabricTypes, fabricColors, trimItems, variantsByTrim, spareParts, generalItems, onAddGeneralItem, onChange, onRemove }) {
     const [variantsLoading, setVariantsLoading] = useState(false);
 
     // Load variants when trim item changes
@@ -238,9 +241,29 @@ function LineCard({ line, index, fabricTypes, fabricColors, trimItems, variantsB
             {line.type === 'other' && (
                 <div className="grid grid-cols-2 gap-2">
                     <div className="col-span-2">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Description *</label>
-                        <input type="text" placeholder="What was received…" value={line.description} onChange={e => set('description', e.target.value)}
-                            className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400" />
+                        <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Item *</label>
+                        <div className="flex gap-1.5 items-center">
+                            <div className="flex-1">
+                                <SearchableSelect
+                                    value={line.general_item_id}
+                                    onChange={v => set('general_item_id', v)}
+                                    options={(generalItems || []).map(i => ({
+                                        value: i.id,
+                                        label: `${i.name}${i.item_code ? ` (${i.item_code})` : ''}`,
+                                    }))}
+                                    placeholder="— Select item —"
+                                    size="sm"
+                                />
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => onAddGeneralItem?.((newItem) => set('general_item_id', newItem.id))}
+                                title="Create new general item"
+                                className="shrink-0 p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                            >
+                                <Plus size={12} />
+                            </button>
+                        </div>
                     </div>
                     <div>
                         <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Qty *</label>
@@ -256,6 +279,11 @@ function LineCard({ line, index, fabricTypes, fabricColors, trimItems, variantsB
                         <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Unit Price (optional)</label>
                         <input type="number" min="0" step="0.01" placeholder="0.00" value={line.unit_price} onChange={e => set('unit_price', e.target.value)}
                             className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400 tabular-nums" />
+                    </div>
+                    <div className="col-span-2">
+                        <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Notes (optional)</label>
+                        <input type="text" placeholder="Any notes…" value={line.description} onChange={e => set('description', e.target.value)}
+                            className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400" />
                     </div>
                 </div>
             )}
@@ -299,11 +327,19 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
     const [lines, setLines] = useState([emptyLine('trim')]);
 
     // Lookup data
-    const [suppliers,    setSuppliers]    = useState([]);
-    const [fabricTypes,  setFabricTypes]  = useState([]);
-    const [fabricColors, setFabricColors] = useState([]);
-    const [trimItems,    setTrimItems]    = useState([]);
-    const [spareParts,   setSpareParts]   = useState([]);
+    const [suppliers,     setSuppliers]     = useState([]);
+    const [fabricTypes,   setFabricTypes]   = useState([]);
+    const [fabricColors,  setFabricColors]  = useState([]);
+    const [trimItems,     setTrimItems]     = useState([]);
+    const [spareParts,    setSpareParts]    = useState([]);
+    const [generalItems,  setGeneralItems]  = useState([]);
+
+    // Quick-create general item
+    const [quickCreate,        setQuickCreate]        = useState(null); // null | callback(newItem)
+    const [quickCreateName,    setQuickCreateName]    = useState('');
+    const [quickCreateCode,    setQuickCreateCode]    = useState('');
+    const [quickCreateBusy,    setQuickCreateBusy]    = useState(false);
+    const [quickCreateErr,     setQuickCreateErr]     = useState(null);
 
     // Submit state
     const [saving,  setSaving]  = useState(false);
@@ -326,6 +362,9 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
             .catch(() => {});
         sparesApi.getAllSpares()
             .then(data => setSpareParts(Array.isArray(data) ? data : (data?.data || [])))
+            .catch(() => {});
+        generalItemsApi.getItems({ active: true })
+            .then(r => setGeneralItems(r.data?.data ?? r.data ?? []))
             .catch(() => {});
     }, []);
 
@@ -370,6 +409,25 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
         }
     };
 
+    const handleQuickCreate = useCallback(async () => {
+        if (!quickCreateName.trim()) { setQuickCreateErr('Name is required.'); return; }
+        setQuickCreateBusy(true); setQuickCreateErr(null);
+        try {
+            const res = await generalItemsApi.createItem({
+                name: quickCreateName.trim(),
+                item_code: quickCreateCode.trim() || undefined,
+            });
+            const newItem = res.data?.data ?? res.data;
+            setGeneralItems(prev => [...prev, newItem]);
+            quickCreate?.(newItem);
+            setQuickCreate(null); setQuickCreateName(''); setQuickCreateCode('');
+        } catch (e) {
+            setQuickCreateErr(e?.response?.data?.error || 'Failed to create item.');
+        } finally {
+            setQuickCreateBusy(false);
+        }
+    }, [quickCreateName, quickCreateCode, quickCreate]);
+
     const handleSubmit = async () => {
         setErr(null);
         if (lines.length === 0) { setErr('Add at least one item.'); return; }
@@ -411,15 +469,16 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                     unit_price:    l.unit_price ? parseFloat(l.unit_price) : null,
                 });
             } else {
-                if (!l.description?.trim()) { setErr('Each "other" line needs a description.'); return; }
+                if (!l.general_item_id) { setErr('Each "other" line needs a general item selected.'); return; }
                 const qty = parseFloat(l.other_qty);
                 if (!qty || qty <= 0) { setErr('Each "other" line needs a quantity > 0.'); return; }
                 items.push({
-                    item_type:    'other',
-                    description:  l.description.trim(),
-                    qty_received: qty,
-                    uom:          l.uom || 'pcs',
-                    unit_price:   l.unit_price ? parseFloat(l.unit_price) : null,
+                    item_type:       'other',
+                    general_item_id: parseInt(l.general_item_id),
+                    description:     l.description?.trim() || null,
+                    qty_received:    qty,
+                    uom:             l.uom || 'pcs',
+                    unit_price:      l.unit_price ? parseFloat(l.unit_price) : null,
                 });
             }
         }
@@ -515,6 +574,7 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
     // ── Free-form modal ───────────────────────────────────────────────────────
 
     return (
+        <>
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={!saving ? onClose : undefined}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[94vh] flex flex-col" onClick={e => e.stopPropagation()}>
 
@@ -685,6 +745,8 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                                 trimItems={trimItems}
                                 variantsByTrim={{}}
                                 spareParts={spareParts}
+                                generalItems={generalItems}
+                                onAddGeneralItem={(cb) => { setQuickCreateName(''); setQuickCreateCode(''); setQuickCreateErr(null); setQuickCreate(() => cb); }}
                                 onChange={updated => updateLine(idx, updated)}
                                 onRemove={() => removeLine(idx)}
                             />
@@ -716,5 +778,55 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                 </div>
             </div>
         </div>
+
+        {/* Quick-create general item modal */}
+        {quickCreate && (
+            <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-bold text-slate-800">New General Item</h3>
+                        <button onClick={() => setQuickCreate(null)} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400"><X size={16} /></button>
+                    </div>
+                    <div className="space-y-3">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Name *</label>
+                            <input
+                                autoFocus
+                                type="text" value={quickCreateName}
+                                onChange={e => setQuickCreateName(e.target.value)}
+                                placeholder="e.g. Sewing Needle #14"
+                                className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Item Code <span className="text-slate-300 font-normal">(optional)</span></label>
+                            <input
+                                type="text" value={quickCreateCode}
+                                onChange={e => setQuickCreateCode(e.target.value)}
+                                placeholder="e.g. GI-001"
+                                className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400"
+                            />
+                        </div>
+                    </div>
+                    {quickCreateErr && (
+                        <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2 text-xs text-red-600">
+                            <AlertTriangle size={13} /> {quickCreateErr}
+                        </div>
+                    )}
+                    <div className="flex justify-end gap-2 pt-1">
+                        <button onClick={() => setQuickCreate(null)} className="text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-xl hover:bg-slate-100 transition">Cancel</button>
+                        <button
+                            onClick={handleQuickCreate}
+                            disabled={quickCreateBusy}
+                            className="flex items-center gap-1.5 text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-40 px-4 py-2 rounded-xl transition"
+                        >
+                            {quickCreateBusy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                            Create & Select
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+        </>
     );
 }

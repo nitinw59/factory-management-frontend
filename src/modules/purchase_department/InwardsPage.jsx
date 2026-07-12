@@ -118,7 +118,7 @@ function InwardDetailModal({ inward, canApprove, onApprove, onReject, onClose })
     }, [inward]);
 
     const resolvedRows = useMemo(() => (inward.items || []).map((it, idx) => {
-        const type = it.item_type || 'other';
+        const type = it.item_type || 'trim';
         let name = '—', details = '';
         if (type === 'fabric') {
             name = it.fabric_type_name || 'Fabric';
@@ -137,7 +137,10 @@ function InwardDetailModal({ inward, canApprove, onApprove, onReject, onClose })
             name = it.spare_part_name || `Spare #${it.spare_part_id}`;
             details = it.spare_part_number || '';
         } else {
-            name = it.description || 'Other item';
+            name = it.general_item_name
+                ? `${it.general_item_name}${it.general_item_code ? ` (${it.general_item_code})` : ''}`
+                : (it.description || 'Other item');
+            details = it.uom || it.general_item_uom || '';
         }
         // For PENDING fabric items, show pending_rolls instead of real rolls
         const rolls = (type === 'fabric' && isPending) ? (it.pending_rolls || []) : (it.rolls || []);

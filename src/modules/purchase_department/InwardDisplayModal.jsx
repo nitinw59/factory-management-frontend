@@ -67,15 +67,22 @@ export default function InwardDisplayModal({
                 };
             }
             // Custom (no PO/req link) — stored joined names should already be on the item.
-            const isFabric = (it.item_type || 'trim') === 'fabric';
-            const name = isFabric
-                ? (it.fabric_type_name || 'Fabric')
-                : (it.trim_item_name || 'Trim');
-            const parts = [];
-            if (isFabric) {
+            const itemType = it.item_type || 'trim';
+            const isGeneralItem = itemType === 'other' && it.general_item_id;
+            const isSpare  = itemType === 'spare';
+            const isFabric = itemType === 'fabric';
+            let name, parts = [];
+            if (isGeneralItem) {
+                name = `${it.general_item_name || 'General Item'}${it.general_item_code ? ` (${it.general_item_code})` : ''}`;
+            } else if (isSpare) {
+                name = it.spare_part_name || `Spare #${it.spare_part_id}`;
+                if (it.spare_part_number) parts.push(it.spare_part_number);
+            } else if (isFabric) {
+                name = it.fabric_type_name || 'Fabric';
                 if (it.fabric_color_number) parts.push(it.fabric_color_number);
                 if (it.fabric_color_name)   parts.push(it.fabric_color_name);
             } else {
+                name = it.trim_item_name || 'Trim';
                 if (it.variant_color_number) parts.push(it.variant_color_number);
                 if (it.variant_color_name)   parts.push(it.variant_color_name);
                 if (it.variant_size)         parts.push(`Sz ${it.variant_size}`);
@@ -87,7 +94,7 @@ export default function InwardDisplayModal({
                 qty:      parseFloat(it.qty_received || 0),
                 unit:     isFabric ? 'm' : (it.uom || 'pcs'),
                 rolls:    it.rolls || null,
-                isTrim:   !isFabric,
+                isTrim:   !isFabric && !isSpare && !isGeneralItem,
                 variantId: it.trim_item_variant_id ?? null,
             };
         });
@@ -104,7 +111,7 @@ export default function InwardDisplayModal({
 
     const handleDelete = async () => {
         if (!inward) return;
-        if (!window.confirm(`Delete inward ${inward.grn_number || `#${inward.id}`}? This will reverse trim stock additions.`)) return;
+        if (!window.confirm(`Delete inward ${inward.grn_number || `#${inward.id}`}? This will reverse any stock changes applied.`)) return;
         setBusy(true); setErr(null);
         try {
             await purchaseDeptApi.deleteInward(inward.id);

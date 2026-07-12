@@ -112,6 +112,7 @@ import AdminMaintenanceDashboard from './modules/admin/AdminMaintenanceDashboard
 import AdminSparesPage from './modules/admin/AdminSparesPage';
 import MaintenanceSchedulePage from './modules/maintenance/MaintenanceSchedulePage';
 import SparePartsPage from './modules/store_manager/SparePartsPage';
+import GeneralItemsPage from './modules/store_manager/GeneralItemsPage';
 import SparesAnalyticsPage from './modules/store_manager/SparesAnalyticsPage';
 import TrimReservationsPage from './modules/store_manager/TrimReservationsPage';
 import SupplierColorCodesPage from './modules/store_manager/SupplierColorCodesPage';
@@ -256,6 +257,7 @@ function App() {
           <Route path="orders/:id" element={<PurchaseFlowPage />} />
           <Route path="inwards" element={<InwardsPage />} />
           <Route path="raise-requirement" element={<RaiseRequirementPage />} />
+          <Route path="general-items" element={<GeneralItemsPage />} />
           <Route path="planning" element={<MerchandiserPlanningPage />} />
           <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
         </Route>

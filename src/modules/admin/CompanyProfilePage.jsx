@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
     Loader2, Save, AlertTriangle, CheckCircle2, Building2, Receipt, MapPin, Phone,
-    Banknote, FileText, Image as ImageIcon, Trash2, Upload, RefreshCw,
+    Banknote, FileText, Image as ImageIcon, Trash2, Upload, RefreshCw, Scale,
 } from 'lucide-react';
 import { adminApi } from '../../api/adminApi';
+import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { IMAGE_BASE_URL } from '../../utils/api';
 
 // ── Field config ─────────────────────────────────────────────────────────────
@@ -176,6 +177,80 @@ function ImageCard({ field, currentUrl, pendingFile, onPick, onClearPending, onD
 }
 
 // ── Main page ────────────────────────────────────────────────────────────────
+
+// Self-contained: the tolerance lives in app_settings (three_way_match_tolerance_pct),
+// not on the company profile row, so it loads and saves through its own endpoints.
+function MatchToleranceCard() {
+    const [pct,     setPct]     = useState('');
+    const [loaded,  setLoaded]  = useState(false);
+    const [saving,  setSaving]  = useState(false);
+    const [msg,     setMsg]     = useState(null); // { ok: bool, text }
+
+    useEffect(() => {
+        purchaseDeptApi.getMatchTolerance()
+            .then(r => { setPct(String(r.data?.tolerance_pct ?? '')); setLoaded(true); })
+            .catch(() => setLoaded(true));
+    }, []);
+
+    const save = async () => {
+        const n = parseFloat(pct);
+        if (!Number.isFinite(n) || n < 0 || n > 100) {
+            setMsg({ ok: false, text: 'Enter a percentage between 0 and 100.' });
+            return;
+        }
+        setSaving(true); setMsg(null);
+        try {
+            const res = await purchaseDeptApi.updateMatchTolerance(n);
+            setPct(String(res.data?.tolerance_pct ?? n));
+            setMsg({ ok: true, text: 'Tolerance updated. Applies to all future match runs.' });
+        } catch (e) {
+            setMsg({ ok: false, text: e?.response?.data?.error || 'Failed to update tolerance.' });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <section className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+            <div className="flex items-center gap-2 px-5 py-3 bg-slate-50 border-b border-slate-100">
+                <Scale size={14} className="text-indigo-500" />
+                <h2 className="text-sm font-bold text-slate-700">Three-Way Match Tolerance</h2>
+            </div>
+            <div className="px-5 py-4 space-y-2">
+                <p className="text-xs text-slate-500">
+                    Maximum allowed variance between PO, GRN, and supplier invoice (quantity, rate, and value)
+                    before booking or payment is blocked. Discrepancies beyond this require a documented override.
+                </p>
+                <div className="flex items-center gap-2">
+                    <div className="relative">
+                        <input
+                            type="number" step="any" min="0" max="100"
+                            value={pct}
+                            onChange={e => setPct(e.target.value)}
+                            disabled={!loaded || saving}
+                            className="w-28 text-sm border border-slate-200 rounded-lg pl-3 pr-7 py-2 text-right tabular-nums focus:outline-none focus:border-indigo-400 disabled:bg-slate-50"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">%</span>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={save}
+                        disabled={!loaded || saving}
+                        className="flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-3 py-2 rounded-lg transition"
+                    >
+                        {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                        Update
+                    </button>
+                    {msg && (
+                        <span className={`text-xs flex items-center gap-1 ${msg.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {msg.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />} {msg.text}
+                        </span>
+                    )}
+                </div>
+            </div>
+        </section>
+    );
+}
 
 export default function CompanyProfilePage() {
     const [form,       setForm]       = useState(emptyForm);
@@ -355,6 +430,9 @@ export default function CompanyProfilePage() {
                     </section>
                 );
             })}
+
+            {/* Purchasing controls */}
+            <MatchToleranceCard />
 
             {/* Images */}
             <section className="bg-white border border-slate-200 rounded-2xl overflow-hidden">

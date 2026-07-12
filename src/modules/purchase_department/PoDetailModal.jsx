@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
-    X, Loader2, AlertTriangle, ShoppingCart, Building2, Calendar, Package, Scissors, Tag,
+    X, Loader2, AlertTriangle, ShoppingCart, Building2, Calendar, Package, Scissors, Tag, Wrench,
     CheckCircle2, XCircle, Truck, Plus, Edit3, Trash2, Save, FileText, Download, Link2,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
@@ -8,6 +8,8 @@ import SupplierCodePill from './SupplierCodePill';
 import SearchableSelect from '../../shared/SearchableSelect';
 import { adminApi } from '../../api/adminApi';
 import { trimsApi } from '../../api/trimsApi';
+import { sparesApi } from '../../api/sparesApi';
+import { generalItemsApi } from '../../api/generalItemsApi';
 import { taApi } from '../../api/taApi';
 import api, { IMAGE_BASE_URL } from '../../utils/api';
 import { generatePoPdf } from './poPdfGenerator';
@@ -20,7 +22,7 @@ const PO_STATUS_CFG = {
     CANCELLED:       { cls: 'bg-red-100 text-red-700 border-red-200',           label: 'Cancelled' },
 };
 
-const TYPE_ICON = { fabric: Package, trim: Scissors, other: Tag };
+const TYPE_ICON = { fabric: Package, trim: Scissors, spare: Wrench, other: Tag };
 
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en', { dateStyle: 'medium' }) : '—';
 const fmtNum  = (n, dec = 2) => Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: dec });
@@ -70,6 +72,8 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
         fabric_color_id:      item?.fabric_color_id ?? '',
         trim_item_id:         item?.variant_trim_item_id ?? '',
         trim_item_variant_id: item?.trim_item_variant_id ?? '',
+        spare_part_id:        item?.spare_part_id ?? '',
+        general_item_id:      item?.general_item_id ?? '',
         quantity:             item?.quantity != null ? String(item.quantity) : '',
         uom:                  item?.uom || 'meter',
         unit_price:           item?.unit_price != null ? String(item.unit_price) : '',
@@ -78,10 +82,12 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
     const [err,  setErr]  = useState(null);
 
     // Lookups
-    const [trimItems,    setTrimItems]    = useState([]);
-    const [fabricTypes,  setFabricTypes]  = useState([]);
-    const [fabricColors, setFabricColors] = useState([]);
-    const [trimVariants, setTrimVariants] = useState([]);  // for currently-picked trim_item_id
+    const [trimItems,     setTrimItems]     = useState([]);
+    const [fabricTypes,   setFabricTypes]   = useState([]);
+    const [fabricColors,  setFabricColors]  = useState([]);
+    const [trimVariants,  setTrimVariants]  = useState([]);
+    const [spareParts,    setSpareParts]    = useState([]);
+    const [generalItems,  setGeneralItems]  = useState([]);
 
     useEffect(() => {
         trimsApi.getItems()
@@ -93,12 +99,16 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
         api.get('/shared/fabric_color')
             .then(r => setFabricColors(r.data?.data ?? r.data ?? []))
             .catch(() => setFabricColors([]));
+        sparesApi.getAllSpares()
+            .then(data => setSpareParts(Array.isArray(data) ? data : (data?.data || [])))
+            .catch(() => setSpareParts([]));
+        generalItemsApi.getItems({ active: true })
+            .then(r => setGeneralItems(r.data?.data ?? r.data ?? []))
+            .catch(() => setGeneralItems([]));
     }, []);
 
-    // Load variants whenever the picked trim item changes (and isn't already loaded for it).
     useEffect(() => {
         if (form.type !== 'trim' || !form.trim_item_id) { return; }
-        // If the current variants belong to this trim, skip
         if (trimVariants[0]?.trim_item_id != null &&
             Number(trimVariants[0].trim_item_id) === Number(form.trim_item_id)) {
             return;
@@ -113,7 +123,7 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
     const set = (k, v) => setForm(p => {
         const next = { ...p, [k]: v };
         if (k === 'type') next.uom = v === 'fabric' ? 'meter' : 'pcs';
-        if (k === 'trim_item_id') next.trim_item_variant_id = '';  // reset variant when trim changes
+        if (k === 'trim_item_id') next.trim_item_variant_id = '';
         return next;
     });
 
@@ -121,8 +131,10 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
         setErr(null);
         const q = parseFloat(form.quantity);
         const p = parseFloat(form.unit_price);
-        if (!q || q <= 0)             { setErr('Quantity must be greater than 0.'); return; }
-        if (isNaN(p) || p < 0)        { setErr('Unit price must be ≥ 0.'); return; }
+        if (!q || q <= 0)  { setErr('Quantity must be greater than 0.'); return; }
+        if (isNaN(p) || p < 0) { setErr('Unit price must be ≥ 0.'); return; }
+        if (form.type === 'spare'  && !form.spare_part_id)   { setErr('Please select a spare part.'); return; }
+        if (form.type === 'other'  && !form.general_item_id) { setErr('Please select a general item.'); return; }
         setBusy(true);
         try {
             const body = {
@@ -132,13 +144,23 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
                 unit_price: p,
             };
             if (form.type === 'fabric') {
-                body.fabric_type_id  = form.fabric_type_id  ? parseInt(form.fabric_type_id, 10)  : null;
-                body.fabric_color_id = form.fabric_color_id ? parseInt(form.fabric_color_id, 10) : null;
+                body.fabric_type_id       = form.fabric_type_id  ? parseInt(form.fabric_type_id,  10) : null;
+                body.fabric_color_id      = form.fabric_color_id ? parseInt(form.fabric_color_id, 10) : null;
                 body.trim_item_variant_id = null;
-            } else {
+            } else if (form.type === 'trim') {
                 body.trim_item_variant_id = form.trim_item_variant_id ? parseInt(form.trim_item_variant_id, 10) : null;
                 body.fabric_type_id  = null;
                 body.fabric_color_id = null;
+            } else if (form.type === 'spare') {
+                body.spare_part_id   = parseInt(form.spare_part_id, 10);
+                body.fabric_type_id  = null;
+                body.fabric_color_id = null;
+                body.trim_item_variant_id = null;
+            } else {
+                body.general_item_id = parseInt(form.general_item_id, 10);
+                body.fabric_type_id  = null;
+                body.fabric_color_id = null;
+                body.trim_item_variant_id = null;
             }
             let res;
             if (isEdit) {
@@ -156,11 +178,22 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
     };
 
     const isFabric = form.type === 'fabric';
+    const isTrim   = form.type === 'trim';
+    const isSpare  = form.type === 'spare';
+    const isOther  = form.type === 'other';
+
+    const borderCls = isFabric ? 'border-violet-200 bg-violet-50/40'
+                    : isTrim   ? 'border-amber-200 bg-amber-50/40'
+                    : isSpare  ? 'border-blue-200 bg-blue-50/40'
+                               : 'border-slate-200 bg-slate-50/40';
+    const TypeIcon = isFabric ? Package : isTrim ? Scissors : isSpare ? Wrench : Tag;
+    const iconCls  = isFabric ? 'text-violet-600' : isTrim ? 'text-amber-600' : isSpare ? 'text-blue-600' : 'text-slate-500';
+
     return (
-        <div className={`border rounded-xl p-3 space-y-2 ${isFabric ? 'border-violet-200 bg-violet-50/40' : 'border-amber-200 bg-amber-50/40'}`}>
+        <div className={`border rounded-xl p-3 space-y-2 ${borderCls}`}>
             <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
-                    {isFabric ? <Package size={13} className="text-violet-600" /> : <Scissors size={13} className="text-amber-600" />}
+                    <TypeIcon size={13} className={iconCls} />
                     <select
                         value={form.type}
                         onChange={e => set('type', e.target.value)}
@@ -169,6 +202,8 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
                     >
                         <option value="fabric">Fabric</option>
                         <option value="trim">Trim</option>
+                        <option value="spare">Spare Part</option>
+                        <option value="other">General Item</option>
                     </select>
                     <span className="text-slate-400 text-[10px] font-normal">
                         {isEdit ? `Edit item #${item.itemId}` : 'New item'}
@@ -182,60 +217,56 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
                 </div>
             )}
 
-            {isFabric ? (
+            {isFabric && (
                 <div className="grid grid-cols-2 gap-2">
                     <div>
                         <label className="text-[9px] font-bold text-slate-400 uppercase">Fabric Type</label>
-                        <SearchableSelect
-                            value={form.fabric_type_id ?? ''}
-                            onChange={v => set('fabric_type_id', v)}
+                        <SearchableSelect value={form.fabric_type_id ?? ''} onChange={v => set('fabric_type_id', v)}
                             options={fabricTypes.map(t => ({ value: t.id, label: t.name || t.fabric_type_name || `Type #${t.id}` }))}
-                            placeholder="— Select type —"
-                            className="w-full mt-0.5"
-                            size="sm"
-                            accentColor="violet"
-                        />
+                            placeholder="— Select type —" size="sm" accentColor="violet" />
                     </div>
                     <div>
                         <label className="text-[9px] font-bold text-slate-400 uppercase">Fabric Color</label>
-                        <SearchableSelect
-                            value={form.fabric_color_id ?? ''}
-                            onChange={v => set('fabric_color_id', v)}
+                        <SearchableSelect value={form.fabric_color_id ?? ''} onChange={v => set('fabric_color_id', v)}
                             options={fabricColors.map(c => ({ value: c.id, label: `${c.color_name || c.name || `Color #${c.id}`}${c.color_number ? ` (${c.color_number})` : ''}` }))}
-                            placeholder="— Select color —"
-                            className="w-full mt-0.5"
-                            size="sm"
-                            accentColor="violet"
-                        />
+                            placeholder="— Select color —" size="sm" accentColor="violet" />
                     </div>
                 </div>
-            ) : (
+            )}
+
+            {isTrim && (
                 <div className="grid grid-cols-2 gap-2">
                     <div>
                         <label className="text-[9px] font-bold text-slate-400 uppercase">Trim Item</label>
-                        <SearchableSelect
-                            value={form.trim_item_id ?? ''}
-                            onChange={v => set('trim_item_id', v)}
+                        <SearchableSelect value={form.trim_item_id ?? ''} onChange={v => set('trim_item_id', v)}
                             options={trimItems.map(t => ({ value: t.id, label: `${t.name || t.item_name || `Trim #${t.id}`}${t.item_code ? ` · ${t.item_code}` : ''}` }))}
-                            placeholder="— Select trim —"
-                            className="w-full mt-0.5"
-                            size="sm"
-                            accentColor="amber"
-                        />
+                            placeholder="— Select trim —" size="sm" accentColor="amber" />
                     </div>
                     <div>
                         <label className="text-[9px] font-bold text-slate-400 uppercase">Variant</label>
-                        <SearchableSelect
-                            value={form.trim_item_variant_id ?? ''}
-                            onChange={v => set('trim_item_variant_id', v)}
+                        <SearchableSelect value={form.trim_item_variant_id ?? ''} onChange={v => set('trim_item_variant_id', v)}
                             options={trimVariants.map(v => ({ value: v.id, label: `${v.color_name || v.name || `Variant #${v.id}`}${v.color_number ? ` (${v.color_number})` : ''}` }))}
                             placeholder={form.trim_item_id ? '— Select variant —' : '— Pick a trim first —'}
-                            disabled={!form.trim_item_id}
-                            className="w-full mt-0.5"
-                            size="sm"
-                            accentColor="amber"
-                        />
+                            disabled={!form.trim_item_id} size="sm" accentColor="amber" />
                     </div>
+                </div>
+            )}
+
+            {isSpare && (
+                <div>
+                    <label className="text-[9px] font-bold text-slate-400 uppercase">Spare Part</label>
+                    <SearchableSelect value={form.spare_part_id ?? ''} onChange={v => set('spare_part_id', v)}
+                        options={spareParts.map(s => ({ value: s.id, label: `${s.name}${s.part_number ? ` (${s.part_number})` : ''}` }))}
+                        placeholder="— Select spare part —" size="sm" accentColor="blue" />
+                </div>
+            )}
+
+            {isOther && (
+                <div>
+                    <label className="text-[9px] font-bold text-slate-400 uppercase">General Item</label>
+                    <SearchableSelect value={form.general_item_id ?? ''} onChange={v => set('general_item_id', v)}
+                        options={generalItems.map(i => ({ value: i.id, label: `${i.name}${i.item_code ? ` (${i.item_code})` : ''}` }))}
+                        placeholder="— Select general item —" size="sm" />
                 </div>
             )}
 
@@ -637,6 +668,14 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
         variant_size:          i.variant_size,
         variant_in_stock:      i.variant_in_stock,
         variant_last_purchase_price: i.variant_last_purchase_price,
+        // spare / general-item fields
+        spare_part_id:         i.spare_part_id ?? null,
+        spare_part_name:       i.spare_part_name ?? null,
+        spare_part_number:     i.spare_part_number ?? null,
+        general_item_id:       i.general_item_id ?? null,
+        general_item_name:     i.general_item_name ?? null,
+        general_item_code:     i.general_item_code ?? null,
+        description:           i.description ?? null,
     })), [po]);
 
     const unassigned = po.unassigned_requirements || [];
@@ -927,7 +966,13 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                                 }
                                 const label = it.type === 'fabric'
                                     ? `${it.fabric_type_name || 'Fabric'}${it.fabric_color_name ? ` · ${it.fabric_color_name}` : ''}${it.fabric_color_number ? ` (${it.fabric_color_number})` : ''}`
-                                    : `${it.trim_item_name || 'Trim'}${it.variant_color_name ? ` · ${it.variant_color_name}` : ''}${it.variant_color_number ? ` (${it.variant_color_number})` : ''}${it.variant_size ? ` · Sz ${it.variant_size}` : ''}`;
+                                    : it.type === 'spare'
+                                        ? `${it.spare_part_name || 'Spare Part'}${it.spare_part_number ? ` (${it.spare_part_number})` : ''}`
+                                        : it.type === 'other'
+                                            ? (it.general_item_name
+                                                ? `${it.general_item_name}${it.general_item_code ? ` (${it.general_item_code})` : ''}`
+                                                : (it.description || 'Other'))
+                                            : `${it.trim_item_name || 'Trim'}${it.variant_color_name ? ` · ${it.variant_color_name}` : ''}${it.variant_color_number ? ` (${it.variant_color_number})` : ''}${it.variant_size ? ` · Sz ${it.variant_size}` : ''}`;
                                 return (
                                     <div key={it.key} className="bg-slate-50 rounded-xl p-2.5">
                                         <div className="flex items-start gap-3">
@@ -1116,7 +1161,13 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                                             <div key={r.id} className="flex items-center justify-between text-[11px] text-amber-800">
                                                 <span className="truncate">
                                                     req #{r.id} · {r.type}
-                                                    {r.type === 'fabric' ? ` · ${r.fabric_type_name || ''} ${r.fabric_color_name || ''}${r.fabric_color_number ? ` · ${r.fabric_color_number}` : ''}` : ` · ${r.trim_item_name || ''}${r.variant_size ? ` · Sz ${r.variant_size}` : ''}`}
+                                                    {r.type === 'fabric'
+                                        ? ` · ${r.fabric_type_name || ''} ${r.fabric_color_name || ''}${r.fabric_color_number ? ` · ${r.fabric_color_number}` : ''}`
+                                        : r.type === 'spare'
+                                            ? ` · ${r.spare_part_name || ''}${r.spare_part_number ? ` (${r.spare_part_number})` : ''}`
+                                            : r.type === 'other'
+                                                ? ` · ${r.general_item_name || r.description || ''}`
+                                                : ` · ${r.trim_item_name || ''}${r.variant_size ? ` · Sz ${r.variant_size}` : ''}`}
                                                     {r.product_name ? ` · ${r.product_name}` : ''}
                                                 </span>
                                                 <span className="shrink-0 ml-2 tabular-nums">{qty.toLocaleString()} {unit}</span>

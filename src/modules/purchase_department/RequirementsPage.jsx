@@ -108,7 +108,9 @@ const reqTitle = (req) => {
             : 'Spare part requirement';
     }
     if (req.type === 'other') {
-        return req.description || 'Other requirement';
+        return req.general_item_name
+            ? `${req.general_item_name}${req.general_item_code ? ` (${req.general_item_code})` : ''}`
+            : (req.description || 'Other requirement');
     }
     return 'Requirement';
 };
@@ -215,7 +217,7 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
                         ? `trim:${req.trim_item_variant_id ?? `req-${req.id}`}`
                         : req.type === 'spare'
                             ? `spare:${req.spare_part_id ?? `req-${req.id}`}`
-                            : `other:${req.description ?? req.id}`;
+                            : `other:${req.general_item_id ?? req.id}`;
             if (!map.has(key)) {
                 let label;
                 if (req.type === 'fabric') {
@@ -227,7 +229,9 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
                         ? `${req.spare_part_name}${req.spare_part_number ? ` (${req.spare_part_number})` : ''}`
                         : 'Spare Part';
                 } else {
-                    label = req.description || 'Other';
+                    label = req.general_item_name
+                        ? `${req.general_item_name}${req.general_item_code ? ` (${req.general_item_code})` : ''}`
+                        : (req.description || 'Other');
                 }
                 map.set(key, {
                     key,
@@ -236,11 +240,12 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
                     items: [],
                     totalMeters: 0,
                     totalQty: 0,
-                    unitOfMeasure: req.unit_of_measure || req.trim_uom,
+                    unitOfMeasure: req.unit_of_measure || req.trim_uom || req.general_item_uom,
                     fabric_type_id:       req.fabric_type_id ?? null,
                     fabric_color_id:      req.fabric_color_id ?? null,
                     trim_item_variant_id: req.trim_item_variant_id ?? null,
                     spare_part_id:        req.spare_part_id ?? null,
+                    general_item_id:      req.general_item_id ?? null,
                     description:          req.description ?? null,
                 });
             }
@@ -320,10 +325,11 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
                     };
                 }
                 return {
-                    type:        'other',
-                    description: g.description,
+                    type:            'other',
+                    general_item_id: g.general_item_id,
+                    ...(g.description ? { description: g.description } : {}),
                     quantity,
-                    uom:         g.unitOfMeasure || 'pcs',
+                    uom:             g.unitOfMeasure || 'pcs',
                     unit_price,
                     requirement_ids,
                 };
@@ -423,17 +429,27 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
                                         {g.items.length > 1 && (
                                             <div className="pl-9 space-y-1">
                                                 {g.items.map(item => {
-                                                    const sub = isFabric
-                                                        ? (item.fabric_color_name
+                                                    let sub;
+                                                    if (isFabric) {
+                                                        sub = item.fabric_color_name
                                                             ? `${item.fabric_color_name}${item.fabric_color_number ? ` · ${item.fabric_color_number}` : ''}`
-                                                            : 'No color')
-                                                        : (item.variant_color_name
+                                                            : 'No color';
+                                                    } else if (g.type === 'spare') {
+                                                        sub = item.is_standalone ? 'Standalone' : (item.order_number || 'No SO');
+                                                    } else if (g.type === 'other') {
+                                                        sub = item.is_standalone ? 'Standalone' : (item.order_number || 'No SO');
+                                                    } else {
+                                                        sub = item.variant_color_name
                                                             ? `${item.variant_color_name}${item.variant_color_number ? ` · ${item.variant_color_number}` : ''}${item.variant_size ? ` · Sz ${item.variant_size}` : ''}${item.is_substitute ? ' · sub' : ''}`
-                                                            : (item.trim_item_code || 'No variant'));
+                                                            : (item.trim_item_code || 'No variant');
+                                                    }
                                                     return (
                                                         <div key={item.id} className="flex items-center justify-between text-[10px] text-slate-500">
                                                             <span className="truncate">
-                                                                {sub}{item.order_number ? ` · ${item.order_number}` : ''}
+                                                                {sub}{!isFabric && g.type !== 'spare' && g.type !== 'other' && item.order_number ? ` · ${item.order_number}` : ''}
+                                                                {item.is_standalone && (
+                                                                    <span className="ml-1.5 text-[9px] font-bold text-emerald-600">STANDALONE</span>
+                                                                )}
                                                             </span>
                                                             <span className="shrink-0 ml-2 font-medium">
                                                                 {isFabric
@@ -758,12 +774,14 @@ const RequirementsPage = () => {
                 }
                 spareItemMap.get(itemKey).rows.push(req);
             } else {
-                const itemKey = req.description ?? `other-${req.id}`;
+                const itemKey = req.general_item_id ?? req.description ?? `other-${req.id}`;
                 if (!otherItemMap.has(itemKey)) {
                     otherItemMap.set(itemKey, {
                         type:  'other',
                         key:   `other-item:${itemKey}`,
-                        label: req.description || 'Other',
+                        label: req.general_item_name
+                            ? `${req.general_item_name}${req.general_item_code ? ` (${req.general_item_code})` : ''}`
+                            : (req.description || 'Other'),
                         rows:  [],
                     });
                 }

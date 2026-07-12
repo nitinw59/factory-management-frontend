@@ -74,4 +74,11 @@ export const purchaseDeptApi = {
             ? api.patch(`/purchase-department/invoices/${id}`, buildFormData(data, 'scan', scanFile))
             : api.patch(`/purchase-department/invoices/${id}`, data),
     deleteInvoice: (id) => api.delete(`/purchase-department/invoices/${id}`),
+
+    // Three-way match
+    getInvoiceById: (id) => api.get(`/purchase-department/invoices/${id}`),
+    rematchInvoice: (id) => api.post(`/purchase-department/invoices/${id}/rematch`),
+    overrideInvoiceMatch: (id, notes) => api.post(`/purchase-department/invoices/${id}/override-match`, { notes }),
+    getMatchTolerance: () => api.get('/purchase-department/match-tolerance'),
+    updateMatchTolerance: (tolerance_pct) => api.patch('/purchase-department/match-tolerance', { tolerance_pct }),
 };
