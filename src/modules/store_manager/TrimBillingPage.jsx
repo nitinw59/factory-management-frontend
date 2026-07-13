@@ -586,6 +586,9 @@ const TrimBillingPage = () => {
     const handleSaveBill = async () => {
         if (draftItems.length === 0) return showToast("Cannot save an empty bill.", "error");
 
+        const zeroPriceCount = draftItems.filter(item => !(parseFloat(item.selling_price) > 0)).length;
+        if (zeroPriceCount > 0) return showToast(`${zeroPriceCount} item${zeroPriceCount > 1 ? 's have' : ' has'} 0 unit price. Fix the price or remove the item before billing.`, "error");
+
         setSaving(true);
         try {
             const payload = {
@@ -662,6 +665,18 @@ const TrimBillingPage = () => {
 
     const handleExpandAll = () => setCollapsedGroups(new Set());
     const handleCollapseAll = () => setCollapsedGroups(new Set(groupedItems.map(g => g.name)));
+
+    const handleRemoveGroup = (group) => {
+        const groupIds = new Set(group.items.map(it => it.id));
+        const removed = draftItems.filter(item => groupIds.has(item.id));
+        setDraftItems(prev => prev.filter(item => !groupIds.has(item.id)));
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            groupIds.forEach(id => next.delete(id));
+            return next;
+        });
+        queueRemoval(removed);
+    };
 
     const handleToggleGroupSelect = (group) => {
         const groupIds = group.items.map(it => it.id);
@@ -919,6 +934,14 @@ const TrimBillingPage = () => {
                                                             <span>Qty <span className="font-bold text-gray-900">{group.totalQty.toLocaleString()}</span></span>
                                                             <span className="flex items-center"><IndianRupee className="w-3 h-3" /><span className="font-bold text-gray-900">{group.totalAmount.toFixed(2)}</span></span>
                                                         </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRemoveGroup(group)}
+                                                            className="shrink-0 text-gray-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
+                                                            title={`Remove all ${group.items.length} ${group.items.length === 1 ? 'variant' : 'variants'} of ${group.name} from draft`}
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
                                                     </div>
                                                 </td>
                                             </tr>
@@ -967,8 +990,13 @@ const TrimBillingPage = () => {
                                                 {hasStock ? stockNum : '--'}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 text-right font-mono text-gray-600">
+                                        <td className={`px-6 py-4 text-right font-mono ${item.selling_price > 0 ? 'text-gray-600' : 'text-red-600 font-bold'}`}>
                                             ₹{item.selling_price.toFixed(2)}
+                                            {!(item.selling_price > 0) && (
+                                                <div className="flex items-center justify-end gap-1 text-[10px] font-bold text-red-500 uppercase mt-0.5">
+                                                    <AlertTriangle className="w-3 h-3" /> no price
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className="flex items-center justify-center gap-1.5">

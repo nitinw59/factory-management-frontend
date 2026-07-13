@@ -110,11 +110,12 @@ const AdminLayout = () => {
 
                 <DesktopNavDropdown
                   title="Inventory"
-                  matchPaths={['/admin/trim-management', '/admin/trim-items', '/admin/trim-clusters', '/admin/fabric-types', '/admin/fabric-colors', '/admin/sizes']}
+                  matchPaths={['/admin/trim-management', '/admin/trim-items', '/admin/trim-clusters', '/admin/fabric-types', '/admin/fabric-colors', '/admin/sizes', '/admin/general-items']}
                 >
                   <NavLink to="/admin/trim-management" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Trims Dashboard</NavLink>
                   <NavLink to="/admin/trim-items"      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Trim Items</NavLink>
                   <NavLink to="/admin/trim-clusters"   className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Trim Substitute Clusters</NavLink>
+                  <NavLink to="/admin/general-items"   className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage General Items</NavLink>
                   <NavLink to="/admin/fabric-types"    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Fabric Types</NavLink>
                   <NavLink to="/admin/fabric-colors"   className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Fabric Colors</NavLink>
                   <NavLink to="/admin/sizes"           className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Sizes</NavLink>
@@ -221,6 +222,7 @@ const AdminLayout = () => {
                 <NavLink to="/admin/trim-management" onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Trims Dashboard</NavLink>
                 <NavLink to="/admin/trim-items"      onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Manage Trim Items</NavLink>
                 <NavLink to="/admin/trim-clusters"   onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Trim Substitute Clusters</NavLink>
+                <NavLink to="/admin/general-items"   onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Manage General Items</NavLink>
                 <NavLink to="/admin/fabric-types"    onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Manage Fabric Types</NavLink>
                 <NavLink to="/admin/fabric-colors"   onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Manage Fabric Colors</NavLink>
                 <NavLink to="/admin/sizes"           onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Manage Sizes</NavLink>

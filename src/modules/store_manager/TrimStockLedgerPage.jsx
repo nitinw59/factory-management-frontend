@@ -24,6 +24,7 @@ const SOURCE_KIND_META = {
   fulfill_revert:          { label: 'Fulfillment Reverted',  color: 'indigo'  },
   auto_fulfill_exact:      { label: 'Auto Fulfill',          color: 'indigo'  },
   auto_fulfill_substitute: { label: 'Auto Fulfill (Sub)',    color: 'violet'  },
+  internal_issue:          { label: 'Internal Issue',        color: 'rose'    },
 };
 
 const COLOR_CLASSES = {
@@ -37,6 +38,7 @@ const COLOR_CLASSES = {
   amber:   'bg-amber-100 text-amber-700',
   indigo:  'bg-indigo-100 text-indigo-700',
   violet:  'bg-violet-100 text-violet-700',
+  rose:    'bg-rose-100 text-rose-700',
 };
 
 const LIMIT_OPTIONS = [50, 100, 250, 500];
@@ -84,6 +86,7 @@ function truncate(str, n) {
 // #8 — Reference priority is now event-type-aware
 function getReference(row) {
   const kind = row.source_kind || '';
+  if (kind === 'internal_issue')                return row.issue_number || (row.issue_id ? `Issue #${row.issue_id}` : '—');
   if (kind.startsWith('inward_') && row.grn_number)                                           return row.grn_number;
   if ((kind.startsWith('fulfill') || kind.startsWith('auto_fulfill')) && row.so_number)       return row.so_number;
   if ((kind.startsWith('reservation')) && row.so_number)                                       return row.so_number;

@@ -113,6 +113,7 @@ import AdminSparesPage from './modules/admin/AdminSparesPage';
 import MaintenanceSchedulePage from './modules/maintenance/MaintenanceSchedulePage';
 import SparePartsPage from './modules/store_manager/SparePartsPage';
 import GeneralItemsPage from './modules/store_manager/GeneralItemsPage';
+import GeneralItemsMasterPage from './modules/admin/GeneralItemsMasterPage';
 import SparesAnalyticsPage from './modules/store_manager/SparesAnalyticsPage';
 import TrimReservationsPage from './modules/store_manager/TrimReservationsPage';
 import SupplierColorCodesPage from './modules/store_manager/SupplierColorCodesPage';
@@ -228,6 +229,7 @@ function App() {
           <Route path="trim-clusters" element={<TrimClustersPage />} />
           <Route path="spares-analytics" element={<SparesAnalyticsPage />} />
           <Route path="spares" element={<AdminSparesPage />} />
+          <Route path="general-items" element={<GeneralItemsMasterPage />} />
       </Route>
 
               {/* Store Manager Portal */}

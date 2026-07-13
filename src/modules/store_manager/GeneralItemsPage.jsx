@@ -1,10 +1,13 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import {
     Package, Search, Plus, AlertTriangle, X, Loader2,
-    CheckCircle2, BookOpen, ClipboardList, ChevronDown, Download,
+    CheckCircle2, BookOpen, ClipboardList, ChevronDown, Download, IndianRupee,
+    Settings2, ArrowUpRight,
 } from 'lucide-react';
 import { generalItemsApi } from '../../api/generalItemsApi';
 import { storeManagerApi } from '../../api/storeManagerApi';
+import { hrApi } from '../../api/hrApi';
 import SearchableSelect from '../../shared/SearchableSelect';
 import { useAuth } from '../../context/AuthContext';
 
@@ -43,7 +46,8 @@ function Toast({ toast }) {
 }
 
 // ─── CreateEditModal ────────────────────────────────────────────────────────
-function CreateEditModal({ item, categories, onSaved, onClose }) {
+// Exported: also used by the admin master-list page (admin/GeneralItemsMasterPage).
+export function CreateEditModal({ item, categories, onSaved, onClose }) {
     const isEdit = !!item;
     const [form, setForm] = useState({
         name:                item?.name ?? '',
@@ -178,11 +182,28 @@ function CreateEditModal({ item, categories, onSaved, onClose }) {
 // ─── IssueSlipModal ──────────────────────────────────────────────────────────
 // onIssued(result) fires on 201 (refresh lists, toast) WITHOUT closing —
 // the success screen stays up until the user dismisses it.
+// Lines are mixed-kind: general items or trim variants (whole-number qty only).
+const trimVariantId = (v) => v.variant_id ?? v.id;
+const trimVariantStock = (v) => {
+    const n = parseFloat(v.in_stock ?? v.main_store_stock);
+    return Number.isFinite(n) ? n : null;
+};
+const trimVariantLabel = (v) => {
+    const color = `${v.color_number ? `${v.color_number} - ` : ''}${v.color_name || ''}`.trim() || `Variant #${trimVariantId(v)}`;
+    const size = v.size ?? v.variant_size;
+    const stock = trimVariantStock(v);
+    const price = parseFloat(v.last_purchase_price);
+    // Server rejects unpriced trims — flag them right in the picker.
+    const priceBit = Number.isFinite(price) ? `Last @ ${money(price)}` : '⚠ no purchase price';
+    return `${color}${size ? ` / ${size}` : ''} · Stock: ${stock != null ? qtyNum(stock) : '—'} · ${priceBit}`;
+};
+
 function IssueSlipModal({ items, onIssued, onClose }) {
-    const emptyLine = () => ({ general_item_id: '', qty: '' });
+    const emptyLine = () => ({ kind: 'general', general_item_id: '', trim_item_id: '', trim_item_variant_id: '', variants: [], variantsLoading: false, qty: '' });
 
     const [dept, setDept] = useState('');
     const [personId, setPersonId] = useState('');
+    const [recoverFromSalary, setRecoverFromSalary] = useState(false);
     const [notes, setNotes] = useState('');
     const [lines, setLines] = useState([emptyLine()]);
     const [busy, setBusy] = useState(false);
@@ -191,12 +212,24 @@ function IssueSlipModal({ items, onIssued, onClose }) {
     const [result, setResult] = useState(null);
     const [users, setUsers] = useState([]);
     const [deptSuggestions, setDeptSuggestions] = useState([]);
+    const [trimCatalog, setTrimCatalog] = useState([]);
+    const variantCache = useRef({});                // trim_item_id → variants[]
 
     useEffect(() => {
-        storeManagerApi.getFactoryUsers()
+        // Any employee can receive an issue (not just system users) — HR master is the source.
+        hrApi.getAllEmployees()
             .then(r => {
                 const list = r.data?.data ?? r.data ?? [];
-                setUsers(Array.isArray(list) ? list.map(u => ({ value: u.id, label: `${u.name} (${u.role})` })) : []);
+                setUsers((Array.isArray(list) ? list : [])
+                    .filter(e => !e.status || e.status === 'Active')
+                    .map(e => ({ value: e.emp_id, label: `${e.employee_name} (${e.emp_id})${e.designation ? ` · ${e.designation}` : ''}` })));
+            })
+            .catch(() => {});
+        // Same source as the trim inward form — variants come per item on demand.
+        storeManagerApi.getAllTrimItems()
+            .then(r => {
+                const list = r.data?.data ?? r.data ?? [];
+                setTrimCatalog(Array.isArray(list) ? list : []);
             })
             .catch(() => {});
         // Departments are free text (no master) — suggest from recent history.
@@ -231,9 +264,35 @@ function IssueSlipModal({ items, onIssued, onClose }) {
         }),
     [items, itemInfo]);
 
+    const trimItemOptions = useMemo(() =>
+        trimCatalog.map(t => ({ value: t.id, label: `${t.name}${t.brand ? ` - ${t.brand}` : ''}` })),
+    [trimCatalog]);
+
     const setLine = (idx, k, v) => {
         setLines(prev => prev.map((l, i) => i === idx ? { ...l, [k]: v } : l));
         setLineErrs(prev => { if (!(idx in prev)) return prev; const n = { ...prev }; delete n[idx]; return n; });
+    };
+    const setLineKind = (idx, kind) => {
+        setLines(prev => prev.map((l, i) => i === idx ? { ...emptyLine(), kind } : l));
+        setLineErrs(prev => { if (!(idx in prev)) return prev; const n = { ...prev }; delete n[idx]; return n; });
+    };
+    const setLineTrimItem = async (idx, itemId) => {
+        const cached = itemId ? variantCache.current[itemId] : null;
+        setLines(prev => prev.map((l, i) => i === idx
+            ? { ...l, trim_item_id: itemId, trim_item_variant_id: '', variants: cached || [], variantsLoading: !!itemId && !cached }
+            : l));
+        setLineErrs(prev => { if (!(idx in prev)) return prev; const n = { ...prev }; delete n[idx]; return n; });
+        if (!itemId || cached) return;
+        try {
+            const r = await storeManagerApi.getVariantsByItem(itemId);
+            const list = r.data?.data ?? r.data ?? [];
+            variantCache.current[itemId] = Array.isArray(list) ? list : [];
+            setLines(prev => prev.map((l, i) => i === idx && String(l.trim_item_id) === String(itemId)
+                ? { ...l, variants: variantCache.current[itemId], variantsLoading: false }
+                : l));
+        } catch {
+            setLines(prev => prev.map((l, i) => i === idx ? { ...l, variantsLoading: false } : l));
+        }
     };
     const addLine = () => setLines(prev => [...prev, emptyLine()]);
     const removeLine = (idx) => {
@@ -241,28 +300,58 @@ function IssueSlipModal({ items, onIssued, onClose }) {
         setLineErrs({});
     };
 
-    const lineValue = (l) => {
-        const info = itemInfo[l.general_item_id];
-        if (!info || info.cost == null) return null;
-        const q = parseFloat(l.qty);
-        return Number.isFinite(q) ? q * info.cost : null;
+    const lineVariant = (l) => l.kind === 'trim'
+        ? l.variants.find(v => String(trimVariantId(v)) === String(l.trim_item_variant_id))
+        : null;
+    const lineCost = (l) => {
+        if (l.kind === 'trim') {
+            const v = lineVariant(l);
+            const n = v ? parseFloat(v.last_purchase_price) : NaN;
+            return Number.isFinite(n) ? n : null;
+        }
+        return itemInfo[l.general_item_id]?.cost ?? null;
     };
+    const linePicked = (l) => l.kind === 'trim' ? !!l.trim_item_variant_id : !!l.general_item_id;
+    const lineValue = (l) => {
+        const cost = linePicked(l) ? lineCost(l) : null;
+        if (cost == null) return null;
+        const q = parseFloat(l.qty);
+        return Number.isFinite(q) ? q * cost : null;
+    };
+    const isFractionalTrim = (l) => l.kind === 'trim' && l.qty !== '' && !Number.isInteger(parseFloat(l.qty));
     const slipTotal = lines.reduce((s, l) => s + (lineValue(l) ?? 0), 0);
-    const hasUnpriced = lines.some(l => l.general_item_id && itemInfo[l.general_item_id]?.cost == null);
+    const hasUnpriced = lines.some(l => linePicked(l) && lineCost(l) == null);
+
+    const lineName = (l) => {
+        if (l.kind === 'trim') {
+            const v = lineVariant(l);
+            const trimName = trimCatalog.find(t => String(t.id) === String(l.trim_item_id))?.name;
+            return [trimName, v?.color_name].filter(Boolean).join(' ') || 'A trim line';
+        }
+        return itemInfo[l.general_item_id]?.name || 'A line';
+    };
 
     const handleSubmit = async () => {
-        if (!dept.trim()) { setErr('Department is required.'); return; }
-        const validLines = lines.filter(l => l.general_item_id && parseFloat(l.qty) > 0);
+        if (!personId) { setErr('Employee is required.'); return; }
+        const validLines = lines.filter(l => linePicked(l) && parseFloat(l.qty) > 0);
         if (!validLines.length) { setErr('Add at least one item with quantity.'); return; }
+        if (validLines.some(isFractionalTrim)) { setErr('Trim quantities must be whole numbers.'); return; }
+        const unpricedLine = validLines.find(l => lineCost(l) == null);
+        if (unpricedLine) { setErr(`"${lineName(unpricedLine)}" has no cost on record — cost is mandatory for issue slips.`); return; }
         // Over-stock is only warned inline — the server enforces atomically and may
         // know better than our possibly-stale snapshot.
         setBusy(true); setErr(null); setLineErrs({});
+        // emp_id is usually numeric but may be a code — only coerce when it is a number.
+        const empId = Number(personId);
         try {
             const r = await generalItemsApi.createIssue({
-                issued_to_department: dept.trim(),
-                ...(personId ? { issued_to_user_id: parseInt(personId) } : {}),
+                issued_to_employee_id: Number.isFinite(empId) ? empId : personId,
+                ...(dept.trim() ? { issued_to_department: dept.trim() } : {}),
+                ...(recoverFromSalary ? { recover_from_salary: true } : {}),
                 ...(notes.trim() ? { notes: notes.trim() } : {}),
-                lines: validLines.map(l => ({ general_item_id: parseInt(l.general_item_id), qty: parseFloat(l.qty) })),
+                lines: validLines.map(l => l.kind === 'trim'
+                    ? { trim_item_variant_id: parseInt(l.trim_item_variant_id), qty: parseFloat(l.qty) }
+                    : { general_item_id: parseInt(l.general_item_id), qty: parseFloat(l.qty) }),
             });
             const data = r.data?.data ?? r.data;
             setResult(data);
@@ -270,11 +359,18 @@ function IssueSlipModal({ items, onIssued, onClose }) {
         } catch (e) {
             const msg = e?.response?.data?.error || 'Failed to create issue.';
             // 409: `Insufficient stock for "X": have N, need M.` — pin it verbatim
-            // on the offending line so the user can fix that qty.
+            // on the offending line so the user can fix that qty. For trim lines the
+            // server names the trim, so match against item/color names too.
             if (e?.response?.status === 409) {
                 const quoted = msg.match(/"(.+)"/)?.[1];
                 const idx = quoted != null
-                    ? lines.findIndex(l => itemInfo[l.general_item_id]?.name === quoted)
+                    ? lines.findIndex(l => {
+                        if (l.kind === 'general') return itemInfo[l.general_item_id]?.name === quoted;
+                        const v = lineVariant(l);
+                        if (!v) return false;
+                        const trimName = trimCatalog.find(t => String(t.id) === String(l.trim_item_id))?.name;
+                        return (trimName && quoted.includes(trimName)) || (v.color_name && quoted.includes(v.color_name));
+                    })
                     : -1;
                 if (idx !== -1) { setLineErrs({ [idx]: msg }); setErr(null); }
                 else setErr(msg);
@@ -288,7 +384,7 @@ function IssueSlipModal({ items, onIssued, onClose }) {
 
     return (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
                     <h2 className="text-sm font-bold text-slate-800">Issue Slip</h2>
                     <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-full transition"><X size={14} className="text-slate-400" /></button>
@@ -300,68 +396,125 @@ function IssueSlipModal({ items, onIssued, onClose }) {
                         <h3 className="text-base font-bold text-slate-800">Issue Created</h3>
                         <p className="text-sm text-slate-500">
                             Issue <span className="font-bold text-slate-700">{result.issue_number || `#${result.id}`}</span>
+                            {result.issued_to_name && <> · to <span className="font-bold text-slate-700">{result.issued_to_name}</span></>}
                             {result.total_value != null && (
                                 <> · Total value: <span className="font-bold text-slate-700">₹{parseFloat(result.total_value).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></>
                             )}
                         </p>
+                        {recoverFromSalary && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                                <IndianRupee size={9} /> Recover from salary
+                            </span>
+                        )}
                         <button onClick={onClose} className="mt-2 text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 px-5 py-2 rounded-xl transition">Close</button>
                     </div>
                 ) : (
                     <>
                         <div className="overflow-auto flex-1 px-5 py-4 space-y-4">
-                            <LabeledField label="Issued To (Department)" required>
-                                <input type="text" list="gis-dept-suggestions" value={dept} onChange={e => setDept(e.target.value)} placeholder="e.g. Maintenance, Production" className={inputCls} />
-                                <datalist id="gis-dept-suggestions">
-                                    {deptSuggestions.map(d => <option key={d} value={d} />)}
-                                </datalist>
-                            </LabeledField>
-                            <div className="grid grid-cols-2 gap-3">
-                                <LabeledField label="Issued To (Person)">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <LabeledField label="Issued To (Employee)" required>
                                     <SearchableSelect
                                         value={personId}
                                         onChange={setPersonId}
-                                        options={[{ value: '', label: '— None —' }, ...users]}
-                                        placeholder="— None —"
+                                        options={users}
+                                        placeholder="— Select employee —"
                                         size="sm"
                                     />
+                                </LabeledField>
+                                <LabeledField label="Department">
+                                    <input type="text" list="gis-dept-suggestions" value={dept} onChange={e => setDept(e.target.value)} placeholder="Optional, e.g. Sampling" className={inputCls} />
+                                    <datalist id="gis-dept-suggestions">
+                                        {deptSuggestions.map(d => <option key={d} value={d} />)}
+                                    </datalist>
                                 </LabeledField>
                                 <LabeledField label="Notes">
                                     <input type="text" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes" className={inputCls} />
                                 </LabeledField>
                             </div>
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={recoverFromSalary}
+                                    onChange={e => setRecoverFromSalary(e.target.checked)}
+                                    className="accent-amber-500"
+                                />
+                                <span className="text-xs font-semibold text-slate-600 flex items-center gap-1">
+                                    <IndianRupee size={11} className="text-amber-600" /> Recover from salary
+                                </span>
+                            </label>
 
                             <div>
                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Items</p>
                                 <div className="space-y-2">
                                     {lines.map((line, idx) => {
-                                        const info = line.general_item_id ? itemInfo[line.general_item_id] : null;
-                                        const overStock = info && parseFloat(line.qty) > info.stock;
+                                        const isTrim = line.kind === 'trim';
+                                        const variant = lineVariant(line);
+                                        const info = !isTrim && line.general_item_id ? itemInfo[line.general_item_id] : null;
+                                        const stock = isTrim ? (variant ? trimVariantStock(variant) : null) : info?.stock ?? null;
+                                        const cost = linePicked(line) ? lineCost(line) : null;
+                                        const overStock = stock != null && parseFloat(line.qty) > stock;
+                                        const fractional = isFractionalTrim(line);
+                                        const unpriced = linePicked(line) && cost == null;
                                         const val = lineValue(line);
                                         const serverErr = lineErrs[idx];
                                         return (
                                             <div key={idx} className={`bg-slate-50 border rounded-xl px-3 py-2 ${serverErr ? 'border-red-300 bg-red-50/60' : 'border-slate-200'}`}>
                                                 <div className="flex gap-2 items-start">
-                                                    <div className="flex-1 min-w-0">
-                                                        <SearchableSelect
-                                                            value={line.general_item_id}
-                                                            onChange={v => setLine(idx, 'general_item_id', v)}
-                                                            options={pickerOptions}
-                                                            placeholder="— Select item —"
-                                                            size="sm"
-                                                        />
-                                                        {info && (
-                                                            <p className={`text-[10px] mt-0.5 ${overStock ? 'text-red-500 font-bold' : 'text-slate-400'}`}>
-                                                                {overStock && <AlertTriangle size={9} className="inline mr-0.5" />}
-                                                                In stock: {qtyNum(info.stock)}{info.uom ? ` ${info.uom}` : ''} · @ {money(info.cost)}
+                                                    <div className="flex rounded-lg border border-slate-200 overflow-hidden shrink-0 mt-0.5">
+                                                        {['general', 'trim'].map(k => (
+                                                            <button
+                                                                key={k} type="button"
+                                                                onClick={() => line.kind !== k && setLineKind(idx, k)}
+                                                                className={`text-[10px] font-bold px-2 py-1.5 transition ${line.kind === k ? 'bg-orange-500 text-white' : 'bg-white text-slate-400 hover:text-slate-600'}`}
+                                                            >
+                                                                {k === 'general' ? 'General' : 'Trim'}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0 space-y-1.5">
+                                                        {isTrim ? (
+                                                            <div className="grid grid-cols-2 gap-1.5">
+                                                                <SearchableSelect
+                                                                    value={line.trim_item_id}
+                                                                    onChange={v => setLineTrimItem(idx, v)}
+                                                                    options={trimItemOptions}
+                                                                    placeholder="— Select trim item —"
+                                                                    size="sm"
+                                                                />
+                                                                <SearchableSelect
+                                                                    value={line.trim_item_variant_id}
+                                                                    onChange={v => setLine(idx, 'trim_item_variant_id', v)}
+                                                                    options={line.variants.map(v => ({ value: trimVariantId(v), label: trimVariantLabel(v) }))}
+                                                                    placeholder={line.variantsLoading ? 'Loading variants…' : line.trim_item_id ? '— Select variant —' : 'Select item first'}
+                                                                    disabled={!line.trim_item_id || line.variantsLoading}
+                                                                    size="sm"
+                                                                />
+                                                            </div>
+                                                        ) : (
+                                                            <SearchableSelect
+                                                                value={line.general_item_id}
+                                                                onChange={v => setLine(idx, 'general_item_id', v)}
+                                                                options={pickerOptions}
+                                                                placeholder="— Select item —"
+                                                                size="sm"
+                                                            />
+                                                        )}
+                                                        {linePicked(line) && (
+                                                            <p className={`text-[10px] ${(overStock || fractional || unpriced) ? 'text-red-500 font-bold' : 'text-slate-400'}`}>
+                                                                {(overStock || fractional || unpriced) && <AlertTriangle size={9} className="inline mr-0.5" />}
+                                                                In stock: {stock != null ? qtyNum(stock) : '—'}{!isTrim && info?.uom ? ` ${info.uom}` : ''} · @ {money(cost)}
+                                                                {isTrim && cost != null && ' (last purchase)'}
                                                                 {overStock && ' — exceeds stock, will be rejected'}
+                                                                {fractional && ' — whole numbers only for trims'}
+                                                                {unpriced && ' — no cost on record, required to issue'}
                                                             </p>
                                                         )}
                                                     </div>
                                                     <input
-                                                        type="number" min="0" step="any"
+                                                        type="number" min="0" step={isTrim ? '1' : 'any'}
                                                         value={line.qty} onChange={e => setLine(idx, 'qty', e.target.value)}
                                                         placeholder="Qty"
-                                                        className={`w-20 text-sm border rounded-xl px-2 py-2 focus:outline-none focus:border-orange-400 ${(overStock || serverErr) ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}
+                                                        className={`w-20 text-sm border rounded-xl px-2 py-2 focus:outline-none focus:border-orange-400 ${(overStock || fractional || serverErr) ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}
                                                     />
                                                     <span className="w-20 text-right text-xs font-bold text-slate-700 tabular-nums mt-2.5 shrink-0">
                                                         {val != null ? money(val) : '—'}
@@ -386,7 +539,7 @@ function IssueSlipModal({ items, onIssued, onClose }) {
                                         </button>
                                         <p className="text-xs text-slate-500">
                                             Slip total: <span className="font-bold text-slate-800 tabular-nums">{money(slipTotal)}</span>
-                                            {hasUnpriced && <span className="text-[10px] text-amber-600 ml-1">(excludes unpriced items)</span>}
+                                            {hasUnpriced && <span className="text-[10px] font-bold text-red-600 ml-1">(unpriced lines — set cost first)</span>}
                                         </p>
                                     </div>
                                     <p className="text-[10px] text-slate-400">Values are a preview at current unit cost — the server computes the authoritative valuation.</p>
@@ -697,23 +850,65 @@ function LedgerTab({ items, onOpenIssue }) {
 
 // ─── Tab: Issues ─────────────────────────────────────────────────────────────
 function IssuesTab({ items, initialFocus }) {
-    const [deptFilter, setDeptFilter] = useState('');
-    const [itemFilter, setItemFilter] = useState('');
-    const [dateFrom,   setDateFrom]   = useState('');
-    const [dateTo,     setDateTo]     = useState('');
-    const [issues,     setIssues]     = useState([]);
-    const [loading,    setLoading]    = useState(false);
-    const [err,        setErr]        = useState(null);
-    const [expanded,   setExpanded]   = useState(null);
+    const [deptFilter,     setDeptFilter]     = useState('');
+    const [itemFilter,     setItemFilter]     = useState('');
+    const [employeeFilter, setEmployeeFilter] = useState('');
+    const [salaryOnly,     setSalaryOnly]     = useState(false);
+    const [trimItemFilter, setTrimItemFilter] = useState('');
+    const [variantFilter,  setVariantFilter]  = useState('');
+    const [variantOptions, setVariantOptions] = useState([]);
+    const [dateFrom,       setDateFrom]       = useState('');
+    const [dateTo,         setDateTo]         = useState('');
+    const [issues,         setIssues]         = useState([]);
+    const [users,          setUsers]          = useState([]);
+    const [trimCatalog,    setTrimCatalog]    = useState([]);
+    const [loading,        setLoading]        = useState(false);
+    const [err,            setErr]            = useState(null);
+    const [expanded,       setExpanded]       = useState(null);
+
+    useEffect(() => {
+        // History filter includes inactive employees — past slips still reference them.
+        hrApi.getAllEmployees()
+            .then(r => {
+                const list = r.data?.data ?? r.data ?? [];
+                setUsers((Array.isArray(list) ? list : [])
+                    .map(e => ({ value: e.emp_id, label: `${e.employee_name} (${e.emp_id})${e.designation ? ` · ${e.designation}` : ''}` })));
+            })
+            .catch(() => {});
+        storeManagerApi.getAllTrimItems()
+            .then(r => {
+                const list = r.data?.data ?? r.data ?? [];
+                setTrimCatalog(Array.isArray(list) ? list : []);
+            })
+            .catch(() => {});
+    }, []);
+
+    // Trim-variant filter is two-step: pick the trim item, then its variant.
+    const handleTrimItemFilter = async (itemId) => {
+        setTrimItemFilter(itemId);
+        setVariantFilter('');
+        setVariantOptions([]);
+        if (!itemId) return;
+        try {
+            const r = await storeManagerApi.getVariantsByItem(itemId);
+            const list = r.data?.data ?? r.data ?? [];
+            setVariantOptions((Array.isArray(list) ? list : []).map(v => ({ value: trimVariantId(v), label: trimVariantLabel(v) })));
+        } catch {
+            // dropdown just stays empty
+        }
+    };
 
     const load = useCallback(async () => {
         setLoading(true); setErr(null);
         try {
             const params = {};
-            if (deptFilter) params.department       = deptFilter;
-            if (itemFilter) params.general_item_id  = itemFilter;
-            if (dateFrom)   params.date_from        = dateFrom;
-            if (dateTo)     params.date_to          = dateTo;
+            if (deptFilter)     params.department            = deptFilter;
+            if (itemFilter)     params.general_item_id       = itemFilter;
+            if (employeeFilter) params.issued_to_employee_id = employeeFilter;
+            if (salaryOnly)     params.recover_from_salary   = true;
+            if (variantFilter)  params.trim_item_variant_id  = variantFilter;
+            if (dateFrom)       params.date_from             = dateFrom;
+            if (dateTo)         params.date_to               = dateTo;
             const r = await generalItemsApi.getIssues(params);
             setIssues(r.data?.data ?? r.data ?? []);
         } catch {
@@ -721,7 +916,7 @@ function IssuesTab({ items, initialFocus }) {
         } finally {
             setLoading(false);
         }
-    }, [deptFilter, itemFilter, dateFrom, dateTo]);
+    }, [deptFilter, itemFilter, employeeFilter, salaryOnly, variantFilter, dateFrom, dateTo]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -736,20 +931,66 @@ function IssuesTab({ items, initialFocus }) {
     return (
         <>
             <div className="flex flex-wrap items-center gap-2 mb-4">
-                <input type="text" value={deptFilter} onChange={e => setDeptFilter(e.target.value)} placeholder="Filter by department…" className="text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400 w-44" />
                 <div className="w-44">
                     <SearchableSelect
-                        value={itemFilter}
-                        onChange={setItemFilter}
-                        options={[{ value: '', label: 'All items' }, ...items.map(i => ({ value: i.id, label: i.name }))]}
-                        placeholder="All items"
+                        value={employeeFilter}
+                        onChange={setEmployeeFilter}
+                        options={[{ value: '', label: 'All employees' }, ...users]}
+                        placeholder="All employees"
                         size="sm"
                     />
                 </div>
+                <button
+                    onClick={() => setSalaryOnly(v => !v)}
+                    className={`text-xs font-semibold px-3 py-2 rounded-xl border transition-all flex items-center gap-1 ${salaryOnly ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}
+                >
+                    <IndianRupee size={11} /> Salary recovery
+                </button>
+                <input type="text" value={deptFilter} onChange={e => setDeptFilter(e.target.value)} placeholder="Filter by department…" className="text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400 w-40" />
+                <div className="w-40">
+                    <SearchableSelect
+                        value={itemFilter}
+                        onChange={setItemFilter}
+                        options={[{ value: '', label: 'All general items' }, ...items.map(i => ({ value: i.id, label: i.name }))]}
+                        placeholder="All general items"
+                        size="sm"
+                    />
+                </div>
+                <div className="w-40">
+                    <SearchableSelect
+                        value={trimItemFilter}
+                        onChange={handleTrimItemFilter}
+                        options={[{ value: '', label: 'All trims' }, ...trimCatalog.map(t => ({ value: t.id, label: `${t.name}${t.brand ? ` - ${t.brand}` : ''}` }))]}
+                        placeholder="All trims"
+                        size="sm"
+                    />
+                </div>
+                {trimItemFilter && (
+                    <div className="w-48">
+                        <SearchableSelect
+                            value={variantFilter}
+                            onChange={setVariantFilter}
+                            options={[{ value: '', label: 'All variants' }, ...variantOptions]}
+                            placeholder="All variants"
+                            size="sm"
+                        />
+                    </div>
+                )}
                 <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400" />
                 <span className="text-xs text-slate-400">to</span>
                 <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400" />
             </div>
+
+            {/* Employee statement: employee + salary-recovery filters active → recoverable total */}
+            {employeeFilter && salaryOnly && !loading && issues.length > 0 && (
+                <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-3 text-sm text-amber-800">
+                    <IndianRupee size={13} className="shrink-0" />
+                    <span>
+                        Recoverable from salary: <span className="font-bold">{money(issues.reduce((s, i) => s + (parseFloat(i.total_value) || 0), 0))}</span>
+                        {' '}across {issues.length} slip{issues.length !== 1 ? 's' : ''}
+                    </span>
+                </div>
+            )}
 
             {err && <p className="text-xs text-red-600 mb-3">{err}</p>}
 
@@ -769,9 +1010,14 @@ function IssuesTab({ items, initialFocus }) {
                                 <div className="flex items-center gap-3 flex-wrap min-w-0">
                                     <span className="text-xs font-bold text-slate-800">{iss.issue_number || `#${iss.id}`}</span>
                                     <span className="text-[11px] text-slate-500">
-                                        {iss.issued_to_department}
-                                        {iss.issued_to_name ? ` → ${iss.issued_to_name}` : ''}
+                                        {iss.issued_to_name || '—'}
+                                        {iss.issued_to_department ? ` · ${iss.issued_to_department}` : ''}
                                     </span>
+                                    {iss.recover_from_salary && (
+                                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md uppercase tracking-wider" title="Recover from salary">
+                                            <IndianRupee size={8} /> Salary
+                                        </span>
+                                    )}
                                     {iss.issued_by_name && (
                                         <span className="text-[10px] text-slate-400">by {iss.issued_by_name}</span>
                                     )}
@@ -801,10 +1047,19 @@ function IssuesTab({ items, initialFocus }) {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-50">
-                                            {(iss.lines || []).map((line, j) => (
+                                            {(iss.lines || []).map((line, j) => {
+                                                const isTrim = line.item_kind === 'trim';
+                                                const variantBits = isTrim
+                                                    ? [line.variant_color_name, line.variant_size].filter(Boolean).join(' / ')
+                                                    : '';
+                                                return (
                                                 <tr key={line.id ?? j}>
                                                     <td className="py-1.5 text-slate-700">
-                                                        {line.item_name || `Item #${line.general_item_id}`}
+                                                        <span className={`text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 rounded mr-1.5 ${isTrim ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                            {isTrim ? 'Trim' : 'General'}
+                                                        </span>
+                                                        {line.item_name || (isTrim ? `Variant #${line.trim_item_variant_id}` : `Item #${line.general_item_id}`)}
+                                                        {variantBits && <span className="text-slate-500"> — {variantBits}</span>}
                                                         {line.item_code && <span className="text-[10px] font-mono text-slate-400 ml-1">{line.item_code}</span>}
                                                     </td>
                                                     <td className="py-1.5 text-right font-semibold text-slate-800 tabular-nums whitespace-nowrap">
@@ -815,7 +1070,8 @@ function IssuesTab({ items, initialFocus }) {
                                                         {line.unit_cost != null ? money(line.line_value) : '—'}
                                                     </td>
                                                 </tr>
-                                            ))}
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                     {iss.notes && <p className="text-[11px] text-slate-400 italic">{iss.notes}</p>}
@@ -877,12 +1133,23 @@ export default function GeneralItemsPage() {
 
     return (
         <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-5">
-            <div>
-                <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                    <Package size={20} className="text-orange-500" />
-                    General Items
-                </h1>
-                <p className="text-sm text-slate-500 mt-0.5">Consumables, supplies, and miscellaneous stock</p>
+            <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                    <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                        <Package size={20} className="text-orange-500" />
+                        General Items
+                    </h1>
+                    <p className="text-sm text-slate-500 mt-0.5">Consumables, supplies, and miscellaneous stock</p>
+                </div>
+                {isAdmin && (
+                    <Link
+                        to="/admin/general-items"
+                        title="Opens Admin portal — item master, categories & deactivation"
+                        className="flex items-center gap-1.5 text-xs font-bold text-slate-600 border border-slate-200 bg-white hover:bg-slate-50 px-3 py-2 rounded-xl transition"
+                    >
+                        <Settings2 size={12} /> Manage Master List <ArrowUpRight size={11} className="opacity-60" />
+                    </Link>
+                )}
             </div>
 
             {lowStockCount > 0 && (
