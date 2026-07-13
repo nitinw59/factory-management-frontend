@@ -241,10 +241,14 @@ function IssueSlipModal({ items, onIssued, onClose }) {
         // Any employee can receive an issue (not just system users) — HR master is the source.
         hrApi.getAllEmployees()
             .then(r => {
-                const list = r.data?.data ?? r.data ?? [];
+                // Response shape: { employees: [{ emp_id, employee_name, status, line_name, dept_name, labor_category }] }
+                const list = r.data?.employees ?? r.data?.data ?? r.data ?? [];
                 setUsers((Array.isArray(list) ? list : [])
                     .filter(e => !e.status || e.status === 'Active')
-                    .map(e => ({ value: e.emp_id, label: `${e.employee_name} (${e.emp_id})${e.designation ? ` · ${e.designation}` : ''}` })));
+                    .map(e => {
+                        const unit = e.line_name || e.dept_name;
+                        return { value: e.emp_id, label: `${(e.employee_name || '').trim()} (${e.emp_id})${unit ? ` · ${unit.trim()}` : ''}` };
+                    }));
             })
             .catch(() => {});
         // Same source as the trim inward form — variants come per item on demand.
@@ -958,9 +962,12 @@ function IssuesTab({ items, initialFocus }) {
         // History filter includes inactive employees — past slips still reference them.
         hrApi.getAllEmployees()
             .then(r => {
-                const list = r.data?.data ?? r.data ?? [];
+                const list = r.data?.employees ?? r.data?.data ?? r.data ?? [];
                 setUsers((Array.isArray(list) ? list : [])
-                    .map(e => ({ value: e.emp_id, label: `${e.employee_name} (${e.emp_id})${e.designation ? ` · ${e.designation}` : ''}` })));
+                    .map(e => {
+                        const unit = e.line_name || e.dept_name;
+                        return { value: e.emp_id, label: `${(e.employee_name || '').trim()} (${e.emp_id})${unit ? ` · ${unit.trim()}` : ''}` };
+                    }));
             })
             .catch(() => {});
         storeManagerApi.getAllTrimItems()
