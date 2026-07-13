@@ -751,6 +751,7 @@ export default function PurchaseFlowPage() {
             {openInvoice && (
                 <InvoiceModal
                     inwards={inwards}
+                    poItems={po?.items || []}
                     invoice={openInvoice}
                     initialMode="view"
                     onClose={() => setOpenInvoice(null)}
@@ -761,6 +762,7 @@ export default function PurchaseFlowPage() {
             {creatingInvoiceForInwardId != null && (
                 <InvoiceModal
                     inwards={inwards}
+                    poItems={po?.items || []}
                     invoice={null}
                     initialMode="create"
                     defaultSelectedIds={new Set([creatingInvoiceForInwardId])}

@@ -139,6 +139,7 @@ export function MatchReportPanel({ report, tolerance }) {
 
 export default function InvoiceModal({
     inwards = [],            // all inwards on this PO
+    poItems = [],            // PO line items for ordered-qty context
     invoice = null,
     initialMode = 'view',
     defaultSelectedIds = new Set(),
@@ -221,8 +222,9 @@ export default function InvoiceModal({
                         _label: itemLabel(it),
                         _grn:   iw.grn_number || `Inward #${iw.id}`,
                         _uom:   it.unit_of_measure || it.trim_uom || '',
-                        _grnQty:  it.qty_received ?? null,
-                        _grnRate: (it.effective_unit_price ?? it.unit_price) ?? null,
+                        _grnQty:   it.qty_received ?? null,
+                        _grnRate:  (it.effective_unit_price ?? it.unit_price) ?? null,
+                        _poItemId: it.purchase_order_item_id ?? null,
                     });
                 });
             });
@@ -242,9 +244,44 @@ export default function InvoiceModal({
     const setLine = (idx, field, value) =>
         setLines(prev => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l));
 
+    const setGroupRate = (groupKey, value) =>
+        setLines(prev => prev.map(l => {
+            const k = l._poItemId != null ? String(l._poItemId) : l._label;
+            return k === groupKey ? { ...l, rate: value } : l;
+        }));
+
     const linesTotal = useMemo(() =>
         lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0),
     [lines]);
+
+    // Merge same-PO-item rows into one display row (one entry per unique purchase_order_item_id / label).
+    const mergedLines = useMemo(() => {
+        const groups = new Map();
+        lines.forEach(l => {
+            const key = l._poItemId != null ? String(l._poItemId) : l._label;
+            if (!groups.has(key)) groups.set(key, { key, label: l._label, uom: l._uom, rate: l.rate, poItemId: l._poItemId, items: [] });
+            groups.get(key).items.push(l);
+        });
+        return [...groups.values()];
+    }, [lines]);
+
+    // PO-ordered qty + qty received in OTHER (non-selected) inwards, keyed by mergedLines group key.
+    const poContextMap = useMemo(() => {
+        if (!poItems.length || !mergedLines.length) return {};
+        const map = {};
+        mergedLines.forEach(g => {
+            if (g.poItemId == null) return;
+            const poItem = poItems.find(p => String(p.id) === String(g.poItemId));
+            if (!poItem) return;
+            const otherReceived = inwards
+                .filter(iw => !selectedIds.has(iw.id))
+                .reduce((s, iw) => s + (iw.items || [])
+                    .filter(it => String(it.purchase_order_item_id) === String(g.poItemId))
+                    .reduce((ss, it) => ss + (parseFloat(it.qty_received) || 0), 0), 0);
+            map[g.key] = { ordered: parseFloat(poItem.quantity) || 0, uom: poItem.uom || g.uom || 'pcs', otherReceived };
+        });
+        return map;
+    }, [mergedLines, poItems, inwards, selectedIds]);
 
     const matchStatus = detail?.match_status ?? invoice?.match_status;
 
@@ -507,7 +544,7 @@ export default function InvoiceModal({
                         <div>
                             <div className="flex items-center justify-between mb-2">
                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                                    <Scale size={11} /> Invoice Lines ({lines.length})
+                                    <Scale size={11} /> Invoice Lines ({mergedLines.length})
                                 </p>
                                 {tolerance != null && (
                                     <span className="text-[10px] text-slate-400">Match tolerance ±{tolerance}%</span>
@@ -518,7 +555,7 @@ export default function InvoiceModal({
                                     Editing amount, lines, or linked inwards voids the existing match override.
                                 </p>
                             )}
-                            {lines.length === 0 ? (
+                            {mergedLines.length === 0 ? (
                                 <p className="text-sm text-slate-400 italic">Select inwards below — their GRN lines appear here prefilled.</p>
                             ) : (
                                 <div className="border border-slate-200 rounded-xl overflow-hidden">
@@ -526,42 +563,58 @@ export default function InvoiceModal({
                                         <table className="w-full text-[11px]">
                                             <thead>
                                                 <tr className="bg-slate-50 text-slate-400 uppercase tracking-wider text-[9px]">
-                                                    <th className="text-left  font-bold px-2.5 py-1.5">Item (GRN)</th>
-                                                    <th className="text-right font-bold px-2.5 py-1.5 w-24">Qty</th>
+                                                    <th className="text-left  font-bold px-2.5 py-1.5">Item</th>
+                                                    <th className="text-right font-bold px-2.5 py-1.5 w-28">Qty</th>
                                                     <th className="text-right font-bold px-2.5 py-1.5 w-24">Rate</th>
                                                     <th className="text-right font-bold px-2.5 py-1.5 w-24">Value</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-100">
-                                                {lines.map((l, i) => {
-                                                    const qtyDiff  = l._grnQty  != null && l.qty  !== '' && parseFloat(l.qty)  !== parseFloat(l._grnQty);
-                                                    const rateDiff = l._grnRate != null && l.rate !== '' && parseFloat(l.rate) !== parseFloat(l._grnRate);
+                                                {mergedLines.map(group => {
+                                                    const totalQty = group.items.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
+                                                    const rate     = parseFloat(group.rate) || 0;
+                                                    const value    = totalQty * rate;
+                                                    const ctx      = poContextMap[group.key];
+                                                    const grns     = [...new Set(group.items.map(l => l._grn))].join(', ');
+                                                    const poBadge  = ctx
+                                                        ? totalQty < ctx.ordered
+                                                            ? 'bg-red-100 text-red-700'
+                                                            : totalQty > ctx.ordered
+                                                                ? 'bg-yellow-100 text-yellow-700'
+                                                                : 'bg-green-100 text-green-700'
+                                                        : 'bg-slate-100 text-slate-600';
                                                     return (
-                                                        <tr key={l.purchase_inward_item_id}>
-                                                            <td className="px-2.5 py-1.5">
-                                                                <p className="font-medium text-slate-700 truncate max-w-[200px]">{l._label}</p>
-                                                                <p className="text-[9px] text-slate-400">{l._grn}</p>
+                                                        <tr key={group.key} className="hover:bg-slate-50/60">
+                                                            <td className="px-2.5 py-2">
+                                                                <p className="font-medium text-slate-700 truncate max-w-[220px]">{group.label}</p>
+                                                                <p className="text-[9px] text-slate-400 mt-0.5">{grns}</p>
+                                                                {ctx && (
+                                                                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${poBadge}`}>
+                                                                            PO {ctx.ordered.toLocaleString()} {ctx.uom}
+                                                                        </span>
+                                                                        {ctx.otherReceived > 0 && (
+                                                                            <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
+                                                                                Other GRNs {ctx.otherReceived.toLocaleString()} {ctx.uom}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                )}
                                                             </td>
-                                                            <td className="px-2.5 py-1.5">
+                                                            <td className="px-2.5 py-2 text-right tabular-nums font-bold text-slate-700 align-top">
+                                                                {totalQty.toLocaleString(undefined, { maximumFractionDigits: 3 })}
+                                                                {group.uom ? <span className="text-[9px] text-slate-400 ml-1">{group.uom}</span> : null}
+                                                            </td>
+                                                            <td className="px-2.5 py-2 align-top">
                                                                 <input
                                                                     type="number" step="any" min="0"
-                                                                    value={l.qty}
-                                                                    onChange={e => setLine(i, 'qty', e.target.value)}
-                                                                    className={`w-full text-right tabular-nums border rounded-md px-1.5 py-1 focus:outline-none focus:border-indigo-400 ${qtyDiff ? 'border-amber-300 bg-amber-50/60' : 'border-slate-200'}`}
+                                                                    value={group.rate}
+                                                                    onChange={e => setGroupRate(group.key, e.target.value)}
+                                                                    className="w-full text-right tabular-nums border border-slate-200 rounded-md px-1.5 py-1 focus:outline-none focus:border-indigo-400 text-[11px]"
                                                                 />
-                                                                {qtyDiff && <p className="text-[9px] text-amber-600 text-right mt-0.5">GRN: {num(l._grnQty)}{l._uom ? ` ${l._uom}` : ''}</p>}
                                                             </td>
-                                                            <td className="px-2.5 py-1.5">
-                                                                <input
-                                                                    type="number" step="any" min="0"
-                                                                    value={l.rate}
-                                                                    onChange={e => setLine(i, 'rate', e.target.value)}
-                                                                    className={`w-full text-right tabular-nums border rounded-md px-1.5 py-1 focus:outline-none focus:border-indigo-400 ${rateDiff ? 'border-amber-300 bg-amber-50/60' : 'border-slate-200'}`}
-                                                                />
-                                                                {rateDiff && <p className="text-[9px] text-amber-600 text-right mt-0.5">GRN: {num(l._grnRate)}</p>}
-                                                            </td>
-                                                            <td className="px-2.5 py-1.5 text-right tabular-nums font-bold text-slate-700">
-                                                                {num((parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0))}
+                                                            <td className="px-2.5 py-2 text-right tabular-nums font-bold text-slate-800 align-top">
+                                                                ₹{num(value)}
                                                             </td>
                                                         </tr>
                                                     );

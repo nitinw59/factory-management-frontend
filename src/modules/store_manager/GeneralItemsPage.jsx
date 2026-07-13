@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     Package, Search, Plus, AlertTriangle, X, Loader2,
-    CheckCircle2, BookOpen, ClipboardList, ChevronDown,
+    CheckCircle2, BookOpen, ClipboardList, ChevronDown, Download,
 } from 'lucide-react';
 import { generalItemsApi } from '../../api/generalItemsApi';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import SearchableSelect from '../../shared/SearchableSelect';
+import { useAuth } from '../../context/AuthContext';
 
 // ─── shared ────────────────────────────────────────────────────────────────
 const LabeledField = ({ label, required, children }) => (
@@ -409,7 +410,7 @@ function IssueSlipModal({ items, onIssued, onClose }) {
 }
 
 // ─── Tab: Items ─────────────────────────────────────────────────────────────
-function ItemsTab({ items, categories, loading, onRefresh, showToast }) {
+function ItemsTab({ items, categories, loading, onRefresh, showToast, isAdmin }) {
     const [q, setQ] = useState('');
     const [catFilter, setCat] = useState('');
     const [lowStockOnly, setLowStockOnly] = useState(false);
@@ -435,6 +436,34 @@ function ItemsTab({ items, categories, loading, onRefresh, showToast }) {
         showToast({ kind: 'success', message: 'Item saved.' });
     };
 
+    const handleExport = () => {
+        const esc = (v) => {
+            const s = v == null ? '' : String(v);
+            return s.includes(',') || s.includes('"') || s.includes('\n')
+                ? `"${s.replace(/"/g, '""')}"`
+                : s;
+        };
+        const headers = ['Item Code', 'Name', 'Category', 'UOM', 'Unit Cost', 'Current Stock', 'Low Stock Threshold', 'Low Stock'];
+        const rows = filtered.map(it => [
+            esc(it.item_code),
+            esc(it.name),
+            esc(it.category_name),
+            esc(it.uom),
+            it.unit_cost != null ? parseFloat(it.unit_cost) : '',
+            it.current_stock ?? '',
+            it.low_stock_threshold ?? '',
+            (it.low_stock_threshold > 0 && it.current_stock <= it.low_stock_threshold) ? 'Yes' : 'No',
+        ]);
+        const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `general-items-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
     return (
         <>
             <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -450,12 +479,17 @@ function ItemsTab({ items, categories, loading, onRefresh, showToast }) {
                     <AlertTriangle size={11} className="inline mr-1" />Low stock
                 </button>
                 <div className="flex gap-2 ml-auto">
+                    <button onClick={handleExport} disabled={filtered.length === 0} className="text-xs font-bold text-slate-600 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 px-3 py-2 rounded-xl transition flex items-center gap-1.5">
+                        <Download size={12} /> Export
+                    </button>
                     <button onClick={() => { setSelected(null); setActiveModal('issue'); }} className="text-xs font-bold text-orange-600 border border-orange-200 bg-orange-50 hover:bg-orange-100 px-3 py-2 rounded-xl transition flex items-center gap-1.5">
                         <ClipboardList size={12} /> Issue Slip
                     </button>
-                    <button onClick={() => { setSelected(null); setActiveModal('create'); }} className="text-xs font-bold text-white bg-orange-500 hover:bg-orange-600 px-3 py-2 rounded-xl transition flex items-center gap-1.5">
-                        <Plus size={12} /> New Item
-                    </button>
+                    {isAdmin && (
+                        <button onClick={() => { setSelected(null); setActiveModal('create'); }} className="text-xs font-bold text-white bg-orange-500 hover:bg-orange-600 px-3 py-2 rounded-xl transition flex items-center gap-1.5">
+                            <Plus size={12} /> New Item
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -503,9 +537,11 @@ function ItemsTab({ items, categories, loading, onRefresh, showToast }) {
                                             ) : <span className="text-xs text-slate-300">—</span>}
                                         </td>
                                         <td className="py-2.5 text-center">
-                                            <button onClick={() => { setSelected(it); setActiveModal('edit'); }} className="text-[10px] font-bold text-slate-500 hover:text-orange-600 border border-slate-200 hover:border-orange-200 px-2 py-1 rounded-lg transition">
-                                                Edit
-                                            </button>
+                                            {isAdmin && (
+                                                <button onClick={() => { setSelected(it); setActiveModal('edit'); }} className="text-[10px] font-bold text-slate-500 hover:text-orange-600 border border-slate-200 hover:border-orange-200 px-2 py-1 rounded-lg transition">
+                                                    Edit
+                                                </button>
+                                            )}
                                         </td>
                                     </tr>
                                 );
@@ -801,6 +837,9 @@ const TABS = [
 ];
 
 export default function GeneralItemsPage() {
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'factory_admin';
+
     const [tab,        setTab]        = useState('items');
     const [items,      setItems]      = useState([]);
     const [categories, setCategories] = useState([]);
@@ -876,7 +915,7 @@ export default function GeneralItemsPage() {
                 </div>
 
                 <div className="p-5">
-                    {tab === 'items'  && <ItemsTab  items={items} categories={categories} loading={loading} onRefresh={fetchItems} showToast={setToast} />}
+                    {tab === 'items'  && <ItemsTab  items={items} categories={categories} loading={loading} onRefresh={fetchItems} showToast={setToast} isAdmin={isAdmin} />}
                     {tab === 'ledger' && <LedgerTab items={items} onOpenIssue={openIssue} />}
                     {tab === 'issues' && <IssuesTab items={items} initialFocus={focusIssue} />}
                 </div>

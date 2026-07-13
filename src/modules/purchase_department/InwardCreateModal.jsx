@@ -45,6 +45,10 @@ export default function InwardCreateModal({
 }) {
     const [busy, setBusy] = useState(false);
     const [err,  setErr]  = useState(null);
+
+    // RAW LOGS
+    console.log('InwardCreateModal: poItems', poItems);
+    console.log('InwardCreateModal: allInwards', allInwards);
     const [boxModal, setBoxModal] = useState(null); // { title, uom, initialBoxes, onSave }
 
     // ── Header fields ───────────────────────────────────────────────────────
@@ -59,6 +63,7 @@ export default function InwardCreateModal({
         () => (poItems || []).flatMap(i => i.requirements || []),
         [poItems]
     );
+
     const pendingByReq    = useMemo(() => pendingByReqMap(allRequirements, allInwards, null, poItems), [allRequirements, allInwards, poItems]);
     const pendingByPoItem = useMemo(() => pendingByPoItemMap(poItems, allInwards, null), [poItems, allInwards]);
 
@@ -132,6 +137,65 @@ export default function InwardCreateModal({
     const [customGroups,  setCustomGroups]  = useState(initialSnapshot?.customGroups  ?? []);
     const [removedReqIds, setRemovedReqIds] = useState(() => new Set(initialSnapshot?.removedReqIds || []));
     const [removedPoItemIds, setRemovedPoItemIds] = useState(() => new Set(initialSnapshot?.removedPoItemIds || []));
+
+    // Merged group-level inputs (one per PO item group; FCFS distribution to per-req entries at review time)
+    const [trimTotalByGroup, setTrimTotalByGroup] = useState(() => {
+        if (initialSnapshot?.trimTotalByGroup) return initialSnapshot.trimTotalByGroup;
+        const m = {};
+        (poItems || []).forEach(g => {
+            if ((g.requirements || []).length === 0 || g.item_type === 'fabric') return;
+            const tot = (g.requirements || []).reduce((s, r) => s + (pendingByReq[r.id] || 0), 0);
+            if (tot > 0) m[g.id] = String(tot);
+        });
+        return m;
+    });
+
+    const [fabricRollsByGroup, setFabricRollsByGroup] = useState(() => {
+        if (initialSnapshot?.fabricRollsByGroup) return initialSnapshot.fabricRollsByGroup;
+        const m = {};
+        (poItems || []).forEach(g => {
+            if ((g.requirements || []).length === 0 || g.item_type !== 'fabric') return;
+            m[g.id] = [newRoll()];
+        });
+        return m;
+    });
+
+    const [removedGroupIds, setRemovedGroupIds] = useState(() => new Set(initialSnapshot?.removedGroupIds || []));
+
+    // Free-form items merged by variant — one input per unique variant, FCFS distribution at review time
+    const ffVarKey = (g) => g.item_type === 'fabric'
+        ? `fabric_${g.fabric_type_id}_${g.fabric_color_id}`
+        : `trim_${g.trim_item_variant_id}`;
+
+    const [freeFormTrimTotalsByVar, setFreeFormTrimTotalsByVar] = useState(() => {
+        if (initialSnapshot?.freeFormTrimTotalsByVar) return initialSnapshot.freeFormTrimTotalsByVar;
+        const m = {};
+        const ffItems = (poItems || []).filter(g => (g.requirements || []).length === 0 && g.item_type !== 'fabric');
+        const seen = new Set();
+        ffItems.forEach(g => {
+            const key = ffVarKey(g);
+            if (seen.has(key)) return;
+            seen.add(key);
+            const tot = ffItems.filter(x => ffVarKey(x) === key).reduce((s, x) => s + (pendingByPoItem[x.id] || 0), 0);
+            if (tot > 0) m[key] = String(tot);
+        });
+        return m;
+    });
+
+    const [freeFormFabricRollsByVar, setFreeFormFabricRollsByVar] = useState(() => {
+        if (initialSnapshot?.freeFormFabricRollsByVar) return initialSnapshot.freeFormFabricRollsByVar;
+        const m = {};
+        const seen = new Set();
+        (poItems || []).filter(g => (g.requirements || []).length === 0 && g.item_type === 'fabric').forEach(g => {
+            const key = ffVarKey(g);
+            if (seen.has(key)) return;
+            seen.add(key);
+            m[key] = [newRoll()];
+        });
+        return m;
+    });
+
+    const [removedVarGroupKeys, setRemovedVarGroupKeys] = useState(() => new Set(initialSnapshot?.removedVarGroupKeys || []));
 
     // ── Lookups (lazy fetch) ────────────────────────────────────────────────
     const [trimItems,      setTrimItems]      = useState([]);
@@ -275,17 +339,123 @@ export default function InwardCreateModal({
     const handleReview = () => {
         setErr(null);
         if (!receivedDate) { setErr('Received date is required.'); return; }
-        const state = { trimTotalByReq, trimBoxesByReq, fabricRollsByReq, freeFormTrimTotals, freeFormTrimBoxes, freeFormFabricRolls, customGroups };
+
+        // FCFS distribution: spread group-level totals into per-req entries
+        const distTrimByReq = { ...trimTotalByReq };
+        const distFabricByReq = { ...fabricRollsByReq };
+
+        (poItems || []).forEach(group => {
+            if (removedGroupIds.has(group.id)) return;
+            const reqs = (group.requirements || []).filter(r => !removedReqIds.has(r.id));
+            if (reqs.length === 0) return;
+            if (group.item_type === 'fabric') {
+                const rolls = fabricRollsByGroup[group.id] || [];
+                const totalMeters = sumRolls(rolls);
+                const rollUom = rolls.find(r => r.uom)?.uom || 'meter';
+                let remaining = totalMeters;
+                reqs.forEach(r => {
+                    const cap = pendingByReq[r.id] || 0;
+                    const allocated = Math.min(remaining, cap);
+                    if (allocated > 0.001) {
+                        distFabricByReq[r.id] = [{ _k: rk(), bale_no: '', meter: String(allocated), uom: rollUom }];
+                    } else {
+                        delete distFabricByReq[r.id];
+                    }
+                    remaining = Math.max(0, remaining - allocated);
+                });
+            } else {
+                const total = parseFloat(trimTotalByGroup[group.id] || 0);
+                let remaining = total;
+                reqs.forEach(r => {
+                    const cap = pendingByReq[r.id] || 0;
+                    const allocated = Math.min(remaining, cap);
+                    if (allocated > 0) {
+                        distTrimByReq[r.id] = String(allocated);
+                    } else {
+                        delete distTrimByReq[r.id];
+                    }
+                    remaining = Math.max(0, remaining - allocated);
+                });
+            }
+        });
+
+        // FCFS distribution for free-form items grouped by variant
+        const distFreeFormTrimTotals = { ...freeFormTrimTotals };
+        const distFreeFormFabricRolls = { ...freeFormFabricRolls };
+        const ffVarGroupMap = {};
+        (poItems || []).filter(g => (g.requirements || []).length === 0).forEach(g => {
+            const key = ffVarKey(g);
+            if (!ffVarGroupMap[key]) ffVarGroupMap[key] = { key, items: [], isFabric: g.item_type === 'fabric' };
+            ffVarGroupMap[key].items.push(g);
+        });
+        Object.values(ffVarGroupMap).forEach(({ key, items, isFabric }) => {
+            if (removedVarGroupKeys.has(key)) return;
+            const activeItems = items.filter(g => !removedPoItemIds.has(g.id));
+            if (activeItems.length === 0) return;
+            if (isFabric) {
+                const rolls = freeFormFabricRollsByVar[key] || [];
+                const totalMeters = sumRolls(rolls);
+                const rollUom = rolls.find(r => r.uom)?.uom || 'meter';
+                let remaining = totalMeters;
+                activeItems.forEach(g => {
+                    const cap = pendingByPoItem[g.id] || 0;
+                    const allocated = Math.min(remaining, cap);
+                    if (allocated > 0.001) {
+                        distFreeFormFabricRolls[g.id] = [{ _k: rk(), bale_no: '', meter: String(allocated), uom: rollUom }];
+                    } else {
+                        delete distFreeFormFabricRolls[g.id];
+                    }
+                    remaining = Math.max(0, remaining - allocated);
+                });
+            } else {
+                const total = parseFloat(freeFormTrimTotalsByVar[key] || 0);
+                let remaining = total;
+                activeItems.forEach(g => {
+                    const cap = pendingByPoItem[g.id] || 0;
+                    const allocated = Math.min(remaining, cap);
+                    if (allocated > 0) {
+                        distFreeFormTrimTotals[g.id] = String(allocated);
+                    } else {
+                        delete distFreeFormTrimTotals[g.id];
+                    }
+                    remaining = Math.max(0, remaining - allocated);
+                });
+            }
+        });
+
+        const state = {
+            trimTotalByReq: distTrimByReq,
+            trimBoxesByReq,
+            fabricRollsByReq: distFabricByReq,
+            freeFormTrimTotals: distFreeFormTrimTotals,
+            freeFormTrimBoxes,
+            freeFormFabricRolls: distFreeFormFabricRolls,
+            customGroups
+        };
+        console.log('handleReview: pendingByReq', pendingByReq);
+        console.log('handleReview: trimTotalByGroup', trimTotalByGroup);
+        console.log('handleReview: fabricRollsByGroup', fabricRollsByGroup);
+        console.log('handleReview: distTrimByReq', distTrimByReq);
+        console.log('handleReview: distFabricByReq', distFabricByReq);
+        console.log('handleReview: distFreeFormTrimTotals', distFreeFormTrimTotals);
+        console.log('handleReview: distFreeFormFabricRolls', distFreeFormFabricRolls);
+        console.log('handleReview: state passed to buildItemsFromState', state);
         const { items: built, error } = buildItemsFromState(state);
+        console.log('handleReview: buildItemsFromState result', { built, error });
         if (error) { setErr(error); return; }
         setBusy(true);
         const decorated = decorateForReview(built);
         const payload = { items: decorated, grnNumber, receivedDate, condition, notes, scanFile };
         const snapshot = {
             grnNumber, receivedDate, condition, notes, scanFile,
-            trimTotalByReq, trimBoxesByReq, fabricRollsByReq, freeFormTrimTotals, freeFormTrimBoxes, freeFormFabricRolls, customGroups,
+            trimTotalByReq, trimBoxesByReq, fabricRollsByReq,
+            trimTotalByGroup, fabricRollsByGroup,
+            freeFormTrimTotals, freeFormTrimBoxes, freeFormFabricRolls, customGroups,
+            freeFormTrimTotalsByVar, freeFormFabricRollsByVar,
             removedReqIds: [...removedReqIds],
             removedPoItemIds: [...removedPoItemIds],
+            removedGroupIds: [...removedGroupIds],
+            removedVarGroupKeys: [...removedVarGroupKeys],
         };
         // Defer reset so parent can swap modals cleanly.
         Promise.resolve().then(() => { setBusy(false); onReview?.({ payload, snapshot }); });
@@ -387,13 +557,114 @@ export default function InwardCreateModal({
 
                     {/* Linked PO groups (groups with requirements) */}
                     {(poItems || [])
-                        .filter(g => (g.requirements || []).length > 0 && (g.requirements || []).some(r => !removedReqIds.has(r.id)))
+                        .filter(g => (g.requirements || []).length > 0 && !removedGroupIds.has(g.id))
                         .map(group => {
                             const Icon = TYPE_ICON[group.item_type] || Package;
                             const isFabricGroup = group.item_type === 'fabric';
                             const groupLabel = isFabricGroup
                                 ? `${group.fabric_type_name || 'Fabric'}${group.fabric_color_number ? ` · ${group.fabric_color_number}` : ''}${group.fabric_color_name ? ` · ${group.fabric_color_name}` : ''}`
                                 : `${group.trim_item_name || 'Trim'}${group.variant_color_number ? ` · ${group.variant_color_number}` : ''}${group.variant_color_name ? ` · ${group.variant_color_name}` : ''}${group.variant_size ? ` · Sz ${group.variant_size}` : ''}`;
+                            const activeReqs = (group.requirements || []).filter(r => !removedReqIds.has(r.id));
+                            const totalPending = activeReqs.reduce((s, r) => s + (pendingByReq[r.id] || 0), 0);
+                            const unit = activeReqs[0] ? reqUnit(activeReqs[0]) : (isFabricGroup ? 'm' : 'pcs');
+
+                            if (isFabricGroup) {
+                                const rolls = fabricRollsByGroup[group.id] || [];
+                                const sum = sumRolls(rolls);
+                                const over = sum > totalPending + 0.001;
+                                let distRem = sum;
+                                const distribution = activeReqs.map(r => {
+                                    const cap = pendingByReq[r.id] || 0;
+                                    const allocated = Math.min(distRem, cap);
+                                    distRem = Math.max(0, distRem - allocated);
+                                    return { r, allocated };
+                                });
+                                return (
+                                    <div key={group.id} className="border border-slate-200 rounded-xl overflow-hidden">
+                                        <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
+                                            <Icon size={13} className="text-slate-500 shrink-0" />
+                                            <p className="text-xs font-bold text-slate-700 truncate flex-1">{groupLabel}</p>
+                                            <span className="text-[9px] text-slate-400 shrink-0">{activeReqs.length} req{activeReqs.length !== 1 ? 's' : ''}</span>
+                                            <button type="button" onClick={() => setRemovedGroupIds(prev => new Set(prev).add(group.id))}
+                                                title="Skip this item" className="p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0">
+                                                <Trash2 size={12} />
+                                            </button>
+                                        </div>
+                                        <div className="p-2 space-y-1.5">
+                                            {activeReqs.length > 1 && (
+                                                <div className="space-y-0.5 px-1 pb-0.5">
+                                                    {distribution.map(({ r, allocated }, i) => (
+                                                        <div key={r.id} className="flex items-center justify-between text-[10px] text-slate-500">
+                                                            <div className="flex items-center gap-1.5">
+                                                                <span className="font-bold text-slate-400">Req {i + 1}/{activeReqs.length}</span>
+                                                                {r.is_standalone
+                                                                    ? <span className="px-1 py-0.5 rounded bg-emerald-50 text-emerald-600 border border-emerald-200 font-bold">Standalone</span>
+                                                                    : r.order_number ? <span className="font-mono">SO {r.order_number}</span> : null}
+                                                                {r.product_name && <span className="text-slate-400 truncate">· {r.product_name}</span>}
+                                                            </div>
+                                                            <div className="flex items-center gap-1.5 tabular-nums shrink-0">
+                                                                <span className="text-slate-400">{(pendingByReq[r.id] || 0)} {unit} pending</span>
+                                                                {sum > 0 && <span className={`font-bold ${allocated > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>→ {allocated.toFixed(2)} {unit}</span>}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            <div className={`rounded-lg p-2 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100'}`}>
+                                                <div className="flex items-center justify-between mb-1.5">
+                                                    <p className="text-[10px] text-slate-500">
+                                                        <span className="font-bold text-emerald-600">Pending {totalPending.toLocaleString()} {unit}</span>
+                                                        {' · '}<span className={`font-bold ${over ? 'text-red-600' : 'text-violet-700'}`}>In this inward {sum.toLocaleString(undefined, { maximumFractionDigits: 2 })} m</span>
+                                                    </p>
+                                                    <button type="button"
+                                                        onClick={() => setFabricRollsByGroup(prev => ({ ...prev, [group.id]: [...(prev[group.id] || []), newRoll()] }))}
+                                                        className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:bg-violet-50 border border-violet-200 px-2 py-1 rounded-md transition">
+                                                        <Plus size={11} /> Roll
+                                                    </button>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    {rolls.length === 0 ? (
+                                                        <p className="text-[10px] text-slate-400 italic px-1">No rolls added — click "Roll" to record one.</p>
+                                                    ) : rolls.map(roll => (
+                                                        <div key={roll._k} className="flex items-center gap-2">
+                                                            <input type="text" placeholder="B-001" value={roll.bale_no}
+                                                                onChange={e => setFabricRollsByGroup(prev => ({ ...prev, [group.id]: (prev[group.id] || []).map(r => r._k === roll._k ? { ...r, bale_no: e.target.value } : r) }))}
+                                                                className="w-24 text-[11px] font-mono border border-slate-200 rounded px-1.5 py-1 focus:outline-none focus:border-violet-400" />
+                                                            <input type="number" step="0.01" min="0" placeholder="0.00" value={roll.meter}
+                                                                onChange={e => setFabricRollsByGroup(prev => ({ ...prev, [group.id]: (prev[group.id] || []).map(r => r._k === roll._k ? { ...r, meter: e.target.value } : r) }))}
+                                                                className="flex-1 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums focus:outline-none focus:border-violet-400" />
+                                                            <select value={roll.uom}
+                                                                onChange={e => setFabricRollsByGroup(prev => ({ ...prev, [group.id]: (prev[group.id] || []).map(r => r._k === roll._k ? { ...r, uom: e.target.value } : r) }))}
+                                                                className="w-16 text-[11px] border border-slate-200 rounded px-1 py-1 bg-white">
+                                                                <option value="meter">m</option>
+                                                                <option value="yard">yd</option>
+                                                                <option value="kg">kg</option>
+                                                            </select>
+                                                            <button type="button"
+                                                                onClick={() => setFabricRollsByGroup(prev => ({ ...prev, [group.id]: (prev[group.id] || []).filter(r => r._k !== roll._k) }))}
+                                                                className="p-1 text-slate-300 hover:text-red-500 transition shrink-0">
+                                                                <Trash2 size={11} />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            }
+
+                            // Trim group — single merged qty input
+                            const rawTotal = trimTotalByGroup[group.id] ?? '';
+                            const inThis = parseFloat(rawTotal) || 0;
+                            const over = inThis > totalPending + 0.001;
+                            let distRem = inThis;
+                            const distribution = activeReqs.map(r => {
+                                const cap = pendingByReq[r.id] || 0;
+                                const allocated = Math.min(distRem, cap);
+                                distRem = Math.max(0, distRem - allocated);
+                                return { r, allocated };
+                            });
                             return (
                                 <div key={group.id} className="border border-slate-200 rounded-xl overflow-hidden">
                                     <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
@@ -402,310 +673,209 @@ export default function InwardCreateModal({
                                         {!isFabricGroup && group.trim_item_variant_id && (
                                             <SupplierCodePill supplierId={supplierId} supplierName={supplierName} variantId={group.trim_item_variant_id} className="shrink-0" />
                                         )}
-                                        <span className="text-[9px] text-slate-400 shrink-0">item #{group.id}</span>
+                                        <span className="text-[9px] text-slate-400 shrink-0">{activeReqs.length} req{activeReqs.length !== 1 ? 's' : ''}</span>
+                                        <button type="button" onClick={() => setRemovedGroupIds(prev => new Set(prev).add(group.id))}
+                                            title="Skip this item" className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
+                                            <Trash2 size={12} />
+                                        </button>
                                     </div>
                                     <div className="p-2 space-y-1.5">
-                                        {(group.requirements || []).filter(r => !removedReqIds.has(r.id)).map(r => {
-                                            const isFabricReq = group.item_type === 'fabric';
-                                            const total = parseFloat(group.quantity ?? 0) || reqTotal(r);
-                                            const unit = reqUnit(r);
-                                            const pending = pendingByReq[r.id] ?? 0;
-
-                                            if (isFabricReq) {
-                                                const rolls = fabricRollsByReq[r.id] || [];
-                                                const sum   = sumRolls(rolls);
-                                                const over  = sum > pending + 0.001;
-                                                return (
-                                                    <div key={r.id} className={`rounded-lg p-2 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100'}`}>
-                                                        <div className="flex items-start justify-between gap-3 mb-1.5">
-                                                            <div className="flex-1 min-w-0">
-                                                                <p className="text-xs font-bold text-slate-700 truncate">
-                                                                    {reqLabel(r)}
-                                                                    {r.product_name ? <span className="text-slate-400 font-normal"> · {r.product_name}</span> : null}
-                                                                </p>
-                                                                <p className="text-[10px] text-slate-500">
-                                                                    Total {total.toLocaleString()} {unit}
-                                                                    {' · '}<span className="font-bold text-emerald-600">Pending {pending.toLocaleString()} {unit}</span>
-                                                                    {' · '}<span className={`font-bold ${over ? 'text-red-600' : 'text-violet-700'}`}>In this inward {sum.toLocaleString(undefined, { maximumFractionDigits: 2 })} m</span>
-                                                                </p>
-                                                            </div>
-                                                            <div className="flex items-center gap-1.5 shrink-0">
-                                                                <button type="button" onClick={() => addRollToReq(r.id)}
-                                                                    className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:bg-violet-50 border border-violet-200 px-2 py-1 rounded-md transition">
-                                                                    <Plus size={11} /> Roll
-                                                                </button>
-                                                                <button type="button" onClick={() => {
-                                                                    setFabricRollsByReq(prev => ({ ...prev, [r.id]: [] }));
-                                                                    setRemovedReqIds(prev => new Set(prev).add(r.id));
-                                                                }} title="Remove from this inward"
-                                                                    className="p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
-                                                                    <Trash2 size={12} />
-                                                                </button>
-                                                            </div>
+                                        {activeReqs.length > 1 && (
+                                            <div className="space-y-0.5 px-1 pb-0.5">
+                                                {distribution.map(({ r, allocated }, i) => (
+                                                    <div key={r.id} className="flex items-center justify-between text-[10px] text-slate-500">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className="font-bold text-slate-400">Req {i + 1}/{activeReqs.length}</span>
+                                                            {r.is_standalone
+                                                                ? <span className="px-1 py-0.5 rounded bg-emerald-50 text-emerald-600 border border-emerald-200 font-bold text-[9px]">Standalone</span>
+                                                                : r.order_number ? <span className="font-mono">SO {r.order_number}</span> : null}
+                                                            {r.product_name && <span className="text-slate-400 truncate">· {r.product_name}</span>}
                                                         </div>
-                                                        <div className="space-y-1">
-                                                            {rolls.length === 0 ? (
-                                                                <p className="text-[10px] text-slate-400 italic px-1">No rolls added — click "Roll" to record one.</p>
-                                                            ) : rolls.map(roll => (
-                                                                <div key={roll._k} className="flex items-center gap-2">
-                                                                    <input type="text" placeholder="B-001" value={roll.bale_no}
-                                                                        onChange={e => setRollFieldOnReq(r.id, roll._k, 'bale_no', e.target.value)}
-                                                                        className="w-24 text-[11px] font-mono border border-slate-200 rounded px-1.5 py-1 focus:outline-none focus:border-violet-400" />
-                                                                    <input type="number" step="0.01" min="0" placeholder="0.00" value={roll.meter}
-                                                                        onChange={e => setRollFieldOnReq(r.id, roll._k, 'meter', e.target.value)}
-                                                                        className="flex-1 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums focus:outline-none focus:border-violet-400" />
-                                                                    <select value={roll.uom} onChange={e => setRollFieldOnReq(r.id, roll._k, 'uom', e.target.value)}
-                                                                        className="w-16 text-[11px] border border-slate-200 rounded px-1 py-1 bg-white">
-                                                                        <option value="meter">m</option>
-                                                                        <option value="yard">yd</option>
-                                                                        <option value="kg">kg</option>
-                                                                    </select>
-                                                                    <button type="button" onClick={() => removeRollFromReq(r.id, roll._k)}
-                                                                        className="p-1 text-slate-300 hover:text-red-500 transition shrink-0">
-                                                                        <Trash2 size={11} />
-                                                                    </button>
-                                                                </div>
-                                                            ))}
+                                                        <div className="flex items-center gap-1.5 tabular-nums shrink-0">
+                                                            <span className="text-slate-400">{(pendingByReq[r.id] || 0)} {unit} pending</span>
+                                                            {inThis > 0 && <span className={`font-bold ${allocated > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>→ {allocated.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}</span>}
                                                         </div>
                                                     </div>
-                                                );
-                                            }
-
-                                            const boxes  = trimBoxesByReq[r.id] || [];
-                                            const rawTotal = trimTotalByReq[r.id] ?? '';
-                                            const inThis = boxes.length > 0 ? sumTrimBoxes(boxes) : (parseFloat(rawTotal) || 0);
-                                            const over   = inThis > pending + 0.001;
-                                            return (
-                                                <div key={r.id} className={`rounded-lg p-2 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100'}`}>
-                                                    <div className="flex items-start justify-between gap-2 mb-1.5">
-                                                        <div className="flex-1 min-w-0">
-                                                            <p className="text-xs font-bold text-slate-700 truncate">
-                                                                {reqLabel(r)}
-                                                                {r.product_name ? <span className="text-slate-400 font-normal"> · {r.product_name}</span> : null}
-                                                            </p>
-                                                            <p className="text-[10px] text-slate-500">
-                                                                Total {total.toLocaleString()} {unit}
-                                                                {' · '}<span className="font-bold text-emerald-600">Pending {pending.toLocaleString()} {unit}</span>
-                                                            </p>
-                                                        </div>
-                                                        <button type="button" onClick={() => {
-                                                            setTrimBoxesByReq(prev => ({ ...prev, [r.id]: [] }));
-                                                            setRemovedReqIds(prev => new Set(prev).add(r.id));
-                                                        }} title="Remove from this inward"
-                                                            className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
-                                                            <Trash2 size={12} />
-                                                        </button>
-                                                    </div>
-                                                    {boxes.length === 0 ? (
-                                                        <div className="flex items-center gap-2">
-                                                            <input type="number" min="0" step="any" placeholder="0"
-                                                                value={rawTotal}
-                                                                onChange={e => setTrimTotalForReq(r.id, e.target.value)}
-                                                                className={`w-36 text-sm font-bold text-right border rounded-lg px-2 py-1.5 focus:outline-none tabular-nums ${over ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-amber-400'}`}
-                                                            />
-                                                            <span className="text-xs text-slate-500">{unit}</span>
-                                                            <button type="button"
-                                                                onClick={() => setBoxModal({
-                                                                    title: reqLabel(r),
-                                                                    uom: unit,
-                                                                    initialBoxes: [],
-                                                                    onSave: (saved) => {
-                                                                        if (saved.length > 0) setTrimBoxesByReq(prev => ({ ...prev, [r.id]: saved }));
-                                                                        setBoxModal(null);
-                                                                    },
-                                                                })}
-                                                                className="ml-auto flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-2 py-1 rounded-md transition">
-                                                                <Plus size={11} /> Add box breakdown
-                                                            </button>
-                                                        </div>
-                                                    ) : (
-                                                        <>
-                                                            <div className="flex items-center gap-2 flex-wrap">
-                                                                <span className={`text-sm font-bold tabular-nums ${over ? 'text-red-600' : 'text-amber-700'}`}>
-                                                                    {inThis.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
-                                                                </span>
-                                                                <button type="button"
-                                                                    onClick={() => setBoxModal({
-                                                                        title: reqLabel(r),
-                                                                        uom: unit,
-                                                                        initialBoxes: boxes,
-                                                                        onSave: (saved) => {
-                                                                            if (saved.length > 0) {
-                                                                                setTrimBoxesByReq(prev => ({ ...prev, [r.id]: saved }));
-                                                                            } else {
-                                                                                clearTrimBoxesForReq(r.id, inThis);
-                                                                            }
-                                                                            setBoxModal(null);
-                                                                        },
-                                                                    })}
-                                                                    className="text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md transition">
-                                                                    Edit
-                                                                </button>
-                                                                <button type="button" onClick={() => clearTrimBoxesForReq(r.id, inThis)}
-                                                                    className="text-[10px] text-slate-400 hover:text-red-500 transition">
-                                                                    Remove
-                                                                </button>
-                                                            </div>
-                                                            <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                                                {boxes.map(b => `${b.box_count}×${b.qty_per_box}`).join(' + ')}
-                                                            </p>
-                                                        </>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className={`rounded-lg p-2 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100'}`}>
+                                            <p className="text-[9px] text-slate-400 mb-1 font-bold uppercase">
+                                                Total pending {totalPending.toLocaleString()} {unit}
+                                            </p>
+                                            <div className="flex items-center gap-2">
+                                                <input type="number" min="0" step="any" placeholder="0"
+                                                    value={rawTotal}
+                                                    onChange={e => setTrimTotalByGroup(prev => ({ ...prev, [group.id]: e.target.value }))}
+                                                    className={`w-36 text-sm font-bold text-right border rounded-lg px-2 py-1.5 focus:outline-none tabular-nums ${over ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-amber-400'}`}
+                                                />
+                                                <span className="text-xs text-slate-500">{unit}</span>
+                                                {over && <span className="text-[10px] font-bold text-red-600">Over by {(inThis - totalPending).toLocaleString()} {unit}</span>}
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             );
                         })}
 
-                    {/* Free-form PO items (no linked requirements) */}
-                    {(poItems || []).filter(g => (g.requirements || []).length === 0 && !removedPoItemIds.has(g.id)).map(group => {
-                        const Icon = TYPE_ICON[group.item_type] || Package;
-                        const isFabricGroup = group.item_type === 'fabric';
-                        const groupLabel = isFabricGroup
-                            ? `${group.fabric_type_name || 'Fabric'}${group.fabric_color_number ? ` · ${group.fabric_color_number}` : ''}${group.fabric_color_name ? ` · ${group.fabric_color_name}` : ''}`
-                            : `${group.trim_item_name || 'Trim'}${group.variant_color_number ? ` · ${group.variant_color_number}` : ''}${group.variant_color_name ? ` · ${group.variant_color_name}` : ''}${group.variant_size ? ` · Sz ${group.variant_size}` : ''}`;
-                        const groupUom = group.uom || (isFabricGroup ? 'm' : 'pcs');
-                        const pending  = pendingByPoItem[group.id] ?? 0;
+                    {/* Free-form PO items grouped by variant */}
+                    {(() => {
+                        const ffItems = (poItems || []).filter(g => (g.requirements || []).length === 0);
+                        const varGroupMap = {};
+                        ffItems.forEach(g => {
+                            const key = ffVarKey(g);
+                            if (!varGroupMap[key]) varGroupMap[key] = { key, items: [], isFabric: g.item_type === 'fabric', ref: g };
+                            varGroupMap[key].items.push(g);
+                        });
+                        return Object.values(varGroupMap)
+                            .filter(({ key }) => !removedVarGroupKeys.has(key))
+                            .map(({ key, items, isFabric, ref }) => {
+                                const Icon = TYPE_ICON[ref.item_type] || Package;
+                                const itemLabel = isFabric
+                                    ? `${ref.fabric_type_name || 'Fabric'}${ref.fabric_color_number ? ` · ${ref.fabric_color_number}` : ''}${ref.fabric_color_name ? ` · ${ref.fabric_color_name}` : ''}`
+                                    : `${ref.trim_item_name || 'Trim'}${ref.variant_color_number ? ` · ${ref.variant_color_number}` : ''}${ref.variant_color_name ? ` · ${ref.variant_color_name}` : ''}${ref.variant_size ? ` · Sz ${ref.variant_size}` : ''}`;
+                                const groupUom = ref.uom || (isFabric ? 'm' : 'pcs');
+                                const activeItems = items.filter(g => !removedPoItemIds.has(g.id));
+                                const totalPending = activeItems.reduce((s, g) => s + (pendingByPoItem[g.id] || 0), 0);
 
-                        if (isFabricGroup) {
-                            const rolls = freeFormFabricRolls[group.id] || [];
-                            const sum   = sumRolls(rolls);
-                            const over  = sum > pending + 0.001;
-                            return (
-                                <div key={`free-${group.id}`} className="border border-slate-200 rounded-xl overflow-hidden">
-                                    <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
-                                        <Icon size={13} className="text-slate-500 shrink-0" />
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-xs font-bold text-slate-700 truncate">{groupLabel} <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 ml-1">Free-form</span></p>
-                                            <p className="text-[10px] text-slate-500">Pending {pending.toLocaleString()} {groupUom} · In this inward {sum.toLocaleString(undefined, { maximumFractionDigits: 2 })} m</p>
+                                if (isFabric) {
+                                    const rolls = freeFormFabricRollsByVar[key] || [];
+                                    const sum = sumRolls(rolls);
+                                    const over = sum > totalPending + 0.001;
+                                    let distRem = sum;
+                                    const distribution = activeItems.map(g => {
+                                        const cap = pendingByPoItem[g.id] || 0;
+                                        const allocated = Math.min(distRem, cap);
+                                        distRem = Math.max(0, distRem - allocated);
+                                        return { g, allocated };
+                                    });
+                                    return (
+                                        <div key={`varfab-${key}`} className="border border-slate-200 rounded-xl overflow-hidden">
+                                            <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
+                                                <Icon size={13} className="text-slate-500 shrink-0" />
+                                                <p className="text-xs font-bold text-slate-700 truncate flex-1">{itemLabel}</p>
+                                                <span className="text-[9px] text-slate-400 shrink-0">{activeItems.length} line{activeItems.length !== 1 ? 's' : ''}</span>
+                                                <button type="button" onClick={() => setRemovedVarGroupKeys(prev => new Set(prev).add(key))}
+                                                    title="Skip this item" className="p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0">
+                                                    <Trash2 size={12} />
+                                                </button>
+                                            </div>
+                                            <div className="p-2 space-y-1.5">
+                                                {activeItems.length > 1 && (
+                                                    <div className="space-y-0.5 px-1 pb-0.5">
+                                                        {distribution.map(({ g, allocated }, i) => (
+                                                            <div key={g.id} className="flex items-center justify-between text-[10px] text-slate-500">
+                                                                <span className="font-bold text-slate-400">Line {i + 1}/{activeItems.length}</span>
+                                                                <div className="flex items-center gap-1.5 tabular-nums shrink-0">
+                                                                    <span className="text-slate-400">{(pendingByPoItem[g.id] || 0)} {groupUom} pending</span>
+                                                                    {sum > 0 && <span className={`font-bold ${allocated > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>→ {allocated.toFixed(2)} {groupUom}</span>}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                <div className={`rounded-lg p-2 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100'}`}>
+                                                    <div className="flex items-center justify-between mb-1.5">
+                                                        <p className="text-[10px] text-slate-500">
+                                                            <span className="font-bold text-emerald-600">Pending {totalPending.toLocaleString()} {groupUom}</span>
+                                                            {' · '}<span className={`font-bold ${over ? 'text-red-600' : 'text-violet-700'}`}>In this inward {sum.toLocaleString(undefined, { maximumFractionDigits: 2 })} m</span>
+                                                        </p>
+                                                        <button type="button"
+                                                            onClick={() => setFreeFormFabricRollsByVar(prev => ({ ...prev, [key]: [...(prev[key] || []), newRoll()] }))}
+                                                            className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:bg-violet-50 border border-violet-200 px-2 py-1 rounded-md transition">
+                                                            <Plus size={11} /> Roll
+                                                        </button>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        {rolls.length === 0 ? (
+                                                            <p className="text-[10px] text-slate-400 italic px-1">No rolls added — click "Roll" to record one.</p>
+                                                        ) : rolls.map(roll => (
+                                                            <div key={roll._k} className="flex items-center gap-2">
+                                                                <input type="text" placeholder="B-001" value={roll.bale_no}
+                                                                    onChange={e => setFreeFormFabricRollsByVar(prev => ({ ...prev, [key]: (prev[key] || []).map(r => r._k === roll._k ? { ...r, bale_no: e.target.value } : r) }))}
+                                                                    className="w-24 text-[11px] font-mono border border-slate-200 rounded px-1.5 py-1 focus:outline-none focus:border-violet-400" />
+                                                                <input type="number" step="0.01" min="0" placeholder="0.00" value={roll.meter}
+                                                                    onChange={e => setFreeFormFabricRollsByVar(prev => ({ ...prev, [key]: (prev[key] || []).map(r => r._k === roll._k ? { ...r, meter: e.target.value } : r) }))}
+                                                                    className="flex-1 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums focus:outline-none focus:border-violet-400" />
+                                                                <select value={roll.uom}
+                                                                    onChange={e => setFreeFormFabricRollsByVar(prev => ({ ...prev, [key]: (prev[key] || []).map(r => r._k === roll._k ? { ...r, uom: e.target.value } : r) }))}
+                                                                    className="w-16 text-[11px] border border-slate-200 rounded px-1 py-1 bg-white">
+                                                                    <option value="meter">m</option>
+                                                                    <option value="yard">yd</option>
+                                                                    <option value="kg">kg</option>
+                                                                </select>
+                                                                <button type="button"
+                                                                    onClick={() => setFreeFormFabricRollsByVar(prev => ({ ...prev, [key]: (prev[key] || []).filter(r => r._k !== roll._k) }))}
+                                                                    className="p-1 text-slate-300 hover:text-red-500 transition shrink-0">
+                                                                    <Trash2 size={11} />
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-1.5 shrink-0">
-                                            <button type="button" onClick={() => addRollToPoItem(group.id)}
-                                                className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:bg-violet-50 border border-violet-200 px-2 py-1 rounded-md transition">
-                                                <Plus size={11} /> Roll
-                                            </button>
-                                            <button type="button" onClick={() => {
-                                                setFreeFormFabricRolls(prev => ({ ...prev, [group.id]: [] }));
-                                                setRemovedPoItemIds(prev => new Set(prev).add(group.id));
-                                            }} title="Remove from this inward"
-                                                className="p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
+                                    );
+                                }
+
+                                // Free-form trim — merged by variant
+                                const rawTotal = freeFormTrimTotalsByVar[key] ?? '';
+                                const inThis = parseFloat(rawTotal) || 0;
+                                const over = inThis > totalPending + 0.001;
+                                let distRem = inThis;
+                                const distribution = activeItems.map(g => {
+                                    const cap = pendingByPoItem[g.id] || 0;
+                                    const allocated = Math.min(distRem, cap);
+                                    distRem = Math.max(0, distRem - allocated);
+                                    return { g, allocated };
+                                });
+                                return (
+                                    <div key={`varfree-${key}`} className="border border-slate-200 rounded-xl overflow-hidden">
+                                        <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
+                                            <Icon size={13} className="text-slate-500 shrink-0" />
+                                            <p className="text-xs font-bold text-slate-700 truncate flex-1">{itemLabel}</p>
+                                            {ref.trim_item_variant_id && (
+                                                <SupplierCodePill supplierId={supplierId} supplierName={supplierName} variantId={ref.trim_item_variant_id} className="shrink-0" />
+                                            )}
+                                            <span className="text-[9px] text-slate-400 shrink-0">{activeItems.length} line{activeItems.length !== 1 ? 's' : ''}</span>
+                                            <button type="button" onClick={() => setRemovedVarGroupKeys(prev => new Set(prev).add(key))}
+                                                title="Skip this item" className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
                                                 <Trash2 size={12} />
                                             </button>
                                         </div>
-                                    </div>
-                                    <div className={`p-2 ${over ? 'bg-red-50' : ''}`}>
-                                        {rolls.length === 0 ? (
-                                            <p className="text-[10px] text-slate-400 italic px-1">No rolls added — click "Roll" to record one.</p>
-                                        ) : rolls.map(roll => (
-                                            <div key={roll._k} className="flex items-center gap-2 mb-1">
-                                                <input type="text" placeholder="B-001" value={roll.bale_no}
-                                                    onChange={e => setRollFieldOnPoItem(group.id, roll._k, 'bale_no', e.target.value)}
-                                                    className="w-24 text-[11px] font-mono border border-slate-200 rounded px-1.5 py-1 focus:outline-none focus:border-violet-400" />
-                                                <input type="number" step="0.01" min="0" placeholder="0.00" value={roll.meter}
-                                                    onChange={e => setRollFieldOnPoItem(group.id, roll._k, 'meter', e.target.value)}
-                                                    className="flex-1 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums" />
-                                                <select value={roll.uom} onChange={e => setRollFieldOnPoItem(group.id, roll._k, 'uom', e.target.value)}
-                                                    className="w-16 text-[11px] border border-slate-200 rounded px-1 py-1 bg-white">
-                                                    <option value="meter">m</option>
-                                                    <option value="yard">yd</option>
-                                                    <option value="kg">kg</option>
-                                                </select>
-                                                <button type="button" onClick={() => removeRollFromPoItem(group.id, roll._k)}
-                                                    className="p-1 text-slate-300 hover:text-red-500 transition shrink-0">
-                                                    <Trash2 size={11} />
-                                                </button>
+                                        <div className="p-2 space-y-1.5">
+                                            {activeItems.length > 1 && (
+                                                <div className="space-y-0.5 px-1 pb-0.5">
+                                                    {distribution.map(({ g, allocated }, i) => (
+                                                        <div key={g.id} className="flex items-center justify-between text-[10px] text-slate-500">
+                                                            <span className="font-bold text-slate-400">Line {i + 1}/{activeItems.length} <span className="font-normal text-slate-400">({(parseFloat(g.quantity) || 0).toLocaleString()} ordered)</span></span>
+                                                            <div className="flex items-center gap-1.5 tabular-nums shrink-0">
+                                                                <span className="text-slate-400">{(pendingByPoItem[g.id] || 0)} {groupUom} pending</span>
+                                                                {inThis > 0 && <span className={`font-bold ${allocated > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>→ {allocated.toLocaleString(undefined, { maximumFractionDigits: 2 })} {groupUom}</span>}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            <div className={`rounded-lg p-2 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100'}`}>
+                                                <p className="text-[9px] text-slate-400 mb-1 font-bold uppercase">
+                                                    Total pending {totalPending.toLocaleString()} {groupUom}
+                                                </p>
+                                                <div className="flex items-center gap-2">
+                                                    <input type="number" min="0" step="any" placeholder="0"
+                                                        value={rawTotal}
+                                                        onChange={e => setFreeFormTrimTotalsByVar(prev => ({ ...prev, [key]: e.target.value }))}
+                                                        className={`w-36 text-sm font-bold text-right border rounded-lg px-2 py-1.5 focus:outline-none tabular-nums ${over ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-amber-400'}`}
+                                                    />
+                                                    <span className="text-xs text-slate-500">{groupUom}</span>
+                                                    {over && <span className="text-[10px] font-bold text-red-600">Over by {(inThis - totalPending).toLocaleString()} {groupUom}</span>}
+                                                </div>
                                             </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            );
-                        }
-
-                        // Free-form trim — total-first, optional box breakdown
-                        const boxes    = freeFormTrimBoxes[group.id] || [];
-                        const rawTotal = freeFormTrimTotals[group.id] ?? '';
-                        const inThis   = boxes.length > 0 ? sumTrimBoxes(boxes) : (parseFloat(rawTotal) || 0);
-                        const over     = inThis > pending + 0.001;
-                        return (
-                            <div key={`free-${group.id}`} className={`rounded-xl p-3 border ${over ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
-                                <div className="flex items-start justify-between gap-2 mb-1.5">
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-xs font-bold text-slate-700">{groupLabel} <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 ml-1">Free-form</span></p>
-                                        {!isFabricGroup && group.trim_item_variant_id && (
-                                            <SupplierCodePill supplierId={supplierId} supplierName={supplierName} variantId={group.trim_item_variant_id} className="mt-0.5" />
-                                        )}
-                                        <p className="text-[10px] text-slate-500">
-                                            <span className="font-bold text-emerald-600">Pending {pending.toLocaleString()} {groupUom}</span>
-                                        </p>
-                                    </div>
-                                    <button type="button" onClick={() => {
-                                        setFreeFormTrimBoxes(prev => ({ ...prev, [group.id]: [] }));
-                                        setRemovedPoItemIds(prev => new Set(prev).add(group.id));
-                                    }} title="Remove from this inward"
-                                        className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
-                                        <Trash2 size={12} />
-                                    </button>
-                                </div>
-                                {boxes.length === 0 ? (
-                                    <div className="flex items-center gap-2">
-                                        <input type="number" min="0" step="any" placeholder="0"
-                                            value={rawTotal}
-                                            onChange={e => setTrimTotalForPoItem(group.id, e.target.value)}
-                                            className={`w-36 text-sm font-bold text-right border rounded-lg px-2 py-1.5 focus:outline-none tabular-nums ${over ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-amber-400'}`}
-                                        />
-                                        <span className="text-xs text-slate-500">{groupUom}</span>
-                                        <button type="button"
-                                            onClick={() => setBoxModal({
-                                                title: groupLabel,
-                                                uom: groupUom,
-                                                initialBoxes: [],
-                                                onSave: (saved) => {
-                                                    if (saved.length > 0) setFreeFormTrimBoxes(prev => ({ ...prev, [group.id]: saved }));
-                                                    setBoxModal(null);
-                                                },
-                                            })}
-                                            className="ml-auto flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-2 py-1 rounded-md transition">
-                                            <Plus size={11} /> Add box breakdown
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <span className={`text-sm font-bold tabular-nums ${over ? 'text-red-600' : 'text-amber-700'}`}>
-                                                {inThis.toLocaleString(undefined, { maximumFractionDigits: 2 })} {groupUom}
-                                            </span>
-                                            <button type="button"
-                                                onClick={() => setBoxModal({
-                                                    title: groupLabel,
-                                                    uom: groupUom,
-                                                    initialBoxes: boxes,
-                                                    onSave: (saved) => {
-                                                        if (saved.length > 0) {
-                                                            setFreeFormTrimBoxes(prev => ({ ...prev, [group.id]: saved }));
-                                                        } else {
-                                                            clearTrimBoxesForPoItem(group.id, inThis);
-                                                        }
-                                                        setBoxModal(null);
-                                                    },
-                                                })}
-                                                className="text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md transition">
-                                                Edit
-                                            </button>
-                                            <button type="button" onClick={() => clearTrimBoxesForPoItem(group.id, inThis)}
-                                                className="text-[10px] text-slate-400 hover:text-red-500 transition">
-                                                Remove
-                                            </button>
                                         </div>
-                                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                            {boxes.map(b => `${b.box_count}×${b.qty_per_box}`).join(' + ')}
-                                        </p>
-                                    </>
-                                )}
-                            </div>
-                        );
-                    })}
+                                    </div>
+                                );
+                            });
+                    })()}
 
                     {/* Free-form custom additions */}
                     <div className="border border-dashed border-slate-300 rounded-xl p-3 bg-slate-50/40">

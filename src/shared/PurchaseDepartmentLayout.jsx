@@ -9,7 +9,7 @@ import NotificationBell from './NotificationBell';
 
 const NAV = [
     { to: '/purchase-department/requirements',         icon: LuClipboardList, label: 'Requirements' },
-    { to: '/purchase-department/raise-requirement',    icon: LuFilePlus,      label: 'Raise Request' },
+    // { to: '/purchase-department/raise-requirement',    icon: LuFilePlus,      label: 'Raise Request' },
     { to: '/purchase-department/orders',               icon: LuPackageCheck,  label: 'Purchase Orders' },
     { to: '/purchase-department/inwards',              icon: LuInbox,         label: 'Inwards' },
     { to: '/purchase-department/fabric-rolls',         icon: LuLayers,        label: 'Fabric' },

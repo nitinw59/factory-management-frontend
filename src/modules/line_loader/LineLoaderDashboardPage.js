@@ -573,6 +573,14 @@ const StageDetailModal = ({ batch, stage, progress, onClose, onAssign, onChangeL
                 </button>
             </div>
 
+            {/* Assign action */}
+            {readyRolls.length > 0 && onAssign && (
+                <button onClick={onAssign}
+                    className="w-full py-3 mb-5 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-700 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest">
+                    <Zap size={16} /> Assign {readyRolls.length} Roll{readyRolls.length !== 1 ? 's' : ''} to Line
+                </button>
+            )}
+
             {/* Summary chips */}
             {progress && (
                 <div className="flex flex-wrap gap-2 mb-5">
@@ -606,20 +614,12 @@ const StageDetailModal = ({ batch, stage, progress, onClose, onAssign, onChangeL
             )}
 
             {/* Action buttons */}
-            {(onAssign || onChangeLine) && (
+            {onChangeLine && progress && (
                 <div className="pt-4 border-t border-slate-200 flex flex-col gap-2">
-                    {readyRolls.length > 0 && onAssign && (
-                        <button onClick={onAssign}
-                            className="w-full py-3 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-700 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest">
-                            <Zap size={16} /> Assign {readyRolls.length} Roll{readyRolls.length !== 1 ? 's' : ''} to Line
-                        </button>
-                    )}
-                    {onChangeLine && progress && (
-                        <button onClick={onChangeLine}
-                            className="w-full py-2.5 bg-white border-2 border-slate-300 text-slate-700 font-black rounded-xl hover:bg-slate-50 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest">
-                            <RefreshCw size={14} /> Change Line
-                        </button>
-                    )}
+                    <button onClick={onChangeLine}
+                        className="w-full py-2.5 bg-white border-2 border-slate-300 text-slate-700 font-black rounded-xl hover:bg-slate-50 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest">
+                        <RefreshCw size={14} /> Change Line
+                    </button>
                 </div>
             )}
         </div>

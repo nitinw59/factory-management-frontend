@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Loader2, AlertTriangle, Receipt, Check } from 'lucide-react';
 import { accountingApi } from '../../../api/accountingApi';
 import { purchaseDeptApi } from '../../../api/purchaseDeptApi';
@@ -41,7 +41,8 @@ export default function PurchaseInvoicesPage() {
     const [statusFilter, setStatusFilter] = useState('ALL');
     const [selected,     setSelected]     = useState(new Set()); // Set<inwardId>
     const [selectedPoId, setSelectedPoId] = useState(null);
-    const [openInvoice,  setOpenInvoice]  = useState(null); // { invoice|null, inwards[], defaultSelectedIds }
+    const [openInvoice,  setOpenInvoice]  = useState(null); // { invoice|null, inwards[], defaultSelectedIds, poItems[] }
+    const poItemsCache = useRef({});
     const [openGrn,      setOpenGrn]      = useState(null); // { inward, po }
 
     const load = async () => {
@@ -135,19 +136,35 @@ export default function PurchaseInvoicesPage() {
         });
     };
 
-    const handleCreateInvoice = (group, preselectIds) => {
+    const fetchPoItems = async (poId) => {
+        if (poItemsCache.current[poId]) return poItemsCache.current[poId];
+        try {
+            const res = await purchaseDeptApi.getOrderById(poId);
+            const items = res.data?.items || res.data?.data?.items || [];
+            poItemsCache.current[poId] = items;
+            return items;
+        } catch {
+            return [];
+        }
+    };
+
+    const handleCreateInvoice = async (group, preselectIds) => {
+        const poItems = await fetchPoItems(group.po.id);
         setOpenInvoice({
             invoice: null,
             inwards: group.inwards,
             defaultSelectedIds: new Set(preselectIds),
+            poItems,
         });
     };
 
-    const handleViewInvoice = (inv) => {
+    const handleViewInvoice = async (inv) => {
+        const poItems = await fetchPoItems(inv._po.id);
         setOpenInvoice({
             invoice: inv,
             inwards: inv._allInwards,
             defaultSelectedIds: new Set(),
+            poItems,
         });
     };
 
@@ -190,6 +207,7 @@ export default function PurchaseInvoicesPage() {
             {openInvoice && (
                 <InvoiceModal
                     inwards={openInvoice.inwards}
+                    poItems={openInvoice.poItems || []}
                     invoice={openInvoice.invoice}
                     initialMode={openInvoice.invoice ? 'view' : 'create'}
                     defaultSelectedIds={openInvoice.defaultSelectedIds}

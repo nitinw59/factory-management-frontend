@@ -2359,11 +2359,11 @@ const ProductionWorkflowDashboard = () => {
     const canProduction = user && ['cutting_manager', 'production_manager', 'admin', 'factory_admin'].includes(user.role);
     const canInward     = user?.role === 'accountant';
     const canTrimOrders = user && ['production_manager', 'admin', 'factory_admin'].includes(user.role);
-    const canEditBatch  = user?.role === 'production_manager';
+    const canEditBatch  = user && ['production_manager', 'cutting_manager'].includes(user.role);
 
     const handleInward      = (po) => setInwardPO({ ...po, id: po.po_id });
     const handleTrimOrders  = (batchId) => setTrimOrdersBatch(batchId);
-    const handleEditBatch   = (batchId) => navigate(`/production-manager/batches/edit/${batchId}`);
+    const handleEditBatch   = (batchId) => navigate(`${basePath}/batches/edit/${batchId}`);
 
     return (
         <div className="h-screen bg-slate-50 overflow-hidden flex flex-col">

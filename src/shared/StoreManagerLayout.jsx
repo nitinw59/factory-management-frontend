@@ -90,9 +90,14 @@ const StoreManagerLayout = () => {
 
 
 
-                            <NavLink to="/store-manager/general-items" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
-                                <LuBoxes className="mr-1" /> General Items
-                            </NavLink>
+                            <NavDropdown title="Requests">
+                                <NavLink to="/store-manager/general-items" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuBoxes className="mr-2" /> General Items
+                                </NavLink>
+                                <NavLink to="/store-manager/raise-requirement" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuFilePlus className="mr-2" /> Raise Request
+                                </NavLink>
+                            </NavDropdown>
 
                             <NavDropdown title="Spares">
                                 <NavLink to="/store-manager/spare-parts" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
@@ -106,17 +111,14 @@ const StoreManagerLayout = () => {
                                 </NavLink>
                             </NavDropdown>
 
-                            <NavLink to="/store-manager/orders" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
-                                <LuClipboardList className="mr-1" /> Orders
-                            </NavLink>
-
-                            <NavLink to="/store-manager/inwards" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
-                                <LuInbox className="mr-1" /> Inwards
-                            </NavLink>
-
-                            <NavLink to="/store-manager/raise-requirement" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
-                                <LuFilePlus className="mr-1" /> Raise Request
-                            </NavLink>
+                            <NavDropdown title="Purchase">
+                                <NavLink to="/store-manager/orders" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuClipboardList className="mr-2" /> Orders
+                                </NavLink>
+                                <NavLink to="/store-manager/inwards" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuInbox className="mr-2" /> Inwards
+                                </NavLink>
+                            </NavDropdown>
 
                             <NavLink to="/store-manager/planning" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
                                 <LuCalendarClock className="mr-1" /> Production Planning
@@ -166,23 +168,26 @@ const StoreManagerLayout = () => {
                             <NavLink to="/store-manager/trim-stock-ledger" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuScrollText className="mr-2" /> Stock Ledger
                             </NavLink>
+                            <div className="px-4 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Requests</div>
                             <NavLink to="/store-manager/general-items" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuBoxes className="mr-2" /> General Items
                             </NavLink>
+                            <NavLink to="/store-manager/raise-requirement" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuFilePlus className="mr-2" /> Raise Request
+                            </NavLink>
+                            <div className="px-4 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Spares</div>
                             <NavLink to="/store-manager/spare-parts" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuPackage className="mr-2" /> Spare Parts
                             </NavLink>
                             <NavLink to="/store-manager/spares-analytics" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuChartLine className="mr-2" /> Spares Analytics
                             </NavLink>
+                            <div className="px-4 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Purchase</div>
                             <NavLink to="/store-manager/orders" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuClipboardList className="mr-2" /> Orders
                             </NavLink>
                             <NavLink to="/store-manager/inwards" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuInbox className="mr-2" /> Inwards
-                            </NavLink>
-                            <NavLink to="/store-manager/raise-requirement" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
-                                <LuFilePlus className="mr-2" /> Raise Request
                             </NavLink>
                             <NavLink to="/store-manager/planning" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuCalendarClock className="mr-2" /> Production Planning

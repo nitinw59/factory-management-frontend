@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { CheckCircle2, Loader2, AlertTriangle, Plus, ArrowLeft, X } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { CheckCircle2, Loader2, AlertTriangle, Plus, ArrowLeft, X, Search, History } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { storeManagerApi } from '../../api/storeManagerApi';
@@ -15,12 +15,207 @@ const TYPES = [
     { key: 'other',  label: 'Other',      cls: 'bg-slate-100 text-slate-700 border-slate-200' },
 ];
 
+const COMMON_UOMS = ['pcs', 'm', 'yd', 'kg', 'g', 'dozen', 'gross', 'roll', 'cone', 'box', 'pkt', 'pair', 'set', 'liter'];
+
+const UomSelect = ({ value, onChange }) => (
+    <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:border-orange-400"
+    >
+        <option value="">— Unit —</option>
+        {/* keep a previously entered free-text value selectable */}
+        {value && !COMMON_UOMS.includes(value) && <option value={value}>{value}</option>}
+        {COMMON_UOMS.map(u => <option key={u} value={u}>{u}</option>)}
+    </select>
+);
+
 const URGENCIES = [
     { key: 'LOW',    label: 'Low',    cls: 'bg-slate-100 text-slate-600 border-slate-200' },
     { key: 'NORMAL', label: 'Normal', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
     { key: 'HIGH',   label: 'High',   cls: 'bg-orange-100 text-orange-700 border-orange-200' },
     { key: 'URGENT', label: 'Urgent', cls: 'bg-red-100 text-red-700 border-red-200' },
 ];
+
+// ─── Requirement history (below the form) ────────────────────────────────────
+
+const HISTORY_STATUSES = ['PENDING', 'PO_RAISED', 'FULFILLED', 'CANCELLED'];
+
+const HISTORY_STATUS_CFG = {
+    PENDING:   { cls: 'bg-amber-100 text-amber-700 border-amber-200',         label: 'Pending'   },
+    PO_RAISED: { cls: 'bg-blue-100 text-blue-700 border-blue-200',             label: 'PO Raised' },
+    FULFILLED: { cls: 'bg-emerald-100 text-emerald-700 border-emerald-200',    label: 'Fulfilled' },
+    CANCELLED: { cls: 'bg-slate-100 text-slate-500 border-slate-200',          label: 'Cancelled' },
+};
+
+// Same labeling rules as RequirementsPage's reqTitle
+const reqTitle = (req) => {
+    if (req.type === 'fabric') {
+        const colorBit = req.fabric_color_name
+            ? `${req.fabric_color_name}${req.fabric_color_number ? ` · ${req.fabric_color_number}` : ''}`
+            : null;
+        const parts = [req.fabric_type_name, colorBit].filter(Boolean);
+        return parts.length ? parts.join(' · ') : 'Fabric requirement';
+    }
+    if (req.type === 'trim') {
+        const base = req.trim_item_name || 'Trim requirement';
+        return req.variant_size ? `${base} · Sz ${req.variant_size}` : base;
+    }
+    if (req.type === 'spare') {
+        return req.spare_part_name
+            ? `${req.spare_part_name}${req.spare_part_number ? ` (${req.spare_part_number})` : ''}`
+            : 'Spare part requirement';
+    }
+    if (req.type === 'other') {
+        return req.general_item_name
+            ? `${req.general_item_name}${req.general_item_code ? ` (${req.general_item_code})` : ''}`
+            : (req.description || 'Other requirement');
+    }
+    return 'Requirement';
+};
+
+const reqQty = (req) => req.type === 'fabric'
+    ? `${Number(req.meters_required || 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} m`
+    : `${Number(req.quantity_required || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })} ${req.unit_of_measure || req.trim_uom || req.general_item_uom || 'pcs'}`;
+
+function RequirementHistory() {
+    const [rows,         setRows]         = useState([]);
+    const [loading,      setLoading]      = useState(true);
+    const [q,            setQ]            = useState('');
+    const [statusFilter, setStatusFilter] = useState('');
+    const [limit,        setLimit]        = useState(25);
+
+    useEffect(() => {
+        let cancelled = false;
+        // The endpoint is status-scoped — fetch all four in parallel and merge
+        // (same pattern as RequirementsPage's tab counts).
+        Promise.all(HISTORY_STATUSES.map(s =>
+            purchaseDeptApi.getRequirements({ status: s })
+                .then(r => r.data?.data ?? r.data ?? [])
+                .catch(() => [])
+        )).then(arrs => {
+            if (cancelled) return;
+            const merged = arrs.flat().filter(r => r?.id != null);
+            merged.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+            setRows(merged);
+        }).finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+    }, []);
+
+    const filtered = useMemo(() => {
+        const s = q.trim().toLowerCase();
+        return rows.filter(r => {
+            if (statusFilter && r.status !== statusFilter) return false;
+            if (!s) return true;
+            const hay = [
+                reqTitle(r), r.type, r.order_number, r.customer_name, r.po_code,
+                r.raised_by_name, r.notes, r.description,
+            ].filter(Boolean).join(' ').toLowerCase();
+            return hay.includes(s);
+        });
+    }, [rows, q, statusFilter]);
+
+    const visible = filtered.slice(0, limit);
+
+    return (
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
+            <div className="flex items-center gap-2">
+                <History size={15} className="text-slate-400" />
+                <h2 className="text-sm font-bold text-slate-800">Previously Raised</h2>
+                {!loading && <span className="text-[11px] text-slate-400">({filtered.length})</span>}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+                <div className="relative flex-1 min-w-[180px]">
+                    <Search size={13} className="absolute left-3 top-2.5 text-slate-400" />
+                    <input
+                        type="text" value={q} onChange={e => { setQ(e.target.value); setLimit(25); }}
+                        placeholder="Search item, SO, PO, customer, raised by…"
+                        className="w-full text-sm pl-8 pr-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-400"
+                    />
+                </div>
+                <select
+                    value={statusFilter}
+                    onChange={e => { setStatusFilter(e.target.value); setLimit(25); }}
+                    className="text-sm border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:border-orange-400"
+                >
+                    <option value="">All statuses</option>
+                    {HISTORY_STATUSES.map(s => <option key={s} value={s}>{HISTORY_STATUS_CFG[s].label}</option>)}
+                </select>
+            </div>
+
+            {loading ? (
+                <div className="flex justify-center py-8"><Loader2 className="animate-spin text-slate-400" size={22} /></div>
+            ) : visible.length === 0 ? (
+                <p className="text-center text-sm text-slate-400 italic py-8">
+                    {rows.length === 0 ? 'No requirements raised yet.' : 'Nothing matches your search.'}
+                </p>
+            ) : (
+                <div className="overflow-x-auto">
+                    <table className="min-w-full text-left text-sm">
+                        <thead>
+                            <tr className="border-b border-slate-100">
+                                <th className="pb-2 pr-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Item</th>
+                                <th className="pb-2 pr-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Qty</th>
+                                <th className="pb-2 pr-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Date</th>
+                                <th className="pb-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                            {visible.map(r => {
+                                const tCfg = TYPES.find(t => t.key === r.type);
+                                const sCfg = HISTORY_STATUS_CFG[r.status] || { cls: 'bg-slate-100 text-slate-500 border-slate-200', label: r.status || '—' };
+                                const source = r.is_standalone
+                                    ? 'Standalone'
+                                    : [r.order_number, r.customer_name].filter(Boolean).join(' · ');
+                                return (
+                                    <tr key={r.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="py-2.5 pr-4">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                {tCfg && (
+                                                    <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${tCfg.cls}`}>
+                                                        {tCfg.label}
+                                                    </span>
+                                                )}
+                                                <span className="text-xs font-semibold text-slate-800">{reqTitle(r)}</span>
+                                            </div>
+                                            <p className="text-[10px] text-slate-400 mt-0.5">
+                                                {source}
+                                                {r.po_code ? `${source ? ' · ' : ''}${r.po_code}` : ''}
+                                                {r.raised_by_name ? ` · by ${r.raised_by_name}` : ''}
+                                            </p>
+                                        </td>
+                                        <td className="py-2.5 pr-4 text-right text-xs font-bold text-slate-700 tabular-nums whitespace-nowrap">
+                                            {reqQty(r)}
+                                        </td>
+                                        <td className="py-2.5 pr-4 text-xs text-slate-500 whitespace-nowrap">
+                                            {r.created_at ? new Date(r.created_at).toLocaleDateString('en', { dateStyle: 'medium' }) : '—'}
+                                        </td>
+                                        <td className="py-2.5">
+                                            <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${sCfg.cls}`}>
+                                                {sCfg.label}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                    {filtered.length > limit && (
+                        <div className="text-center pt-3">
+                            <button
+                                onClick={() => setLimit(l => l + 25)}
+                                className="text-xs font-semibold text-orange-500 hover:text-orange-600"
+                            >
+                                Show more ({filtered.length - limit} remaining)
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
 
 const RaiseRequirementPage = () => {
     const navigate = useNavigate();
@@ -58,6 +253,7 @@ const RaiseRequirementPage = () => {
     const [busy,    setBusy]    = useState(false);
     const [err,     setErr]     = useState(null);
     const [success, setSuccess] = useState(false);
+    const [showForm, setShowForm] = useState(false); // history-first: form opens via "New Request"
 
     useEffect(() => {
         storeManagerApi.getFabricTypes()
@@ -198,11 +394,22 @@ const RaiseRequirementPage = () => {
                     <ArrowLeft size={18} />
                 </button>
                 <div>
-                    <h1 className="text-xl font-bold text-slate-800">Raise Purchase Request</h1>
+                    <h1 className="text-xl font-bold text-slate-800">Purchase Requests</h1>
                     <p className="text-sm text-slate-500">Request material or items from the purchase team</p>
                 </div>
+                <button
+                    onClick={() => setShowForm(v => !v)}
+                    className={`ml-auto flex items-center gap-1.5 text-sm font-bold px-4 py-2 rounded-xl transition-colors ${
+                        showForm
+                            ? 'text-slate-600 border border-slate-200 hover:bg-slate-50'
+                            : 'text-white bg-orange-500 hover:bg-orange-600'
+                    }`}
+                >
+                    {showForm ? <><X size={14} /> Close</> : <><Plus size={14} /> New Request</>}
+                </button>
             </div>
 
+            {showForm && (
             <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-5">
 
                 {/* Type selector */}
@@ -284,14 +491,21 @@ const RaiseRequirementPage = () => {
                                 <SearchableSelect
                                     value={trimVariantId}
                                     onChange={setTrimVariantId}
-                                    options={trimVariants.map(v => ({
-                                        value: v.id,
-                                        label: [
+                                    options={trimVariants.map(v => {
+                                        // rows come back with variant_id (string), not id
+                                        const id = v.variant_id ?? v.id;
+                                        const parts = [
                                             v.color_name,
                                             v.color_number,
-                                            v.size ? `Sz ${v.size}` : null,
-                                        ].filter(Boolean).join(' · ') || `Variant #${v.id}`,
-                                    }))}
+                                            v.variant_size ? `Sz ${v.variant_size}` : null,
+                                            v.brand,
+                                        ].filter(Boolean);
+                                        const stock = parseFloat(v.main_store_stock);
+                                        return {
+                                            value: id,
+                                            label: `${parts.join(' · ') || `Variant #${id}`}${Number.isFinite(stock) ? ` — ${stock.toLocaleString('en-IN')} in stock` : ''}`,
+                                        };
+                                    })}
                                     placeholder={loadingVars ? 'Loading variants…' : (trimVariants.length ? '— Select variant —' : 'No variants found')}
                                 />
                             </div>
@@ -308,11 +522,7 @@ const RaiseRequirementPage = () => {
                             </div>
                             <div>
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Unit</label>
-                                <input
-                                    type="text" value={uom} onChange={e => setUom(e.target.value)}
-                                    placeholder="pcs"
-                                    className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400"
-                                />
+                                <UomSelect value={uom} onChange={setUom} />
                             </div>
                         </div>
                     </>
@@ -384,11 +594,7 @@ const RaiseRequirementPage = () => {
                             </div>
                             <div>
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Unit</label>
-                                <input
-                                    type="text" value={uom} onChange={e => setUom(e.target.value)}
-                                    placeholder="pcs / boxes / kg"
-                                    className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400"
-                                />
+                                <UomSelect value={uom} onChange={setUom} />
                             </div>
                         </div>
                         <div>
@@ -468,6 +674,11 @@ const RaiseRequirementPage = () => {
                     </button>
                 </div>
             </div>
+            )}
+
+            {/* Historic requirements — remounts (and refetches) after each submit
+                because the success screen replaces this whole tree. */}
+            <RequirementHistory />
         </div>
 
             {/* Quick-create general item mini-modal */}

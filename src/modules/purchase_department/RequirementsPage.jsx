@@ -1229,9 +1229,17 @@ const RequirementsPage = () => {
 
                                     {pendable > 0 && (
                                         <button
-                                            onClick={e => { e.stopPropagation(); createPoForRows(allRows); }}
+                                            onClick={e => {
+                                                e.stopPropagation();
+                                                const bucketSel = allRows.filter(r => selected.has(r.id));
+                                                if (bucketSel.length > 0) {
+                                                    setShowPOModal(true);
+                                                } else {
+                                                    createPoForRows(allRows);
+                                                }
+                                            }}
                                             className="shrink-0 flex items-center gap-1 text-[11px] font-bold text-orange-600 bg-orange-50 hover:bg-orange-100 border border-orange-200 px-2 py-1 rounded-lg transition-colors"
-                                            title="Create PO covering all pending rows in this bucket"
+                                            title="Create PO for selected rows (or all pending if none selected)"
                                         >
                                             <ShoppingCart size={11} /> PO
                                         </button>
@@ -1335,9 +1343,17 @@ const RequirementsPage = () => {
                                                                 </div>
                                                                 {vPend > 0 && (
                                                                     <button
-                                                                        onClick={e => { e.stopPropagation(); createPoForRows(v.rows); }}
+                                                                        onClick={e => {
+                                                                            e.stopPropagation();
+                                                                            const variantSel = v.rows.filter(r => selected.has(r.id));
+                                                                            if (variantSel.length > 0) {
+                                                                                setShowPOModal(true);
+                                                                            } else {
+                                                                                createPoForRows(v.rows);
+                                                                            }
+                                                                        }}
                                                                         className="shrink-0 flex items-center gap-1 text-[10px] font-bold text-orange-600 bg-orange-50 hover:bg-orange-100 border border-orange-200 px-1.5 py-0.5 rounded-md transition-colors"
-                                                                        title="Create PO for this variant"
+                                                                        title="Create PO for selected rows (or all pending if none selected)"
                                                                     >
                                                                         <ShoppingCart size={10} /> PO
                                                                     </button>

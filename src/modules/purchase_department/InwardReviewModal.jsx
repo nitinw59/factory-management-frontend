@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, Loader2, AlertTriangle, ArrowLeft, CheckCircle2, Link2, ChevronDown, ChevronUp, Zap } from 'lucide-react';
+import { X, Loader2, AlertTriangle, ArrowLeft, CheckCircle2, Link2, ChevronDown, ChevronUp, Zap, PartyPopper } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { labelFromGroup } from './inwardShared';
 import SupplierCodePill from './SupplierCodePill';
@@ -35,6 +35,9 @@ export default function InwardReviewModal({
 }) {
     const [busy, setBusy] = useState(false);
     const [err,  setErr]  = useState(null);
+    // Server-confirmed inward — when set, the modal shows a success screen
+    // instead of the review body; onConfirmed fires only when the user dismisses.
+    const [saved, setSaved] = useState(null);
     // allocations[itemIdx][prId] = qty (string from the input)
     const [allocations, setAllocations] = useState({});
     // Per-item expand state for the allocation accordion.
@@ -287,7 +290,7 @@ export default function InwardReviewModal({
             const res = isCreate
                 ? await purchaseDeptApi.createInward(poId, body, payload.scanFile)
                 : await purchaseDeptApi.updateInward(inward.id, body, payload.scanFile);
-            onConfirmed?.(res.data);
+            setSaved(res.data?.data ?? res.data ?? true);
         } catch (e) {
             setErr(e?.response?.data?.error || e.message || 'Save failed.');
         } finally {
@@ -295,29 +298,143 @@ export default function InwardReviewModal({
         }
     };
 
+    // After a successful save the parent must still be notified (it refreshes
+    // and closes), whether the user clicks Done, the X, or the backdrop.
+    const handleDismiss = () => {
+        if (saved) onConfirmed?.(saved);
+        else onClose?.();
+    };
+
+    const savedObj  = saved && typeof saved === 'object' ? saved : null;
+    const savedGrn  = savedObj?.grn_number || payload?.grnNumber || null;
+    const savedDate = savedObj?.received_date || payload?.receivedDate;
+
+    // Resolve the PR allocations of a summary row for the success screen.
+    const allocationsForRow = (idx) => Object.entries(allocations[idx] || {})
+        .filter(([, v]) => parseFloat(v) > 0)
+        .map(([prId, v]) => {
+            const pr = openReqs.find(r => String(r.id) === String(prId));
+            const ctx = pr ? [
+                pr.order_number && `SO ${pr.order_number}`,
+                pr.customer_name,
+            ].filter(Boolean).join(' · ') : '';
+            return { prId, qty: parseFloat(v), ctx };
+        });
+
     return (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={handleDismiss}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
-                <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+                <div className={`flex items-start justify-between gap-3 px-5 py-4 border-b ${saved ? 'border-emerald-100 bg-emerald-50/60' : 'border-slate-100'}`}>
                     <div>
                         <h2 className="text-base font-black text-slate-800 flex items-center gap-2">
-                            <CheckCircle2 size={16} className="text-emerald-500" />
-                            Review before saving
+                            {saved ? <PartyPopper size={16} className="text-emerald-600" /> : <CheckCircle2 size={16} className="text-emerald-500" />}
+                            {saved
+                                ? `Inward ${isCreate ? 'recorded' : 'updated'} successfully`
+                                : 'Review before saving'}
                         </h2>
                         {(poCode || poId) && (
                             <p className="text-[11px] font-semibold text-emerald-700 mt-0.5">
                                 PO · {poCode || `#${poId}`}
                             </p>
                         )}
-                        <p className="text-xs text-slate-500 mt-0.5">
-                            {summary.length} line{summary.length !== 1 ? 's' : ''} will be {isCreate ? 'recorded' : 'updated'} on GRN {payload?.grnNumber || '(auto)'} dated {payload?.receivedDate}.
-                        </p>
+                        {saved ? (
+                            <p className="text-xs text-slate-600 mt-0.5">
+                                GRN {savedGrn || (savedObj?.id ? `#${savedObj.id}` : '(auto)')} · dated {savedDate} · {summary.length} line{summary.length !== 1 ? 's' : ''} posted.
+                            </p>
+                        ) : (
+                            <p className="text-xs text-slate-500 mt-0.5">
+                                {summary.length} line{summary.length !== 1 ? 's' : ''} will be {isCreate ? 'recorded' : 'updated'} on GRN {payload?.grnNumber || '(auto)'} dated {payload?.receivedDate}.
+                            </p>
+                        )}
                     </div>
-                    <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-full transition shrink-0">
+                    <button onClick={handleDismiss} className="p-1.5 hover:bg-slate-100 rounded-full transition shrink-0">
                         <X size={16} className="text-slate-500" />
                     </button>
                 </div>
 
+                {saved ? (
+                <div className="overflow-auto flex-1 px-5 py-4 space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                        {savedObj?.id && (
+                            <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-full">Inward #{savedObj.id}</span>
+                        )}
+                        {savedGrn && (
+                            <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">GRN {savedGrn}</span>
+                        )}
+                        {savedDate && (
+                            <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-full">Received {savedDate}</span>
+                        )}
+                        {payload?.condition && (
+                            <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-full capitalize">Condition · {payload.condition}</span>
+                        )}
+                        {payload?.scanFile && (
+                            <span className="text-[10px] font-bold bg-blue-50 text-blue-700 px-2 py-1 rounded-full">Scan attached</span>
+                        )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                        {summary.map(row => {
+                            const rowAllocs = allocationsForRow(row.idx);
+                            return (
+                                <div key={row.key} className="bg-white border border-emerald-100 rounded-xl">
+                                    <div className="flex items-start gap-3 px-3 py-2">
+                                        <CheckCircle2 size={14} className="text-emerald-500 mt-0.5 shrink-0" />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-xs font-bold text-slate-800">{row.name}</p>
+                                            {row.details && (
+                                                <p className="text-[11px] text-slate-600 mt-0.5">{row.details}</p>
+                                            )}
+                                            {row.isTrim && row.variantId && (
+                                                <SupplierCodePill supplierId={supplierId} supplierName={supplierName} variantId={row.variantId} className="mt-0.5" />
+                                            )}
+                                            {row.rolls && row.rolls.length > 0 && (
+                                                <ul className="mt-1 text-[10px] text-slate-500 space-y-0.5">
+                                                    {row.rolls.map((r, i) => (
+                                                        <li key={i} className="font-mono">
+                                                            {r.bale_no || '—'} · {Number(r.meter).toLocaleString(undefined, { maximumFractionDigits: 2 })} {r.uom || 'm'}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            )}
+                                            {row.boxes && row.boxes.length > 0 && (
+                                                <p className="mt-1 text-[10px] text-slate-500 font-mono">
+                                                    {row.boxes.map(b => `${b.box_count} × ${Number(b.qty_per_box).toLocaleString()}`).join(' + ')}
+                                                </p>
+                                            )}
+                                            {rowAllocs.length > 0 && (
+                                                <ul className="mt-1 space-y-0.5">
+                                                    {rowAllocs.map(a => (
+                                                        <li key={a.prId} className="text-[10px] text-slate-600">
+                                                            <span className="font-mono font-bold text-blue-700">PR-{a.prId}</span>
+                                                            {' '}← {a.qty.toLocaleString(undefined, { maximumFractionDigits: 2 })} {row.unit}
+                                                            {a.ctx && <span className="text-slate-400"> · {a.ctx}</span>}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            )}
+                                        </div>
+                                        <div className="shrink-0 text-right">
+                                            <p className="text-sm font-bold text-emerald-700 tabular-nums">
+                                                {Number(row.qty || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} {row.unit}
+                                            </p>
+                                            {row.rolls && row.rolls.length > 0 && (
+                                                <p className="text-[9px] text-slate-400">{row.rolls.length} roll{row.rolls.length !== 1 ? 's' : ''}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {payload?.notes && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Notes</p>
+                            <p className="text-xs text-slate-700 mt-0.5 whitespace-pre-wrap">{payload.notes}</p>
+                        </div>
+                    )}
+                </div>
+                ) : (
                 <div className="overflow-auto flex-1 px-5 py-4 space-y-3">
                     {err && (
                         <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2 text-sm text-red-600">
@@ -497,23 +614,35 @@ export default function InwardReviewModal({
                         </div>
                     )}
                 </div>
+                )}
 
                 <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100">
-                    <button
-                        onClick={() => onBack?.(payload)}
-                        disabled={busy}
-                        className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition disabled:opacity-40"
-                    >
-                        <ArrowLeft size={12} /> Back to edit
-                    </button>
-                    <button
-                        onClick={handleConfirm}
-                        disabled={busy}
-                        className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 px-4 py-1.5 rounded-lg transition shadow-sm"
-                    >
-                        {busy && <Loader2 size={12} className="animate-spin" />}
-                        {isCreate ? 'Confirm & Save' : 'Confirm changes'}
-                    </button>
+                    {saved ? (
+                        <button
+                            onClick={handleDismiss}
+                            className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-4 py-1.5 rounded-lg transition shadow-sm"
+                        >
+                            <CheckCircle2 size={12} /> Done
+                        </button>
+                    ) : (
+                        <>
+                            <button
+                                onClick={() => onBack?.(payload)}
+                                disabled={busy}
+                                className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition disabled:opacity-40"
+                            >
+                                <ArrowLeft size={12} /> Back to edit
+                            </button>
+                            <button
+                                onClick={handleConfirm}
+                                disabled={busy}
+                                className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 px-4 py-1.5 rounded-lg transition shadow-sm"
+                            >
+                                {busy && <Loader2 size={12} className="animate-spin" />}
+                                {isCreate ? 'Confirm & Save' : 'Confirm changes'}
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
         </div>

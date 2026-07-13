@@ -94,6 +94,7 @@ const CreatePartForm = ({ categories, onSave, onCancel }) => {
 const SparePartsPage = () => {
     const { user } = useAuth();
     const isStoreManager = user?.role === 'store_manager';
+    const isAdmin = user?.role === 'factory_admin';
 
     const [spares, setSpares] = useState([]);
     const [categories, setCategories] = useState([]);
@@ -181,12 +182,14 @@ const SparePartsPage = () => {
                                 <Truck size={18} className="mr-2"/> Receive Stock
                             </button>
                         )}
-                        <button
-                            onClick={() => setActiveModal('create')}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg shadow-md font-bold flex items-center transition-all"
-                        >
-                            <Plus size={18} className="mr-2"/> Add New Part
-                        </button>
+                        {isAdmin && (
+                            <button
+                                onClick={() => setActiveModal('create')}
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg shadow-md font-bold flex items-center transition-all"
+                            >
+                                <Plus size={18} className="mr-2"/> Add New Part
+                            </button>
+                        )}
                     </div>
                 </div>
 
