@@ -8,6 +8,8 @@ import {
 import { generalItemsApi } from '../../api/generalItemsApi';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import { hrApi } from '../../api/hrApi';
+import { adminApi } from '../../api/adminApi';
+import { downloadIssueSlipPdf } from './issueSlipPdfGenerator';
 import SearchableSelect from '../../shared/SearchableSelect';
 import { useAuth } from '../../context/AuthContext';
 
@@ -32,6 +34,25 @@ const money = (v) => {
 const qtyNum = (v) => {
     const n = parseFloat(v);
     return Number.isFinite(n) ? n.toLocaleString('en-IN', { maximumFractionDigits: 3 }) : '—';
+};
+
+// Company profile for PDF headers — fetched once per session. The endpoint may be
+// admin-only; a 403/failed fetch just means the PDF falls back to generic branding.
+let _companyProfile;
+const getCompanyProfileOnce = async () => {
+    if (_companyProfile !== undefined) return _companyProfile;
+    try {
+        const r = await adminApi.getCompanyProfile();
+        _companyProfile = r.data ?? null;
+    } catch {
+        _companyProfile = null;
+    }
+    return _companyProfile;
+};
+
+const downloadSlipPdf = async (issue) => {
+    const company = await getCompanyProfileOnce();
+    await downloadIssueSlipPdf({ issue, company });
 };
 
 function Toast({ toast }) {
@@ -210,6 +231,7 @@ function IssueSlipModal({ items, onIssued, onClose }) {
     const [err, setErr] = useState(null);
     const [lineErrs, setLineErrs] = useState({});   // { lineIdx: verbatim 409 message }
     const [result, setResult] = useState(null);
+    const [pdfBusy, setPdfBusy] = useState(false);
     const [users, setUsers] = useState([]);
     const [deptSuggestions, setDeptSuggestions] = useState([]);
     const [trimCatalog, setTrimCatalog] = useState([]);
@@ -382,6 +404,55 @@ function IssueSlipModal({ items, onIssued, onClose }) {
         }
     };
 
+    // The 201 response carries no lines — rebuild the slip for the PDF from the
+    // form state that produced it (names resolved from local caches).
+    const handleDownloadPdf = async () => {
+        if (!result || pdfBusy) return;
+        setPdfBusy(true);
+        try {
+            const validLines = lines.filter(l => linePicked(l) && parseFloat(l.qty) > 0);
+            await downloadSlipPdf({
+                id: result.id,
+                issue_number: result.issue_number,
+                created_at: new Date().toISOString(),
+                issued_to_name: result.issued_to_name
+                    || users.find(u => String(u.value) === String(personId))?.label || '—',
+                issued_to_department: dept.trim() || null,
+                recover_from_salary: recoverFromSalary,
+                notes: notes.trim() || null,
+                total_value: result.total_value,
+                lines: validLines.map(l => {
+                    if (l.kind === 'trim') {
+                        const v = lineVariant(l);
+                        const trim = trimCatalog.find(t => String(t.id) === String(l.trim_item_id));
+                        return {
+                            item_kind: 'trim',
+                            item_name: trim ? `${trim.name}${trim.brand ? ` - ${trim.brand}` : ''}` : 'Trim',
+                            variant_color_name: v?.color_name,
+                            variant_color_number: v?.color_number,
+                            variant_size: v?.size ?? v?.variant_size,
+                            qty: parseFloat(l.qty),
+                            uom: 'pcs',
+                            unit_cost: lineCost(l),
+                            line_value: lineValue(l),
+                        };
+                    }
+                    const info = itemInfo[l.general_item_id];
+                    return {
+                        item_kind: 'general',
+                        item_name: info?.name || 'Item',
+                        qty: parseFloat(l.qty),
+                        uom: info?.uom || '',
+                        unit_cost: lineCost(l),
+                        line_value: lineValue(l),
+                    };
+                }),
+            });
+        } finally {
+            setPdfBusy(false);
+        }
+    };
+
     return (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -406,7 +477,13 @@ function IssueSlipModal({ items, onIssued, onClose }) {
                                 <IndianRupee size={9} /> Recover from salary
                             </span>
                         )}
-                        <button onClick={onClose} className="mt-2 text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 px-5 py-2 rounded-xl transition">Close</button>
+                        <div className="flex gap-2 mt-2">
+                            <button onClick={handleDownloadPdf} disabled={pdfBusy} className="text-sm font-bold text-slate-600 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 px-5 py-2 rounded-xl transition flex items-center gap-1.5">
+                                {pdfBusy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                                Download PDF
+                            </button>
+                            <button onClick={onClose} className="text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 px-5 py-2 rounded-xl transition">Close</button>
+                        </div>
                     </div>
                 ) : (
                     <>
@@ -865,6 +942,17 @@ function IssuesTab({ items, initialFocus }) {
     const [loading,        setLoading]        = useState(false);
     const [err,            setErr]            = useState(null);
     const [expanded,       setExpanded]       = useState(null);
+    const [pdfBusyId,      setPdfBusyId]      = useState(null);
+
+    const handleSlipPdf = async (iss) => {
+        if (pdfBusyId) return;
+        setPdfBusyId(iss.id);
+        try {
+            await downloadSlipPdf(iss);
+        } finally {
+            setPdfBusyId(null);
+        }
+    };
 
     useEffect(() => {
         // History filter includes inactive employees — past slips still reference them.
@@ -1037,6 +1125,16 @@ function IssuesTab({ items, initialFocus }) {
                             </button>
                             {expanded === iss.id && (
                                 <div className="border-t border-slate-100 px-4 py-3 space-y-2">
+                                    <div className="flex justify-end">
+                                        <button
+                                            onClick={() => handleSlipPdf(iss)}
+                                            disabled={pdfBusyId === iss.id}
+                                            className="text-[10px] font-bold text-slate-500 hover:text-orange-600 border border-slate-200 hover:border-orange-200 disabled:opacity-40 px-2 py-1 rounded-lg transition flex items-center gap-1"
+                                        >
+                                            {pdfBusyId === iss.id ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
+                                            Download PDF
+                                        </button>
+                                    </div>
                                     <table className="w-full text-xs">
                                         <thead>
                                             <tr className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
