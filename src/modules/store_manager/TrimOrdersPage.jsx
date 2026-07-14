@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { storeManagerApi } from '../../api/storeManagerApi';
-import { FiClock, FiCheckCircle, FiList, FiPackage } from 'react-icons/fi'; 
+import { FiClock, FiCheckCircle, FiList, FiPackage, FiSend, FiTruck } from 'react-icons/fi';
 import { ChevronRight, Search, RefreshCw, AlertCircle, Receipt, IndianRupee, Loader2 } from 'lucide-react';
+import { kitStatusOf } from '../trim_kits/kitStatusConfig';
 
 const Spinner = () => <div className="flex justify-center items-center p-12"><Loader2 className="animate-spin h-10 w-10 text-blue-600" /></div>;
 
@@ -21,27 +22,28 @@ const KPICard = ({ title, count, icon: Icon, colorClass, bgColorClass, prefix = 
 
 // --- Reusable Order Card ---
 const OrderCard = ({ order }) => {
-    const statusInfo = {
-        PENDING: { color: 'yellow', icon: FiClock, text: 'Pending' },
-        PREPARED: { color: 'blue', icon: FiPackage, text: 'Prepared' },
-        COMPLETED: { color: 'green', icon: FiCheckCircle, text: 'Completed' },
-    }[order.status] || { color: 'gray', icon: FiList, text: order.status };
+    const statusMeta = kitStatusOf(order.status);
+    const statusIcon = {
+        PENDING: FiClock,
+        PREPARED: FiPackage,
+        COMPLETED: FiPackage,
+        READY_FOR_PICKUP: FiSend,
+        PARTIALLY_ISSUED: FiTruck,
+        ISSUED: FiCheckCircle,
+    }[order.status] || FiList;
 
-    const Icon = statusInfo.icon;
+    const Icon = statusIcon;
 
     const borderColorClass = {
-        'yellow': 'border-yellow-500 hover:border-yellow-600',
-        'blue': 'border-blue-500 hover:border-blue-600',
-        'green': 'border-green-500 hover:border-green-600',
-        'gray': 'border-gray-500 hover:border-gray-600',
-    }[statusInfo.color];
+        PENDING: 'border-yellow-500 hover:border-yellow-600',
+        PREPARED: 'border-blue-500 hover:border-blue-600',
+        COMPLETED: 'border-teal-500 hover:border-teal-600',
+        READY_FOR_PICKUP: 'border-indigo-500 hover:border-indigo-600',
+        PARTIALLY_ISSUED: 'border-purple-500 hover:border-purple-600',
+        ISSUED: 'border-green-500 hover:border-green-600',
+    }[order.status] || 'border-gray-500 hover:border-gray-600';
 
-    const badgeColorClass = {
-        'yellow': 'bg-yellow-100 text-yellow-800',
-        'blue': 'bg-blue-100 text-blue-800',
-        'green': 'bg-green-100 text-green-800',
-        'gray': 'bg-gray-100 text-gray-800',
-    }[statusInfo.color];
+    const badgeColorClass = statusMeta.badge;
 
     // Billing Status Logic
     const billStatus = order.billing_status || 'UNBILLED';
@@ -70,7 +72,7 @@ const OrderCard = ({ order }) => {
                     </div>
                     <span className={`inline-flex items-center text-[10px] uppercase tracking-wider font-bold px-2.5 py-1 rounded-full ${badgeColorClass}`}>
                         <Icon size={12} className="mr-1.5"/>
-                        {statusInfo.text}
+                        {statusMeta.label}
                     </span>
                 </div>
 
@@ -124,9 +126,10 @@ const OrderCard = ({ order }) => {
 const TrimOrdersPage = () => {
     // Data State
     const [orders, setOrders] = useState([]);
-    const [kpis, setKpis] = useState({ 
-        pending: 0, prepared: 0, completedToday: 0, 
-        pendingBilling: 0, totalBilled: 0, activeTotal: 0, completedTotal: 0 
+    const [kpis, setKpis] = useState({
+        pending: 0, prepared: 0, completedToday: 0,
+        pendingBilling: 0, totalBilled: 0, activeTotal: 0, completedTotal: 0,
+        readyForPickup: 0, partiallyIssued: 0, issued: 0
     });
     
     // UI State
@@ -269,18 +272,21 @@ const TrimOrdersPage = () => {
             </div>
 
             {/* --- KPI CARDS --- */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-4 mb-8">
                 <KPICard title="Pending Fulfillment" count={kpis.pending || 0} icon={FiClock} colorClass="text-amber-600" bgColorClass="bg-amber-100" />
                 <KPICard title="Prepared / Partial" count={kpis.prepared || 0} icon={FiPackage} colorClass="text-blue-600" bgColorClass="bg-blue-100" />
-                <KPICard title="Completed Today" count={kpis.completedToday || 0} icon={FiCheckCircle} colorClass="text-emerald-600" bgColorClass="bg-emerald-100" />
+                <KPICard title="Ready for Pickup" count={kpis.readyForPickup || 0} icon={FiSend} colorClass="text-indigo-600" bgColorClass="bg-indigo-100" />
+                <KPICard title="Partially Issued" count={kpis.partiallyIssued || 0} icon={FiTruck} colorClass="text-purple-600" bgColorClass="bg-purple-100" />
+                <KPICard title="Issued" count={kpis.issued || 0} icon={FiCheckCircle} colorClass="text-green-600" bgColorClass="bg-green-100" />
+                <KPICard title="Allocated Today" count={kpis.completedToday || 0} icon={FiCheckCircle} colorClass="text-emerald-600" bgColorClass="bg-emerald-100" />
                 <KPICard title="Pending Billing" count={kpis.pendingBilling || 0} icon={Receipt} colorClass="text-rose-600" bgColorClass="bg-rose-100" />
-                <KPICard 
-                    title="Total Billed" 
-                    count={(kpis.totalBilled || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })} 
+                <KPICard
+                    title="Total Billed"
+                    count={(kpis.totalBilled || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     prefix="₹"
-                    icon={IndianRupee} 
-                    colorClass="text-indigo-600" 
-                    bgColorClass="bg-indigo-100" 
+                    icon={IndianRupee}
+                    colorClass="text-indigo-600"
+                    bgColorClass="bg-indigo-100"
                 />
             </div>
 

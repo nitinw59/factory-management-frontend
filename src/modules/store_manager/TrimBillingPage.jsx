@@ -432,6 +432,10 @@ const TrimBillingPage = () => {
 
     // --- EDIT LOGIC ---
     const handleEditInvoice = (bill) => {
+        if (bill.source_issue_id) {
+            showToast("This bill was auto-created at kit handover and is read-only.", "error");
+            return;
+        }
         setEditingBill(bill);
         
         // Load the bill's items into the draft editor
@@ -442,7 +446,7 @@ const TrimBillingPage = () => {
             color_name: item.color_name,
             color_number: item.color_number,
             quantity: parseFloat(item.quantity),
-            selling_price: parseFloat(item.selling_price),
+            selling_price: parseFloat(item.selling_price) || 0,
             main_store_stock: item.main_store_stock,
             consumed_qty: 0,
             previously_billed_qty: 0,
@@ -465,6 +469,12 @@ const TrimBillingPage = () => {
     const handleQuantityChange = (id, newQty) => {
         setDraftItems(prev => prev.map(item =>
             item.id === id ? { ...item, quantity: parseFloat(newQty) || 0 } : item
+        ));
+    };
+
+    const handlePriceChange = (id, newPrice) => {
+        setDraftItems(prev => prev.map(item =>
+            item.id === id ? { ...item, selling_price: parseFloat(newPrice) || 0 } : item
         ));
     };
 
@@ -726,8 +736,10 @@ const TrimBillingPage = () => {
                         <FileText className="w-5 h-5 mr-2 text-indigo-600"/> Previous Invoices Generated
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {existingBills.map(bill => (
-                            <div key={bill.id} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:border-indigo-300 transition-colors">
+                        {existingBills.map(bill => {
+                            const isAutoBill = !!bill.source_issue_id;
+                            return (
+                            <div key={bill.id} className={`bg-white border rounded-xl p-5 shadow-sm transition-colors ${isAutoBill ? 'border-emerald-200' : 'border-gray-200 hover:border-indigo-300'}`}>
                                 <div className="flex justify-between items-start mb-3">
                                     <div>
                                         <h3 className="font-bold text-gray-900 flex items-center">
@@ -735,6 +747,11 @@ const TrimBillingPage = () => {
                                             <CheckCircle2 className="w-4 h-4 ml-2 text-green-500" />
                                         </h3>
                                         <p className="text-xs text-gray-500 mt-0.5">{new Date(bill.created_at).toLocaleString()}</p>
+                                        {isAutoBill && (
+                                            <span className="inline-block mt-1.5 text-[10px] uppercase tracking-wider font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded">
+                                                Auto (kit handover{bill.source_issue_number ? ` — ${bill.source_issue_number}` : ''})
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="flex flex-col items-end gap-2">
                                         <span className="bg-indigo-50 text-indigo-800 text-sm font-bold px-3 py-1 rounded-lg">₹{parseFloat(bill.total_amount).toFixed(2)}</span>
@@ -742,9 +759,11 @@ const TrimBillingPage = () => {
                                             <button onClick={() => handlePrintInvoice(bill)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors" title="Print/Download PDF">
                                                 <Printer size={16} />
                                             </button>
+                                            {!isAutoBill && (
                                             <button onClick={() => handleEditInvoice(bill)} className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors" title="Edit this Invoice">
                                                 <Edit2 size={16} />
                                             </button>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -765,10 +784,20 @@ const TrimBillingPage = () => {
                                     </ul>
                                 </div>
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             )}
+
+            {/* VALUATION-ONLY NOTICE — billing no longer moves stock; kits are billed automatically at handover signing */}
+            <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-sm text-amber-800 font-medium">
+                    Manual billing is <strong>valuation-only</strong> — it does not move stock. Kit handovers are billed automatically when the loader signs.
+                    A manual bill on an unsigned kit order will <strong>block loader signing</strong>; use this only for exceptional or legacy cases.
+                </p>
+            </div>
 
             {/* HEADER FOR DRAFT / EDITOR */}
             <div className={`bg-white rounded-xl shadow-sm border p-6 mb-6 flex flex-col md:flex-row md:justify-between md:items-center gap-4 border-t-4 ${editingBill ? 'border-t-amber-500 border-x-amber-200 border-b-amber-200' : 'border-t-indigo-500 border-gray-200'}`}>
@@ -881,7 +910,7 @@ const TrimBillingPage = () => {
                                 </th>
                                 <th className="px-6 py-4">Item Description</th>
                                 <th className="px-6 py-4 w-28 text-center">In Stock</th>
-                                <th className="px-6 py-4 w-28 text-right">Unit Price</th>
+                                <th className="px-6 py-4 w-36 text-right">Unit Price</th>
                                 <th className="px-6 py-4 w-44 text-center">Quantity</th>
                                 <th className="px-6 py-4 w-32 text-right">Line Total</th>
                                 <th className="px-6 py-4 w-16"></th>
@@ -990,11 +1019,22 @@ const TrimBillingPage = () => {
                                                 {hasStock ? stockNum : '--'}
                                             </span>
                                         </td>
-                                        <td className={`px-6 py-4 text-right font-mono ${item.selling_price > 0 ? 'text-gray-600' : 'text-red-600 font-bold'}`}>
-                                            ₹{item.selling_price.toFixed(2)}
+                                        <td className="px-6 py-4">
+                                            <div className="relative">
+                                                <span className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-sm font-mono ${item.selling_price > 0 ? 'text-gray-400' : 'text-red-400'}`}>₹</span>
+                                                <input
+                                                    type="number"
+                                                    value={item.selling_price}
+                                                    onChange={(e) => handlePriceChange(item.id, e.target.value)}
+                                                    onWheel={(e) => e.target.blur()}
+                                                    className={`w-full text-right border rounded-lg p-2 pl-6 outline-none font-mono font-bold transition-all shadow-sm focus:ring-2 ${item.selling_price > 0 ? 'border-gray-300 text-gray-900 focus:ring-indigo-500 focus:border-indigo-500' : 'border-red-400 bg-red-50 text-red-700 focus:ring-red-400 focus:border-red-500'}`}
+                                                    min="0"
+                                                    step="0.01"
+                                                />
+                                            </div>
                                             {!(item.selling_price > 0) && (
-                                                <div className="flex items-center justify-end gap-1 text-[10px] font-bold text-red-500 uppercase mt-0.5">
-                                                    <AlertTriangle className="w-3 h-3" /> no price
+                                                <div className="flex items-center justify-end gap-1 text-[10px] font-bold text-red-500 uppercase mt-1">
+                                                    <AlertTriangle className="w-3 h-3" /> no price — enter one to bill
                                                 </div>
                                             )}
                                         </td>

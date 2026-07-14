@@ -15,6 +15,8 @@ export const storeManagerApi = {
     getInStockFabricRolls: () => api.get('/store-manager/fabric-rolls/in-stock'),
     updateFabricRoll: (rollId, data) => api.put(`/store-manager/fabric-rolls/${rollId}`, data),
     deleteFabricRoll: (rollId) => api.delete(`/store-manager/fabric-rolls/${rollId}`),
+    // Shared departments master — plain array of { id, name, is_overhead, created_at }
+    getDepartments: () => api.get('/shared/departments'),
     // Trims
     getAllTrimItems: () => api.get('/store-manager/trim-items'),
     getVariantsByTrimItem: (trimItemId) => api.get(`/store-manager/trim-item-variants/${trimItemId}`),
@@ -23,7 +25,6 @@ export const storeManagerApi = {
     getAllTrimOrders: (params) => api.get('/store-manager/trim-orders', { params }),
     getTrimOrdersKPIs: () => api.get('/store-manager/trim-orders/kpis'),
     getTrimOrderDetails: (orderId) => api.get(`/store-manager/trim-orders/${orderId}`),
-    fulfillOrderItem: (data) => api.post('/store-manager/trim-orders/fulfill-item', data),
     fulfillWithVariant: (data) => api.post('/store-manager/trim-orders/fulfill-with-variant', data),
     getTrimOrderSummary: async (orderId) => api.get(`/store-manager/trim-orders/${orderId}/summary`),
     getOrderReferenceData: (orderId) => api.get(`/store-manager/trim-orders/${orderId}/reference-data`),
@@ -48,6 +49,10 @@ export const storeManagerApi = {
 
     autoFulfillSubstitutes: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/auto-fulfill-substitutes`),
     revertFulfillment: (logId) => api.delete(`/store-manager/trim-fulfillments/${logId}`),
+
+    // Kit custody (loader pickup flow)
+    markKitReady: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/mark-ready`),
+    unmarkKitReady: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/unmark-ready`),
 
 
     // Billing  

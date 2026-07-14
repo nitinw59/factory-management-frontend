@@ -1793,7 +1793,9 @@ const BatchStageDrilldownModal = ({ batchId, flowId, stageName, onClose }) => {
 
 // ─── TRIM ORDER DETAIL MODAL ─────────────────────────────────────────────────
 
-const TRIM_ORDER_STATUSES = ['DRAFT', 'PENDING', 'PREPARED', 'ISSUED', 'COMPLETED'];
+const TRIM_ORDER_STATUSES = ['DRAFT', 'PENDING', 'PREPARED', 'COMPLETED', 'READY_FOR_PICKUP', 'PARTIALLY_ISSUED', 'ISSUED'];
+// Once a kit has had a handover, status is computed server-side — manual edits are rejected.
+const STATUS_LOCKED_AFTER_HANDOVER = ['PARTIALLY_ISSUED', 'ISSUED'];
 
 const TrimOrderDetailModal = ({ orderId, onBack, onClose }) => {
     const [order,   setOrder]   = useState(null);
@@ -1839,7 +1841,8 @@ const TrimOrderDetailModal = ({ orderId, onBack, onClose }) => {
                 .map(i => ({ id: i.id, quantity_required: parseFloat(itemQtys[i.id]) }));
 
             const body = {};
-            if (newStatus !== order.status)  body.status           = newStatus;
+            // Never send a manual status once the kit has handovers — the server computes it and 400s.
+            if (newStatus !== order.status && !STATUS_LOCKED_AFTER_HANDOVER.includes(order.status)) body.status = newStatus;
             if (update_items.length)         body.update_items     = update_items;
             if (removedIds.size)             body.remove_item_ids  = [...removedIds];
             if (dismissedIds.size)           body.dismiss_missing_ids = [...dismissedIds];
@@ -1882,6 +1885,14 @@ const TrimOrderDetailModal = ({ orderId, onBack, onClose }) => {
             {/* Top bar: status selector + back + auto-fill */}
             <div className="flex items-center gap-3 mb-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
                 <span className="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0">Status</span>
+                {STATUS_LOCKED_AFTER_HANDOVER.includes(order.status) ? (
+                    <span
+                        className="text-xs font-bold px-2 py-1.5 rounded-lg bg-slate-100 text-slate-600 border border-slate-200"
+                        title="Status is computed from kit handovers and can no longer be set manually"
+                    >
+                        {order.status} (auto)
+                    </span>
+                ) : (
                 <select
                     value={newStatus}
                     onChange={e => setNewStatus(e.target.value)}
@@ -1889,6 +1900,7 @@ const TrimOrderDetailModal = ({ orderId, onBack, onClose }) => {
                 >
                     {TRIM_ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
+                )}
                 <button
                     onClick={handleAutoFill}
                     disabled={autoFilling}

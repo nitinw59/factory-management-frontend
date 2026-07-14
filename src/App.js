@@ -10,6 +10,10 @@ import AdminProtectedRoute from './shared/AdminProtectedRoute';
 import StoreManagerProtectedRoute from './shared/StoreManagerProtectedRoute';
 import ProductionManagerProtectedRoute from './shared/ProductionManagerProtectedRoute';
 import InitialRedirect from './shared/InitialRedirect';
+import RedirectWithParams from './shared/RedirectWithParams';
+import TrimKitLinkResolver from './shared/TrimKitLinkResolver';
+import KitPickupQueuePage from './modules/trim_kits/KitPickupQueuePage';
+import KitOrderPage from './modules/trim_kits/KitOrderPage';
 import WorkstationsPage from './modules/workstations/WorkstationsPage';
 import WorkstationTypesPage from './modules/workstations/WorkstationTypesPage';
 import PiecePartsPage from './modules/products/PiecePartsPage';
@@ -197,6 +201,9 @@ function App() {
         {/* The root path is the main entry point that redirects based on role */}
         <Route path="/init" element={<InitialRedirect />} />
         <Route path="/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+        {/* Notification link_to aliases — backend paths mapped onto real portal routes */}
+        <Route path="/store/trim-orders/:orderId" element={<RedirectWithParams to="/store-manager/trim-orders" />} />
+        <Route path="/trim-kits/orders/:orderId" element={<TrimKitLinkResolver />} />
         
         {/* Admin Portal */}
         <Route path="/admin" element={<AdminProtectedRoute><AdminLayout /></AdminProtectedRoute>}>
@@ -300,6 +307,7 @@ function App() {
           <Route path="bom-approvals" element={<BomApprovalPage />} />
           <Route path="job-work" element={<JobWorkDashboardPage />} />
           <Route path="planning" element={<MerchandiserPlanningPage />} />
+          <Route path="trim-kits/orders/:orderId" element={<KitOrderPage />} />
 
         </Route>
       </Route>
@@ -340,7 +348,9 @@ function App() {
       <Route path="/line-loader" element={<LineLoaderProtectedRoute><LineLoaderLayout /></LineLoaderProtectedRoute>}>
           <Route index element={<LineLoaderDashboardPage />} />
           <Route path="dashboard" element={<LineLoaderDashboardPage />} />
-          <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} /> 
+          <Route path="trim-kits" element={<KitPickupQueuePage />} />
+          <Route path="trim-kits/orders/:orderId" element={<KitOrderPage />} />
+          <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} />
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
 
 

@@ -258,13 +258,25 @@ function IssueSlipModal({ items, onIssued, onClose }) {
                 setTrimCatalog(Array.isArray(list) ? list : []);
             })
             .catch(() => {});
-        // Departments are free text (no master) — suggest from recent history.
-        generalItemsApi.getIssues({ limit: 200 })
+        // Department suggestions come from the shared departments master; fall back
+        // to recent issue history if the master is unavailable or empty (older slips
+        // may reference departments that were never added to the master).
+        const suggestFromHistory = () => generalItemsApi.getIssues({ limit: 200 })
             .then(r => {
                 const list = r.data?.data ?? r.data ?? [];
                 setDeptSuggestions([...new Set(list.map(i => i.issued_to_department).filter(Boolean))]);
             })
             .catch(() => {});
+        storeManagerApi.getDepartments()
+            .then(r => {
+                const names = (Array.isArray(r.data) ? r.data : [])
+                    .map(d => d.name)
+                    .filter(Boolean)
+                    .sort((a, b) => a.localeCompare(b));
+                if (names.length > 0) setDeptSuggestions(names);
+                else suggestFromHistory();
+            })
+            .catch(suggestFromHistory);
     }, []);
 
     const itemInfo = useMemo(() => {

@@ -4,10 +4,14 @@ import { useParams, Link } from 'react-router-dom';
 import {
     LuPackage, LuTriangleAlert, LuRefreshCw,
     LuReplace, LuArrowLeft, LuListOrdered, LuCircleCheck, LuWand,
-    LuTrash2, LuFileText, LuBookOpen, LuScissors, LuTag, LuPrinter, LuDownload, LuX
+    LuTrash2, LuFileText, LuBookOpen, LuScissors, LuTag, LuPrinter, LuDownload, LuX,
+    LuSend, LuUndo2
 } from 'react-icons/lu';
 import { Loader2, Info } from 'lucide-react';
 import { storeManagerApi } from '../../api/storeManagerApi';
+import { trimKitsApi } from '../../api/trimKitsApi';
+import { kitStatusOf } from '../trim_kits/kitStatusConfig';
+import ExchangePanel from '../trim_kits/ExchangePanel';
 const Spinner = () => <div className="flex justify-center items-center p-12"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
 
 // --- Barcode Print/Download Modal ---
@@ -587,6 +591,40 @@ const TrimOrderDetailPage = () => {
 
     useEffect(() => { fetchBills(); }, [fetchBills]);
 
+    // Handover slips + loader custody — both live on the kit endpoint.
+    const [handoverSlips, setHandoverSlips] = useState([]);
+    const [kitCustodyVariants, setKitCustodyVariants] = useState([]);
+    const fetchHandovers = useCallback(async () => {
+        try {
+            const res = await trimKitsApi.getKitOrder(orderId);
+            setHandoverSlips(res.data?.slips || []);
+            // Net custody per variant = signed out (qty) minus not-yet-issued (unissued_qty).
+            const cust = {};
+            (res.data?.items || []).forEach(it => (it.fulfilled_with || []).forEach(fw => {
+                const held = (parseFloat(fw.qty) || 0) - (parseFloat(fw.unissued_qty) || 0);
+                if (held > 0) {
+                    const k = fw.variant_id;
+                    if (!cust[k]) cust[k] = {
+                        variant_id: fw.variant_id,
+                        item_name: fw.item_name || it.item_name,
+                        color_name: fw.color_name,
+                        color_number: fw.color_number,
+                        variant_size: fw.variant_size,
+                        custody_qty: 0,
+                    };
+                    cust[k].custody_qty += held;
+                }
+            }));
+            setKitCustodyVariants(Object.values(cust));
+        } catch (err) {
+            // Store manager may not have kit read access on older orders — non-fatal.
+            setHandoverSlips([]);
+            setKitCustodyVariants([]);
+        }
+    }, [orderId]);
+
+    useEffect(() => { fetchHandovers(); }, [fetchHandovers]);
+
     const fetchDetails = useCallback(async () => {
         setIsLoading(true);
         setError(null);
@@ -649,6 +687,7 @@ const TrimOrderDetailPage = () => {
             fetchDetails();
         } catch (err) {
             showToast('error', `Failed: ${err.response?.data?.error || 'Server error'}`);
+            if (err.response?.status === 409) fetchDetails(); // kit locked for pickup / already issued
         } finally {
             setIsFulfillingAll(false);
         }
@@ -663,6 +702,7 @@ const TrimOrderDetailPage = () => {
             fetchDetails();
         } catch (err) {
             showToast('error', `Failed: ${err.response?.data?.error || 'Server error'}`);
+            if (err.response?.status === 409) fetchDetails(); // kit locked for pickup / already issued
         } finally {
             setIsFulfillingAll(false);
         }
@@ -949,13 +989,15 @@ const TrimOrderDetailPage = () => {
     };
 
     const handleRevertFulfillment = async (logId) => {
-        if (!window.confirm("Are you sure you want to remove this fulfillment? The items will be returned to inventory and you will need to fulfill this again.")) return;
+        if (!window.confirm("Revert this fulfillment? This reverts the allocation only — no stock moves. You will need to pick this again.")) return;
         setIsReverting(true);
         try {
             await storeManagerApi.revertFulfillment(logId);
+            showToast('success', 'Fulfillment allocation reverted.');
             fetchDetails();
         } catch (err) {
             showToast('error', `Failed to revert: ${err.response?.data?.error || 'Server error'}`);
+            if (err.response?.status === 409) fetchDetails();
         } finally {
             setIsReverting(false);
         }
@@ -973,7 +1015,60 @@ const TrimOrderDetailPage = () => {
             setIsFulfillingAll(false);
         }
     };
-    
+
+    // ── Kit custody: mark ready / pull back ───────────────────────────────
+    const [kitBusy, setKitBusy] = useState(false);
+    const [markReadyOpen, setMarkReadyOpen] = useState(false);
+    // Something picked since the last handover = any fulfillment-log row not yet on an issue slip
+    const hasUnissuedPick = useMemo(
+        () => items.some(it => (it.fulfillment_log || []).some(log => !log.issue_id)),
+        [items]
+    );
+    const canMarkReady = ['PENDING', 'PREPARED', 'COMPLETED', 'PARTIALLY_ISSUED'].includes(orderInfo?.status) && hasUnissuedPick;
+
+    // What actually goes out in this kit — allocations not yet on a signed slip, grouped by ordered item.
+    const kitReviewGroups = useMemo(() => {
+        return items.map(it => {
+            const picks = (it.fulfillment_log || []).filter(l => !l.issue_id);
+            const pickedQty = picks.reduce((s, l) => s + (parseFloat(l.quantity_fulfilled) || 0), 0);
+            return { item: it, picks, pickedQty };
+        }).filter(g => g.picks.length > 0);
+    }, [items]);
+
+    const kitTotals = useMemo(() => ({
+        variants: kitReviewGroups.length,
+        qty: kitReviewGroups.reduce((s, g) => s + g.pickedQty, 0),
+        hasSub: kitReviewGroups.some(g => g.picks.some(p => p.used_substitute)),
+    }), [kitReviewGroups]);
+
+    const handleConfirmMarkReady = async () => {
+        setKitBusy(true);
+        try {
+            await storeManagerApi.markKitReady(orderId);
+            showToast('success', 'Kit marked ready — loaders have been notified.');
+            setMarkReadyOpen(false);
+            await Promise.all([fetchDetails(), fetchHandovers()]);
+        } catch (err) {
+            showToast('error', err.response?.data?.error || 'Failed to mark kit ready.');
+        } finally {
+            setKitBusy(false);
+        }
+    };
+
+    const handleUnmarkReady = async () => {
+        setKitBusy(true);
+        try {
+            const res = await storeManagerApi.unmarkKitReady(orderId);
+            showToast('success', res.data?.message || 'Kit pulled back — you can adjust allocations.');
+            await Promise.all([fetchDetails(), fetchHandovers()]);
+        } catch (err) {
+            showToast('error', err.response?.data?.error || 'Failed to pull back kit.');
+        } finally {
+            setKitBusy(false);
+        }
+    };
+
+
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
             <header className="mb-6">
@@ -987,8 +1082,8 @@ const TrimOrderDetailPage = () => {
                             <div className="flex items-center gap-3 mb-3">
                                 <h1 className="text-2xl font-extrabold text-gray-900">Trim Order #{orderId}</h1>
                                 {orderInfo?.status && (
-                                    <span className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full border ${orderInfo.status === 'COMPLETED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
-                                        {orderInfo.status}
+                                    <span className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full border ${kitStatusOf(orderInfo.status).badge}`}>
+                                        {kitStatusOf(orderInfo.status).label}
                                     </span>
                                 )}
                             </div>
@@ -1007,6 +1102,25 @@ const TrimOrderDetailPage = () => {
                         </div>
                         
                         <div className="flex flex-col sm:flex-row items-end gap-3 shrink-0 mt-2 md:mt-0">
+                            {orderInfo?.status === 'READY_FOR_PICKUP' ? (
+                                <button
+                                    onClick={handleUnmarkReady}
+                                    disabled={kitBusy}
+                                    className="px-5 py-2.5 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white border border-amber-200 hover:border-amber-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center disabled:opacity-50"
+                                    title="Pull the kit back to adjust allocations — loaders can no longer sign it"
+                                >
+                                    <LuUndo2 className="mr-2 h-5 w-5" /> Pull Back Kit
+                                </button>
+                            ) : orderInfo?.status !== 'ISSUED' && (
+                                <button
+                                    onClick={() => setMarkReadyOpen(true)}
+                                    disabled={kitBusy || !canMarkReady}
+                                    className="px-5 py-2.5 bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title={canMarkReady ? 'Review the kit, then notify loaders it is ready for pickup' : 'Pick at least one item before marking the kit ready'}
+                                >
+                                    <LuSend className="mr-2 h-5 w-5" /> Mark Kit Ready
+                                </button>
+                            )}
                             {/* ✅ NEW BUTTON: Opens Reference Modal */}
                             <button 
                                 onClick={() => setRefModalOpen(true)}
@@ -1061,6 +1175,44 @@ const TrimOrderDetailPage = () => {
                                 ))}
                             </ul>
                         </div>
+                    )}
+
+                    {/* Handover history — signed kit slips (custody transferred) */}
+                    {handoverSlips.length > 0 && (
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                            <div className="px-5 py-3 border-b border-gray-100 flex items-center">
+                                <LuFileText className="w-4 h-4 mr-2 text-green-600" />
+                                <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider">Handovers</h3>
+                                <span className="ml-2 text-xs text-gray-400 font-medium">custody transferred to loaders</span>
+                            </div>
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50 text-[10px] uppercase text-gray-500 font-bold tracking-wider">
+                                    <tr>
+                                        <th className="px-5 py-2.5 text-left">Slip</th>
+                                        <th className="px-5 py-2.5 text-left">Signed</th>
+                                        <th className="px-5 py-2.5 text-left">Taken by</th>
+                                        <th className="px-5 py-2.5 text-right">Value</th>
+                                        <th className="px-5 py-2.5 text-left">Bill</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {handoverSlips.map(s => (
+                                        <tr key={s.id} className="hover:bg-gray-50/60">
+                                            <td className="px-5 py-2.5 font-mono font-bold text-gray-800">{s.issue_number}</td>
+                                            <td className="px-5 py-2.5 text-gray-600">{s.created_at ? new Date(s.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td>
+                                            <td className="px-5 py-2.5 font-medium text-gray-700">{s.issued_to_name || '—'}</td>
+                                            <td className="px-5 py-2.5 text-right font-mono">₹{parseFloat(s.total_value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                            <td className="px-5 py-2.5 text-gray-600">{s.bill_number || '—'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {/* Exchanges — swap wrong variants already in the loader's custody */}
+                    {handoverSlips.length > 0 && (
+                        <ExchangePanel orderId={orderId} custodyVariants={kitCustodyVariants} onChanged={fetchHandovers} />
                     )}
 
                     {/* Order-level progress strip */}
@@ -1477,25 +1629,33 @@ const TrimOrderDetailPage = () => {
                                                                 </p>
                                                                 <div className="space-y-1">
                                                                     {it.fulfillment_log.map(log => {
-                                                                        console.log('[TrimBilling] raw log entry:', log);
                                                                         const logKey = billKey(log.fulfilled_item_name, log.fulfilled_color_name, log.fulfilled_color_number);
                                                                         const isBilled = billedKeys.has(logKey);
-                                                                        console.log('[TrimBilling] log row check:', { logId: log.id, logKey, isBilled, billedKeys: [...billedKeys] });
+                                                                        const isIssued = !!log.issue_id;
                                                                         return (
                                                                         <div key={log.id} className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded text-[11px]">
                                                                             <span className="truncate">
                                                                                 <span className="bg-gray-200 text-gray-700 px-1 rounded mr-1">{log.quantity_fulfilled}×</span>
                                                                                 {log.fulfilled_color_name} {log.fulfilled_color_number}
                                                                                 {log.used_substitute && <span className="text-purple-600 font-bold ml-1.5 bg-purple-50 px-1 rounded">sub</span>}
-                                                                                {isBilled && <span className="text-amber-700 font-bold ml-1.5 bg-amber-50 border border-amber-200 px-1 rounded">billed</span>}
+                                                                                {isBilled && !isIssued && <span className="text-amber-700 font-bold ml-1.5 bg-amber-50 border border-amber-200 px-1 rounded">billed</span>}
                                                                             </span>
+                                                                            {isIssued ? (
+                                                                                <span
+                                                                                    className="text-green-700 font-bold bg-green-50 border border-green-200 px-1.5 py-0.5 rounded whitespace-nowrap"
+                                                                                    title="Custody transferred — this allocation went out on a signed issue slip and can no longer be reverted"
+                                                                                >
+                                                                                    handed over{log.issue_number ? ` · ${log.issue_number}` : ''}
+                                                                                </span>
+                                                                            ) : (
                                                                             <button
                                                                                 onClick={() => handleRevertFulfillment(log.id)}
                                                                                 disabled={isBilled}
                                                                                 className={`p-1 rounded transition-colors ${isBilled ? 'text-gray-300 cursor-not-allowed' : 'text-red-400 hover:text-white hover:bg-red-500'}`}
-                                                                                title={isBilled ? 'Cannot revert — this variant has been billed' : 'Undo this specific fulfillment'}>
+                                                                                title={isBilled ? 'Cannot revert — this variant has been billed' : 'Undo this allocation (no stock moves)'}>
                                                                                 <LuTrash2 size={11} />
                                                                             </button>
+                                                                            )}
                                                                         </div>
                                                                         );
                                                                     })}
@@ -1521,6 +1681,87 @@ const TrimOrderDetailPage = () => {
 
             <ReferenceDataModal isOpen={refModalOpen} onClose={() => setRefModalOpen(false)} orderId={orderId} />
             <BarcodePrintModal isOpen={barcodeModalOpen} onClose={() => setBarcodeModalOpen(false)} batchId={orderInfo?.batchId} />
+
+            {/* Mark-ready review — confirm exactly what will go to the loader before locking the kit */}
+            {markReadyOpen && createPortal(
+                <div className="fixed inset-0 bg-gray-900/50 flex items-center justify-center p-4 z-[600]" onMouseDown={(e) => { if (e.target === e.currentTarget && !kitBusy) setMarkReadyOpen(false); }}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+                        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-indigo-100 rounded-lg"><LuSend className="w-5 h-5 text-indigo-600" /></div>
+                                <div>
+                                    <h2 className="text-lg font-extrabold text-gray-900">Review Kit Before Pickup</h2>
+                                    <p className="text-xs text-gray-500 font-medium">Confirm these are the items you're handing over. Loaders will count and sign for exactly this.</p>
+                                </div>
+                            </div>
+                            <button onClick={() => !kitBusy && setMarkReadyOpen(false)} className="text-gray-400 hover:text-gray-600"><LuX className="w-5 h-5" /></button>
+                        </div>
+
+                        <div className="px-6 py-4 grid grid-cols-3 gap-3 shrink-0">
+                            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
+                                <p className="text-2xl font-black text-gray-900">{kitTotals.variants}</p>
+                                <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Variants</p>
+                            </div>
+                            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
+                                <p className="text-2xl font-black text-gray-900">{kitTotals.qty.toLocaleString('en-IN')}</p>
+                                <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Total Qty</p>
+                            </div>
+                            <div className={`border rounded-lg p-3 text-center ${kitTotals.hasSub ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200'}`}>
+                                <p className={`text-2xl font-black ${kitTotals.hasSub ? 'text-amber-700' : 'text-gray-900'}`}>{kitReviewGroups.reduce((s, g) => s + g.picks.filter(p => p.used_substitute).length, 0)}</p>
+                                <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Substitutes</p>
+                            </div>
+                        </div>
+
+                        <div className="px-6 overflow-y-auto flex-1">
+                            {kitReviewGroups.length === 0 ? (
+                                <p className="text-sm text-gray-500 py-8 text-center">Nothing picked yet — there's nothing to hand over.</p>
+                            ) : (
+                                <div className="space-y-2 pb-2">
+                                    {kitReviewGroups.map(({ item, picks, pickedQty }) => (
+                                        <div key={item.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                                            <div className="bg-gray-50 px-3 py-2 flex justify-between items-center">
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-bold text-gray-800 truncate">{item.item_name}</p>
+                                                    <p className="text-xs text-gray-500">{item.color_name || 'AGNOSTIC'} {item.color_number ? `(${item.color_number})` : ''}</p>
+                                                </div>
+                                                <span className="text-xs font-mono font-bold text-gray-700 bg-white border border-gray-200 px-2 py-0.5 rounded shrink-0">{pickedQty.toLocaleString('en-IN')} pcs</span>
+                                            </div>
+                                            <div className="divide-y divide-gray-100">
+                                                {picks.map(p => (
+                                                    <div key={p.id} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                                                        <span className="truncate text-gray-700">
+                                                            <span className="bg-gray-200 text-gray-700 px-1 rounded mr-1.5 font-mono">{p.quantity_fulfilled}×</span>
+                                                            {p.fulfilled_color_name} {p.fulfilled_color_number}
+                                                            {p.used_substitute && <span className="text-amber-700 font-bold ml-1.5 bg-amber-50 border border-amber-200 px-1 rounded">substitute</span>}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3 shrink-0">
+                            <p className="text-xs text-gray-500 font-medium">Once ready, allocations lock until a loader signs or you pull the kit back.</p>
+                            <div className="flex gap-2 shrink-0">
+                                <button onClick={() => setMarkReadyOpen(false)} disabled={kitBusy} className="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-bold text-sm hover:bg-gray-200 transition-colors disabled:opacity-50">Cancel</button>
+                                <button
+                                    onClick={handleConfirmMarkReady}
+                                    disabled={kitBusy || kitReviewGroups.length === 0}
+                                    className="px-5 py-2.5 bg-indigo-600 text-white rounded-lg font-bold text-sm hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center"
+                                >
+                                    {kitBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <LuSend className="w-4 h-4 mr-2" />}
+                                    Confirm & Mark Ready
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
+
             <Toast kind={toast?.kind} message={toast?.message} onDismiss={() => setToast(null)} />
 
             {/* Portal-rendered override popover — escapes intent-card overflow-hidden and right-pane overflow-auto */}

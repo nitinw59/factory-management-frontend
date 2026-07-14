@@ -23,7 +23,11 @@ const LineLoaderLayout = () => {
               <NavLink to="/line-loader/dashboard" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                 Dashboard
               </NavLink>
-              
+
+              <NavLink to="/line-loader/trim-kits" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                Kit Pickups
+              </NavLink>
+
               <NavLink to="/line-loader/sewing-machine-complaints" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                 Sewing Machine Complaints
               </NavLink>
