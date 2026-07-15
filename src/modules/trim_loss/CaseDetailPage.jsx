@@ -3,14 +3,11 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { trimLossApi } from '../../api/trimLossApi';
 import { caseStatusOf, debitStatusOf } from './trimLossStatusConfig';
 import StatusTimeline from './StatusTimeline';
+import CaseActions from './CaseActions';
+import { fmtDateTime, fmtMoney, variantText } from './format';
 import {
-    Loader2, ArrowLeft, RefreshCw, AlertCircle, PackageX, FileText, Users, History, Link2, ScrollText,
+    Loader2, ArrowLeft, RefreshCw, AlertCircle, PackageX, FileText, History, Link2, ScrollText,
 } from 'lucide-react';
-
-export const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
-export const fmtMoney = (v) => `₹${parseFloat(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-export const variantText = (l) =>
-    [`${l?.color_number ? `${l.color_number} - ` : ''}${l?.color_name || ''}`.trim(), l?.variant_size].filter(Boolean).join(' / ');
 
 // Derive the item label + outstanding qty defensively (backend shape isn't pinned).
 const itemLabel = (c) => {
@@ -137,6 +134,9 @@ const CaseDetailPage = () => {
                     {c.created_at && <Tile label="Reported at">{fmtDateTime(c.created_at)}</Tile>}
                 </div>
             </div>
+
+            {/* Role-gated action zones (search outcome, investigation, replacement, …) */}
+            <CaseActions caseData={c} onChanged={fetchCase} />
 
             {/* Custody trail — the original signed slip + its matching lines */}
             <Section

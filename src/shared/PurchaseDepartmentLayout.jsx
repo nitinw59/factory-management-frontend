@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
 import {
-    LuLogOut, LuMenu, LuX, LuClipboardList, LuPackageCheck, LuLayers, LuBookOpen, LuTag, LuInbox, LuFilePlus,
+    LuLogOut, LuMenu, LuX, LuClipboardList, LuPackageCheck, LuLayers, LuBookOpen, LuTag, LuInbox, LuFilePlus, LuPackageX,
 } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
 
@@ -15,6 +15,7 @@ const NAV = [
     { to: '/purchase-department/fabric-rolls',         icon: LuLayers,        label: 'Fabric' },
     { to: '/purchase-department/trims-ledger',         icon: LuBookOpen,      label: 'Trims Ledger' },
     { to: '/purchase-department/supplier-color-codes', icon: LuTag,           label: 'Supplier Codes' },
+    { to: '/trim-loss',                                icon: LuPackageX,      label: 'Trim Loss' },
 ];
 
 const PurchaseDepartmentLayout = () => {

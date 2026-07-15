@@ -3,12 +3,16 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { trimKitsApi } from '../../api/trimKitsApi';
 import { adminApi } from '../../api/adminApi';
 import Modal from '../../shared/Modal';
+import { useAuth } from '../../context/AuthContext';
+import ReportMissingModal from '../trim_loss/ReportMissingModal';
 import { kitBatchLabel } from './kitStatusConfig';
 import { BatchTag, batchIdOf } from './BatchTag';
 import { downloadIssueSlipPdf } from '../store_manager/issueSlipPdfGenerator';
 import {
     Loader2, ArrowLeft, ArrowLeftRight, RefreshCw, AlertCircle, AlertTriangle, History, Package, Download, X, PackageX,
 } from 'lucide-react';
+
+const REPORTER_ROLES = ['line_loader', 'line_supervisor', 'line_manager', 'production_manager', 'factory_admin'];
 
 const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 const fmtMoney = (v) => `₹${parseFloat(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -32,7 +36,10 @@ export const HandoverDetailModal = ({ issueId, orderId, onClose }) => {
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
     const [downloading, setDownloading] = useState(false);
+    const [reportLine, setReportLine] = useState(null); // slip line being reported missing
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const canReport = REPORTER_ROLES.includes(user?.role);
     const kitOrderId = orderId ?? data?.order_id ?? data?.trim_order_id;
 
     useEffect(() => {
@@ -78,6 +85,7 @@ export const HandoverDetailModal = ({ issueId, orderId, onClose }) => {
     };
 
     return (
+      <>
         <Modal title={data ? `Handover ${data.issue_number}` : 'Handover'} onClose={onClose}>
             {error ? (
                 <div className="p-4 bg-red-50 text-red-700 rounded-lg border border-red-200 text-sm font-medium">{error}</div>
@@ -103,6 +111,7 @@ export const HandoverDetailModal = ({ issueId, orderId, onClose }) => {
                                     <th className="px-3 py-2 text-right">Qty</th>
                                     <th className="px-3 py-2 text-right">Unit cost</th>
                                     <th className="px-3 py-2 text-right">Value</th>
+                                    {canReport && <th className="px-3 py-2 text-right"></th>}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
@@ -112,6 +121,17 @@ export const HandoverDetailModal = ({ issueId, orderId, onClose }) => {
                                         <td className="px-3 py-2 text-right font-mono">{l.qty}</td>
                                         <td className="px-3 py-2 text-right font-mono">{Number(l.unit_cost) > 0 ? fmtMoney(l.unit_cost) : '—'}</td>
                                         <td className="px-3 py-2 text-right font-mono">{fmtMoney(l.line_value)}</td>
+                                        {canReport && (
+                                            <td className="px-3 py-2 text-right whitespace-nowrap">
+                                                <button
+                                                    onClick={() => setReportLine(l)}
+                                                    className="inline-flex items-center gap-1 text-[11px] font-bold text-red-600 hover:text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 hover:bg-red-100"
+                                                    title="Report this trim as missing / lost"
+                                                >
+                                                    <PackageX className="w-3.5 h-3.5" /> Report missing
+                                                </button>
+                                            </td>
+                                        )}
                                     </tr>
                                 ))}
                             </tbody>
@@ -161,6 +181,14 @@ export const HandoverDetailModal = ({ issueId, orderId, onClose }) => {
                 </div>
             )}
         </Modal>
+        {reportLine && (
+            <ReportMissingModal
+                line={reportLine}
+                header={data}
+                onClose={() => setReportLine(null)}
+            />
+        )}
+      </>
     );
 };
 

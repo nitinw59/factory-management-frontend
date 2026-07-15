@@ -18,6 +18,10 @@ const JOB_WORK_NAV = [
     { to: '/accounts/job-work', label: 'Job Work Challans' },
 ];
 
+const TRIM_LOSS_NAV = [
+    { to: '/trim-loss', label: 'Register' },
+];
+
 const AccountsLayout = () => {
     const { pathname } = useLocation();
 
@@ -85,6 +89,22 @@ const AccountsLayout = () => {
                     <span className="text-xs font-bold uppercase tracking-widest text-amber-500 shrink-0">Job Work</span>
                     <nav className="flex items-center gap-1">
                         {JOB_WORK_NAV.map(({ to, label }) => (
+                            <Link
+                                key={to}
+                                to={to}
+                                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${activeClass(to)}`}
+                            >
+                                {label}
+                            </Link>
+                        ))}
+                    </nav>
+
+                    <span className="w-px h-5 bg-gray-200 mx-1" />
+
+                    {/* Trim Loss group */}
+                    <span className="text-xs font-bold uppercase tracking-widest text-rose-400 shrink-0">Trim Loss</span>
+                    <nav className="flex items-center gap-1">
+                        {TRIM_LOSS_NAV.map(({ to, label }) => (
                             <Link
                                 key={to}
                                 to={to}

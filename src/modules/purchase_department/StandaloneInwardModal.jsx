@@ -25,6 +25,18 @@ const TYPES = [
 
 const CONDITIONS = ['GOOD', 'DAMAGED', 'PARTIAL'];
 
+// Variants from storeManagerApi.getVariantsByTrimItem use `variant_id` (NOT `id`) and carry
+// color_number/color_name/variant_size (see ExchangePanel / TrimBillingPage which read the
+// same endpoint). Build the label from those; fall back to any explicit name, then the id.
+const variantIdOf = (v) => v.variant_id ?? v.id;
+const variantLabel = (v) => {
+    const parts = [];
+    if (v.color_number) parts.push(v.color_number);
+    if (v.color_name)   parts.push(v.color_name);
+    if (v.variant_size) parts.push(`Sz ${v.variant_size}`);
+    return parts.join(' · ') || v.name || v.variant_name || `Variant #${variantIdOf(v)}`;
+};
+
 const emptyLine = (type = 'trim') => ({
     _k:                  rk(),
     type,
@@ -113,6 +125,7 @@ function LineCard({ line, index, fabricTypes, fabricColors, trimItems, variantsB
         setVariantsLoading(true);
         storeManagerApi.getVariantsByTrimItem(line.trim_item_id)
             .then(r => {
+                console.log('[inwardd] gggetVariantsByTrimItem raw:', r.data);
                 const variants = r.data?.data || r.data || [];
                 onChange({ ...line, _variants: variants, trim_item_variant_id: '' });
             })
@@ -219,7 +232,7 @@ function LineCard({ line, index, fabricTypes, fabricColors, trimItems, variantsB
                             className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400 disabled:bg-slate-100">
                             <option value="">Select variant…</option>
                             {(line._variants || variantsByTrim[line.trim_item_id] || []).map(v => (
-                                <option key={v.id} value={v.id}>{v.name || v.variant_name || `Variant #${v.id}`}</option>
+                                <option key={variantIdOf(v)} value={variantIdOf(v)}>{variantLabel(v)}</option>
                             ))}
                         </select>
                     </div>

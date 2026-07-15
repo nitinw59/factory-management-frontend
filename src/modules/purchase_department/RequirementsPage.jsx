@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
     Loader2, Filter, CheckSquare, Square, ShoppingCart,
     AlertTriangle, ChevronDown, ChevronUp, X, Search,
@@ -518,6 +519,7 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
 const RequirementsPage = () => {
+    const [searchParams] = useSearchParams();
     const [requirements, setRequirements]   = useState([]);
     const [loading,      setLoading]        = useState(true);
     const [typeFilter,   setTypeFilter]     = useState('');
@@ -674,8 +676,13 @@ const RequirementsPage = () => {
 
     useEffect(() => { fetchRequirements(); }, [fetchRequirements]);
 
+    // Trim-loss replacements land here as URGENT standalone requirements — the notification
+    // link deep-links with ?standalone=true, so scope the list to standalone rows when asked.
+    const standaloneOnly = searchParams.get('standalone') === 'true';
+    const scoped = standaloneOnly ? requirements.filter(r => r.is_standalone) : requirements;
+
     const filtered = search.trim()
-        ? requirements.filter(r => {
+        ? scoped.filter(r => {
             const q = search.toLowerCase();
             return [
                 r.product_name, r.trim_item_name, r.trim_item_code,
@@ -686,7 +693,7 @@ const RequirementsPage = () => {
                 r.spare_part_name, r.spare_part_number, r.description,
             ].some(v => (v || '').toLowerCase().includes(q));
           })
-        : requirements;
+        : scoped;
 
     // Sort: urgent → high → normal → low; within same urgency, newest first
     const sorted = [...filtered].sort((a, b) => {

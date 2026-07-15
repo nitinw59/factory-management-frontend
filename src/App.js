@@ -186,6 +186,13 @@ import GarmentMonitor from './modules/garment_checker/GarmentMonitor';
 
 import ProductionAnalyticsDashboard from './modules/management/FactoryLineControlBoard';
 
+// Trim Loss (lost trim) exception
+import TrimLossProtectedRoute from './shared/TrimLossProtectedRoute';
+import TrimLossLayout from './shared/TrimLossLayout';
+import TrimLossRegisterPage from './modules/trim_loss/TrimLossRegisterPage';
+import CaseDetailPage from './modules/trim_loss/CaseDetailPage';
+import HrRecoveryQueuePage from './modules/trim_loss/HrRecoveryQueuePage';
+
 
 function App() {
   return (
@@ -501,6 +508,15 @@ function App() {
     <Route path="/receiver" element={<ReceiverProtectedRoute><ReceiverLayout /></ReceiverProtectedRoute>}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<ReceiverDashboardPage />} />
+    </Route>
+
+    {/* Trim Loss (lost trim) exception — top-level group; satisfies the hardcoded
+        /trim-loss/... links in KitHistoryPage and all trim-loss notification link_to targets. */}
+    <Route path="/trim-loss" element={<TrimLossProtectedRoute><TrimLossLayout /></TrimLossProtectedRoute>}>
+        <Route index element={<TrimLossRegisterPage />} />
+        <Route path="cases/:id" element={<CaseDetailPage />} />
+        <Route path="near-misses" element={<TrimLossRegisterPage nearMiss />} />
+        <Route path="recovery" element={<HrRecoveryQueuePage />} />
     </Route>
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}

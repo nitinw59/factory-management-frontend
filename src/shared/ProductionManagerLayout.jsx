@@ -95,6 +95,10 @@ const ProductionManagerLayout = () => {
                   <NavLink to="/production-manager/planning" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Production Planning</NavLink>
                 </NavDropdown>
 
+                <NavLink to="/trim-loss" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                  Trim Loss
+                </NavLink>
+
                 <NavLink to="/production-manager/settings" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                   Settings
                 </NavLink>

@@ -11,7 +11,8 @@ import {
     X, 
     LogOut, 
     ShieldCheck,
-    Building2
+    Building2,
+    PackageX
 } from 'lucide-react';
 
 const HRLayout = () => {
@@ -32,6 +33,7 @@ const HRLayout = () => {
         
         // Placeholders for the features we discussed building next:
         { name: 'Employee Directory', path: '/hr-portal/employees', icon: Users, disabled: false },
+        { name: 'Trim Loss Recovery', path: '/trim-loss/recovery', icon: PackageX, disabled: false },
         { name: 'Payroll Processing', path: '/hr-portal/payroll', icon: DollarSign, disabled: true },
     ];
 

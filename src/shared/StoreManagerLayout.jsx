@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
-import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag, LuScrollText, LuInbox, LuFilePlus, LuBoxes } from 'react-icons/lu';
+import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag, LuScrollText, LuInbox, LuFilePlus, LuBoxes, LuPackageX } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
 
 // No changes to NavDropdown component
@@ -73,6 +73,9 @@ const StoreManagerLayout = () => {
                                 </NavLink>
                                 <NavLink to="/store-manager/trim-stock-ledger" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuScrollText className="mr-2" /> Stock Ledger
+                                </NavLink>
+                                <NavLink to="/trim-loss" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <LuPackageX className="mr-2" /> Trim Loss
                                 </NavLink>
                             </NavDropdown>
                             
@@ -153,6 +156,9 @@ const StoreManagerLayout = () => {
                             </NavLink>
                             <NavLink to="/store-manager/trim-stock-ledger" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuScrollText className="mr-2" /> Stock Ledger
+                            </NavLink>
+                            <NavLink to="/trim-loss" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuPackageX className="mr-2" /> Trim Loss
                             </NavLink>
                             <div className="px-4 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Requests</div>
                             <NavLink to="/store-manager/general-items" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
