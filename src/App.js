@@ -336,6 +336,8 @@ function App() {
             <Route path="purchase/supplier-color-codes" element={<SupplierColorCodesPage />} />
             <Route path="purchase/inwards" element={<InwardsPage />} />
             <Route path="job-work" element={<AccountsJobWorkPage />} />
+            {/* Asset Management accessible to accountants */}
+            <Route path="asset-management" element={<AssetManagementPage />} />
         </Route>
 
       <Route path="/cutting-portal" element={<CuttingOperatorProtectedRoute><CuttingPortalLayout /></CuttingOperatorProtectedRoute>}>
