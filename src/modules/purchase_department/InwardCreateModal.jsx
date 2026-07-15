@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
-    X, Loader2, AlertTriangle, Package, Scissors, Trash2, Upload, FileText, Plus,
+    X, Loader2, AlertTriangle, Package, Scissors, Wrench, Tag, Trash2, Upload, FileText, Plus, Boxes,
 } from 'lucide-react';
 import { trimsApi } from '../../api/trimsApi';
+import { sparesApi } from '../../api/sparesApi';
+import { generalItemsApi } from '../../api/generalItemsApi';
 import api from '../../utils/api';
 import SupplierCodePill from './SupplierCodePill';
 import SearchableSelect from '../../shared/SearchableSelect';
@@ -46,13 +48,10 @@ export default function InwardCreateModal({
     const [busy, setBusy] = useState(false);
     const [err,  setErr]  = useState(null);
 
-    // RAW LOGS
-    console.log('InwardCreateModal: poItems', poItems);
-    console.log('InwardCreateModal: allInwards', allInwards);
     const [boxModal, setBoxModal] = useState(null); // { title, uom, initialBoxes, onSave }
 
     // ── Header fields ───────────────────────────────────────────────────────
-    const [grnNumber,    setGrnNumber]    = useState(initialSnapshot?.grnNumber    ?? '');
+    const grnNumber = ''; // auto-generated server-side; field is display-only
     const [receivedDate, setReceivedDate] = useState(initialSnapshot?.receivedDate ?? new Date().toISOString().split('T')[0]);
     const [condition,    setCondition]    = useState(initialSnapshot?.condition    ?? 'GOOD');
     const [notes,        setNotes]        = useState(initialSnapshot?.notes        ?? '');
@@ -202,12 +201,26 @@ export default function InwardCreateModal({
     const [fabricTypes,    setFabricTypes]    = useState([]);
     const [fabricColors,   setFabricColors]   = useState([]);
     const [variantsByTrim, setVariantsByTrim] = useState({});
+    const [spareParts,     setSpareParts]     = useState([]);
+    const [generalItems,   setGeneralItems]   = useState([]);
 
     useEffect(() => {
         trimsApi.getItems().then(r => setTrimItems(r.data?.data ?? r.data ?? [])).catch(() => setTrimItems([]));
         api.get('/shared/fabric_type').then(r => setFabricTypes(r.data?.data ?? r.data ?? [])).catch(() => setFabricTypes([]));
         api.get('/shared/fabric_color').then(r => setFabricColors(r.data?.data ?? r.data ?? [])).catch(() => setFabricColors([]));
+        sparesApi.getAllSpares().then(d => setSpareParts(Array.isArray(d) ? d : (d?.data ?? []))).catch(() => setSpareParts([]));
+        generalItemsApi.getItems({ active: true }).then(r => setGeneralItems(r.data?.data ?? r.data ?? [])).catch(() => setGeneralItems([]));
     }, []);
+
+    // Quick-create a general item inline (mirrors StandaloneInwardModal).
+    const quickCreateGeneralItem = async (name, code, onDone) => {
+        try {
+            const res = await generalItemsApi.createItem({ name: name.trim(), item_code: code?.trim() || undefined });
+            const item = res.data?.data ?? res.data;
+            setGeneralItems(prev => [...prev, item]);
+            onDone?.(item);
+        } catch { /* surfaced by caller if needed */ }
+    };
 
     const ensureVariants = async (trimItemId) => {
         if (!trimItemId || variantsByTrim[trimItemId]) return;
@@ -247,14 +260,18 @@ export default function InwardCreateModal({
     const setRollFieldOnPoItem = (pid, k, f, v) => setFreeFormFabricRolls(prev => ({ ...prev, [pid]: (prev[pid] || []).map(r => r._k === k ? { ...r, [f]: v } : r) }));
 
     // Custom groups
+    const emptyCustomLine = (type) => {
+        if (type === 'fabric') return { _k: rk(), fabric_color_id: '', rolls: [newRoll()] };
+        if (type === 'spare')  return { _k: rk(), spare_part_id: '', total: '', boxes: [] };
+        if (type === 'other')  return { _k: rk(), general_item_id: '', description: '', uom: 'pcs', total: '', boxes: [] };
+        return { _k: rk(), trim_item_variant_id: '', total: '', boxes: [] }; // trim
+    };
     const addCustomGroup = (type) => setCustomGroups(prev => [...prev, {
         _k: rk(), type,
         fabric_type_id: '', trim_item_id: '',
         uom: type === 'fabric' ? 'meter' : 'pcs',
         unit_price: '', description: '',
-        lines: type === 'fabric'
-            ? [{ _k: rk(), fabric_color_id: '', rolls: [newRoll()] }]
-            : [{ _k: rk(), trim_item_variant_id: '', total: '', boxes: [] }],
+        lines: [emptyCustomLine(type)],
     }]);
     const removeCustomGroup = (gk) => setCustomGroups(prev => prev.filter(g => g._k !== gk));
     const setCustomGroupField = (gk, field, value) => setCustomGroups(prev => prev.map(g => {
@@ -266,18 +283,50 @@ export default function InwardCreateModal({
         }
         return next;
     }));
-    const addCustomLine = (gk) => setCustomGroups(prev => prev.map(g => {
-        if (g._k !== gk) return g;
-        const ln = g.type === 'fabric'
-            ? { _k: rk(), fabric_color_id: '', rolls: [newRoll()] }
-            : { _k: rk(), trim_item_variant_id: '', total: '', boxes: [] };
-        return { ...g, lines: [...g.lines, ln] };
-    }));
+    const addCustomLine = (gk) => setCustomGroups(prev => prev.map(g =>
+        g._k !== gk ? g : { ...g, lines: [...g.lines, emptyCustomLine(g.type)] }
+    ));
     const removeCustomLine         = (gk, lk)            => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.filter(ln => ln._k !== lk) }));
     const setCustomLineField       = (gk, lk, f, v)      => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, [f]: v } : ln) }));
     const addRollToCustomLine      = (gk, lk)            => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: [...(ln.rolls || []), newRoll()] } : ln) }));
     const removeRollFromCustomLine = (gk, lk, rK)        => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: (ln.rolls || []).filter(r => r._k !== rK) } : ln) }));
     const setRollOnCustomLine      = (gk, lk, rK, f, v)  => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(ln => ln._k === lk ? { ...ln, rolls: (ln.rolls || []).map(r => r._k === rK ? { ...r, [f]: v } : r) } : ln) }));
+    // Set/clear a custom line's box breakdown; clearing keeps the computed total.
+    const setCustomLineBoxes = (gk, lk, saved) => setCustomGroups(prev => prev.map(g => g._k !== gk ? g : { ...g, lines: g.lines.map(l => {
+        if (l._k !== lk) return l;
+        if (saved.length > 0) return { ...l, boxes: saved };
+        const computed = sumTrimBoxes(l.boxes);
+        return { ...l, boxes: [], total: computed > 0 ? String(computed) : '' };
+    }) }));
+    // Reusable "plain total OR box breakdown" control for non-fabric custom lines (trim/spare/other).
+    const boxTotalControl = (g, ln) => {
+        const uom = g.uom || 'pcs';
+        const open = () => setBoxModal({ title: `${g.type} line`, uom, initialBoxes: ln.boxes || [], onSave: (saved) => { setCustomLineBoxes(g._k, ln._k, saved); setBoxModal(null); } });
+        if ((ln.boxes || []).length === 0) {
+            return (
+                <div className="flex items-center gap-2 mt-1">
+                    <input type="number" min="0" step="any" placeholder="0" value={ln.total || ''}
+                        onChange={e => setCustomLineField(g._k, ln._k, 'total', e.target.value)}
+                        className="w-28 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums focus:outline-none focus:border-amber-400" />
+                    <span className="text-[10px] text-slate-400">{uom}</span>
+                    <button type="button" onClick={open}
+                        className="ml-auto flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded-md transition">
+                        <Boxes size={10} /> Box breakdown
+                    </button>
+                </div>
+            );
+        }
+        return (
+            <>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <span className="text-[11px] font-bold text-amber-700 tabular-nums">{sumTrimBoxes(ln.boxes).toLocaleString(undefined, { maximumFractionDigits: 2 })} {uom}</span>
+                    <button type="button" onClick={open} className="text-[10px] font-bold text-amber-600 hover:bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded-md transition">Edit</button>
+                    <button type="button" onClick={() => setCustomLineBoxes(g._k, ln._k, [])} className="text-[10px] text-slate-400 hover:text-red-500 transition">Remove</button>
+                </div>
+                <p className="text-[10px] text-slate-400 font-mono mt-0.5">{(ln.boxes || []).map(b => `${b.box_count}×${b.qty_per_box}`).join(' + ')}</p>
+            </>
+        );
+    };
     // ── Review handoff ──────────────────────────────────────────────────────
     // Resolve a per-item display label (name + details + unit) using whatever
     // lookups this modal already has loaded. Stamping it onto the payload means
@@ -314,6 +363,14 @@ export default function InwardCreateModal({
                 return { ...it, _label: label };
             }
             // Custom item — resolve from local lookup arrays.
+            if (it.item_type === 'spare') {
+                const sp = spareParts.find(x => String(x.id) === String(it.spare_part_id));
+                return { ...it, _label: { name: sp?.name || 'Spare part', details: sp?.part_number || '', unit: 'pcs' } };
+            }
+            if (it.item_type === 'other') {
+                const gi = generalItems.find(x => String(x.id) === String(it.general_item_id));
+                return { ...it, _label: { name: gi?.name || 'Item', details: it.description || gi?.item_code || '', unit: it.uom || 'pcs' } };
+            }
             const isFabric = it.item_type === 'fabric';
             let name = isFabric ? 'Fabric' : 'Trim';
             const parts = [];
@@ -363,6 +420,13 @@ export default function InwardCreateModal({
                     }
                     remaining = Math.max(0, remaining - allocated);
                 });
+                // Over-receipt: record the excess on the last requirement (approval catches it) — never drop it.
+                if (remaining > 0.001 && reqs.length > 0) {
+                    const last = reqs[reqs.length - 1];
+                    const ex = distFabricByReq[last.id];
+                    if (ex && ex[0]) ex[0] = { ...ex[0], meter: String((parseFloat(ex[0].meter) || 0) + remaining) };
+                    else distFabricByReq[last.id] = [{ _k: rk(), bale_no: '', meter: String(remaining), uom: rollUom }];
+                }
             } else {
                 const total = parseFloat(trimTotalByGroup[group.id] || 0);
                 let remaining = total;
@@ -376,6 +440,10 @@ export default function InwardCreateModal({
                     }
                     remaining = Math.max(0, remaining - allocated);
                 });
+                if (remaining > 0.001 && reqs.length > 0) {
+                    const last = reqs[reqs.length - 1];
+                    distTrimByReq[last.id] = String((parseFloat(distTrimByReq[last.id]) || 0) + remaining);
+                }
             }
         });
 
@@ -407,6 +475,12 @@ export default function InwardCreateModal({
                     }
                     remaining = Math.max(0, remaining - allocated);
                 });
+                if (remaining > 0.001 && activeItems.length > 0) {
+                    const last = activeItems[activeItems.length - 1];
+                    const ex = distFreeFormFabricRolls[last.id];
+                    if (ex && ex[0]) ex[0] = { ...ex[0], meter: String((parseFloat(ex[0].meter) || 0) + remaining) };
+                    else distFreeFormFabricRolls[last.id] = [{ _k: rk(), bale_no: '', meter: String(remaining), uom: rollUom }];
+                }
             } else {
                 const total = parseFloat(freeFormTrimTotalsByVar[key] || 0);
                 let remaining = total;
@@ -420,6 +494,10 @@ export default function InwardCreateModal({
                     }
                     remaining = Math.max(0, remaining - allocated);
                 });
+                if (remaining > 0.001 && activeItems.length > 0) {
+                    const last = activeItems[activeItems.length - 1];
+                    distFreeFormTrimTotals[last.id] = String((parseFloat(distFreeFormTrimTotals[last.id]) || 0) + remaining);
+                }
             }
         });
 
@@ -432,16 +510,7 @@ export default function InwardCreateModal({
             freeFormFabricRolls: distFreeFormFabricRolls,
             customGroups
         };
-        console.log('handleReview: pendingByReq', pendingByReq);
-        console.log('handleReview: trimTotalByGroup', trimTotalByGroup);
-        console.log('handleReview: fabricRollsByGroup', fabricRollsByGroup);
-        console.log('handleReview: distTrimByReq', distTrimByReq);
-        console.log('handleReview: distFabricByReq', distFabricByReq);
-        console.log('handleReview: distFreeFormTrimTotals', distFreeFormTrimTotals);
-        console.log('handleReview: distFreeFormFabricRolls', distFreeFormFabricRolls);
-        console.log('handleReview: state passed to buildItemsFromState', state);
         const { items: built, error } = buildItemsFromState(state);
-        console.log('handleReview: buildItemsFromState result', { built, error });
         if (error) { setErr(error); return; }
         setBusy(true);
         const decorated = decorateForReview(built);
@@ -474,8 +543,8 @@ export default function InwardCreateModal({
             onSave={boxModal?.onSave || (() => {})}
             onClose={() => setBoxModal(null)}
         />
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 bg-white flex flex-col">
+            <div className="bg-white w-full h-full flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
                 {/* Header */}
                 <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
                     <div>
@@ -508,10 +577,10 @@ export default function InwardCreateModal({
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">GRN Number</label>
                             <input
                                 type="text"
-                                value={grnNumber}
-                                onChange={e => setGrnNumber(e.target.value)}
-                                placeholder="GRN-2026-…"
-                                className="w-full mt-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-emerald-400"
+                                value=""
+                                disabled
+                                placeholder="Auto-generated on submit"
+                                className="w-full mt-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-400 cursor-not-allowed"
                             />
                         </div>
                         <div>
@@ -710,6 +779,11 @@ export default function InwardCreateModal({
                                                     className={`w-36 text-sm font-bold text-right border rounded-lg px-2 py-1.5 focus:outline-none tabular-nums ${over ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-amber-400'}`}
                                                 />
                                                 <span className="text-xs text-slate-500">{unit}</span>
+                                                <button type="button" title="Count in boxes → fills the total"
+                                                    onClick={() => setBoxModal({ title: 'Box breakdown', uom: unit, initialBoxes: [], onSave: (saved) => { const t = sumTrimBoxes(saved); if (t > 0) setTrimTotalByGroup(prev => ({ ...prev, [group.id]: String(t) })); setBoxModal(null); } })}
+                                                    className="flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-100 border border-amber-200 px-1.5 py-1 rounded-md transition">
+                                                    <Boxes size={11} /> Boxes
+                                                </button>
                                                 {over && <span className="text-[10px] font-bold text-red-600">Over by {(inThis - totalPending).toLocaleString()} {unit}</span>}
                                             </div>
                                         </div>
@@ -868,6 +942,11 @@ export default function InwardCreateModal({
                                                         className={`w-36 text-sm font-bold text-right border rounded-lg px-2 py-1.5 focus:outline-none tabular-nums ${over ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-amber-400'}`}
                                                     />
                                                     <span className="text-xs text-slate-500">{groupUom}</span>
+                                                    <button type="button" title="Count in boxes → fills the total"
+                                                        onClick={() => setBoxModal({ title: 'Box breakdown', uom: groupUom, initialBoxes: [], onSave: (saved) => { const t = sumTrimBoxes(saved); if (t > 0) setFreeFormTrimTotalsByVar(prev => ({ ...prev, [key]: String(t) })); setBoxModal(null); } })}
+                                                        className="flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-100 border border-amber-200 px-1.5 py-1 rounded-md transition">
+                                                        <Boxes size={11} /> Boxes
+                                                    </button>
                                                     {over && <span className="text-[10px] font-bold text-red-600">Over by {(inThis - totalPending).toLocaleString()} {groupUom}</span>}
                                                 </div>
                                             </div>
@@ -892,6 +971,14 @@ export default function InwardCreateModal({
                                     className="flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-50 border border-amber-200 px-2 py-1 rounded-md transition">
                                     <Plus size={11} /> Trim card
                                 </button>
+                                <button onClick={() => addCustomGroup('spare')}
+                                    className="flex items-center gap-1 text-[10px] font-bold text-sky-600 hover:bg-sky-50 border border-sky-200 px-2 py-1 rounded-md transition">
+                                    <Plus size={11} /> Spare card
+                                </button>
+                                <button onClick={() => addCustomGroup('other')}
+                                    className="flex items-center gap-1 text-[10px] font-bold text-teal-600 hover:bg-teal-50 border border-teal-200 px-2 py-1 rounded-md transition">
+                                    <Plus size={11} /> Other card
+                                </button>
                             </div>
                         </div>
                         {customGroups.length === 0 ? (
@@ -900,22 +987,32 @@ export default function InwardCreateModal({
                             <div className="space-y-2">
                                 {customGroups.map((g, gi) => {
                                     const isFabric = g.type === 'fabric';
-                                    const variants = !isFabric ? (variantsByTrim[g.trim_item_id] || []) : [];
+                                    const isTrim   = g.type === 'trim';
+                                    const isSpare  = g.type === 'spare';
+                                    const variants = isTrim ? (variantsByTrim[g.trim_item_id] || []) : [];
                                     const groupSum = isFabric
                                         ? g.lines.reduce((s, ln) => s + sumRolls(ln.rolls), 0)
-                                        : g.lines.reduce((s, ln) => {
-                                            const boxes = ln.boxes || [];
-                                            return s + (boxes.length > 0 ? sumTrimBoxes(boxes) : (parseFloat(ln.total) || 0));
-                                        }, 0);
+                                        : g.lines.reduce((s, ln) => s + ((ln.boxes || []).length > 0 ? sumTrimBoxes(ln.boxes) : (parseFloat(ln.total) || 0)), 0);
+                                    const ICON = { fabric: Package, trim: Scissors, spare: Wrench, other: Tag }[g.type];
+                                    // Static class strings per type (Tailwind purges dynamically-built names).
+                                    const S = {
+                                        fabric: { icon: 'text-violet-600', sum: 'text-violet-700', btn: 'text-violet-600 hover:bg-violet-100 border-violet-200' },
+                                        trim:   { icon: 'text-amber-600',  sum: 'text-amber-700',  btn: 'text-amber-600 hover:bg-amber-100 border-amber-200' },
+                                        spare:  { icon: 'text-sky-600',     sum: 'text-sky-700',     btn: 'text-sky-600 hover:bg-sky-100 border-sky-200' },
+                                        other:  { icon: 'text-teal-600',    sum: 'text-teal-700',    btn: 'text-teal-600 hover:bg-teal-100 border-teal-200' },
+                                    }[g.type];
+                                    const tone = { fabric: 'bg-violet-50/40 border-violet-200', trim: 'bg-amber-50/40 border-amber-200', spare: 'bg-sky-50/40 border-sky-200', other: 'bg-teal-50/40 border-teal-200' }[g.type];
+                                    const addLabel = isFabric ? 'color' : isTrim ? 'variant' : isSpare ? 'spare' : 'item';
+                                    const addDisabled = isTrim && !g.trim_item_id;
                                     return (
-                                        <div key={g._k} className={`rounded-lg p-2 border ${isFabric ? 'bg-violet-50/40 border-violet-200' : 'bg-amber-50/40 border-amber-200'}`}>
+                                        <div key={g._k} className={`rounded-lg p-2 border ${tone}`}>
                                             <div className="flex items-center justify-between gap-2 mb-1.5">
                                                 <div className="flex items-center gap-2 text-[11px] font-bold text-slate-700">
-                                                    {isFabric ? <Package size={11} className="text-violet-600" /> : <Scissors size={11} className="text-amber-600" />}
-                                                    <span className="uppercase tracking-wider text-[10px]">{isFabric ? 'Fabric' : 'Trim'} card</span>
+                                                    <ICON size={11} className={S.icon} />
+                                                    <span className="uppercase tracking-wider text-[10px] capitalize">{g.type} card</span>
                                                     <span className="text-slate-400 text-[10px] font-normal">#{gi + 1}</span>
                                                     {groupSum > 0 && (
-                                                        <span className={`text-[10px] font-bold ${isFabric ? 'text-violet-700' : 'text-amber-700'}`}>
+                                                        <span className={`text-[10px] font-bold ${S.sum}`}>
                                                             · {groupSum.toLocaleString(undefined, { maximumFractionDigits: 2 })} {isFabric ? 'm' : (g.uom || 'pcs')} total
                                                         </span>
                                                     )}
@@ -935,7 +1032,7 @@ export default function InwardCreateModal({
                                                         size="xs"
                                                         accentColor="violet"
                                                     />
-                                                ) : (
+                                                ) : isTrim ? (
                                                     <SearchableSelect
                                                         value={g.trim_item_id}
                                                         onChange={v => setCustomGroupField(g._k, 'trim_item_id', v)}
@@ -944,6 +1041,8 @@ export default function InwardCreateModal({
                                                         size="xs"
                                                         accentColor="amber"
                                                     />
+                                                ) : (
+                                                    <div className="text-[10px] text-slate-400 self-center italic">Pick {isSpare ? 'a spare part' : 'an item'} per line below</div>
                                                 )}
                                                 <input type="text" placeholder="UOM" value={g.uom}
                                                     onChange={e => setCustomGroupField(g._k, 'uom', e.target.value)}
@@ -956,11 +1055,11 @@ export default function InwardCreateModal({
                                                 onChange={e => setCustomGroupField(g._k, 'description', e.target.value)}
                                                 className="w-full mb-2 text-[11px] border border-slate-200 rounded px-1.5 py-1" />
                                             <div className="flex items-center justify-between mb-1">
-                                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{isFabric ? 'Colors' : 'Variants'} · {g.lines.length}</p>
+                                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{g.lines.length} line{g.lines.length !== 1 ? 's' : ''}</p>
                                                 <button onClick={() => addCustomLine(g._k)}
-                                                    disabled={!isFabric && !g.trim_item_id}
-                                                    className={`flex items-center gap-1 text-[10px] font-bold border px-1.5 py-0.5 rounded-md transition disabled:opacity-40 ${isFabric ? 'text-violet-600 hover:bg-violet-100 border-violet-200' : 'text-amber-600 hover:bg-amber-100 border-amber-200'}`}>
-                                                    <Plus size={10} /> Add {isFabric ? 'color' : 'variant'}
+                                                    disabled={addDisabled}
+                                                    className={`flex items-center gap-1 text-[10px] font-bold border px-1.5 py-0.5 rounded-md transition disabled:opacity-40 ${S.btn}`}>
+                                                    <Plus size={10} /> Add {addLabel}
                                                 </button>
                                             </div>
                                             <div className="space-y-2">
@@ -1015,16 +1114,47 @@ export default function InwardCreateModal({
                                                         ) : (
                                                             <div className="space-y-1.5">
                                                                 <div className="flex items-center gap-2">
-                                                                    <SearchableSelect
-                                                                        value={ln.trim_item_variant_id}
-                                                                        onChange={v => setCustomLineField(g._k, ln._k, 'trim_item_variant_id', v)}
-                                                                        options={variants.map(v => ({ value: v.id, label: `${v.color_number ? `${v.color_number} · ` : ''}${v.color_name || v.name || `Variant #${v.id}`}${v.variant_size ? ` · Sz ${v.variant_size}` : ''}` }))}
-                                                                        placeholder={g.trim_item_id ? '— Variant —' : '— Pick trim first —'}
-                                                                        disabled={!g.trim_item_id}
-                                                                        className="flex-1 min-w-0"
-                                                                        size="xs"
-                                                                        accentColor="amber"
-                                                                    />
+                                                                    {isTrim && (
+                                                                        <SearchableSelect
+                                                                            value={ln.trim_item_variant_id}
+                                                                            onChange={v => setCustomLineField(g._k, ln._k, 'trim_item_variant_id', v)}
+                                                                            options={variants.map(v => ({ value: v.id, label: `${v.color_number ? `${v.color_number} · ` : ''}${v.color_name || v.name || `Variant #${v.id}`}${v.variant_size ? ` · Sz ${v.variant_size}` : ''}` }))}
+                                                                            placeholder={g.trim_item_id ? '— Variant —' : '— Pick trim first —'}
+                                                                            disabled={!g.trim_item_id}
+                                                                            className="flex-1 min-w-0"
+                                                                            size="xs"
+                                                                            accentColor="amber"
+                                                                        />
+                                                                    )}
+                                                                    {isSpare && (
+                                                                        <SearchableSelect
+                                                                            value={ln.spare_part_id}
+                                                                            onChange={v => setCustomLineField(g._k, ln._k, 'spare_part_id', v)}
+                                                                            options={spareParts.map(s => ({ value: s.id, label: `${s.name || `Spare #${s.id}`}${s.part_number ? ` (${s.part_number})` : ''}` }))}
+                                                                            placeholder="— Spare part —"
+                                                                            className="flex-1 min-w-0"
+                                                                            size="xs"
+                                                                            accentColor="violet"
+                                                                        />
+                                                                    )}
+                                                                    {g.type === 'other' && (
+                                                                        <div className="flex-1 min-w-0 flex items-center gap-1">
+                                                                            <SearchableSelect
+                                                                                value={ln.general_item_id}
+                                                                                onChange={v => setCustomLineField(g._k, ln._k, 'general_item_id', v)}
+                                                                                options={generalItems.map(i => ({ value: i.id, label: `${i.name}${i.item_code ? ` (${i.item_code})` : ''}` }))}
+                                                                                placeholder="— Item —"
+                                                                                className="flex-1 min-w-0"
+                                                                                size="xs"
+                                                                                accentColor="violet"
+                                                                            />
+                                                                            <button type="button" title="Create item"
+                                                                                onClick={() => { const nm = window.prompt('New item name'); if (nm && nm.trim()) quickCreateGeneralItem(nm, '', (it) => setCustomLineField(g._k, ln._k, 'general_item_id', it.id)); }}
+                                                                                className="shrink-0 p-1 rounded border border-slate-200 hover:bg-slate-100 text-slate-500">
+                                                                                <Plus size={11} />
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
                                                                     {g.lines.length > 1 && (
                                                                         <button onClick={() => removeCustomLine(g._k, ln._k)} title="Remove line"
                                                                             className="p-1 text-slate-300 hover:text-red-500 transition">
@@ -1032,59 +1162,12 @@ export default function InwardCreateModal({
                                                                         </button>
                                                                     )}
                                                                 </div>
-                                                                {(ln.boxes || []).length === 0 ? (
-                                                                    <div className="flex items-center gap-2 mt-1">
-                                                                        <input type="number" min="0" step="any" placeholder="0"
-                                                                            value={ln.total || ''}
-                                                                            onChange={e => setCustomLineField(g._k, ln._k, 'total', e.target.value)}
-                                                                            className="w-28 text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums focus:outline-none focus:border-amber-400" />
-                                                                        <span className="text-[10px] text-slate-400">{g.uom || 'pcs'}</span>
-                                                                        <button type="button"
-                                                                            onClick={() => setBoxModal({
-                                                                                title: ln.trim_item_variant_id ? `Variant #${ln.trim_item_variant_id}` : 'Custom trim line',
-                                                                                uom: g.uom || 'pcs',
-                                                                                initialBoxes: [],
-                                                                                onSave: (saved) => {
-                                                                                    if (saved.length > 0) setCustomGroups(prev => prev.map(g2 => g2._k !== g._k ? g2 : { ...g2, lines: g2.lines.map(l => l._k !== ln._k ? l : { ...l, boxes: saved }) }));
-                                                                                    setBoxModal(null);
-                                                                                },
-                                                                            })}
-                                                                            className="ml-auto flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded-md transition">
-                                                                            <Plus size={10} /> Add box breakdown
-                                                                        </button>
-                                                                    </div>
-                                                                ) : (
-                                                                    <>
-                                                                        <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                                                            <span className="text-[11px] font-bold text-amber-700 tabular-nums">
-                                                                                {sumTrimBoxes(ln.boxes).toLocaleString(undefined, { maximumFractionDigits: 2 })} {g.uom || 'pcs'}
-                                                                            </span>
-                                                                            <button type="button"
-                                                                                onClick={() => setBoxModal({
-                                                                                    title: ln.trim_item_variant_id ? `Variant #${ln.trim_item_variant_id}` : 'Custom trim line',
-                                                                                    uom: g.uom || 'pcs',
-                                                                                    initialBoxes: ln.boxes,
-                                                                                    onSave: (saved) => {
-                                                                                        const computed = sumTrimBoxes(ln.boxes);
-                                                                                        setCustomGroups(prev => prev.map(g2 => g2._k !== g._k ? g2 : { ...g2, lines: g2.lines.map(l => l._k !== ln._k ? l : saved.length > 0 ? { ...l, boxes: saved } : { ...l, boxes: [], total: computed > 0 ? String(computed) : '' }) }));
-                                                                                        setBoxModal(null);
-                                                                                    },
-                                                                                })}
-                                                                                className="text-[10px] font-bold text-amber-600 hover:bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded-md transition">
-                                                                                Edit
-                                                                            </button>
-                                                                            <button type="button" onClick={() => {
-                                                                                const computed = sumTrimBoxes(ln.boxes);
-                                                                                setCustomGroups(prev => prev.map(g2 => g2._k !== g._k ? g2 : { ...g2, lines: g2.lines.map(l => l._k !== ln._k ? l : { ...l, boxes: [], total: computed > 0 ? String(computed) : '' }) }));
-                                                                            }} className="text-[10px] text-slate-400 hover:text-red-500 transition">
-                                                                                Remove
-                                                                            </button>
-                                                                        </div>
-                                                                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                                                            {(ln.boxes || []).map(b => `${b.box_count}×${b.qty_per_box}`).join(' + ')}
-                                                                        </p>
-                                                                    </>
+                                                                {g.type === 'other' && (
+                                                                    <input type="text" placeholder="Line note (optional)" value={ln.description || ''}
+                                                                        onChange={e => setCustomLineField(g._k, ln._k, 'description', e.target.value)}
+                                                                        className="w-full text-[11px] border border-slate-200 rounded px-1.5 py-1" />
                                                                 )}
+                                                                {boxTotalControl(g, ln)}
                                                             </div>
                                                         )}
                                                     </div>

@@ -1,5 +1,12 @@
 import api from '../utils/api';
 
+// The sales-order endpoints expect `products` as a JSON-encoded string
+// (backend does JSON.parse on it → "Invalid products JSON." on failure).
+const withStringifiedProducts = (data) => ({
+  ...data,
+  products: JSON.stringify(data.products ?? []),
+});
+
 export const accountingApi = {
   /**
    * Fetches dropdown options (Customers, Products, Fabrics, Colors)
@@ -19,7 +26,7 @@ export const accountingApi = {
    * items: [ { productId, fabricTypeId, colorId, quantity, sizeRatio } ]
    * }
    */
-  createSalesOrder: (data) => {return api.post('/accounting/sales-orders', data);},
+  createSalesOrder: (data) => {return api.post('/accounting/sales-orders', withStringifiedProducts(data));},
 
   /**
    * Fetches the list of all Sales Orders.
@@ -37,7 +44,7 @@ export const accountingApi = {
    * (Optional) Update an existing Sales Order.
    * Payload structure would be the same as createSalesOrder.
    */
-  updateSalesOrder: (id, data) => {return api.put(`/accounting/sales-orders/${id}`, data);},
+  updateSalesOrder: (id, data) => {return api.put(`/accounting/sales-orders/${id}`, withStringifiedProducts(data));},
 
   
   createPurchaseOrder: (data) => {return api.post('/accounting/purchase-orders', data);},

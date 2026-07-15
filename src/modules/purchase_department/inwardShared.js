@@ -1,7 +1,7 @@
-import { Package, Scissors, Tag } from 'lucide-react';
+import { Package, Scissors, Tag, Wrench } from 'lucide-react';
 
 // ── Constants ────────────────────────────────────────────────────────────────
-export const TYPE_ICON = { fabric: Package, trim: Scissors, other: Tag };
+export const TYPE_ICON = { fabric: Package, trim: Scissors, spare: Wrench, other: Tag };
 
 // ── Pure label/value helpers ────────────────────────────────────────────────
 export const reqTotal = (r) =>
@@ -39,6 +39,12 @@ export const labelFromGroup = (g) => {
         if (g.fabric_color_number) parts.push(g.fabric_color_number);
         if (g.fabric_color_name)   parts.push(g.fabric_color_name);
         return { name: g.fabric_type_name || 'Fabric', details: parts.join(' · ') };
+    }
+    if (g.item_type === 'spare') {
+        return { name: g.spare_part_name || 'Spare part', details: g.spare_part_code || '' };
+    }
+    if (g.item_type === 'other') {
+        return { name: g.general_item_name || g.item_name || 'Item', details: g.description || '' };
     }
     const parts = [];
     if (g.variant_color_number) parts.push(g.variant_color_number);
@@ -216,7 +222,7 @@ export const buildItemsFromState = (state) => {
 
     const customEntries = [];
     for (const [gi, g] of (customGroups || []).entries()) {
-        const groupLabel = g.type === 'fabric' ? `Free-form fabric card #${gi + 1}` : `Free-form trim card #${gi + 1}`;
+        const groupLabel = `Free-form ${g.type} card #${gi + 1}`;
         const unitPrice = g.unit_price === '' || g.unit_price == null ? null : parseFloat(g.unit_price);
         for (const [li, ln] of g.lines.entries()) {
             if (g.type === 'fabric') {
@@ -232,21 +238,26 @@ export const buildItemsFromState = (state) => {
                     unit_price:      unitPrice,
                     description:     g.description || null,
                 });
-            } else {
-                const boxes = mapTrimBoxes(ln.boxes);
-                const q = boxes.length > 0
-                    ? boxes.reduce((s, b) => s + b.box_count * b.qty_per_box, 0)
-                    : parseFloat(ln.total ?? 0);
-                if (!q || q <= 0) continue;
+                continue;
+            }
+            // Non-fabric (trim / spare / other) — all support box breakdown or a plain total.
+            const boxes = mapTrimBoxes(ln.boxes);
+            const q = boxes.length > 0 ? sumTrimBoxes(ln.boxes) : parseFloat(ln.total ?? 0);
+            if (!q || q <= 0) continue;
+            if (g.type === 'trim') {
                 if (!g.trim_item_id)          return { items: null, error: `${groupLabel}: pick a trim item.` };
                 if (!ln.trim_item_variant_id) return { items: null, error: `${groupLabel}, line ${li + 1}: pick a variant.` };
-                const entry = {
-                    item_type:            'trim',
-                    qty_received:         q,
-                    trim_item_variant_id: parseInt(ln.trim_item_variant_id, 10),
-                    unit_price:           unitPrice,
-                    description:          g.description || null,
-                };
+                const entry = { item_type: 'trim', qty_received: q, trim_item_variant_id: parseInt(ln.trim_item_variant_id, 10), unit_price: unitPrice, description: g.description || null };
+                if (boxes.length > 0) entry.boxes = boxes;
+                customEntries.push(entry);
+            } else if (g.type === 'spare') {
+                if (!ln.spare_part_id) return { items: null, error: `${groupLabel}, line ${li + 1}: pick a spare part.` };
+                const entry = { item_type: 'spare', qty_received: q, spare_part_id: parseInt(ln.spare_part_id, 10), unit_price: unitPrice, description: g.description || null };
+                if (boxes.length > 0) entry.boxes = boxes;
+                customEntries.push(entry);
+            } else { // 'other'
+                if (!ln.general_item_id) return { items: null, error: `${groupLabel}, line ${li + 1}: pick an item.` };
+                const entry = { item_type: 'other', qty_received: q, general_item_id: parseInt(ln.general_item_id, 10), description: ln.description?.trim() || g.description || null, uom: ln.uom || 'pcs', unit_price: unitPrice };
                 if (boxes.length > 0) entry.boxes = boxes;
                 customEntries.push(entry);
             }

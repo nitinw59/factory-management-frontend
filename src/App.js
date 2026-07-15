@@ -14,6 +14,7 @@ import RedirectWithParams from './shared/RedirectWithParams';
 import TrimKitLinkResolver from './shared/TrimKitLinkResolver';
 import KitPickupQueuePage from './modules/trim_kits/KitPickupQueuePage';
 import KitOrderPage from './modules/trim_kits/KitOrderPage';
+import KitHistoryPage from './modules/trim_kits/KitHistoryPage';
 import WorkstationsPage from './modules/workstations/WorkstationsPage';
 import WorkstationTypesPage from './modules/workstations/WorkstationTypesPage';
 import PiecePartsPage from './modules/products/PiecePartsPage';
@@ -67,7 +68,6 @@ import ProductTypesPage from './modules/products/ProductTypesPage';
 import ProductionLineTypesPage from './modules/production/ProductionLineTypesPage';
 import CuttingDashboardPage from './modules/cutting_portal/CuttingDashboardPage'; // New
 import FactoryLayoutPlannerPage from './modules/production/FactoryLayoutPlannerPage';
-import UnifiedIntakeForm from './modules/store_manager/UnifiedIntakeForm'; 
 import TrimManagementPage from './modules/store_manager/TrimManagementPage';
 import TrimOrdersPage from './modules/store_manager/TrimOrdersPage';
 import TrimOrderDetailPage from './modules/store_manager/TrimOrderDetailPage';
@@ -95,7 +95,6 @@ import SewingManagerDashboardPage from './modules/sewing_portal/SewingManagerDas
 import TrimOrderSummaryPage from './modules/store_manager/TrimOrderSummaryPage';
 import NumberingCheckerSummaryPage from './modules/numbering_portal/NumberingCheckerSummaryPage';
 import SewingMachineComplaintPage from './modules/asset/SewingMachineComplaintPage';
-import ListInventoryIntakes from './modules/store_manager/ListInventoryIntakes';  
 import CuttingManagerReportPage from './modules/initialisation_portal/CuttingManagerReportPage';
 import CreateSalesOrder from './modules/accounts/sales/CreateSalesOrder';
 //import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
@@ -243,8 +242,7 @@ function App() {
         <Route path="/store-manager" element={<StoreManagerProtectedRoute><StoreManagerLayout /></StoreManagerProtectedRoute>}>
           <Route index element={<Navigate to="fabric-rolls" replace />} />
           <Route path="trim-management" element={<TrimManagementPage />} />
-          <Route path="trim-stock-intake" element={<ListInventoryIntakes />} />
-          
+
           {/* Corrected Routes for Trim Orders */}
           {/* This route displays the list of all orders */}
           <Route path="trim-orders" element={<TrimOrdersPage />} />
@@ -252,9 +250,9 @@ function App() {
           {/* This route displays the details of a single, specific order */}
           <Route path="trim-orders/:orderId" element={<TrimOrderDetailPage />} />
           
-          <Route path="record-trim-purchase" element={<UnifiedIntakeForm />} />
-          <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} /> 
+          <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} />
           <Route path="trim-orders/:orderId/billing" element={<TrimBillingPage />} />
+          <Route path="trim-kits/history" element={<KitHistoryPage />} />
           <Route path="trim-reservations" element={<TrimReservationsPage />} />
           <Route path="supplier-color-codes" element={<SupplierColorCodesPage />} />
           <Route path="trim-stock-ledger" element={<TrimStockLedgerPage />} />
@@ -308,6 +306,7 @@ function App() {
           <Route path="job-work" element={<JobWorkDashboardPage />} />
           <Route path="planning" element={<MerchandiserPlanningPage />} />
           <Route path="trim-kits/orders/:orderId" element={<KitOrderPage />} />
+          <Route path="trim-kits/history" element={<KitHistoryPage />} />
 
         </Route>
       </Route>
@@ -349,6 +348,7 @@ function App() {
           <Route index element={<LineLoaderDashboardPage />} />
           <Route path="dashboard" element={<LineLoaderDashboardPage />} />
           <Route path="trim-kits" element={<KitPickupQueuePage />} />
+          <Route path="trim-kits/history" element={<KitHistoryPage />} />
           <Route path="trim-kits/orders/:orderId" element={<KitOrderPage />} />
           <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} />
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />

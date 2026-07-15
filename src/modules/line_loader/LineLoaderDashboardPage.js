@@ -955,17 +955,23 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                             <span className="text-white font-black text-sm">{overallCompletedRolls}/{batch.total_rolls} rolls · {completedStages}/{totalStages} stages</span>
                         </div>
                     </div>
-                    {batch.trim_orders?.length > 0 && (
-                        <div className="flex gap-1.5">
-                            {batch.trim_orders.map(to => (
-                                <Link key={to.id} to={`/line-loader/trim-orders/${to.id}/summary`}
-                                    className="flex items-center text-xs font-bold bg-purple-900 text-purple-300 px-2 py-1 rounded-lg border border-purple-700 hover:bg-purple-800 transition-colors"
-                                    onClick={e => e.stopPropagation()}>
-                                    <FileText size={11} className="mr-1" />#{to.id}<ExternalLink size={9} className="ml-1 opacity-50" />
-                                </Link>
-                            ))}
-                        </div>
-                    )}
+                    <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                        {batch.trim_orders?.length > 0 && batch.trim_orders.map(to => (
+                            <Link key={to.id} to={`/line-loader/trim-orders/${to.id}/summary`}
+                                className="flex items-center text-xs font-bold bg-purple-900 text-purple-300 px-2 py-1 rounded-lg border border-purple-700 hover:bg-purple-800 transition-colors"
+                                onClick={e => e.stopPropagation()}>
+                                <FileText size={11} className="mr-1" />#{to.id}<ExternalLink size={9} className="ml-1 opacity-50" />
+                            </Link>
+                        ))}
+                        <Link
+                            to={`/line-loader/trim-kits/history?production_batch_id=${batch.batch_id}${batch.batch_code ? `&batch_code=${encodeURIComponent(batch.batch_code)}` : ''}${batch.trim_orders?.length ? `&order_ids=${batch.trim_orders.map(t => t.id).join(',')}` : ''}`}
+                            className="flex items-center text-xs font-bold bg-indigo-900 text-indigo-300 px-2 py-1 rounded-lg border border-indigo-700 hover:bg-indigo-800 transition-colors"
+                            onClick={e => e.stopPropagation()}
+                            title="View past kit pickups + pending trims for this batch"
+                        >
+                            <History size={11} className="mr-1" /> Kit pickups
+                        </Link>
+                    </div>
                 </div>
             </div>
 

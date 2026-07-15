@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { trimKitsApi } from '../../api/trimKitsApi';
-import { kitBatchLabel } from './kitStatusConfig';
-import { Loader2, RefreshCw, Package, ChevronRight, AlertCircle, Inbox } from 'lucide-react';
+import { BatchTag, batchIdOf } from './BatchTag';
+import { getPickedKits, clearPickedKits } from './pickedKitsHistory';
+import { Loader2, RefreshCw, Package, ChevronRight, AlertCircle, Inbox, History, FileText } from 'lucide-react';
 
 const fmtWhen = (d) => {
     if (!d) return '—';
@@ -19,12 +20,14 @@ const KitPickupQueuePage = () => {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState(null);
+    const [picked, setPicked] = useState(getPickedKits());
 
     const fetchKits = useCallback(async (isRefresh = false) => {
         isRefresh ? setRefreshing(true) : setLoading(true);
         setError(null);
         try {
             const res = await trimKitsApi.getReadyKits();
+            console.log('[trimkits] getReadyKits raw:', res.data);
             setKits(res.data || []);
         } catch (err) {
             setError(err.response?.data?.error || 'Failed to load pickup queue.');
@@ -36,12 +39,18 @@ const KitPickupQueuePage = () => {
 
     useEffect(() => { fetchKits(); }, [fetchKits]);
 
-    // Kits get picked up by other loaders — refresh whenever the tab regains focus.
+    // Kits get picked up by other loaders — refresh queue + local pickup history on focus.
     useEffect(() => {
-        const onFocus = () => fetchKits(true);
+        const onFocus = () => { fetchKits(true); setPicked(getPickedKits()); };
         window.addEventListener('focus', onFocus);
         return () => window.removeEventListener('focus', onFocus);
     }, [fetchKits]);
+
+    const handleClearHistory = () => {
+        if (!window.confirm('Clear your recently picked-up history on this device?')) return;
+        clearPickedKits();
+        setPicked([]);
+    };
 
     return (
         <div className="max-w-4xl mx-auto">
@@ -54,14 +63,22 @@ const KitPickupQueuePage = () => {
                         Kits marked ready by the store. Count each item against the checklist, then sign to take custody.
                     </p>
                 </div>
-                <button
-                    onClick={() => fetchKits(true)}
-                    disabled={loading || refreshing}
-                    className="p-2.5 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 text-gray-700 transition-all disabled:opacity-50"
-                    title="Refresh queue"
-                >
-                    <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin text-indigo-600' : ''}`} />
-                </button>
+                <div className="flex items-center gap-2">
+                    <Link
+                        to="/line-loader/trim-kits/history"
+                        className="flex items-center gap-1.5 px-3 py-2.5 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 text-gray-700 text-sm font-bold transition-all"
+                    >
+                        <History className="h-4 w-4" /> History
+                    </Link>
+                    <button
+                        onClick={() => fetchKits(true)}
+                        disabled={loading || refreshing}
+                        className="p-2.5 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 text-gray-700 transition-all disabled:opacity-50"
+                        title="Refresh queue"
+                    >
+                        <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin text-indigo-600' : ''}`} />
+                    </button>
+                </div>
             </div>
 
             {error && (
@@ -89,7 +106,7 @@ const KitPickupQueuePage = () => {
                             <div className="flex justify-between items-center gap-4">
                                 <div className="min-w-0">
                                     <div className="flex items-center gap-3">
-                                        <h3 className="font-bold text-lg text-gray-900 truncate">Batch {kitBatchLabel(kit)}</h3>
+                                        <h3 className="font-bold text-lg text-gray-900 truncate inline-flex items-center gap-1.5">Batch <BatchTag code={kit.batch_code} id={batchIdOf(kit)} /></h3>
                                         <span className="text-[10px] uppercase tracking-wider font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded-full whitespace-nowrap">
                                             Ready for pickup
                                         </span>
@@ -113,6 +130,47 @@ const KitPickupQueuePage = () => {
                             </div>
                         </Link>
                     ))}
+                </div>
+            )}
+
+            {/* Recently picked up — on-device history so a signed kit doesn't just vanish from the queue */}
+            {picked.length > 0 && (
+                <div className="mt-8">
+                    <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-sm font-bold text-gray-600 uppercase tracking-wider flex items-center">
+                            <History className="w-4 h-4 mr-2 text-gray-400" /> Recently picked up
+                            <span className="ml-2 text-[10px] font-medium text-gray-400 normal-case tracking-normal">(on this device)</span>
+                        </h2>
+                        <button onClick={handleClearHistory} className="text-xs font-bold text-gray-400 hover:text-red-600">Clear</button>
+                    </div>
+                    <div className="space-y-2">
+                        {picked.map((p, i) => (
+                            <Link
+                                key={`${p.orderId}-${p.issue_number || i}`}
+                                to={`/line-loader/trim-kits/orders/${p.orderId}`}
+                                className="flex items-center justify-between gap-4 bg-white rounded-xl border border-gray-200 shadow-sm hover:border-indigo-300 transition-all px-4 py-3"
+                            >
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <FileText className="w-4 h-4 text-gray-400 shrink-0" />
+                                        <span className="font-bold text-gray-800 truncate inline-flex items-center gap-1.5">
+                                            Batch {p.batch_code || p.production_batch_id != null
+                                                ? <BatchTag code={p.batch_code} id={p.production_batch_id} />
+                                                : (p.batchLabel || `#${p.orderId}`)}
+                                        </span>
+                                        {p.order_status === 'PARTIALLY_ISSUED' && (
+                                            <span className="text-[10px] uppercase tracking-wider font-bold bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded whitespace-nowrap">partial</span>
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                        {p.issue_number && <span className="font-mono">{p.issue_number}</span>}
+                                        {p.signed_at && <> · signed {fmtWhen(p.signed_at)}</>}
+                                    </p>
+                                </div>
+                                <ChevronRight className="w-5 h-5 text-gray-400 shrink-0" />
+                            </Link>
+                        ))}
+                    </div>
                 </div>
             )}
         </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Plus, Trash2, Save, Palette, Loader2, AlertCircle, AlertTriangle, CheckCircle2, DollarSign, X, ClipboardCheck, ChevronDown, ChevronRight, Paperclip, FileText, Copy } from 'lucide-react';
+import { Plus, Trash2, Save, Palette, Loader2, AlertCircle, AlertTriangle, CheckCircle2, DollarSign, X, ClipboardCheck, ChevronDown, ChevronRight, Paperclip, FileText, Copy, ExternalLink, ListChecks } from 'lucide-react';
 import { accountingApi } from '../../../api/accountingApi';
 
 const skippedLabel = (entry) => {
@@ -41,6 +41,7 @@ const CreateSalesOrder = () => {
   const [skippedRemovals, setSkippedRemovals] = useState([]);
   const [reloading, setReloading] = useState(false);
   const [showReview, setShowReview] = useState(false);
+  const [submittedSummary, setSubmittedSummary] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState(() => new Set([0]));
   const [originalSopsById, setOriginalSopsById] = useState(() => new Map());
   const [stagedFiles, setStagedFiles] = useState([]);
@@ -281,6 +282,59 @@ const CreateSalesOrder = () => {
 
   const { grandTotal, totalPieces } = calculateTotal();
 
+  // Build a stable snapshot of the just-saved order for the success screen.
+  const buildSummarySnapshot = (soId, { skipped = [], attachmentsCount = 0 } = {}) => {
+    const customer    = options.customers.find(c => String(c.id) === String(header.customerId));
+    const productById  = new Map(options.products.map(p => [String(p.id), p]));
+    const fabricById   = new Map(options.fabricTypes.map(f => [String(f.id), f]));
+    const colorById    = new Map(options.fabricColors.map(c => [String(c.id), c]));
+    return {
+      orderId:       soId,
+      isEdit:        isEditMode,
+      customerName:  customer?.name || (header.customerId ? `Customer #${header.customerId}` : '—'),
+      orderNumber:   header.orderNumber || '—',
+      buyerPoNumber: header.buyerPoNumber || '—',
+      deliveryDate:  header.deliveryDate || '—',
+      notes:         header.notes || '',
+      totalPieces,
+      grandTotal,
+      attachmentsCount,
+      skipped,
+      products: productGroups.map(g => ({
+        name:     productById.get(String(g.productId))?.name || (g.productId ? `Product #${g.productId}` : '—'),
+        fabric:   fabricById.get(String(g.fabricTypeId))?.name || (g.fabricTypeId ? `Fabric #${g.fabricTypeId}` : '—'),
+        qty:      groupTotal(g),
+        subtotal: g.colors.reduce((s, c) => s + colorTotal(c) * (parseFloat(c.price) || 0), 0),
+        colors: g.colors.map(c => {
+          const cQty  = colorTotal(c);
+          const price = parseFloat(c.price) || 0;
+          return {
+            name:      colorById.get(String(c.colorId))?.name || (c.colorId ? `Color #${c.colorId}` : '—'),
+            qty:       cQty,
+            price,
+            lineTotal: cQty * price,
+            sizes: Object.entries(c.sizes)
+              .filter(([, v]) => Number(v) > 0)
+              .map(([sizeId, qty]) => ({ name: options.sizes.find(s => String(s.id) === sizeId)?.name ?? sizeId, qty })),
+          };
+        }),
+      })),
+    };
+  };
+
+  const resetForm = () => {
+    setSubmittedSummary(null);
+    setError(null); setSuccess(null); setSkippedRemovals([]);
+    setHeader({
+      customerId: '', buyerPoNumber: '', deliveryDate: '', notes: '',
+      orderNumber: `SO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+    });
+    setProductGroups([{ salesOrderProductId: null, productId: '', fabricTypeId: '', colors: [freshColor()] }]);
+    setStagedFiles([]);
+    setExpandedGroups(new Set([0]));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // --- Submit ---
   const handleOpenReview = (e) => {
     e.preventDefault();
@@ -322,6 +376,7 @@ const CreateSalesOrder = () => {
       const skipped = body.skipped_product_removals ?? [];
 
       const soId = isEditMode ? orderId : body.orderId;
+      const attachmentsCount = stagedFiles.length;
       if (stagedFiles.length > 0 && soId) {
         try {
           await accountingApi.uploadSalesOrderAttachments(String(soId), stagedFiles);
@@ -331,15 +386,14 @@ const CreateSalesOrder = () => {
         }
       }
 
+      // Snapshot the saved order BEFORE any reload mutates the form state.
+      setSubmittedSummary(buildSummarySnapshot(soId, { skipped, attachmentsCount }));
+
       if (isEditMode) {
-        setSuccess(body.message || 'Sales order updated.');
         setSkippedRemovals(skipped);
         await loadOrderForEdit({ silent: true });
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      } else {
-        if (body.orderId) navigate(`/accounts/sales/${body.orderId}/edit`, { replace: true });
-        else navigate('/accounts/sales/orders');
       }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       const status = err?.response?.status;
       const apiErr = err?.response?.data?.error;
@@ -1046,6 +1100,168 @@ const CreateSalesOrder = () => {
           </div>
         );
       })()}
+
+      {/* Success details modal */}
+      {submittedSummary && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-5 bg-emerald-50 border-b border-emerald-100 shrink-0">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-6 h-6 text-emerald-600" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-lg font-extrabold text-slate-900">
+                    Sales order {submittedSummary.isEdit ? 'updated' : 'created'} successfully
+                  </h3>
+                  <p className="text-sm text-slate-600 mt-0.5">
+                    <span className="font-bold">{submittedSummary.orderNumber}</span>
+                    {submittedSummary.orderId != null && (
+                      <span className="text-slate-400"> · Order #{submittedSummary.orderId}</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Details */}
+            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+              {submittedSummary.skipped.length > 0 && (
+                <div className="bg-amber-50 text-amber-800 px-4 py-3 rounded-lg border border-amber-200">
+                  <div className="flex items-center gap-2 text-sm font-bold">
+                    <AlertTriangle className="w-5 h-5" /> Some products were kept
+                  </div>
+                  <ul className="ml-6 list-disc text-sm space-y-1 mt-1.5">
+                    {submittedSummary.skipped.map(s => <li key={s.sales_order_product_id}>{skippedLabel(s)}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {/* Order info */}
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Order Information</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Customer',      value: submittedSummary.customerName },
+                    { label: 'Order #',       value: submittedSummary.orderNumber },
+                    { label: 'Buyer PO',      value: submittedSummary.buyerPoNumber },
+                    { label: 'Delivery Date', value: submittedSummary.deliveryDate },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="bg-slate-50 border border-slate-100 rounded-lg px-4 py-3">
+                      <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{label}</p>
+                      <p className="text-base font-bold text-slate-800 mt-1 truncate">{value}</p>
+                    </div>
+                  ))}
+                  {submittedSummary.notes && (
+                    <div className="col-span-2 bg-slate-50 border border-slate-100 rounded-lg px-4 py-3">
+                      <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Notes</p>
+                      <p className="text-sm text-slate-700 mt-1 whitespace-pre-wrap">{submittedSummary.notes}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Products */}
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  Products · {submittedSummary.products.length}
+                </p>
+                <div className="space-y-3">
+                  {submittedSummary.products.map((p, idx) => (
+                    <div key={idx} className="border border-slate-200 rounded-lg p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-base font-bold text-slate-800">{p.name}</p>
+                          <p className="text-sm text-slate-500 truncate">{p.fabric}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-[11px] font-bold text-slate-400 uppercase">Subtotal</p>
+                          <p className="text-base font-bold text-slate-800">₹{p.subtotal.toFixed(2)}</p>
+                        </div>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {p.colors.map((c, ci) => (
+                          <div key={ci} className="border border-slate-100 rounded-lg p-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-medium text-slate-700 truncate">{c.name}</span>
+                              <span className="text-xs font-mono tabular-nums text-slate-500 shrink-0">
+                                {c.qty.toLocaleString()} × ₹{c.price.toFixed(2)} = ₹{c.lineTotal.toFixed(2)}
+                              </span>
+                            </div>
+                            {c.sizes.length > 0 && (
+                              <div className="mt-1.5 flex flex-wrap gap-1">
+                                {c.sizes.map((s, si) => (
+                                  <span key={si} className="text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded">
+                                    {s.name}: {s.qty}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        <div className="flex justify-between text-slate-500 text-sm pt-2 border-t border-slate-100">
+                          <span>Group total</span>
+                          <span className="font-mono tabular-nums">{p.qty.toLocaleString()} pcs</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {submittedSummary.attachmentsCount > 0 && (
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <Paperclip size={14} className="text-slate-400" />
+                  {submittedSummary.attachmentsCount} attachment{submittedSummary.attachmentsCount === 1 ? '' : 's'} uploaded
+                </div>
+              )}
+
+              {/* Grand total */}
+              <div className="bg-indigo-50 border border-indigo-100 rounded-lg px-5 py-4 flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-bold text-indigo-500 uppercase tracking-wider">Grand Total</p>
+                  <p className="text-sm text-slate-600 mt-1">
+                    {submittedSummary.totalPieces.toLocaleString()} pcs across {submittedSummary.products.length} product{submittedSummary.products.length === 1 ? '' : 's'}
+                  </p>
+                </div>
+                <p className="text-2xl font-black text-indigo-700 tabular-nums">₹{submittedSummary.grandTotal}</p>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="px-6 py-4 border-t bg-slate-50 flex flex-wrap justify-end gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => navigate('/accounts/sales/orders')}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition"
+              >
+                <ListChecks size={15} /> All orders
+              </button>
+              {!submittedSummary.isEdit && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition"
+                >
+                  <Plus size={15} /> Create another
+                </button>
+              )}
+              {submittedSummary.orderId != null && (
+                <button
+                  type="button"
+                  onClick={() => submittedSummary.isEdit
+                    ? setSubmittedSummary(null)
+                    : navigate(`/accounts/sales/${submittedSummary.orderId}/edit`, { replace: true })}
+                  className="flex items-center gap-1.5 px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition"
+                >
+                  {submittedSummary.isEdit ? <><CheckCircle2 size={15} /> Done</> : <><ExternalLink size={15} /> View order</>}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

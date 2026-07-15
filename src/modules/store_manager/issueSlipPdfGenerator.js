@@ -138,6 +138,7 @@ export async function generateIssueSlipPdf({ issue, company }) {
     };
     metaRow('Slip No.', issue.issue_number || `#${issue.id}`);
     metaRow('Date', fmtDateTime(issue.created_at));
+    if (issue.batch_label) metaRow('Batch', issue.batch_label);
     if (issue.issued_by_name) metaRow('Issued By', issue.issued_by_name);
 
     y = Math.max(y + 60, metaY, idTextY) + 8;
@@ -182,8 +183,11 @@ export async function generateIssueSlipPdf({ issue, company }) {
     y += 4;
 
     // ── Lines table ──────────────────────────────────────────────────────────
+    // Only show the cost columns when we actually have pricing — otherwise render a
+    // clean qty-only slip instead of a column of blank "Unit Cost" cells.
     const lines = issue.lines || [];
-    const body = lines.map((l, i) => {
+    const hasCosts = lines.some(l => Number(l.unit_cost) > 0) || Number(issue.total_value) > 0;
+    const nameOf = (l) => {
         const isTrim = l.item_kind === 'trim';
         const variantBits = isTrim
             ? [
@@ -191,46 +195,62 @@ export async function generateIssueSlipPdf({ issue, company }) {
                 l.variant_size,
               ].filter(Boolean).join(' / ')
             : '';
-        const name = `${l.item_name || '—'}${variantBits ? ` — ${variantBits}` : ''}${l.item_code ? `  (${l.item_code})` : ''}`;
-        return [
+        return `${l.item_name || '—'}${variantBits ? ` — ${variantBits}` : ''}${l.item_code ? `  (${l.item_code})` : ''}`;
+    };
+    const body = lines.map((l, i) => {
+        const isTrim = l.item_kind === 'trim';
+        const row = [
             String(i + 1),
             isTrim ? 'Trim' : 'General',
-            name,
+            nameOf(l),
             `${fmtQty(l.qty)}${l.uom ? ` ${l.uom}` : ''}`,
-            fmtMoney(l.unit_cost),
-            fmtMoney(l.line_value ?? (parseFloat(l.qty) * parseFloat(l.unit_cost))),
         ];
+        if (hasCosts) {
+            row.push(
+                Number(l.unit_cost) > 0 ? fmtMoney(l.unit_cost) : '—',
+                l.line_value != null ? fmtMoney(l.line_value)
+                    : Number(l.unit_cost) > 0 ? fmtMoney(parseFloat(l.qty) * parseFloat(l.unit_cost)) : '—',
+            );
+        }
+        return row;
     });
 
     autoTable(doc, {
         startY: y,
-        head: [['#', 'Type', 'Item', 'Qty', 'Unit Cost', 'Value']],
+        head: [hasCosts ? ['#', 'Type', 'Item', 'Qty', 'Unit Cost', 'Value'] : ['#', 'Type', 'Item', 'Qty']],
         body,
         margin: { left: MARGIN, right: MARGIN },
         styles: { fontSize: 9, cellPadding: 6, textColor: accent, lineColor: line, lineWidth: 0.4 },
         headStyles: { fillColor: accent, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5 },
-        columnStyles: {
+        columnStyles: hasCosts ? {
             0: { cellWidth: 24, halign: 'center' },
             1: { cellWidth: 50 },
             2: { cellWidth: 'auto' },
             3: { cellWidth: 76, halign: 'right' },
             4: { cellWidth: 76, halign: 'right' },
             5: { cellWidth: 84, halign: 'right' },
+        } : {
+            0: { cellWidth: 24, halign: 'center' },
+            1: { cellWidth: 60 },
+            2: { cellWidth: 'auto' },
+            3: { cellWidth: 90, halign: 'right' },
         },
     });
     y = doc.lastAutoTable.finalY + 14;
 
     // ── Total ────────────────────────────────────────────────────────────────
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(...accent);
-    doc.text('Total Value', COL_R - 200, y);
-    doc.text(fmtMoney(issue.total_value), COL_R, y, { align: 'right' });
-    doc.setDrawColor(...accent);
-    doc.setLineWidth(1);
-    doc.line(COL_R - 200, y - 14, COL_R, y - 14);
-    doc.line(COL_R - 200, y + 5, COL_R, y + 5);
-    y += 24;
+    if (hasCosts) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(...accent);
+        doc.text('Total Value', COL_R - 200, y);
+        doc.text(fmtMoney(issue.total_value), COL_R, y, { align: 'right' });
+        doc.setDrawColor(...accent);
+        doc.setLineWidth(1);
+        doc.line(COL_R - 200, y - 14, COL_R, y - 14);
+        doc.line(COL_R - 200, y + 5, COL_R, y + 5);
+        y += 24;
+    }
 
     // ── Notes ────────────────────────────────────────────────────────────────
     if (issue.notes && String(issue.notes).trim()) {

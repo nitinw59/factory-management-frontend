@@ -5,7 +5,10 @@ import { adminApi } from '../../api/adminApi';
 import { useAuth } from '../../context/AuthContext';
 import Modal from '../../shared/Modal';
 import { kitStatusOf, kitBatchLabel } from './kitStatusConfig';
+import { BatchTag, batchIdOf } from './BatchTag';
 import ExchangePanel from './ExchangePanel';
+import { recordPickedKit } from './pickedKitsHistory';
+import { HandoverDetailModal } from './KitHistoryPage';
 import { downloadIssueSlipPdf } from '../store_manager/issueSlipPdfGenerator';
 import {
     Loader2, ArrowLeft, AlertCircle, AlertTriangle, CheckCircle2, ClipboardCheck,
@@ -16,23 +19,52 @@ import {
 const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 const fmtMoney = (v) => `₹${parseFloat(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-// Company profile for the slip PDF header — fetched once per session; failure just
-// means generic branding (endpoint may be admin-only).
-let _companyProfile;
+// Company profile for the slip PDF header — cached once a real profile is fetched.
+// A failed/empty fetch is NOT cached, so a later download retries (the endpoint may be
+// briefly unreachable or gated); the PDF only falls back to generic branding if every try fails.
+let _companyProfile = null;
 const getCompanyProfileOnce = async () => {
-    if (_companyProfile !== undefined) return _companyProfile;
+    if (_companyProfile) return _companyProfile;
     try {
         const r = await adminApi.getCompanyProfile();
-        _companyProfile = r.data ?? null;
+        if (r.data && Object.keys(r.data).length) _companyProfile = r.data;
+        return r.data ?? null;
     } catch {
-        _companyProfile = null;
+        return null;
     }
-    return _companyProfile;
 };
 
 const variantLabel = (v) =>
     [`${v.color_number ? `${v.color_number} - ` : ''}${v.color_name || ''}`.trim(), v.variant_size]
         .filter(Boolean).join(' / ');
+
+const _norm = (s) => String(s ?? '').trim().toLowerCase();
+
+// Stable physical-trim key iff the item's WHOLE unissued fill is one substitute
+// trim; otherwise null (mixed/partial/own-variant items never merge).
+const substituteFillKey = (item) => {
+    const active = (item.fulfilled_with || []).filter(fw => Number(fw.unissued_qty) > 0);
+    if (active.length !== 1) return null;                    // 0 or multiple fills → don't merge
+    const fw = active[0];
+    if (!fw.is_substitute) return null;                      // own variant → don't merge
+    if (Number(fw.unissued_qty) !== Number(item.unissued_qty)) return null; // partial → don't merge
+    return ['sub', _norm(fw.item_name), _norm(fw.color_number), _norm(fw.color_name), _norm(fw.variant_size)].join('|');
+};
+
+// Regroup a name-group's items into render units: singles, plus merged clusters
+// where 2+ originals were fully substituted with the SAME physical trim (one pile).
+// A cluster sits at the position of its first constituent; a cluster of <2 demotes to a single.
+const clustersOf = (items) => {
+    const byKey = new Map();
+    const units = [];
+    items.forEach(it => {
+        const k = substituteFillKey(it);
+        if (!k) { units.push({ type: 'single', item: it }); return; }
+        if (!byKey.has(k)) { const c = { type: 'merged', key: k, items: [] }; byKey.set(k, c); units.push(c); }
+        byKey.get(k).items.push(it);
+    });
+    return units.map(u => (u.type === 'merged' && u.items.length < 2) ? { type: 'single', item: u.items[0] } : u);
+};
 
 // ── Result modal (MISMATCH / MATCHED / SIGNED) ───────────────────────────────
 const VerifyResultModal = ({ result, onClose, onDownloadSlip, downloadingSlip }) => {
@@ -153,12 +185,15 @@ const KitOrderPage = () => {
 
     const [query, setQuery] = useState('');          // item search
     const [collapsed, setCollapsed] = useState({});  // { [trimName]: true } — accordion state
+    const [expandedClusters, setExpandedClusters] = useState({}); // { [cid]: true } — merged rows opened for shortage
+    const [missingOpen, setMissingOpen] = useState(false); // "still missing" panel — collapsed by default
 
     const fetchKit = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
             const res = await trimKitsApi.getKitOrder(orderId);
+            console.log('[trimkits] getKitOrder raw:', res.data);
             setKit(res.data);
         } catch (err) {
             setError(err.response?.data?.error || 'Failed to load kit.');
@@ -178,10 +213,36 @@ const KitOrderPage = () => {
         });
         setCounts(next);
         setSign(false);
+        setExpandedClusters({});
     }, [kit]);
 
     const unissuedItems = useMemo(() => (kit?.items || []).filter(it => Number(it.unissued_qty) > 0), [kit]);
     const issuedItems = useMemo(() => (kit?.items || []).filter(it => !(Number(it.unissued_qty) > 0)), [kit]);
+
+    // Batch-wide "still missing" — what's short across ALL kits of this batch, not just the current one:
+    //  • per ordered item, required − fulfilled = qty never picked in any kit
+    //  • plus items the store dismissed as unavailable (missing_items)
+    const batchMissing = useMemo(() => {
+        const rows = [];
+        (kit?.items || []).forEach(it => {
+            const short = (Number(it.quantity_required) || 0) - (Number(it.quantity_fulfilled) || 0);
+            if (short > 0) rows.push({
+                key: `short-${it.id}`,
+                kind: 'short',
+                item_name: it.item_name, item_code: it.item_code,
+                color_name: it.color_name, color_number: it.color_number, variant_size: it.variant_size,
+                qty: short,
+            });
+        });
+        (kit?.missing_items || []).forEach((m, i) => rows.push({
+            key: `dismissed-${m.id ?? i}`,
+            kind: 'dismissed',
+            item_name: m.item_name, item_code: m.item_code,
+            color_name: m.color_name, color_number: m.color_number, variant_size: m.variant_size,
+            qty: Number(m.quantity_required) || Number(m.missing_qty) || null,
+        }));
+        return rows;
+    }, [kit]);
 
     // Group the count list by trim so all colours/sizes of one article sit together.
     const unissuedGroups = useMemo(() => {
@@ -194,6 +255,11 @@ const KitOrderPage = () => {
         });
         return order.map(k => byName.get(k));
     }, [unissuedItems]);
+
+    // Default to collapsed groups — variants stay tucked inside their trim until the loader opens one.
+    useEffect(() => {
+        setCollapsed(Object.fromEntries(unissuedGroups.map(g => [g.name, true])));
+    }, [unissuedGroups]);
 
     // Item search — match on trim name/code, or any variant's colour/size (keeps a whole group if its name hits).
     const filteredGroups = useMemo(() => {
@@ -227,6 +293,212 @@ const KitOrderPage = () => {
         const next = Math.max(0, base + delta);
         return { ...prev, [id]: { ...cur, counted_qty: String(next) } };
     });
+
+    // Bulk "all present" — mark each given item counted at its full expected qty (one tap for a whole group or the kit).
+    const markItemsPresent = (list) => setCounts(prev => {
+        const next = { ...prev };
+        list.forEach(it => {
+            next[it.id] = { ...next[it.id], mode: 'exact', counted_qty: String(Number(it.unissued_qty)), issue_kind: '', notes: '' };
+        });
+        return next;
+    });
+    const markAllPresent = () => markItemsPresent(unissuedItems);
+    const markGroupPresent = (group) => markItemsPresent(group.items);
+    const groupAllPresent = (group) => group.items.every(it => counts[it.id]?.mode === 'exact');
+
+    // A merged-cluster id must be unique across the checklist — namespace by group name.
+    const clusterId = (groupName, key) => `${groupName}::${key}`;
+
+    // One count row for a single ordered trim variant (its own line = one trim_order_item).
+    const renderCountRow = (item) => {
+        const c = counts[item.id] || {};
+        const counted = c.counted_qty;
+        const countState = counted === '' || counted === undefined ? 'empty'
+            : !isValidCount(counted) ? 'invalid'
+            : Number(counted) === Number(item.unissued_qty) ? 'match' : 'diff';
+        const borderTone = countState === 'match' ? 'border-l-green-400'
+            : countState === 'diff' || countState === 'invalid' ? 'border-l-amber-400'
+            : 'border-l-gray-200';
+        const variant = [`${item.color_number ? `${item.color_number} - ` : ''}${item.color_name || ''}`.trim(), item.variant_size].filter(Boolean).join(' / ');
+        return (
+            <div key={item.id} className={`bg-white rounded-xl border border-gray-200 border-l-4 ${borderTone} shadow-sm p-4`}>
+                <div className="flex flex-wrap justify-between items-start gap-4">
+                    <div className="min-w-0 flex-1">
+                        <p className="font-bold text-gray-900">
+                            {variant || item.item_name}
+                        </p>
+                        {/* What was actually picked — check the physical trims against THESE variants */}
+                        {(item.fulfilled_with || []).length > 0 && (
+                            <div className="mt-2 space-y-1">
+                                {item.fulfilled_with.filter(fw => Number(fw.unissued_qty) > 0).map((fw, i) => (
+                                    <div key={i} className="flex items-center gap-2 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                                        <span className="font-mono font-bold text-gray-700">{fw.unissued_qty}×</span>
+                                        <span className="text-gray-700 font-medium truncate">{fw.item_name || item.item_name} — {variantLabel(fw)}</span>
+                                        {fw.is_substitute && (
+                                            <span className="inline-flex items-center text-[10px] uppercase tracking-wider font-bold bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded">
+                                                <Replace className="w-3 h-3 mr-1" /> Substitute
+                                            </span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                    <div className="text-center shrink-0">
+                        <p className="text-2xl font-black text-indigo-700">{Number(item.unissued_qty).toLocaleString('en-IN')}</p>
+                        <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Count this cycle</p>
+                    </div>
+                </div>
+
+                {canVerify && (() => {
+                    const expected = Number(item.unissued_qty);
+                    const mode = c.mode; // 'exact' | 'diff' | undefined
+                    const countedNum = counted === '' || counted == null ? 0 : Number(counted);
+                    return (
+                        <div className="mt-3 pt-3 border-t border-gray-100">
+                            {/* One-tap: everything present, or flag a shortage / issue */}
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setCount(item.id, { mode: 'exact', counted_qty: String(expected), issue_kind: '', notes: '' })}
+                                    className={`flex items-center justify-center gap-2 rounded-xl py-4 font-bold text-base border-2 transition-all active:scale-[0.98] ${
+                                        mode === 'exact'
+                                            ? 'border-green-500 bg-green-50 text-green-800 shadow-sm'
+                                            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                                    }`}
+                                >
+                                    <CheckCircle2 className="w-5 h-5" /> All {expected} present
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setCount(item.id, { mode: 'diff', counted_qty: mode === 'diff' ? (counted ?? '') : String(Math.max(expected - 1, 0)) })}
+                                    className={`flex items-center justify-center gap-2 rounded-xl py-4 font-bold text-base border-2 transition-all active:scale-[0.98] ${
+                                        mode === 'diff'
+                                            ? 'border-amber-500 bg-amber-50 text-amber-800 shadow-sm'
+                                            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                                    }`}
+                                >
+                                    <AlertTriangle className="w-5 h-5" /> Shortage / issue
+                                </button>
+                            </div>
+
+                            {mode === 'diff' && (
+                                <div className="mt-3 space-y-3">
+                                    {/* Big +/- stepper — no keyboard needed on a handheld */}
+                                    <div className="flex items-center justify-between bg-amber-50/60 border border-amber-200 rounded-xl p-2">
+                                        <span className="text-sm font-bold text-amber-800 pl-2">Counted on hand</span>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => stepCount(item.id, -1)}
+                                                disabled={countedNum <= 0}
+                                                className="w-12 h-12 rounded-lg bg-white border-2 border-amber-300 text-amber-700 flex items-center justify-center active:scale-95 disabled:opacity-40"
+                                                aria-label="Decrease counted quantity"
+                                            >
+                                                <Minus className="w-5 h-5" />
+                                            </button>
+                                            <span className="w-16 text-center text-2xl font-black text-amber-900 tabular-nums">{countedNum}</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => stepCount(item.id, 1)}
+                                                className="w-12 h-12 rounded-lg bg-white border-2 border-amber-300 text-amber-700 flex items-center justify-center active:scale-95"
+                                                aria-label="Increase counted quantity"
+                                            >
+                                                <Plus className="w-5 h-5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <p className="text-xs font-bold text-center text-amber-700">
+                                        {countedNum < expected ? `${expected - countedNum} short of ${expected} expected`
+                                            : countedNum > expected ? `${countedNum - expected} over ${expected} expected`
+                                            : `Matches expected ${expected}`}
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Problem (optional)</label>
+                                            <select
+                                                value={c.issue_kind || ''}
+                                                onChange={e => setCount(item.id, { issue_kind: e.target.value })}
+                                                className="mt-1 w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                                            >
+                                                <option value="">No problem</option>
+                                                <option value="WRONG_ITEM">Wrong item</option>
+                                                <option value="DAMAGED">Damaged</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Notes (optional)</label>
+                                            <input
+                                                type="text"
+                                                value={c.notes || ''}
+                                                onChange={e => setCount(item.id, { notes: e.target.value })}
+                                                placeholder="e.g. 2 pieces torn"
+                                                className="mt-1 w-full border border-gray-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })()}
+            </div>
+        );
+    };
+
+    // One merged row standing in for a cluster of ordered variants all substituted with the
+    // SAME physical trim (one pile). "All present" fans out to per-item exact counts; "Shortage"
+    // expands the cluster into its real rows so each order line gets its own qty/issue/notes.
+    const renderMergedRow = (group, unit, cid) => {
+        const fw0 = unit.items[0].fulfilled_with.find(f => Number(f.unissued_qty) > 0);
+        const total = unit.items.reduce((s, it) => s + Number(it.unissued_qty), 0);
+        const allExact = unit.items.every(it => counts[it.id]?.mode === 'exact');
+        const anyCounted = unit.items.some(it => isValidCount(counts[it.id]?.counted_qty));
+        const tone = allExact ? 'border-l-green-400' : anyCounted ? 'border-l-amber-400' : 'border-l-gray-200';
+        return (
+            <div key={cid} className={`bg-white rounded-xl border border-gray-200 border-l-4 ${tone} shadow-sm p-4`}>
+                <div className="flex flex-wrap justify-between items-start gap-4">
+                    <div className="min-w-0 flex-1">
+                        <p className="font-bold text-gray-900 flex items-center gap-2 flex-wrap">
+                            {fw0.item_name || group.name} — {variantLabel(fw0)}
+                            <span className="inline-flex items-center text-[10px] uppercase tracking-wider font-bold bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded">
+                                <Replace className="w-3 h-3 mr-1" /> Substitute
+                            </span>
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                            One pile — covers {unit.items.length} ordered variants ({unit.items.map(it => variantLabel(it) || it.item_name).join(', ')})
+                        </p>
+                    </div>
+                    <div className="text-center shrink-0">
+                        <p className="text-2xl font-black text-indigo-700">{total.toLocaleString('en-IN')}</p>
+                        <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Count this cycle</p>
+                    </div>
+                </div>
+                {canVerify && (
+                    <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-2 gap-2">
+                        <button
+                            type="button"
+                            onClick={() => markItemsPresent(unit.items)}
+                            className={`flex items-center justify-center gap-2 rounded-xl py-4 font-bold text-base border-2 transition-all active:scale-[0.98] ${
+                                allExact
+                                    ? 'border-green-500 bg-green-50 text-green-800 shadow-sm'
+                                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                            }`}
+                        >
+                            <CheckCircle2 className="w-5 h-5" /> All {total} present
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setExpandedClusters(p => ({ ...p, [cid]: true }))}
+                            className="flex items-center justify-center gap-2 rounded-xl py-4 font-bold text-base border-2 transition-all active:scale-[0.98] border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                        >
+                            <AlertTriangle className="w-5 h-5" /> Shortage / issue
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     const loadVerifications = useCallback(async () => {
         try {
@@ -265,6 +537,7 @@ const KitOrderPage = () => {
                     variant_color_number: fw.color_number,
                     variant_size: fw.variant_size,
                     qty: fw.unissued_qty,
+                    unit_cost: fw.unit_cost ?? fw.selling_price ?? it.unit_cost ?? it.selling_price ?? it.unit_price,
                 }))
             ));
             const res = await trimKitsApi.verifyKit(orderId, {
@@ -273,10 +546,22 @@ const KitOrderPage = () => {
                 ...(overallNotes.trim() ? { notes: overallNotes.trim() } : {}),
             });
             const data = res.data || {};
+            console.log('[trimkits] verifyKit raw:', data);
             if (data.result === 'MISMATCH') {
                 setResult({ kind: 'MISMATCH', discrepancies: data.discrepancies, order_status: data.order_status });
             } else if (data.signed) {
                 setResult({ kind: 'SIGNED', ...data });
+                // Remember this pickup on-device — the backend has no signed-kit history to query.
+                recordPickedKit({
+                    orderId,
+                    batchLabel: kitBatchLabel(kit),
+                    batch_code: kit.batch_code,
+                    production_batch_id: batchIdOf(kit),
+                    issue_number: data.issue?.issue_number,
+                    total_value: data.issue?.total_value,
+                    order_status: data.order_status,
+                    signed_at: new Date().toISOString(),
+                });
             } else {
                 setResult({ kind: 'MATCHED_UNSIGNED' });
             }
@@ -305,6 +590,7 @@ const KitOrderPage = () => {
                     id: result.issue.id,
                     issue_number: result.issue.issue_number,
                     created_at: new Date().toISOString(),
+                    batch_label: kitBatchLabel(kit),
                     issued_to_name: user?.name || 'Line Loader',
                     issued_to_department: kit?.delivery_line_name ? `Production line: ${kit.delivery_line_name}` : undefined,
                     issued_by_name: kit?.kit_ready_by_name,
@@ -317,6 +603,9 @@ const KitOrderPage = () => {
             setDownloadingSlip(false);
         }
     };
+
+    // Past handover slips open a shared detail modal (real lines at cost + loss cases + PDF).
+    const [slipDetailId, setSlipDetailId] = useState(null);
 
     // ── Render ───────────────────────────────────────────────────────────────
     if (loading) return <div className="flex justify-center p-16"><Loader2 className="animate-spin h-10 w-10 text-indigo-600" /></div>;
@@ -355,7 +644,7 @@ const KitOrderPage = () => {
                 <div className="flex flex-wrap justify-between items-start gap-3">
                     <div>
                         <div className="flex items-center gap-3">
-                            <h1 className="text-2xl font-extrabold text-gray-900">Kit — Batch {kitBatchLabel(kit)}</h1>
+                            <h1 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">Kit — Batch <BatchTag code={kit.batch_code} id={batchIdOf(kit)} /></h1>
                             <span className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full border ${statusMeta.badge}`}>
                                 {statusMeta.label}
                             </span>
@@ -406,14 +695,38 @@ const KitOrderPage = () => {
             {/* ── CHECKLIST TAB ── */}
             {activeTab === 'checklist' && (
                 <div className="space-y-4">
-                    {(kit.missing_items || []).length > 0 && (
-                        <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl">
-                            <p className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Not in this kit (dismissed by store)</p>
-                            <ul className="text-sm text-gray-600 space-y-1 list-disc list-inside">
-                                {kit.missing_items.map((m, i) => (
-                                    <li key={m.id || i}>{m.item_name} {m.color_name} {m.color_number ? `(${m.color_number})` : ''}</li>
-                                ))}
+                    {batchMissing.length > 0 && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl">
+                            <button
+                                type="button"
+                                onClick={() => setMissingOpen(o => !o)}
+                                className="w-full flex items-center justify-between gap-2 p-4"
+                            >
+                                <span className="flex items-center gap-2 min-w-0">
+                                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                                    <span className="text-xs font-bold uppercase tracking-wider text-amber-700 text-left">Still missing for this batch — not supplied in any kit</span>
+                                    <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5 shrink-0">{batchMissing.length}</span>
+                                </span>
+                                <ChevronDown className={`w-4 h-4 text-amber-600 shrink-0 transition-transform ${missingOpen ? '' : '-rotate-90'}`} />
+                            </button>
+                            {missingOpen && (
+                            <ul className="space-y-1 px-4 pb-4">
+                                {batchMissing.map(m => {
+                                    const variant = [`${m.color_number ? `${m.color_number} - ` : ''}${m.color_name || ''}`.trim(), m.variant_size].filter(Boolean).join(' / ');
+                                    return (
+                                        <li key={m.key} className="flex items-center justify-between text-sm bg-white border border-amber-100 rounded px-3 py-1.5">
+                                            <span className="text-gray-700 truncate">
+                                                {m.qty != null && <span className="font-mono font-bold text-amber-800 mr-1.5">{Number(m.qty).toLocaleString('en-IN')}×</span>}
+                                                <span className="font-semibold">{m.item_name}</span>{variant ? ` — ${variant}` : ''}
+                                            </span>
+                                            <span className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded shrink-0 ml-2 ${m.kind === 'dismissed' ? 'bg-gray-100 text-gray-600' : 'bg-amber-100 text-amber-700'}`}>
+                                                {m.kind === 'dismissed' ? 'unavailable' : 'not yet picked'}
+                                            </span>
+                                        </li>
+                                    );
+                                })}
                             </ul>
+                            )}
                         </div>
                     )}
 
@@ -441,6 +754,16 @@ const KitOrderPage = () => {
                                     </button>
                                 )}
                             </div>
+                            {canVerify && (
+                                <button
+                                    type="button"
+                                    onClick={markAllPresent}
+                                    className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-bold text-green-700 bg-green-50 border border-green-300 rounded-lg hover:bg-green-100 whitespace-nowrap"
+                                    title="Mark every item counted at its full expected quantity"
+                                >
+                                    <CheckCircle2 className="w-4 h-4" /> All present
+                                </button>
+                            )}
                             <button
                                 type="button"
                                 onClick={toggleAll}
@@ -461,13 +784,13 @@ const KitOrderPage = () => {
                           const groupDone = group.items.filter(it => isValidCount(counts[it.id]?.counted_qty)).length;
                           return (
                           <div key={group.name} className="space-y-3">
-                            {/* Accordion header — tap to collapse/expand this trim's variants */}
-                            <button
-                                type="button"
-                                onClick={() => toggleGroup(group.name)}
-                                className="w-full flex items-center justify-between gap-2 px-1 py-1 text-left"
-                            >
-                                <div className="flex items-center gap-2 min-w-0">
+                            {/* Accordion header — tap the title to collapse/expand this trim's variants */}
+                            <div className="w-full flex items-center justify-between gap-2 px-1 py-1">
+                                <button
+                                    type="button"
+                                    onClick={() => toggleGroup(group.name)}
+                                    className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                                >
                                     <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
                                     <h3 className="text-base font-extrabold text-gray-900 truncate">{group.name}</h3>
                                     {group.item_code && <span className="text-xs font-mono text-gray-400 shrink-0">({group.item_code})</span>}
@@ -476,147 +799,47 @@ const KitOrderPage = () => {
                                             {group.items.length} variants
                                         </span>
                                     )}
-                                </div>
+                                </button>
                                 {canVerify && (
-                                    <span className={`text-xs font-bold whitespace-nowrap shrink-0 ${groupDone === group.items.length ? 'text-green-600' : 'text-gray-400'}`}>
-                                        {groupDone}/{group.items.length} counted
-                                    </span>
-                                )}
-                            </button>
-                            {!isCollapsed && group.items.map(item => {
-                            const c = counts[item.id] || {};
-                            const counted = c.counted_qty;
-                            const countState = counted === '' || counted === undefined ? 'empty'
-                                : !isValidCount(counted) ? 'invalid'
-                                : Number(counted) === Number(item.unissued_qty) ? 'match' : 'diff';
-                            const borderTone = countState === 'match' ? 'border-l-green-400'
-                                : countState === 'diff' || countState === 'invalid' ? 'border-l-amber-400'
-                                : 'border-l-gray-200';
-                            const variant = [`${item.color_number ? `${item.color_number} - ` : ''}${item.color_name || ''}`.trim(), item.variant_size].filter(Boolean).join(' / ');
-                            return (
-                                <div key={item.id} className={`bg-white rounded-xl border border-gray-200 border-l-4 ${borderTone} shadow-sm p-4`}>
-                                    <div className="flex flex-wrap justify-between items-start gap-4">
-                                        <div className="min-w-0 flex-1">
-                                            <p className="font-bold text-gray-900">
-                                                {variant || item.item_name}
-                                            </p>
-                                            {/* What was actually picked — check the physical trims against THESE variants */}
-                                            {(item.fulfilled_with || []).length > 0 && (
-                                                <div className="mt-2 space-y-1">
-                                                    {item.fulfilled_with.filter(fw => Number(fw.unissued_qty) > 0).map((fw, i) => (
-                                                        <div key={i} className="flex items-center gap-2 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1">
-                                                            <span className="font-mono font-bold text-gray-700">{fw.unissued_qty}×</span>
-                                                            <span className="text-gray-700 font-medium truncate">{fw.item_name || item.item_name} — {variantLabel(fw)}</span>
-                                                            {fw.is_substitute && (
-                                                                <span className="inline-flex items-center text-[10px] uppercase tracking-wider font-bold bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded">
-                                                                    <Replace className="w-3 h-3 mr-1" /> Substitute
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="text-center shrink-0">
-                                            <p className="text-2xl font-black text-indigo-700">{Number(item.unissued_qty).toLocaleString('en-IN')}</p>
-                                            <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Count this cycle</p>
-                                        </div>
+                                    <div className="flex items-center gap-3 shrink-0">
+                                        <span className={`text-xs font-bold whitespace-nowrap ${groupDone === group.items.length ? 'text-green-600' : 'text-gray-400'}`}>
+                                            {groupDone}/{group.items.length} counted
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => markGroupPresent(group)}
+                                            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg border whitespace-nowrap transition-colors ${
+                                                groupAllPresent(group)
+                                                    ? 'text-green-700 bg-green-50 border-green-300'
+                                                    : 'text-gray-600 bg-white border-gray-300 hover:bg-gray-50'
+                                            }`}
+                                            title={group.items.length > 1 ? 'Mark all variants of this trim present' : 'Mark this item present'}
+                                        >
+                                            <CheckCircle2 className="w-3.5 h-3.5" /> All present
+                                        </button>
                                     </div>
-
-                                    {canVerify && (() => {
-                                        const expected = Number(item.unissued_qty);
-                                        const mode = c.mode; // 'exact' | 'diff' | undefined
-                                        const countedNum = counted === '' || counted == null ? 0 : Number(counted);
-                                        return (
-                                            <div className="mt-3 pt-3 border-t border-gray-100">
-                                                {/* One-tap: everything present, or flag a shortage / issue */}
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setCount(item.id, { mode: 'exact', counted_qty: String(expected), issue_kind: '', notes: '' })}
-                                                        className={`flex items-center justify-center gap-2 rounded-xl py-4 font-bold text-base border-2 transition-all active:scale-[0.98] ${
-                                                            mode === 'exact'
-                                                                ? 'border-green-500 bg-green-50 text-green-800 shadow-sm'
-                                                                : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                                                        }`}
-                                                    >
-                                                        <CheckCircle2 className="w-5 h-5" /> All {expected} present
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setCount(item.id, { mode: 'diff', counted_qty: mode === 'diff' ? (counted ?? '') : String(Math.max(expected - 1, 0)) })}
-                                                        className={`flex items-center justify-center gap-2 rounded-xl py-4 font-bold text-base border-2 transition-all active:scale-[0.98] ${
-                                                            mode === 'diff'
-                                                                ? 'border-amber-500 bg-amber-50 text-amber-800 shadow-sm'
-                                                                : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                                                        }`}
-                                                    >
-                                                        <AlertTriangle className="w-5 h-5" /> Shortage / issue
-                                                    </button>
-                                                </div>
-
-                                                {mode === 'diff' && (
-                                                    <div className="mt-3 space-y-3">
-                                                        {/* Big +/- stepper — no keyboard needed on a handheld */}
-                                                        <div className="flex items-center justify-between bg-amber-50/60 border border-amber-200 rounded-xl p-2">
-                                                            <span className="text-sm font-bold text-amber-800 pl-2">Counted on hand</span>
-                                                            <div className="flex items-center gap-2">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => stepCount(item.id, -1)}
-                                                                    disabled={countedNum <= 0}
-                                                                    className="w-12 h-12 rounded-lg bg-white border-2 border-amber-300 text-amber-700 flex items-center justify-center active:scale-95 disabled:opacity-40"
-                                                                    aria-label="Decrease counted quantity"
-                                                                >
-                                                                    <Minus className="w-5 h-5" />
-                                                                </button>
-                                                                <span className="w-16 text-center text-2xl font-black text-amber-900 tabular-nums">{countedNum}</span>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => stepCount(item.id, 1)}
-                                                                    className="w-12 h-12 rounded-lg bg-white border-2 border-amber-300 text-amber-700 flex items-center justify-center active:scale-95"
-                                                                    aria-label="Increase counted quantity"
-                                                                >
-                                                                    <Plus className="w-5 h-5" />
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                        <p className="text-xs font-bold text-center text-amber-700">
-                                                            {countedNum < expected ? `${expected - countedNum} short of ${expected} expected`
-                                                                : countedNum > expected ? `${countedNum - expected} over ${expected} expected`
-                                                                : `Matches expected ${expected}`}
-                                                        </p>
-                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                            <div>
-                                                                <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Problem (optional)</label>
-                                                                <select
-                                                                    value={c.issue_kind || ''}
-                                                                    onChange={e => setCount(item.id, { issue_kind: e.target.value })}
-                                                                    className="mt-1 w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
-                                                                >
-                                                                    <option value="">No problem</option>
-                                                                    <option value="WRONG_ITEM">Wrong item</option>
-                                                                    <option value="DAMAGED">Damaged</option>
-                                                                </select>
-                                                            </div>
-                                                            <div>
-                                                                <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Notes (optional)</label>
-                                                                <input
-                                                                    type="text"
-                                                                    value={c.notes || ''}
-                                                                    onChange={e => setCount(item.id, { notes: e.target.value })}
-                                                                    placeholder="e.g. 2 pieces torn"
-                                                                    className="mt-1 w-full border border-gray-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                                                                />
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })()}
-                                </div>
-                            );
+                                )}
+                            </div>
+                            {!isCollapsed && clustersOf(group.items).map(unit => {
+                                if (unit.type === 'single') return renderCountRow(unit.item);
+                                const cid = clusterId(group.name, unit.key);
+                                if (expandedClusters[cid]) {
+                                    // Shortage path — show the real per-line rows so each order line
+                                    // gets its own counted qty / issue / notes.
+                                    return (
+                                        <div key={cid} className="space-y-3">
+                                            <button
+                                                type="button"
+                                                onClick={() => setExpandedClusters(p => { const n = { ...p }; delete n[cid]; return n; })}
+                                                className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1 px-1"
+                                            >
+                                                <ChevronsDownUp className="w-3.5 h-3.5" /> Count these {unit.items.length} together again
+                                            </button>
+                                            {unit.items.map(renderCountRow)}
+                                        </div>
+                                    );
+                                }
+                                return renderMergedRow(group, unit, cid);
                             })}
                           </div>
                           );
@@ -652,35 +875,33 @@ const KitOrderPage = () => {
 
             {/* ── HANDOVERS TAB ── */}
             {activeTab === 'handovers' && (
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                <div className="space-y-2">
                     {slips.length === 0 ? (
-                        <p className="p-10 text-center text-gray-400 font-medium">No handovers yet — this kit has not been signed for.</p>
+                        <p className="bg-white rounded-xl border border-gray-200 shadow-sm p-10 text-center text-gray-400 font-medium">No handovers yet — this kit has not been signed for.</p>
                     ) : (
-                        <table className="w-full text-sm">
-                            <thead className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-500 font-bold">
-                                <tr>
-                                    <th className="px-5 py-3 text-left">Slip</th>
-                                    <th className="px-5 py-3 text-left">Signed</th>
-                                    <th className="px-5 py-3 text-left">Taken by</th>
-                                    <th className="px-5 py-3 text-right">Value</th>
-                                    <th className="px-5 py-3 text-left">Bill</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {slips.map(s => (
-                                    <tr key={s.id} className="hover:bg-gray-50/60">
-                                        <td className="px-5 py-3 font-mono font-bold text-gray-800">{s.issue_number}</td>
-                                        <td className="px-5 py-3 text-gray-600">{fmtDateTime(s.created_at)}</td>
-                                        <td className="px-5 py-3 font-medium text-gray-700">{s.issued_to_name || '—'}</td>
-                                        <td className="px-5 py-3 text-right font-mono">{fmtMoney(s.total_value)}</td>
-                                        <td className="px-5 py-3 text-gray-600">
-                                            {s.bill_number ? <>{s.bill_number} <span className="text-gray-400">({fmtMoney(s.bill_amount)})</span></> : '—'}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                        slips.map(s => (
+                            <button
+                                key={s.id}
+                                onClick={() => setSlipDetailId(s.id)}
+                                className="w-full flex items-center justify-between gap-4 bg-white rounded-xl border border-gray-200 shadow-sm hover:border-indigo-300 transition-all px-4 py-3 text-left"
+                            >
+                                <div className="min-w-0">
+                                    <p className="font-mono font-bold text-gray-800">{s.issue_number}</p>
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                        {fmtDateTime(s.created_at)}{s.issued_to_name ? ` · ${s.issued_to_name}` : ''}
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-3 shrink-0">
+                                    <div className="text-right">
+                                        <p className="font-mono font-bold text-gray-800">{fmtMoney(s.total_value)}</p>
+                                        {s.bill_number && <p className="text-[11px] text-gray-400">{s.bill_number}</p>}
+                                    </div>
+                                    <span className="flex items-center gap-1 text-xs font-bold text-indigo-600"><Download className="w-4 h-4" /> Detail</span>
+                                </div>
+                            </button>
+                        ))
                     )}
+                    {slipDetailId && <HandoverDetailModal issueId={slipDetailId} onClose={() => setSlipDetailId(null)} />}
                 </div>
             )}
 

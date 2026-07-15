@@ -5,7 +5,7 @@ import {
     LuPackage, LuTriangleAlert, LuRefreshCw,
     LuReplace, LuArrowLeft, LuListOrdered, LuCircleCheck, LuWand,
     LuTrash2, LuFileText, LuBookOpen, LuScissors, LuTag, LuPrinter, LuDownload, LuX,
-    LuSend, LuUndo2
+    LuSend, LuUndo2, LuChevronDown, LuChevronsDownUp, LuChevronsUpDown
 } from 'react-icons/lu';
 import { Loader2, Info } from 'lucide-react';
 import { storeManagerApi } from '../../api/storeManagerApi';
@@ -597,6 +597,7 @@ const TrimOrderDetailPage = () => {
     const fetchHandovers = useCallback(async () => {
         try {
             const res = await trimKitsApi.getKitOrder(orderId);
+            console.log('[trimkits] store getKitOrder raw:', res.data);
             setHandoverSlips(res.data?.slips || []);
             // Net custody per variant = signed out (qty) minus not-yet-issued (unissued_qty).
             const cust = {};
@@ -1019,6 +1020,7 @@ const TrimOrderDetailPage = () => {
     // ── Kit custody: mark ready / pull back ───────────────────────────────
     const [kitBusy, setKitBusy] = useState(false);
     const [markReadyOpen, setMarkReadyOpen] = useState(false);
+    const [reviewOpen, setReviewOpen] = useState({}); // Review-modal accordion state — all collapsed by default
     // Something picked since the last handover = any fulfillment-log row not yet on an issue slip
     const hasUnissuedPick = useMemo(
         () => items.some(it => (it.fulfillment_log || []).some(log => !log.issue_id)),
@@ -1040,6 +1042,24 @@ const TrimOrderDetailPage = () => {
         qty: kitReviewGroups.reduce((s, g) => s + g.pickedQty, 0),
         hasSub: kitReviewGroups.some(g => g.picks.some(p => p.used_substitute)),
     }), [kitReviewGroups]);
+
+    // Roll the per-variant review rows up under their trim name for the collapsible review modal.
+    const reviewByItem = useMemo(() => {
+        const order = [];
+        const map = new Map();
+        kitReviewGroups.forEach(g => {
+            const key = g.item.item_name || `#${g.item.id}`;
+            if (!map.has(key)) { map.set(key, { name: g.item.item_name || 'Unnamed trim', groups: [], qty: 0, subCount: 0 }); order.push(key); }
+            const e = map.get(key);
+            e.groups.push(g);
+            e.qty += g.pickedQty;
+            e.subCount += g.picks.filter(p => p.used_substitute).length;
+        });
+        return order.map(k => map.get(k));
+    }, [kitReviewGroups]);
+
+    const allReviewCollapsed = reviewByItem.length > 0 && reviewByItem.every(e => !reviewOpen[e.name]);
+    const toggleAllReview = () => setReviewOpen(allReviewCollapsed ? Object.fromEntries(reviewByItem.map(e => [e.name, true])) : {});
 
     const handleConfirmMarkReady = async () => {
         setKitBusy(true);
@@ -1113,7 +1133,7 @@ const TrimOrderDetailPage = () => {
                                 </button>
                             ) : orderInfo?.status !== 'ISSUED' && (
                                 <button
-                                    onClick={() => setMarkReadyOpen(true)}
+                                    onClick={() => { setReviewOpen({}); setMarkReadyOpen(true); }}
                                     disabled={kitBusy || !canMarkReady}
                                     className="px-5 py-2.5 bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
                                     title={canMarkReady ? 'Review the kit, then notify loaders it is ready for pickup' : 'Pick at least one item before marking the kit ready'}
@@ -1210,8 +1230,9 @@ const TrimOrderDetailPage = () => {
                         </div>
                     )}
 
-                    {/* Exchanges — swap wrong variants already in the loader's custody */}
-                    {handoverSlips.length > 0 && (
+                    {/* Exchanges — swap wrong variants already in the loader's custody.
+                        Show once anything has been handed over (status-based so it doesn't depend on the slips fetch). */}
+                    {(['PARTIALLY_ISSUED', 'ISSUED'].includes(orderInfo?.status) || handoverSlips.length > 0) && (
                         <ExchangePanel orderId={orderId} custodyVariants={kitCustodyVariants} onChanged={fetchHandovers} />
                     )}
 
@@ -1713,33 +1734,76 @@ const TrimOrderDetailPage = () => {
                         </div>
 
                         <div className="px-6 overflow-y-auto flex-1">
-                            {kitReviewGroups.length === 0 ? (
+                            {reviewByItem.length === 0 ? (
                                 <p className="text-sm text-gray-500 py-8 text-center">Nothing picked yet — there's nothing to hand over.</p>
                             ) : (
-                                <div className="space-y-2 pb-2">
-                                    {kitReviewGroups.map(({ item, picks, pickedQty }) => (
-                                        <div key={item.id} className="border border-gray-200 rounded-lg overflow-hidden">
-                                            <div className="bg-gray-50 px-3 py-2 flex justify-between items-center">
-                                                <div className="min-w-0">
-                                                    <p className="text-sm font-bold text-gray-800 truncate">{item.item_name}</p>
-                                                    <p className="text-xs text-gray-500">{item.color_name || 'AGNOSTIC'} {item.color_number ? `(${item.color_number})` : ''}</p>
+                                <>
+                                    <div className="flex items-center justify-between pb-2">
+                                        <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">{reviewByItem.length} trim item{reviewByItem.length === 1 ? '' : 's'}</p>
+                                        <button
+                                            type="button"
+                                            onClick={toggleAllReview}
+                                            className="flex items-center gap-1.5 text-xs font-bold text-gray-500 hover:text-gray-700"
+                                        >
+                                            {allReviewCollapsed ? <LuChevronsUpDown className="w-3.5 h-3.5" /> : <LuChevronsDownUp className="w-3.5 h-3.5" />}
+                                            {allReviewCollapsed ? 'Expand all' : 'Collapse all'}
+                                        </button>
+                                    </div>
+                                    <div className="space-y-2 pb-2">
+                                        {reviewByItem.map(entry => {
+                                            const isOpen = !!reviewOpen[entry.name];
+                                            return (
+                                                <div key={entry.name} className="border border-gray-200 rounded-lg overflow-hidden">
+                                                    {/* Accordion header — one row per trim item, collapsed by default */}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setReviewOpen(p => ({ ...p, [entry.name]: !p[entry.name] }))}
+                                                        className="w-full flex items-center justify-between gap-2 bg-gray-50 hover:bg-gray-100 px-3 py-2.5 text-left transition-colors"
+                                                    >
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <LuChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
+                                                            <span className="text-sm font-bold text-gray-800 truncate">{entry.name}</span>
+                                                            {entry.groups.length > 1 && (
+                                                                <span className="text-[10px] uppercase tracking-wider font-bold text-gray-500 bg-white border border-gray-200 rounded-full px-2 py-0.5 shrink-0">
+                                                                    {entry.groups.length} variants
+                                                                </span>
+                                                            )}
+                                                            {entry.subCount > 0 && (
+                                                                <span className="text-[10px] uppercase tracking-wider font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 shrink-0">
+                                                                    {entry.subCount} sub
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <span className="text-xs font-mono font-bold text-gray-700 bg-white border border-gray-200 px-2 py-0.5 rounded shrink-0">{entry.qty.toLocaleString('en-IN')} pcs</span>
+                                                    </button>
+                                                    {isOpen && (
+                                                        <div className="divide-y divide-gray-100 border-t border-gray-200">
+                                                            {entry.groups.map(({ item, picks, pickedQty }) => (
+                                                                <div key={item.id} className="px-3 py-2">
+                                                                    <div className="flex justify-between items-center mb-1">
+                                                                        <p className="text-xs font-semibold text-gray-600">{item.color_name || 'AGNOSTIC'} {item.color_number ? `(${item.color_number})` : ''}</p>
+                                                                        <span className="text-[11px] font-mono font-bold text-gray-500 shrink-0">{pickedQty.toLocaleString('en-IN')} pcs</span>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        {picks.map(p => (
+                                                                            <div key={p.id} className="flex items-center justify-between px-2 py-1 text-xs bg-gray-50 rounded">
+                                                                                <span className="truncate text-gray-700">
+                                                                                    <span className="bg-gray-200 text-gray-700 px-1 rounded mr-1.5 font-mono">{p.quantity_fulfilled}×</span>
+                                                                                    {p.fulfilled_color_name} {p.fulfilled_color_number}
+                                                                                    {p.used_substitute && <span className="text-amber-700 font-bold ml-1.5 bg-amber-50 border border-amber-200 px-1 rounded">substitute</span>}
+                                                                                </span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
-                                                <span className="text-xs font-mono font-bold text-gray-700 bg-white border border-gray-200 px-2 py-0.5 rounded shrink-0">{pickedQty.toLocaleString('en-IN')} pcs</span>
-                                            </div>
-                                            <div className="divide-y divide-gray-100">
-                                                {picks.map(p => (
-                                                    <div key={p.id} className="flex items-center justify-between px-3 py-1.5 text-xs">
-                                                        <span className="truncate text-gray-700">
-                                                            <span className="bg-gray-200 text-gray-700 px-1 rounded mr-1.5 font-mono">{p.quantity_fulfilled}×</span>
-                                                            {p.fulfilled_color_name} {p.fulfilled_color_number}
-                                                            {p.used_substitute && <span className="text-amber-700 font-bold ml-1.5 bg-amber-50 border border-amber-200 px-1 rounded">substitute</span>}
-                                                        </span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </>
                             )}
                         </div>
 

@@ -28,11 +28,7 @@ export const storeManagerApi = {
     fulfillWithVariant: (data) => api.post('/store-manager/trim-orders/fulfill-with-variant', data),
     getTrimOrderSummary: async (orderId) => api.get(`/store-manager/trim-orders/${orderId}/summary`),
     getOrderReferenceData: (orderId) => api.get(`/store-manager/trim-orders/${orderId}/reference-data`),
-    // Trim Intake
-    createInventoryIntake: (data) => api.post('/store-manager/inventory-intake', data),
-    getInventoryIntakeFormData: () => api.get('/store-manager/form-data/inventory-intake'),
-    getVariantsByItem: (itemId) => api.get(`/store-manager/trim-item-variants/${itemId}`),  
-    getInventoryIntakes: () => api.get('/store-manager/inventory-intakes-list'),
+    getVariantsByItem: (itemId) => api.get(`/store-manager/trim-item-variants/${itemId}`),
 
     // Generic resources needed for forms
     getSuppliers: () => api.get('/shared/supplier'),

@@ -51,7 +51,7 @@ export default function InwardModal({
     const [boxModal, setBoxModal] = useState(null);
 
     // Form state
-    const [grnNumber,    setGrnNumber]    = useState(inward?.grn_number || '');
+    const grnNumber = inward?.grn_number || ''; // read-only; server assigns/keeps it
     const [receivedDate, setReceivedDate] = useState(
         inward?.received_date || new Date().toISOString().split('T')[0]
     );
@@ -728,8 +728,8 @@ export default function InwardModal({
             onSave={boxModal?.onSave || (() => {})}
             onClose={() => setBoxModal(null)}
         />
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 bg-white flex flex-col">
+            <div className="bg-white w-full h-full flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
                 {/* Header */}
                 <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
                     <div>
@@ -810,10 +810,9 @@ export default function InwardModal({
                             <input
                                 type="text"
                                 value={grnNumber}
-                                onChange={e => setGrnNumber(e.target.value)}
-                                disabled={!editable}
-                                placeholder="GRN-2026-…"
-                                className="w-full mt-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 disabled:bg-slate-50 disabled:text-slate-600 focus:outline-none focus:border-emerald-400"
+                                disabled
+                                placeholder="Auto-generated on submit"
+                                className="w-full mt-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-400 cursor-not-allowed"
                             />
                         </div>
                         <div>

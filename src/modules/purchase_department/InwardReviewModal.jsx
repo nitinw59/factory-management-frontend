@@ -322,8 +322,8 @@ export default function InwardReviewModal({
         });
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={handleDismiss}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 bg-white flex flex-col">
+            <div className="bg-white w-full h-full flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className={`flex items-start justify-between gap-3 px-5 py-4 border-b ${saved ? 'border-emerald-100 bg-emerald-50/60' : 'border-slate-100'}`}>
                     <div>
                         <h2 className="text-base font-black text-slate-800 flex items-center gap-2">

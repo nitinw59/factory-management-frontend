@@ -8,7 +8,7 @@ import { sparesApi } from '../../api/sparesApi';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 
-// --- SearchableDropdown (copy of UnifiedIntakeForm pattern; extract to shared in a separate PR) ---
+// --- SearchableDropdown (extract to shared in a separate PR) ---
 const DROPDOWN_HEIGHT = 280; // approx max-h-60 panel + search header
 const SearchableDropdown = ({ options = [], value, onChange, placeholder, disabled, labelKey = 'name' }) => {
     const [isOpen, setIsOpen] = useState(false);
