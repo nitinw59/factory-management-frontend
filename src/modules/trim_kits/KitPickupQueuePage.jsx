@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import { trimKitsApi } from '../../api/trimKitsApi';
 import { BatchTag, batchIdOf } from './BatchTag';
 import { getPickedKits, clearPickedKits } from './pickedKitsHistory';
-import { Loader2, RefreshCw, Package, ChevronRight, AlertCircle, Inbox, History, FileText } from 'lucide-react';
+import { resolveIssueId, downloadHandoverById } from './handoverSlip';
+import { Loader2, RefreshCw, Package, ChevronRight, AlertCircle, Inbox, History, FileText, Download } from 'lucide-react';
 
 const fmtWhen = (d) => {
     if (!d) return '—';
@@ -21,6 +22,8 @@ const KitPickupQueuePage = () => {
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState(null);
     const [picked, setPicked] = useState(getPickedKits());
+    const [slipBusy, setSlipBusy] = useState(null);   // key of the entry whose slip is downloading
+    const [slipError, setSlipError] = useState(null);
 
     const fetchKits = useCallback(async (isRefresh = false) => {
         isRefresh ? setRefreshing(true) : setLoading(true);
@@ -50,6 +53,25 @@ const KitPickupQueuePage = () => {
         if (!window.confirm('Clear your recently picked-up history on this device?')) return;
         clearPickedKits();
         setPicked([]);
+    };
+
+    // The on-device entry holds no lines — pull the signed slip back off the register and
+    // render the same PDF the history page hands out.
+    const downloadSlip = async (entry, key) => {
+        setSlipBusy(key);
+        setSlipError(null);
+        try {
+            const issueId = await resolveIssueId(entry);
+            if (issueId == null) {
+                setSlipError(`Couldn't find the slip for ${entry.issue_number || 'this pickup'} on the register.`);
+                return;
+            }
+            await downloadHandoverById(issueId);
+        } catch (err) {
+            setSlipError(err.response?.data?.error || 'Failed to download the slip PDF.');
+        } finally {
+            setSlipBusy(null);
+        }
     };
 
     return (
@@ -143,33 +165,53 @@ const KitPickupQueuePage = () => {
                         </h2>
                         <button onClick={handleClearHistory} className="text-xs font-bold text-gray-400 hover:text-red-600">Clear</button>
                     </div>
+                    {slipError && (
+                        <div className="p-3 mb-2 bg-red-50 text-red-700 rounded-lg border border-red-200 flex items-center text-xs font-medium">
+                            <AlertCircle className="h-4 w-4 mr-2 shrink-0" /> {slipError}
+                        </div>
+                    )}
                     <div className="space-y-2">
-                        {picked.map((p, i) => (
-                            <Link
-                                key={`${p.orderId}-${p.issue_number || i}`}
-                                to={`/line-loader/trim-kits/orders/${p.orderId}`}
-                                className="flex items-center justify-between gap-4 bg-white rounded-xl border border-gray-200 shadow-sm hover:border-indigo-300 transition-all px-4 py-3"
-                            >
-                                <div className="min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <FileText className="w-4 h-4 text-gray-400 shrink-0" />
-                                        <span className="font-bold text-gray-800 truncate inline-flex items-center gap-1.5">
-                                            Batch {p.batch_code || p.production_batch_id != null
-                                                ? <BatchTag code={p.batch_code} id={p.production_batch_id} />
-                                                : (p.batchLabel || `#${p.orderId}`)}
-                                        </span>
-                                        {p.order_status === 'PARTIALLY_ISSUED' && (
-                                            <span className="text-[10px] uppercase tracking-wider font-bold bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded whitespace-nowrap">partial</span>
-                                        )}
-                                    </div>
-                                    <p className="text-xs text-gray-500 mt-0.5">
-                                        {p.issue_number && <span className="font-mono">{p.issue_number}</span>}
-                                        {p.signed_at && <> · signed {fmtWhen(p.signed_at)}</>}
-                                    </p>
+                        {picked.map((p, i) => {
+                            const key = `${p.orderId}-${p.issue_number || i}`;
+                            const canDownload = p.issue_id != null || !!p.issue_number;
+                            return (
+                                <div
+                                    key={key}
+                                    className="flex items-center bg-white rounded-xl border border-gray-200 shadow-sm hover:border-indigo-300 transition-all"
+                                >
+                                    <Link to={`/line-loader/trim-kits/orders/${p.orderId}`} className="flex-1 min-w-0 px-4 py-3">
+                                        <div className="flex items-center gap-2">
+                                            <FileText className="w-4 h-4 text-gray-400 shrink-0" />
+                                            <span className="font-bold text-gray-800 truncate inline-flex items-center gap-1.5">
+                                                Batch {p.batch_code || p.production_batch_id != null
+                                                    ? <BatchTag code={p.batch_code} id={p.production_batch_id} />
+                                                    : (p.batchLabel || `#${p.orderId}`)}
+                                            </span>
+                                            {p.order_status === 'PARTIALLY_ISSUED' && (
+                                                <span className="text-[10px] uppercase tracking-wider font-bold bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded whitespace-nowrap">partial</span>
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                            {p.issue_number && <span className="font-mono">{p.issue_number}</span>}
+                                            {p.signed_at && <> · signed {fmtWhen(p.signed_at)}</>}
+                                        </p>
+                                    </Link>
+                                    {canDownload && (
+                                        <button
+                                            onClick={() => downloadSlip(p, key)}
+                                            disabled={slipBusy === key}
+                                            title="Download slip PDF"
+                                            className="p-2 mr-1 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors disabled:opacity-50 shrink-0"
+                                        >
+                                            {slipBusy === key
+                                                ? <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                                                : <Download className="w-4 h-4" />}
+                                        </button>
+                                    )}
+                                    <ChevronRight className="w-5 h-5 text-gray-400 shrink-0 mr-3" />
                                 </div>
-                                <ChevronRight className="w-5 h-5 text-gray-400 shrink-0" />
-                            </Link>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             )}

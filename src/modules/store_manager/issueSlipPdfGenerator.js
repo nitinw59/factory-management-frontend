@@ -68,6 +68,8 @@ const fmtQty = (v) => {
 };
 const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 
+const _norm = (s) => String(s ?? '').trim().toLowerCase();
+
 // ── Generator ────────────────────────────────────────────────────────────────
 // issue: { id, issue_number, created_at, issued_to_name, issued_to_department,
 //          recover_from_salary, notes, issued_by_name, total_value,
@@ -187,32 +189,81 @@ export async function generateIssueSlipPdf({ issue, company }) {
     // clean qty-only slip instead of a column of blank "Unit Cost" cells.
     const lines = issue.lines || [];
     const hasCosts = lines.some(l => Number(l.unit_cost) > 0) || Number(issue.total_value) > 0;
-    const nameOf = (l) => {
-        const isTrim = l.item_kind === 'trim';
-        const variantBits = isTrim
-            ? [
-                `${l.variant_color_number ? `${l.variant_color_number} - ` : ''}${l.variant_color_name || ''}`.trim(),
-                l.variant_size,
-              ].filter(Boolean).join(' / ')
-            : '';
-        return `${l.item_name || '—'}${variantBits ? ` — ${variantBits}` : ''}${l.item_code ? `  (${l.item_code})` : ''}`;
-    };
-    const body = lines.map((l, i) => {
-        const isTrim = l.item_kind === 'trim';
-        const row = [
-            String(i + 1),
-            isTrim ? 'Trim' : 'General',
-            nameOf(l),
-            `${fmtQty(l.qty)}${l.uom ? ` ${l.uom}` : ''}`,
-        ];
-        if (hasCosts) {
-            row.push(
-                Number(l.unit_cost) > 0 ? fmtMoney(l.unit_cost) : '—',
-                l.line_value != null ? fmtMoney(l.line_value)
-                    : Number(l.unit_cost) > 0 ? fmtMoney(parseFloat(l.qty) * parseFloat(l.unit_cost)) : '—',
-            );
+
+    const lineValueOf = (l) => l.line_value != null
+        ? parseFloat(l.line_value) || 0
+        : (Number(l.unit_cost) > 0 ? parseFloat(l.qty || 0) * parseFloat(l.unit_cost) : 0);
+    const qtyCell   = (l) => `${fmtQty(l.qty)}${l.uom ? ` ${l.uom}` : ''}`;
+    const costCells = (l) => [
+        Number(l.unit_cost) > 0 ? fmtMoney(l.unit_cost) : '—',
+        lineValueOf(l) > 0 ? fmtMoney(lineValueOf(l)) : '—',
+    ];
+    const variantLabelOf = (l) =>
+        `${l.variant_color_name || 'No variant'}${l.variant_color_number ? ` (${l.variant_color_number})` : ''}${l.variant_size ? ` · Sz ${l.variant_size}` : ''}`;
+
+    // Trim lines collapse under their trim item: a bold parent row carrying the group
+    // summary (variant count, total qty, shared unit cost, group value) with one indented
+    // row per variant beneath it. General items have no variants, so they stay flat.
+    // Same parent/child layout as poPdfGenerator, so a slip reads like the PO it came from.
+    const groups = [];
+    const trimGroups = new Map();
+    lines.forEach(l => {
+        if (l.item_kind !== 'trim') {
+            groups.push({ type: 'general', line: l });
+            return;
         }
-        return row;
+        const key = `${_norm(l.item_name)}|${_norm(l.item_code)}`;
+        if (!trimGroups.has(key)) {
+            const g = { type: 'trim', parentName: l.item_name || 'Trim', code: l.item_code || '', items: [] };
+            trimGroups.set(key, g);
+            groups.push(g);   // first appearance fixes the group's place in the slip
+        }
+        trimGroups.get(key).items.push(l);
+    });
+
+    const HEADER_FILL = [241, 245, 249];   // slate-100
+    const SUB_LABEL_INDENT = '   · ';
+    const body = [];
+    groups.forEach((g, gi) => {
+        if (g.type === 'general') {
+            const l = g.line;
+            body.push([
+                String(gi + 1),
+                'General',
+                `${l.item_name || '—'}${l.item_code ? `  (${l.item_code})` : ''}`,
+                qtyCell(l),
+                ...(hasCosts ? costCells(l) : []),
+            ]);
+            return;
+        }
+
+        const groupQty   = g.items.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
+        const groupValue = g.items.reduce((s, l) => s + lineValueOf(l), 0);
+        const uoms  = new Set(g.items.map(l => l.uom || 'pcs'));
+        const costs = new Set(g.items.map(l => Number(parseFloat(l.unit_cost || 0).toFixed(2))));
+        const sharedUom  = uoms.size === 1 ? [...uoms][0] : null;
+        const sharedCost = costs.size === 1 && [...costs][0] > 0 ? [...costs][0] : null;
+
+        const hs = { fontStyle: 'bold', fillColor: HEADER_FILL };
+        body.push([
+            { content: String(gi + 1), styles: { ...hs, halign: 'center' } },
+            { content: 'Trim', styles: hs },
+            { content: `${g.parentName}${g.code ? `  (${g.code})` : ''}  ·  ${g.items.length} variant${g.items.length === 1 ? '' : 's'}`, styles: hs },
+            { content: `${fmtQty(groupQty)}${sharedUom ? ` ${sharedUom}` : ''}`, styles: { ...hs, halign: 'right' } },
+            ...(hasCosts ? [
+                // Blank unless every variant shares one cost — a single number here would otherwise lie.
+                { content: sharedCost != null ? fmtMoney(sharedCost) : '', styles: { ...hs, halign: 'right' } },
+                { content: groupValue > 0 ? fmtMoney(groupValue) : '—', styles: { ...hs, halign: 'right' } },
+            ] : []),
+        ]);
+
+        g.items.forEach(l => body.push([
+            '',
+            '',
+            `${SUB_LABEL_INDENT}${variantLabelOf(l)}`,
+            qtyCell(l),
+            ...(hasCosts ? costCells(l) : []),
+        ]));
     });
 
     autoTable(doc, {

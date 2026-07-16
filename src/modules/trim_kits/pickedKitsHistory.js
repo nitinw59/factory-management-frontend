@@ -1,6 +1,7 @@
 // Local record of kits this loader has signed for, kept on the device.
-// The backend exposes only the "ready for pickup" queue (no signed-kit history endpoint),
-// so we remember what was picked up here to give the loader a recent-history list + drilldown.
+// The register at GET /trim-kits/history is the source of truth (see KitHistoryPage); this
+// is just a per-device shortlist so a kit doesn't vanish off the queue the moment it's signed.
+// Entries carry issue_id — enough to pull the real slip back from the register on demand.
 const KEY = 'trimkits_picked_history';
 const MAX = 40;
 

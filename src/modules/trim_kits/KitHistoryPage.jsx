@@ -1,13 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { trimKitsApi } from '../../api/trimKitsApi';
-import { adminApi } from '../../api/adminApi';
 import Modal from '../../shared/Modal';
 import { useAuth } from '../../context/AuthContext';
 import ReportMissingModal from '../trim_loss/ReportMissingModal';
-import { kitBatchLabel } from './kitStatusConfig';
 import { BatchTag, batchIdOf } from './BatchTag';
-import { downloadIssueSlipPdf } from '../store_manager/issueSlipPdfGenerator';
+import { downloadHandover } from './handoverSlip';
 import {
     Loader2, ArrowLeft, ArrowLeftRight, RefreshCw, AlertCircle, AlertTriangle, History, Package, Download, X, PackageX,
 } from 'lucide-react';
@@ -18,18 +16,6 @@ const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-IN', { dateStyle: 
 const fmtMoney = (v) => `₹${parseFloat(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const variantText = (l) =>
     [`${l.color_number ? `${l.color_number} - ` : ''}${l.color_name || ''}`.trim(), l.variant_size].filter(Boolean).join(' / ');
-
-let _companyProfile = null;
-const getCompanyProfileOnce = async () => {
-    if (_companyProfile) return _companyProfile;
-    try {
-        const r = await adminApi.getCompanyProfile();
-        if (r.data && Object.keys(r.data).length) _companyProfile = r.data;
-        return r.data ?? null;
-    } catch {
-        return null;
-    }
-};
 
 // ── Detail modal — one handover (lines at cost + any loss cases raised on the slip) ──
 export const HandoverDetailModal = ({ issueId, orderId, onClose }) => {
@@ -54,31 +40,7 @@ export const HandoverDetailModal = ({ issueId, orderId, onClose }) => {
         if (!data) return;
         setDownloading(true);
         try {
-            const company = await getCompanyProfileOnce();
-            await downloadIssueSlipPdf({
-                company,
-                issue: {
-                    id: data.issue_id,
-                    issue_number: data.issue_number,
-                    created_at: data.created_at,
-                    batch_label: kitBatchLabel(data),
-                    issued_to_name: data.issued_to_name,
-                    issued_to_department: data.delivery_line_name ? `Production line: ${data.delivery_line_name}` : undefined,
-                    issued_by_name: data.issued_by_name,
-                    total_value: data.total_value,
-                    lines: (data.lines || []).map(l => ({
-                        item_kind: 'trim',
-                        item_name: l.item_name,
-                        item_code: l.item_code,
-                        variant_color_name: l.color_name,
-                        variant_color_number: l.color_number,
-                        variant_size: l.variant_size,
-                        qty: l.qty,
-                        unit_cost: l.unit_cost,
-                        line_value: l.line_value,
-                    })),
-                },
-            });
+            await downloadHandover(data);
         } finally {
             setDownloading(false);
         }

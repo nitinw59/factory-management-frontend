@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { trimKitsApi } from '../../api/trimKitsApi';
-import { adminApi } from '../../api/adminApi';
 import { useAuth } from '../../context/AuthContext';
 import Modal from '../../shared/Modal';
 import { kitStatusOf, kitBatchLabel } from './kitStatusConfig';
@@ -10,6 +9,7 @@ import ExchangePanel from './ExchangePanel';
 import { recordPickedKit } from './pickedKitsHistory';
 import { HandoverDetailModal } from './KitHistoryPage';
 import { downloadIssueSlipPdf } from '../store_manager/issueSlipPdfGenerator';
+import { getCompanyProfileOnce } from './handoverSlip';
 import {
     Loader2, ArrowLeft, AlertCircle, AlertTriangle, CheckCircle2, ClipboardCheck,
     Replace, FileText, History, Download, PartyPopper, PackageX, RefreshCw, ArrowLeftRight,
@@ -18,21 +18,6 @@ import {
 
 const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 const fmtMoney = (v) => `₹${parseFloat(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-// Company profile for the slip PDF header — cached once a real profile is fetched.
-// A failed/empty fetch is NOT cached, so a later download retries (the endpoint may be
-// briefly unreachable or gated); the PDF only falls back to generic branding if every try fails.
-let _companyProfile = null;
-const getCompanyProfileOnce = async () => {
-    if (_companyProfile) return _companyProfile;
-    try {
-        const r = await adminApi.getCompanyProfile();
-        if (r.data && Object.keys(r.data).length) _companyProfile = r.data;
-        return r.data ?? null;
-    } catch {
-        return null;
-    }
-};
 
 const variantLabel = (v) =>
     [`${v.color_number ? `${v.color_number} - ` : ''}${v.color_name || ''}`.trim(), v.variant_size]
@@ -551,12 +536,14 @@ const KitOrderPage = () => {
                 setResult({ kind: 'MISMATCH', discrepancies: data.discrepancies, order_status: data.order_status });
             } else if (data.signed) {
                 setResult({ kind: 'SIGNED', ...data });
-                // Remember this pickup on-device — the backend has no signed-kit history to query.
+                // Remember this pickup on-device so the loader keeps a recent list of their own
+                // handovers without paging the register. issue_id is what the slip PDF downloads by.
                 recordPickedKit({
                     orderId,
                     batchLabel: kitBatchLabel(kit),
                     batch_code: kit.batch_code,
                     production_batch_id: batchIdOf(kit),
+                    issue_id: data.issue?.id,
                     issue_number: data.issue?.issue_number,
                     total_value: data.issue?.total_value,
                     order_status: data.order_status,

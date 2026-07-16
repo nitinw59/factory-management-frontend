@@ -480,8 +480,8 @@ const effectiveStockOf = (v) => {
 const reservedOf = (v) => Number(v?.quantity_reserved ?? 0);
 
 const intentDisplay = (decision, fulfillingVariant) => {
-    if (decision === 'exact')        return { key: 'exact',        label: 'Exact match',                                                       color: 'green',  order: 0 };
-    if (decision === 'fulfilled')    return { key: 'fulfilled',    label: 'Already fulfilled',                                                 color: 'gray',   order: 4 };
+    if (decision === 'exact')        return { key: 'exact',        label: 'Exact match',                                                       color: 'blue',   order: 0 };
+    if (decision === 'fulfilled')    return { key: 'fulfilled',    label: 'Already fulfilled',                                                 color: 'green',  order: 4 };
     if (decision === 'insufficient') return { key: 'insufficient', label: 'Cannot fulfill',                                                    color: 'red',    order: 3 };
     // substitute — one bucket per substitute variant id
     const v = fulfillingVariant || {};
@@ -1100,7 +1100,12 @@ const TrimOrderDetailPage = () => {
                     <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
                         <div className="flex-1">
                             <div className="flex items-center gap-3 mb-3">
-                                <h1 className="text-2xl font-extrabold text-gray-900">Trim Order #{orderId}</h1>
+                                <h1 className="text-2xl font-extrabold text-gray-900">
+                                    Batch #{orderInfo?.batchId ?? '—'}
+                                    {orderInfo?.batch_code && (
+                                        <span className="ml-2 text-lg font-bold text-gray-500">({orderInfo.batch_code})</span>
+                                    )}
+                                </h1>
                                 {orderInfo?.status && (
                                     <span className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full border ${kitStatusOf(orderInfo.status).badge}`}>
                                         {kitStatusOf(orderInfo.status).label}
@@ -1111,11 +1116,8 @@ const TrimOrderDetailPage = () => {
                             {orderInfo && (
                                 <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-600 bg-gray-50 border border-gray-100 p-3 rounded-lg inline-flex">
                                     <div className="flex items-center">
-                                        <span className="font-bold text-gray-400 uppercase text-[10px] tracking-wider mr-2">Batch:</span> 
-                                        <span className="font-semibold text-gray-800">
-                                            #{orderInfo.batchId} 
-                                            {orderInfo.batch_code && <span className="ml-1 text-gray-500">({orderInfo.batch_code})</span>}
-                                        </span>
+                                        <span className="font-bold text-gray-400 uppercase text-[10px] tracking-wider mr-2">Trim Order:</span>
+                                        <span className="font-semibold text-gray-800">#{orderId}</span>
                                     </div>
                                 </div>
                             )}
@@ -1277,7 +1279,7 @@ const TrimOrderDetailPage = () => {
                                 )}
                                 {exactFulfillableItems.length > 0 && (
                                     <button onClick={handleFulfillAllExact} disabled={isFulfillingAll || isReverting}
-                                        className="px-3 py-1.5 bg-green-600 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-green-700 transition-colors flex items-center disabled:opacity-70">
+                                        className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-blue-700 transition-colors flex items-center disabled:opacity-70">
                                         {isFulfillingAll ? <Loader2 className="animate-spin h-3.5 w-3.5 mr-1"/> : <LuCircleCheck className="mr-1 h-3.5 w-3.5"/>}
                                         Auto-Fulfill {exactFulfillableItems.length} Exact
                                     </button>
@@ -1305,11 +1307,11 @@ const TrimOrderDetailPage = () => {
                                     </div>
                                     <div className="flex flex-wrap gap-1">
                                         {[
-                                            { key: 'all',          label: 'All',          color: 'gray'    },
-                                            { key: 'ready',        label: 'Ready',        color: 'green'   },
-                                            { key: 'sub',          label: 'Substitute',   color: 'purple'  },
-                                            { key: 'insufficient', label: 'Insufficient', color: 'red'     },
-                                            { key: 'fulfilled',    label: 'Fulfilled',    color: 'emerald' },
+                                            { key: 'all',          label: 'All',          color: 'gray'   },
+                                            { key: 'ready',        label: 'Ready',        color: 'blue'   },
+                                            { key: 'sub',          label: 'Substitute',   color: 'purple' },
+                                            { key: 'insufficient', label: 'Insufficient', color: 'red'    },
+                                            { key: 'fulfilled',    label: 'Fulfilled',    color: 'green'  },
                                         ].map(opt => {
                                             const active = statusFilter === opt.key;
                                             const cs = STATUS_STYLES[opt.color];
@@ -1340,17 +1342,18 @@ const TrimOrderDetailPage = () => {
                                                         {group.total}
                                                     </span>
                                                 </div>
+                                                {/* Legend: green = allocated (done) · blue = ready to allocate · purple = via substitute · red = missing/short */}
                                                 <div className="flex h-1.5 rounded-full overflow-hidden bg-gray-100 mb-1.5">
-                                                    {c.fulfilled    > 0 && <div className="bg-emerald-500" style={{ width: `${(c.fulfilled    / group.total) * 100}%` }} />}
-                                                    {c.exact        > 0 && <div className="bg-green-500"   style={{ width: `${(c.exact        / group.total) * 100}%` }} />}
+                                                    {c.fulfilled    > 0 && <div className="bg-green-500"   style={{ width: `${(c.fulfilled    / group.total) * 100}%` }} />}
+                                                    {c.exact        > 0 && <div className="bg-blue-500"    style={{ width: `${(c.exact        / group.total) * 100}%` }} />}
                                                     {c.substitute   > 0 && <div className="bg-purple-500"  style={{ width: `${(c.substitute   / group.total) * 100}%` }} />}
                                                     {c.insufficient > 0 && <div className="bg-red-500"     style={{ width: `${(c.insufficient / group.total) * 100}%` }} />}
                                                 </div>
                                                 <div className="flex flex-wrap gap-1.5 text-[10px] font-bold">
-                                                    {c.exact        > 0 && <span className="text-green-700">{c.exact} ready</span>}
+                                                    {c.exact        > 0 && <span className="text-blue-700">{c.exact} ready</span>}
                                                     {c.substitute   > 0 && <span className="text-purple-700">{c.substitute} sub</span>}
                                                     {c.insufficient > 0 && <span className="text-red-700">{c.insufficient} short</span>}
-                                                    {c.fulfilled    > 0 && <span className="text-emerald-700">{c.fulfilled} done</span>}
+                                                    {c.fulfilled    > 0 && <span className="text-green-700">{c.fulfilled} done</span>}
                                                 </div>
                                             </button>
                                         );
@@ -1580,7 +1583,7 @@ const TrimOrderDetailPage = () => {
                                                             {fulfillable.length > 0 && group.key !== 'fulfilled' && group.key !== 'insufficient' && (
                                                                 <button onClick={() => handleBulkFulfillGroup(group)}
                                                                     disabled={isBusy || isFulfillingAll || isReverting}
-                                                                    className={`flex items-center gap-1.5 text-xs font-bold text-white ${group.color === 'green' ? 'bg-green-600 hover:bg-green-700' : 'bg-purple-600 hover:bg-purple-700'} disabled:opacity-50 px-3 py-1.5 rounded-lg shadow-sm transition`}>
+                                                                    className={`flex items-center gap-1.5 text-xs font-bold text-white ${group.color === 'blue' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-purple-600 hover:bg-purple-700'} disabled:opacity-50 px-3 py-1.5 rounded-lg shadow-sm transition`}>
                                                                     {isBusy ? <Loader2 className="animate-spin h-3.5 w-3.5"/> : <LuPackage className="h-3.5 w-3.5"/>}
                                                                     Allocate {fulfillable.length}
                                                                 </button>
@@ -1615,8 +1618,8 @@ const TrimOrderDetailPage = () => {
                                                                             : overReserved
                                                                                 ? `Planned ${plan.quantity_to_fulfill} but only ${fulfillingNet} net after ${fulfillingRes} reserved`
                                                                                 : 'Click to override the planned variant'}
-                                                                        className={`group inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-bold transition ${isFulfilledRow ? 'bg-emerald-50 text-emerald-700 border-emerald-200 cursor-default' : 'bg-white text-gray-800 border-gray-200 hover:border-blue-300'} ${isOverridden ? 'ring-1 ring-amber-300' : ''} ${overReserved ? 'ring-1 ring-amber-400 bg-amber-50' : ''} ${isOpen ? 'ring-2 ring-blue-400' : ''}`}>
-                                                                        <span className={isFulfilledRow ? 'text-emerald-700' : 'text-gray-500'}>{item.color_name || 'AGNOSTIC'}</span>
+                                                                        className={`group inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-bold transition ${isFulfilledRow ? 'bg-green-50 text-green-700 border-green-200 cursor-default' : 'bg-white text-gray-800 border-gray-200 hover:border-blue-300'} ${isOverridden ? 'ring-1 ring-amber-300' : ''} ${overReserved ? 'ring-1 ring-amber-400 bg-amber-50' : ''} ${isOpen ? 'ring-2 ring-blue-400' : ''}`}>
+                                                                        <span className={isFulfilledRow ? 'text-green-700' : 'text-gray-500'}>{item.color_name || 'AGNOSTIC'}</span>
                                                                         <span className="text-[9px] text-gray-400 font-mono">{item.color_number}</span>
                                                                         <span className="text-gray-300">·</span>
                                                                         {isFulfilledRow ? (
@@ -1866,10 +1869,10 @@ const TrimOrderDetailPage = () => {
                             onClick={() => handlePickOverride(item, { __isExact: true })}
                             disabled={!exactAvail}
                             title={exactReserved > 0 ? `Raw ${exactStock} · ${exactReserved} reserved → ${exactEffective} net` : `Raw ${exactStock}`}
-                            className={`w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded text-[11px] hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed ${plan.decision === 'exact' ? 'bg-green-50' : ''}`}
+                            className={`w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded text-[11px] hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed ${plan.decision === 'exact' ? 'bg-blue-50' : ''}`}
                         >
                             <span className="flex items-center gap-1 min-w-0">
-                                <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-green-100 text-green-700">Exact</span>
+                                <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-blue-100 text-blue-700">Exact</span>
                                 <span className="font-bold text-gray-800 truncate">{item.color_name} {item.color_number}</span>
                                 {exactEffective < remaining && (
                                     <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-amber-100 text-amber-700">⚠ over</span>

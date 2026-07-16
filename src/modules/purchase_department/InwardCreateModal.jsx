@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
-    X, Loader2, AlertTriangle, Package, Scissors, Wrench, Tag, Trash2, Upload, FileText, Plus, Boxes,
+    X, Loader2, AlertTriangle, Package, Scissors, Wrench, Tag, Trash2, Upload, FileText, Plus, Boxes, ArrowLeft,
 } from 'lucide-react';
 import { trimsApi } from '../../api/trimsApi';
 import { sparesApi } from '../../api/sparesApi';
@@ -32,6 +32,8 @@ import {
  *   allInwards      — existing inwards on this PO, for pending-qty math
  *   initialSnapshot — restore previous form state (when coming back from review)
  *   onReview({ payload, snapshot })
+ *   onBack()        — optional; when given, a Back button returns to whatever
+ *                     screen opened this one instead of closing outright
  *   onClose()
  */
 export default function InwardCreateModal({
@@ -43,6 +45,7 @@ export default function InwardCreateModal({
     allInwards = [],
     initialSnapshot = null,
     onReview,
+    onBack,
     onClose,
 }) {
     const [busy, setBusy] = useState(false);
@@ -1182,9 +1185,15 @@ export default function InwardCreateModal({
                 </div>
 
                 {/* Footer */}
-                <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100">
+                <div className="flex items-center gap-2 px-5 py-4 border-t border-slate-100">
+                    {onBack && (
+                        <button onClick={onBack} disabled={busy}
+                            className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition disabled:opacity-40">
+                            <ArrowLeft size={12} /> Back
+                        </button>
+                    )}
                     <button onClick={onClose} disabled={busy}
-                        className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition disabled:opacity-40">
+                        className="ml-auto text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition disabled:opacity-40">
                         Cancel
                     </button>
                     <button onClick={handleReview} disabled={busy}

@@ -25,6 +25,29 @@ const TYPES = [
 
 const CONDITIONS = ['GOOD', 'DAMAGED', 'PARTIAL'];
 
+// Approval states a just-created inward can come back in. Keys and palette match
+// STATUS_CFG in InwardsPage, which is where the user lands next.
+const STATUS_CFG = {
+    PENDING_APPROVAL: {
+        label:  'Pending',
+        pill:   'bg-amber-100 text-amber-700 border-amber-200',
+        banner: 'bg-amber-50 border-amber-200 text-amber-800',
+        note:   'Pending purchase-manager approval — stock will be applied once approved.',
+    },
+    APPROVED: {
+        label:  'Approved',
+        pill:   'bg-emerald-100 text-emerald-700 border-emerald-200',
+        banner: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+        note:   'Approved — stock has been applied.',
+    },
+    REJECTED: {
+        label:  'Rejected',
+        pill:   'bg-rose-100 text-rose-700 border-rose-200',
+        banner: 'bg-rose-50 border-rose-200 text-rose-800',
+        note:   'Rejected — no stock was applied.',
+    },
+};
+
 // Variants from storeManagerApi.getVariantsByTrimItem use `variant_id` (NOT `id`) and carry
 // color_number/color_name/variant_size (see ExchangePanel / TrimBillingPage which read the
 // same endpoint). Build the label from those; fall back to any explicit name, then the id.
@@ -97,7 +120,10 @@ function RollRow({ roll, onChange, onRemove, removable }) {
 
 // ── Single line-item card ─────────────────────────────────────────────────────
 
-function LineCard({ line, index, fabricTypes, fabricColors, trimItems, variantsByTrim, spareParts, generalItems, onAddGeneralItem, onOpenBoxes, onChange, onRemove }) {
+// onPatch(patch) shallow-merges into this line; patch may be an updater fn of the
+// current line, which is what async callers must use — a captured `line` would be
+// stale by the time a request resolves. onReplace swaps the line wholesale.
+function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, generalItems, onAddGeneralItem, onOpenBoxes, onPatch, onReplace, onRemove }) {
     const qtyField = line.type === 'trim' ? 'qty' : line.type === 'spare' ? 'spare_qty' : 'other_qty';
     const hasBoxes = (line.boxes || []).length > 0;
     // Box-breakdown control for non-fabric lines (trim/spare/other) — mirrors the PO flow.
@@ -108,7 +134,7 @@ function LineCard({ line, index, fabricTypes, fabricColors, trimItems, variantsB
                     <span className="text-[11px] font-bold text-slate-700 tabular-nums">{sumTrimBoxes(line.boxes).toLocaleString('en-IN')} {line.uom || 'pcs'} via boxes</span>
                     <span className="text-[10px] text-slate-400 font-mono">{line.boxes.map(b => `${b.box_count}×${b.qty_per_box}`).join(' + ')}</span>
                     <button type="button" onClick={() => onOpenBoxes(line)} className="ml-auto text-[10px] font-bold text-violet-600 border border-violet-200 hover:bg-violet-50 px-1.5 py-0.5 rounded">Edit</button>
-                    <button type="button" onClick={() => onChange({ ...line, boxes: [], [qtyField]: sumTrimBoxes(line.boxes) > 0 ? String(sumTrimBoxes(line.boxes)) : '' })} className="text-[10px] text-slate-400 hover:text-red-500">Remove</button>
+                    <button type="button" onClick={() => onPatch(l => ({ boxes: [], [qtyField]: sumTrimBoxes(l.boxes) > 0 ? String(sumTrimBoxes(l.boxes)) : '' }))} className="text-[10px] text-slate-400 hover:text-red-500">Remove</button>
                 </div>
             ) : (
                 <button type="button" onClick={() => onOpenBoxes(line)} className="flex items-center gap-1 text-[10px] font-bold text-violet-600 border border-violet-200 hover:bg-violet-50 px-1.5 py-0.5 rounded transition">
@@ -119,28 +145,31 @@ function LineCard({ line, index, fabricTypes, fabricColors, trimItems, variantsB
     );
     const [variantsLoading, setVariantsLoading] = useState(false);
 
-    // Load variants when trim item changes
+    // Load variants when trim item changes. Patch functionally and ignore stale
+    // responses — the user may have edited the line (or switched trim item again)
+    // while this request was in flight.
+    const trimItemId = line.trim_item_id;
     useEffect(() => {
-        if (!line.trim_item_id) return;
+        if (!trimItemId) return;
+        let cancelled = false;
         setVariantsLoading(true);
-        storeManagerApi.getVariantsByTrimItem(line.trim_item_id)
+        storeManagerApi.getVariantsByTrimItem(trimItemId)
             .then(r => {
-                console.log('[inwardd] gggetVariantsByTrimItem raw:', r.data);
-                const variants = r.data?.data || r.data || [];
-                onChange({ ...line, _variants: variants, trim_item_variant_id: '' });
+                if (cancelled) return;
+                onPatch({ _variants: r.data?.data || r.data || [], trim_item_variant_id: '' });
             })
-            .catch(() => onChange({ ...line, _variants: [] }))
-            .finally(() => setVariantsLoading(false));
+            .catch(() => { if (!cancelled) onPatch({ _variants: [] }); })
+            .finally(() => { if (!cancelled) setVariantsLoading(false); });
+        return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [line.trim_item_id]);
+    }, [trimItemId]);
 
-    const set = (k, v) => onChange({ ...line, [k]: v });
+    const set = (k, v) => onPatch({ [k]: v });
 
-    const addRoll = () => onChange({ ...line, rolls: [...line.rolls, newRoll()] });
-    const setRoll = (i, r) => onChange({ ...line, rolls: line.rolls.map((x, j) => j === i ? r : x) });
-    const removeRoll = (i) => onChange({ ...line, rolls: line.rolls.filter((_, j) => j !== i) });
+    const addRoll = () => onPatch(l => ({ rolls: [...l.rolls, newRoll()] }));
+    const setRoll = (i, r) => onPatch(l => ({ rolls: l.rolls.map((x, j) => j === i ? r : x) }));
+    const removeRoll = (i) => onPatch(l => ({ rolls: l.rolls.filter((_, j) => j !== i) }));
 
-    const Icon = TYPES.find(t => t.key === line.type)?.icon || Tag;
     const rollTotal = sumRolls(line.rolls);
 
     return (
@@ -152,7 +181,7 @@ function LineCard({ line, index, fabricTypes, fabricColors, trimItems, variantsB
                         <button
                             key={key}
                             type="button"
-                            onClick={() => onChange({ ...emptyLine(key), _k: line._k })}
+                            onClick={() => onReplace({ ...emptyLine(key), _k: line._k })}
                             className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg border transition ${
                                 line.type === key
                                     ? 'bg-orange-500 text-white border-orange-500'
@@ -231,7 +260,7 @@ function LineCard({ line, index, fabricTypes, fabricColors, trimItems, variantsB
                             disabled={!line.trim_item_id || variantsLoading}
                             className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400 disabled:bg-slate-100">
                             <option value="">Select variant…</option>
-                            {(line._variants || variantsByTrim[line.trim_item_id] || []).map(v => (
+                            {(line._variants || []).map(v => (
                                 <option key={variantIdOf(v)} value={variantIdOf(v)}>{variantLabel(v)}</option>
                             ))}
                         </select>
@@ -437,6 +466,9 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
 
     const handleLoadPo = async () => {
         if (!selectedPo) return;
+        // Re-entering a PO we already loaded — keep the in-progress snapshot
+        // rather than refetching and wiping what was entered before Back.
+        if (poCtx?.po?.id === selectedPo.id) { setPoStep('create'); return; }
         setPoLoading(true); setErr(null);
         try {
             const [poRes, iwRes] = await Promise.all([
@@ -477,8 +509,7 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
     const handleSubmit = async () => {
         setErr(null);
         if (lines.length === 0) { setErr('Add at least one item.'); return; }
-        const hasFabric = lines.some(l => l.type === 'fabric');
-        if (hasFabric && !supplierId) { setErr('Supplier is required when receiving fabric.'); return; }
+        if (!supplierId) { setErr('Supplier is required.'); return; }
 
         const items = [];
         for (const l of lines) {
@@ -543,7 +574,7 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
             received_date: receivedDate,
             condition,
             notes:         notes || null,
-            supplier_id:   supplierId ? parseInt(supplierId) : null,
+            supplier_id:   parseInt(supplierId),
             items,
         };
 
@@ -576,7 +607,7 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
             setCreated({
                 id:            inward?.id ?? null,
                 grn:           inward?.grn_number ?? null,
-                status:        inward?.status ?? 'PENDING_APPROVAL',
+                status:        inward?.approval_status ?? 'PENDING_APPROVAL',
                 received_date: receivedDate,
                 condition,
                 supplier_name: suppliers.find(s => String(s.id) === String(supplierId))?.name || null,
@@ -591,8 +622,13 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
         }
     };
 
-    const updateLine = (idx, updated) =>
-        setLines(prev => prev.map((l, i) => i === idx ? updated : l));
+    // patch may be an object or an updater fn of the current line; both merge
+    // shallowly, so in-flight async work never clobbers unrelated edits.
+    const patchLine = (idx, patch) =>
+        setLines(prev => prev.map((l, i) =>
+            i === idx ? { ...l, ...(typeof patch === 'function' ? patch(l) : patch) } : l));
+    const replaceLine = (idx, next) =>
+        setLines(prev => prev.map((l, i) => i === idx ? next : l));
     const removeLine = (idx) =>
         setLines(prev => prev.filter((_, i) => i !== idx));
     const addLine = (type) =>
@@ -611,6 +647,7 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                 allInwards={poCtx.inwards}
                 initialSnapshot={poCtx.snapshot}
                 onClose={onClose}
+                onBack={() => setPoStep(null)}
                 onReview={({ payload, snapshot }) => {
                     setPoCtx(prev => ({ ...prev, payload, snapshot }));
                     setPoStep('review');
@@ -639,6 +676,10 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
 
     if (success && created) {
         const totalLines = created.lines.length;
+        const scfg = STATUS_CFG[created.status] || STATUS_CFG.PENDING_APPROVAL;
+        // The server assigns the GRN; fall back to the inward id, and if neither
+        // came back there is no number to shout about yet.
+        const grnText = created.grn || (created.id ? `#${created.id}` : null);
         return (
             <div className="fixed inset-0 z-50 bg-white flex flex-col">
                 {/* Header */}
@@ -649,7 +690,7 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                         </div>
                         <div>
                             <h2 className="font-extrabold text-slate-800 text-lg">Inward Recorded</h2>
-                            <p className="text-sm text-slate-500">GRN <span className="font-mono font-bold text-emerald-700">{created.grn || (created.id ? `#${created.id}` : '(auto — pending)')}</span></p>
+                            <p className="text-sm text-slate-500">Goods receipt saved</p>
                         </div>
                     </div>
                     <button onClick={() => { onCreated?.(); onClose(); }} className="p-2 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition"><X size={18} /></button>
@@ -657,12 +698,25 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
 
                 {/* Body */}
                 <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 max-w-3xl w-full mx-auto space-y-5">
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 font-medium">
-                        Pending purchase-manager approval — stock will be applied once approved.
+                    {/* GRN — the one number the user needs off this screen */}
+                    <div className="text-center py-2">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-2">Goods Receipt Note</p>
+                        {grnText ? (
+                            <p className="font-mono font-black text-emerald-700 text-4xl sm:text-6xl leading-none tracking-tight break-all">
+                                {grnText}
+                            </p>
+                        ) : (
+                            <p className="text-lg font-medium text-slate-400 italic">Auto-generating — pending</p>
+                        )}
+                    </div>
+
+                    <div className={`border rounded-xl px-4 py-3 text-sm font-medium ${scfg.banner}`}>
+                        {scfg.note}
                     </div>
 
                     {/* Meta pills */}
                     <div className="flex flex-wrap gap-2">
+                        <span className={`text-xs font-bold border rounded-lg px-3 py-1.5 ${scfg.pill}`}>{scfg.label}</span>
                         {created.id != null && <span className="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded-lg px-3 py-1.5">Inward #{created.id}</span>}
                         <span className="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded-lg px-3 py-1.5">Received {created.received_date}</span>
                         <span className="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded-lg px-3 py-1.5">Condition {created.condition}</span>
@@ -751,11 +805,11 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                         </div>
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-                                Supplier {lines.some(l => l.type === 'fabric') && <span className="text-red-500">*</span>}
+                                Supplier <span className="text-red-500">*</span>
                             </label>
                             <select value={supplierId} onChange={e => setSupplierId(e.target.value)}
                                 className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-orange-400">
-                                <option value="">No supplier</option>
+                                <option value="">Select supplier…</option>
                                 {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                             </select>
                         </div>
@@ -877,16 +931,15 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                             <LineCard
                                 key={line._k}
                                 line={line}
-                                index={idx}
                                 fabricTypes={fabricTypes}
                                 fabricColors={fabricColors}
                                 trimItems={trimItems}
-                                variantsByTrim={{}}
                                 spareParts={spareParts}
                                 generalItems={generalItems}
                                 onAddGeneralItem={(cb) => { setQuickCreateName(''); setQuickCreateCode(''); setQuickCreateErr(null); setQuickCreate(() => cb); }}
                                 onOpenBoxes={(ln) => setBoxModal({ idx, uom: ln.uom || 'pcs', initialBoxes: ln.boxes || [] })}
-                                onChange={updated => updateLine(idx, updated)}
+                                onPatch={patch => patchLine(idx, patch)}
+                                onReplace={next => replaceLine(idx, next)}
                                 onRemove={() => removeLine(idx)}
                             />
                         ))}
@@ -909,7 +962,7 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                         className="text-sm font-medium text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg hover:bg-slate-200 transition disabled:opacity-50">
                         Cancel
                     </button>
-                    <button onClick={handleSubmit} disabled={saving || lines.length === 0}
+                    <button onClick={handleSubmit} disabled={saving || lines.length === 0 || !supplierId}
                         className="flex items-center gap-2 text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 px-5 py-2 rounded-xl transition">
                         {saving ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
                         {saving ? 'Submitting…' : `Submit Inward (${lines.length} line${lines.length !== 1 ? 's' : ''})`}
@@ -972,7 +1025,7 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
             title="Box breakdown"
             uom={boxModal?.uom || 'pcs'}
             initialBoxes={boxModal?.initialBoxes || []}
-            onSave={(saved) => { if (boxModal) updateLine(boxModal.idx, { ...lines[boxModal.idx], boxes: saved }); setBoxModal(null); }}
+            onSave={(saved) => { if (boxModal) patchLine(boxModal.idx, { boxes: saved }); setBoxModal(null); }}
             onClose={() => setBoxModal(null)}
         />
         </>
