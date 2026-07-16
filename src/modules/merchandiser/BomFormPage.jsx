@@ -2,12 +2,23 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     Plus, FileText, Loader2, X, ChevronDown, ChevronRight,
-    AlertCircle, Scissors, ArrowLeft, Check, XCircle, Ruler,
+    AlertCircle, AlertTriangle, Scissors, ArrowLeft, Check, XCircle, Ruler,
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
 import { accountingApi } from '../../api/accountingApi';
 
 const genKey = () => `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+// Sizes are "standard" only if they exist in the /sizes master table. A loaded
+// BOM can carry a legacy free-text size that is no longer in the master — flag it.
+const normSize = (s) => String(s ?? '').trim().toUpperCase();
+const makeSizeValidator = (sizes) => {
+    const valid = new Set((sizes || []).map(s => normSize(s.name)).filter(Boolean));
+    return (size) => {
+        const n = normSize(size);
+        return !!n && valid.size > 0 && !valid.has(n);
+    };
+};
 
 const freshFabric = () => ({ _key: genKey(), fabric_type_id: '', consumption_inches: '' });
 
@@ -48,6 +59,8 @@ const AddBtn = ({ onClick, label }) => (
 const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, canRemove, fabricTypes, sizes }) => {
     const totalPieces = group.items.reduce((s, it) => s + (parseInt(it.number_of_pieces) || 0), 0);
     const sizeSummary = group.items.filter(it => it.size).map(it => `${it.size}×${it.number_of_pieces}`).join(' · ');
+    const isBadSize = useMemo(() => makeSizeValidator(sizes), [sizes]);
+    const hasBadSize = group.items.some(it => isBadSize(it.size));
 
     const updItems = (items) => onUpdate(gIdx, 'items', items);
     const addSize = (sizeName) => updItems([...group.items, { _key: genKey(), size: sizeName, number_of_pieces: 1 }]);
@@ -82,6 +95,12 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                     </span>
                     {!expanded && sizeSummary && (
                         <span className="text-xs text-slate-400">{sizeSummary}</span>
+                    )}
+                    {hasBadSize && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full shrink-0"
+                            title="Contains non-standard sizes not in the Sizes master">
+                            <AlertTriangle size={10} /> Non-standard size
+                        </span>
                     )}
                 </div>
                 {!expanded && group.marker_length_inches && (
@@ -138,17 +157,22 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                                     const usedNamesExceptThis = new Set(
                                         group.items.filter((_, i) => i !== sIdx).map(it => it.size)
                                     );
+                                    const bad = isBadSize(item.size);
                                     return (
                                         <tr key={item._key} className="border-b border-slate-50">
                                             <td className="py-1.5 pr-2">
-                                                <select value={item.size}
-                                                    onChange={e => updateSize(sIdx, 'size', e.target.value)}
-                                                    className="w-20 border border-slate-200 rounded px-2 py-1 text-xs outline-none bg-white text-center"
-                                                >
-                                                    {item.size && <option value={item.size}>{item.size}</option>}
-                                                    {sizes.filter(s => !usedNamesExceptThis.has(s.name) && s.name !== item.size)
-                                                        .map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                                                </select>
+                                                <div className="flex items-center gap-1">
+                                                    <select value={item.size}
+                                                        onChange={e => updateSize(sIdx, 'size', e.target.value)}
+                                                        title={bad ? 'Non-standard size — pick a size from the master list' : undefined}
+                                                        className={`w-20 border rounded px-2 py-1 text-xs outline-none bg-white text-center ${bad ? 'border-red-400 text-red-700 bg-red-50 font-bold' : 'border-slate-200'}`}
+                                                    >
+                                                        {item.size && <option value={item.size}>{item.size}</option>}
+                                                        {sizes.filter(s => !usedNamesExceptThis.has(s.name) && s.name !== item.size)
+                                                            .map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                                                    </select>
+                                                    {bad && <AlertTriangle size={12} className="text-red-500 shrink-0" title="Not in Sizes master" />}
+                                                </div>
                                             </td>
                                             <td className="py-1.5 text-right pr-3">
                                                 <input type="number" min="1" value={item.number_of_pieces}
@@ -428,16 +452,13 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
         const key = markerSizes.join(',');
         if (syncKeyRef.current === key) return;
         syncKeyRef.current = key;
+        // PER_SIZE quantities strictly follow the marker sizes (from the /sizes master).
+        // Off-marker rows are not allowed — sizes must come from a ratio group.
         const existingMap = Object.fromEntries(mc.size_consumptions.map(sc => [sc.size, sc]));
         const markerRows = markerSizes.map(s => existingMap[s] ?? { _key: genKey(), size: s, quantity: '', target_variant_size: '' });
-        const extraRows  = mc.size_consumptions.filter(sc =>
-            !markerSizes.includes(sc.size) && (sc.quantity || sc.target_variant_size)
-        );
-        onUpdate(mIdx, 'size_consumptions', [...markerRows, ...extraRows]);
+        onUpdate(mIdx, 'size_consumptions', markerRows);
     }, [mc.calculation_type, markerSizes]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const addSize = () => upd('size_consumptions', [...mc.size_consumptions, { _key: genKey(), size: '', quantity: '', target_variant_size: '' }]);
-    const removeSize = (sIdx) => upd('size_consumptions', mc.size_consumptions.filter((_, i) => i !== sIdx));
     const updateSize = (sIdx, field, val) => {
         const sc = [...mc.size_consumptions];
         sc[sIdx] = { ...sc[sIdx], [field]: val };
@@ -549,6 +570,11 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                             <p className="text-[10px] font-bold text-slate-400 uppercase mb-1.5">
                                 Qty Per Size{uom ? ` (${uom})` : ''}
                             </p>
+                            {markerSizes.length === 0 && (
+                                <p className="text-[10px] text-slate-400 italic mb-2">
+                                    No marker sizes yet — add sizes to a ratio group first. Per-size quantities follow the marker.
+                                </p>
+                            )}
                             {markerSizes.length > 0 && (() => {
                                 const missing = markerSizes.filter(s => {
                                     const row = mc.size_consumptions.find(sc => sc.size === s);
@@ -572,22 +598,13 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                                 </thead>
                                 <tbody>
                                     {mc.size_consumptions.map((sc, sIdx) => {
-                                        const isRequired = markerSizes.includes(sc.size);
-                                        const isEmpty    = sc.quantity === '' || sc.quantity == null;
+                                        const isEmpty = sc.quantity === '' || sc.quantity == null;
                                         return (
                                         <tr key={sc._key} className="border-b border-slate-50">
                                             <td className="py-1.5 pr-2">
-                                                {isRequired ? (
-                                                    <span className={`inline-flex items-center justify-center w-14 px-2 py-0.5 text-xs font-bold rounded border ${isEmpty ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
-                                                        {sc.size}
-                                                    </span>
-                                                ) : (
-                                                    <input type="text" value={sc.size}
-                                                        onChange={e => updateSize(sIdx, 'size', e.target.value)}
-                                                        placeholder="S"
-                                                        className="w-14 border border-slate-200 rounded px-2 py-0.5 text-xs outline-none text-center"
-                                                    />
-                                                )}
+                                                <span className={`inline-flex items-center justify-center w-14 px-2 py-0.5 text-xs font-bold rounded border ${isEmpty ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                                                    {sc.size}
+                                                </span>
                                             </td>
                                             <td className="py-1.5 px-2">
                                                 <select
@@ -605,26 +622,17 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                                                 <input type="number" min="0" step="0.0001" value={sc.quantity}
                                                     onChange={e => updateSize(sIdx, 'quantity', e.target.value)}
                                                     placeholder="6"
-                                                    className={`w-20 border rounded px-2 py-0.5 text-xs outline-none text-right ${isEmpty && isRequired ? 'border-amber-300 focus:ring-amber-300' : 'border-slate-200'}`}
+                                                    className={`w-20 border rounded px-2 py-0.5 text-xs outline-none text-right ${isEmpty ? 'border-amber-300 focus:ring-amber-300' : 'border-slate-200'}`}
                                                 />
                                             </td>
                                             <td className="py-1.5 text-center">
-                                                {isRequired ? (
-                                                    <span className="w-5 inline-block" title="Required by marker" />
-                                                ) : (
-                                                    <button onClick={() => removeSize(sIdx)} className="text-slate-300 hover:text-red-400">
-                                                        <X size={11} />
-                                                    </button>
-                                                )}
+                                                <span className="w-5 inline-block" title="Required by marker" />
                                             </td>
                                         </tr>
                                         );
                                     })}
                                 </tbody>
                             </table>
-                            <button onClick={addSize} className="text-[10px] font-bold text-violet-500 hover:text-violet-600 flex items-center gap-1">
-                                <Plus size={10} /> Add size
-                            </button>
                         </div>
                     )}
                 </div>
@@ -794,6 +802,12 @@ export default function BomFormPage() {
         return [...sizes];
     }, [form.ratio_groups]);
 
+    // Distinct sizes used in the form that are not in the /sizes master table.
+    const nonStandardSizes = useMemo(() => {
+        const isBad = makeSizeValidator(formMeta.sizes);
+        return markerSizes.filter(isBad);
+    }, [markerSizes, formMeta.sizes]);
+
     const handleSave = async () => {
         if (!form.product_id) { setErr('Please select a product.'); return; }
         if (!form.bom_name.trim()) { setErr('BOM name is required.'); return; }
@@ -895,6 +909,21 @@ export default function BomFormPage() {
                 {err && (
                     <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-600 text-sm font-medium">
                         <AlertCircle size={15} /> {err}
+                    </div>
+                )}
+
+                {nonStandardSizes.length > 0 && (
+                    <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                        <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-sm font-bold text-amber-700">
+                                {nonStandardSizes.length} non-standard size{nonStandardSizes.length > 1 ? 's' : ''} in this BOM
+                            </p>
+                            <p className="text-xs text-amber-700 mt-0.5">
+                                Not in the Sizes master — please replace with a standard size:{' '}
+                                <span className="font-bold">{nonStandardSizes.join(', ')}</span>. Manage the master list in Admin → Inventory → Manage Sizes.
+                            </p>
+                        </div>
                     </div>
                 )}
 

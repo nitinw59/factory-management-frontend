@@ -6,6 +6,7 @@ import {
     ChevronUp, Check, AlertTriangle, XCircle,
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
+import { accountingApi } from '../../api/accountingApi';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -36,23 +37,69 @@ const StatusBadge = ({ status }) => {
 
 // ─── BOM DETAIL MODAL ─────────────────────────────────────────────────────────
 
-const BomDetailModal = ({ bomId, onClose }) => {
+const normSize = (s) => String(s ?? '').trim().toUpperCase();
+
+const BomDetailModal = ({ bomId, onClose, onEdit }) => {
     const [bom, setBom] = useState(null);
+    const [sizes, setSizes] = useState([]);
     const [loading, setLoading] = useState(true);
     const [err, setErr] = useState(null);
+    const [q, setQ] = useState('');
 
     useEffect(() => {
-        bomApi.getById(bomId)
-            .then(res => {
-                const data = res.data?.data ?? res.data;
-                console.log('BOM detail response:', data);
-                setBom(data);
+        Promise.all([bomApi.getById(bomId), accountingApi.getSizes()])
+            .then(([bomRes, sizesRes]) => {
+                setBom(bomRes.data?.data ?? bomRes.data);
+                setSizes(sizesRes.data?.data ?? sizesRes.data ?? []);
             })
             .catch(e => setErr(e?.response?.data?.error || e.message || 'Failed to load'))
             .finally(() => setLoading(false));
-
-            
     }, [bomId]);
+
+    // Canonical sizes from the master table. Only flag once we actually have a
+    // non-empty set — a failed/empty load must not flag every size.
+    const validSizes = useMemo(
+        () => new Set((sizes || []).map(s => normSize(s.name)).filter(Boolean)),
+        [sizes]
+    );
+    const isFlagged = useCallback((size) => {
+        const n = normSize(size);
+        return !!n && validSizes.size > 0 && !validSizes.has(n);
+    }, [validSizes]);
+
+    // Distinct non-standard sizes used anywhere in this BOM.
+    const flaggedSizes = useMemo(() => {
+        if (!bom || validSizes.size === 0) return [];
+        const bad = new Set();
+        (bom.ratio_groups || []).forEach(rg =>
+            (rg.items || []).forEach(it => { if (isFlagged(it.size)) bad.add(String(it.size).trim()); })
+        );
+        (bom.material_consumptions || []).forEach(mc =>
+            (mc.size_consumptions || []).forEach(sc => {
+                if (isFlagged(sc.size)) bad.add(String(sc.size).trim());
+                if (isFlagged(sc.target_variant_size)) bad.add(String(sc.target_variant_size).trim());
+            })
+        );
+        return [...bad];
+    }, [bom, validSizes, isFlagged]);
+
+    // Search filters whole sections (ratio groups / material trims) by name or size.
+    const query = q.trim().toLowerCase();
+    const groupMatches = (rg) =>
+        !query ||
+        (rg.ratio_group_name || '').toLowerCase().includes(query) ||
+        (rg.items || []).some(it => String(it.size ?? '').toLowerCase().includes(query));
+    const materialMatches = (mc) =>
+        !query ||
+        (mc.trim_item_name || '').toLowerCase().includes(query) ||
+        (mc.item_code || '').toLowerCase().includes(query) ||
+        (mc.size_consumptions || []).some(sc =>
+            String(sc.size ?? '').toLowerCase().includes(query) ||
+            String(sc.target_variant_size ?? '').toLowerCase().includes(query)
+        );
+    const visibleGroups    = (bom?.ratio_groups || []).filter(groupMatches);
+    const visibleMaterials = (bom?.material_consumptions || []).filter(materialMatches);
+    const noSearchResults  = !!query && visibleGroups.length === 0 && visibleMaterials.length === 0;
 
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -68,6 +115,47 @@ const BomDetailModal = ({ bomId, onClose }) => {
                     {err && <p className="text-red-500 text-sm">{err}</p>}
                     {bom && (
                         <div className="space-y-5">
+                            {/* Search */}
+                            <div className="relative">
+                                <Search className="absolute left-3 top-2.5 text-slate-400 w-4 h-4" />
+                                <input
+                                    type="text"
+                                    value={q}
+                                    onChange={e => setQ(e.target.value)}
+                                    placeholder="Search groups, trims, or sizes…"
+                                    className="w-full pl-9 pr-9 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-violet-400 outline-none"
+                                />
+                                {q && (
+                                    <button onClick={() => setQ('')} className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600" title="Clear">
+                                        <X size={16} />
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Non-standard sizes banner */}
+                            {flaggedSizes.length > 0 && (
+                                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                                    <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-[9px] font-bold text-amber-600 uppercase tracking-wider mb-0.5">
+                                            {flaggedSizes.length} non-standard size{flaggedSizes.length > 1 ? 's' : ''} found
+                                        </p>
+                                        <p className="text-xs text-amber-700">
+                                            Not in the Sizes master — please correct:{' '}
+                                            <span className="font-bold">{flaggedSizes.join(', ')}</span>
+                                        </p>
+                                    </div>
+                                    {onEdit && (
+                                        <button
+                                            onClick={() => onEdit(bom.id)}
+                                            className="shrink-0 flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-100 hover:bg-amber-200 px-2.5 py-1.5 rounded-lg transition-colors"
+                                        >
+                                            <Edit2 size={11} /> Edit BOM
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Rejection banner */}
                             {bom.status === 'REJECTED' && (bom.rejection?.notes || bom.rejection_notes) && (
                                 <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
@@ -103,15 +191,15 @@ const BomDetailModal = ({ bomId, onClose }) => {
                             </div>
 
                             {/* Ratio Groups */}
-                            {(bom.ratio_groups || []).length > 0 && (
+                            {visibleGroups.length > 0 && (
                                 <div>
                                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Ratio Groups</p>
                                     <div className="space-y-3">
-                                        {bom.ratio_groups.map((rg, i) => (
+                                        {visibleGroups.map((rg, i) => (
                                             <div key={i} className="border border-slate-200 rounded-xl overflow-hidden">
                                                 <div className="flex items-center justify-between bg-slate-50 px-4 py-2.5">
                                                     <p className="font-bold text-slate-700 text-sm">
-                                                        {rg.ratio_group_name || `Group ${i + 1}`}
+                                                        {rg.ratio_group_name || `Group ${bom.ratio_groups.indexOf(rg) + 1}`}
                                                     </p>
                                                     <div className="flex items-center gap-3">
                                                         {rg.total_pieces_in_marker > 0 && (
@@ -125,11 +213,19 @@ const BomDetailModal = ({ bomId, onClose }) => {
                                                     </div>
                                                 </div>
                                                 <div className="flex flex-wrap gap-1.5 p-3">
-                                                    {(rg.items || []).filter(it => it.size).map((it, j) => (
-                                                        <span key={j} className="bg-violet-50 text-violet-700 border border-violet-100 rounded-lg px-2.5 py-1 text-xs font-bold">
-                                                            {it.size}: {it.number_of_pieces} pcs
-                                                        </span>
-                                                    ))}
+                                                    {(rg.items || []).filter(it => it.size).map((it, j) => {
+                                                        const bad = isFlagged(it.size);
+                                                        return (
+                                                            <span
+                                                                key={j}
+                                                                title={bad ? 'Non-standard size — not in Sizes master' : undefined}
+                                                                className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold border ${bad ? 'bg-red-50 text-red-700 border-red-300' : 'bg-violet-50 text-violet-700 border-violet-100'}`}
+                                                            >
+                                                                {bad && <AlertTriangle size={11} />}
+                                                                {it.size}: {it.number_of_pieces} pcs
+                                                            </span>
+                                                        );
+                                                    })}
                                                 </div>
                                                 {(rg.fabric_consumptions || []).length > 0 && (
                                                     <div className="border-t border-slate-100 px-3 py-2">
@@ -153,11 +249,11 @@ const BomDetailModal = ({ bomId, onClose }) => {
                             )}
 
                             {/* Material / Trim Consumptions */}
-                            {(bom.material_consumptions || []).length > 0 && (
+                            {visibleMaterials.length > 0 && (
                                 <div>
                                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Material / Trim Consumptions</p>
                                     <div className="space-y-2">
-                                        {bom.material_consumptions.map((mc, i) => (
+                                        {visibleMaterials.map((mc, i) => (
                                             <div key={i} className="border border-slate-200 rounded-xl p-3">
                                                 <div className="flex items-start justify-between gap-2 mb-1.5">
                                                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -194,24 +290,39 @@ const BomDetailModal = ({ bomId, onClose }) => {
                                                     </p>
                                                 ) : (
                                                     <div className="space-y-1">
-                                                        {(mc.size_consumptions || []).map((sc, j) => (
-                                                            <div key={j} className="flex items-center gap-2">
-                                                                <span className="bg-violet-50 text-violet-700 border border-violet-100 rounded px-2 py-0.5 text-[10px] font-bold min-w-[52px] text-center">
-                                                                    {sc.size || '—'}: {sc.quantity}{mc.unit_of_measure ? ` ${mc.unit_of_measure}` : ''}
-                                                                </span>
-                                                                {sc.target_variant_size && (
-                                                                    <span className="text-[10px] text-slate-400 font-medium">
-                                                                        → sz <span className="font-bold text-slate-600">{sc.target_variant_size}</span>
+                                                        {(mc.size_consumptions || []).map((sc, j) => {
+                                                            const badSize = isFlagged(sc.size);
+                                                            const badTarget = isFlagged(sc.target_variant_size);
+                                                            return (
+                                                                <div key={j} className="flex items-center gap-2">
+                                                                    <span
+                                                                        title={badSize ? 'Non-standard size — not in Sizes master' : undefined}
+                                                                        className={`inline-flex items-center justify-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold min-w-[52px] text-center border ${badSize ? 'bg-red-50 text-red-700 border-red-300' : 'bg-violet-50 text-violet-700 border-violet-100'}`}
+                                                                    >
+                                                                        {badSize && <AlertTriangle size={10} />}
+                                                                        {sc.size || '—'}: {sc.quantity}{mc.unit_of_measure ? ` ${mc.unit_of_measure}` : ''}
                                                                     </span>
-                                                                )}
-                                                            </div>
-                                                        ))}
+                                                                    {sc.target_variant_size && (
+                                                                        <span className={`text-[10px] font-medium inline-flex items-center gap-1 ${badTarget ? 'text-red-600' : 'text-slate-400'}`}>
+                                                                            {badTarget && <AlertTriangle size={10} />}
+                                                                            → sz <span className={`font-bold ${badTarget ? 'text-red-700' : 'text-slate-600'}`}>{sc.target_variant_size}</span>
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
                                                     </div>
                                                 )}
                                             </div>
                                         ))}
                                     </div>
                                 </div>
+                            )}
+
+                            {noSearchResults && (
+                                <p className="text-center text-sm text-slate-400 py-6">
+                                    No groups or trims match “{q.trim()}”.
+                                </p>
                             )}
                         </div>
                     )}
@@ -510,7 +621,11 @@ export default function BomDashboardPage() {
             </div>
 
             {viewBomId && (
-                <BomDetailModal bomId={viewBomId} onClose={() => setViewBomId(null)} />
+                <BomDetailModal
+                    bomId={viewBomId}
+                    onClose={() => setViewBomId(null)}
+                    onEdit={(id) => { setViewBomId(null); navigate(`/merchandiser/bom/${id}/edit`); }}
+                />
             )}
             {confirmAction && (
                 <ConfirmDialog

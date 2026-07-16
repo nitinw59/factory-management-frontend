@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, Plus, Trash2, Loader2, AlertCircle, Check,
-    Ruler, X, ChevronDown,
+    Ruler, X,
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
+import { accountingApi } from '../../api/accountingApi';
 
 // ─── constants ─────────────────────────────────────────────────────────────────
 
@@ -17,18 +18,32 @@ const STEP_OPTIONS = [
     { label: '1',  value: 1.0 },
 ];
 
+// Fallback ordering for sizes not present in the /sizes master (legacy chart data).
 const SIZE_ORDER = ['XXXS','XXS','XS','S','M','L','XL','XXL','XXXL','3XL','4XL','5XL','6XL'];
 
-const sortSizes = (sizes) => [...new Set(sizes)].sort((a, b) => {
+const fallbackCompare = (a, b) => {
     const na = parseFloat(a), nb = parseFloat(b);
     if (!isNaN(na) && !isNaN(nb)) return na - nb;
-    const ia = SIZE_ORDER.findIndex(s => s === a.toUpperCase());
-    const ib = SIZE_ORDER.findIndex(s => s === b.toUpperCase());
+    const ia = SIZE_ORDER.indexOf(a.toUpperCase());
+    const ib = SIZE_ORDER.indexOf(b.toUpperCase());
     if (ia !== -1 && ib !== -1) return ia - ib;
     if (ia !== -1) return -1;
     if (ib !== -1) return 1;
     return a.localeCompare(b);
-});
+};
+
+// Sort sizes by the master's display_order; master sizes always sort ahead of
+// any legacy off-master sizes, which fall back to the heuristic above.
+const makeSortSizes = (masterSizes) => {
+    const orderMap = new Map(masterSizes.map((s, i) => [s.name, s.display_order ?? (1000 + i)]));
+    return (sizes) => [...new Set(sizes)].sort((a, b) => {
+        const ma = orderMap.has(a), mb = orderMap.has(b);
+        if (ma && mb) return orderMap.get(a) - orderMap.get(b);
+        if (ma) return -1;
+        if (mb) return 1;
+        return fallbackCompare(a, b);
+    });
+};
 
 const FRACS = { 1:'⅛', 2:'¼', 3:'⅜', 4:'½', 5:'⅝', 6:'¾', 7:'⅞' };
 
@@ -96,24 +111,24 @@ export default function GarmentMeasurementChartPage() {
     const [bomName,     setBomName]     = useState('');
     const [markerSizes, setMarkerSizes] = useState([]);
     const [customSizes, setCustomSizes] = useState([]);
+    const [masterSizes, setMasterSizes] = useState([]);
     const [chart,       setChart]       = useState(null);
     const [step,        setStep]        = useState(0.25);
     const [loading,     setLoading]     = useState(true);
     const [saving,      setSaving]      = useState(false);
     const [err,         setErr]         = useState(null);
     const [toast,       setToast]       = useState(null);
-    const [newSizeVal,  setNewSizeVal]  = useState('');
-    const [addingSize,  setAddingSize]  = useState(false);
-    const addSizeRef = useRef(null);
 
     // ── load ──
     useEffect(() => {
         Promise.all([
             bomApi.getById(bomId),
             bomApi.getMeasurementChart(bomId).catch(() => ({ data: null })),
-        ]).then(([bomRes, chartRes]) => {
+            accountingApi.getSizes().catch(() => ({ data: [] })),
+        ]).then(([bomRes, chartRes, sizesRes]) => {
             const bom = bomRes.data?.data ?? bomRes.data;
             setBomName(bom?.bom_name || '');
+            setMasterSizes(sizesRes?.data?.data ?? sizesRes?.data ?? []);
 
             const mSizes = new Set();
             (bom?.ratio_groups || []).forEach(rg =>
@@ -148,15 +163,19 @@ export default function GarmentMeasurementChartPage() {
           .finally(() => setLoading(false));
     }, [bomId]);
 
-    useEffect(() => {
-        if (addingSize && addSizeRef.current) addSizeRef.current.focus();
-    }, [addingSize]);
-
     // ── computed sizes ──
+    const sortSizes = useMemo(() => makeSortSizes(masterSizes), [masterSizes]);
+
     const allSizes = useMemo(
         () => sortSizes([...markerSizes, ...customSizes]),
-        [markerSizes, customSizes]
+        [sortSizes, markerSizes, customSizes]
     );
+
+    // Master sizes not already shown — offered in the "+ Size" column dropdown.
+    const addableSizes = useMemo(() => {
+        const present = new Set(allSizes.map(s => s.toLowerCase()));
+        return masterSizes.filter(s => !present.has(s.name.toLowerCase()));
+    }, [masterSizes, allSizes]);
 
     const orderedCols = useMemo(() => {
         if (!chart?.base_size) return allSizes;
@@ -186,13 +205,11 @@ export default function GarmentMeasurementChartPage() {
             return { ...c, points: pts };
         });
 
-    // ── custom size handlers ──
-    const commitAddSize = () => {
-        const s = newSizeVal.trim();
-        if (s && !allSizes.map(x => x.toLowerCase()).includes(s.toLowerCase())) {
-            setCustomSizes(prev => [...prev, s]);
+    // ── size column handlers ──
+    const addSizeFromMaster = (name) => {
+        if (name && !allSizes.map(x => x.toLowerCase()).includes(name.toLowerCase())) {
+            setCustomSizes(prev => [...prev, name]);
         }
-        setNewSizeVal(''); setAddingSize(false);
     };
 
     const removeCustomSize = (size) => {
@@ -378,38 +395,28 @@ export default function GarmentMeasurementChartPage() {
                                                 </button>
                                             )}
                                             {!isMarker && isBase && (
-                                                <span className="text-[8px] text-violet-400">custom</span>
+                                                <span className="text-[8px] text-violet-400">non-marker</span>
                                             )}
                                         </div>
                                     </th>
                                 );
                             })}
 
-                            {/* add size column */}
+                            {/* add size column — master sizes only */}
                             <th style={{ minWidth: 72 }}
                                 className="border-b-2 border-slate-200 bg-slate-50 text-center px-2 py-2">
-                                {addingSize ? (
-                                    <div className="flex items-center gap-0.5 justify-center">
-                                        <input
-                                            ref={addSizeRef}
-                                            value={newSizeVal}
-                                            onChange={e => setNewSizeVal(e.target.value)}
-                                            onKeyDown={e => { if (e.key === 'Enter') commitAddSize(); if (e.key === 'Escape') { setAddingSize(false); setNewSizeVal(''); } }}
-                                            placeholder="40"
-                                            className="w-10 border border-violet-300 rounded px-1 py-0.5 text-xs font-bold outline-none text-center focus:ring-1 focus:ring-violet-400"
-                                        />
-                                        <button onClick={commitAddSize} className="text-emerald-600 hover:text-emerald-700">
-                                            <Check size={11} />
-                                        </button>
-                                        <button onClick={() => { setAddingSize(false); setNewSizeVal(''); }} className="text-slate-400 hover:text-slate-600">
-                                            <X size={11} />
-                                        </button>
-                                    </div>
+                                {addableSizes.length > 0 ? (
+                                    <select
+                                        value=""
+                                        onChange={e => { if (e.target.value) addSizeFromMaster(e.target.value); }}
+                                        title="Add a size column from the size master"
+                                        className="text-[10px] font-bold text-violet-500 border border-dashed border-violet-300 rounded px-1.5 py-1 bg-white hover:border-violet-500 hover:text-violet-700 cursor-pointer outline-none transition"
+                                    >
+                                        <option value="">+ Size</option>
+                                        {addableSizes.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                                    </select>
                                 ) : (
-                                    <button onClick={() => setAddingSize(true)}
-                                        className="flex items-center gap-0.5 text-[10px] font-bold text-violet-500 hover:text-violet-700 transition-colors mx-auto">
-                                        <Plus size={10} /> Size
-                                    </button>
+                                    <span className="text-[9px] text-slate-300 font-medium" title="All master sizes added">All sizes</span>
                                 )}
                             </th>
 

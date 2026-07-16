@@ -237,6 +237,116 @@ export default function InwardReviewModal({
         });
     }, [payload, reqIdToPoGroup, poItems, fabricTypes, fabricColors, variantsByTrim, trimItems]);
 
+    // ── Consolidated received-breakdown views ───────────────────────────────
+    // A GRN is a physical receipt, so alongside the per-line list we show two
+    // roll-ups: every fabric roll grouped by fabric type + colour, and every
+    // boxed line's box breakdown. These read off `summary`, so they reflect
+    // exactly what will be posted.
+
+    // Merge roll fragments of the same physical bale back together (FCFS
+    // distribution may split one bale across requirements) for a clean bale list.
+    const mergeRolls = (rolls) => {
+        const byBale = new Map();
+        const anon = [];
+        (rolls || []).forEach(r => {
+            const meter = parseFloat(r.meter) || 0;
+            if (meter <= 0) return;
+            const uom  = r.uom || 'm';
+            const bale = (r.bale_no || '').trim();
+            if (!bale) { anon.push({ bale_no: '', meter, uom }); return; }
+            const k = `${bale}||${uom}`;
+            if (byBale.has(k)) byBale.get(k).meter += meter;
+            else byBale.set(k, { bale_no: bale, meter, uom });
+        });
+        return [...byBale.values(), ...anon];
+    };
+
+    const fabricRollGroups = useMemo(() => {
+        const m = new Map();
+        summary.forEach(row => {
+            if (row.isTrim || !row.rolls || row.rolls.length === 0) return;
+            const key = `${row.name}||${row.details}`;
+            if (!m.has(key)) m.set(key, { key, name: row.name, details: row.details, unit: row.unit || 'm', rolls: [] });
+            m.get(key).rolls.push(...row.rolls);
+        });
+        return [...m.values()].map(g => {
+            const rolls = mergeRolls(g.rolls);
+            return { ...g, rolls, totalMeters: rolls.reduce((s, r) => s + r.meter, 0) };
+        });
+    }, [summary]);
+
+    const boxedRows = useMemo(
+        () => summary.filter(row => row.boxes && row.boxes.length > 0),
+        [summary]
+    );
+
+    const breakdownPanel = (fabricRollGroups.length > 0 || boxedRows.length > 0) && (
+        <div className="space-y-2">
+            {fabricRollGroups.length > 0 && (
+                <div className="bg-violet-50/40 border border-violet-200 rounded-xl p-3">
+                    <p className="text-[10px] font-bold text-violet-700 uppercase tracking-wider mb-2">Rolls received · by fabric</p>
+                    <div className="space-y-2.5">
+                        {fabricRollGroups.map(g => (
+                            <div key={g.key}>
+                                <div className="flex items-center justify-between gap-2">
+                                    <p className="text-xs font-bold text-slate-800 truncate">
+                                        {g.name}{g.details && <span className="font-normal text-slate-500"> · {g.details}</span>}
+                                    </p>
+                                    <p className="text-[11px] font-bold text-violet-700 tabular-nums shrink-0">
+                                        {g.totalMeters.toLocaleString(undefined, { maximumFractionDigits: 2 })} m · {g.rolls.length} roll{g.rolls.length !== 1 ? 's' : ''}
+                                    </p>
+                                </div>
+                                <ul className="mt-1 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5">
+                                    {g.rolls.map((r, i) => (
+                                        <li key={i} className="flex items-center justify-between gap-2 text-[10px] font-mono text-slate-500">
+                                            <span className="truncate">{r.bale_no || '—'}</span>
+                                            <span className="tabular-nums shrink-0">{r.meter.toLocaleString(undefined, { maximumFractionDigits: 2 })} {r.uom}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+            {boxedRows.length > 0 && (
+                <div className="bg-amber-50/40 border border-amber-200 rounded-xl p-3">
+                    <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-2">Box breakdown</p>
+                    <div className="space-y-2.5">
+                        {boxedRows.map(row => {
+                            const totalBoxes = row.boxes.reduce((s, b) => s + (parseFloat(b.box_count) || 0), 0);
+                            const totalQty   = row.boxes.reduce((s, b) => s + (parseFloat(b.box_count) || 0) * (parseFloat(b.qty_per_box) || 0), 0);
+                            return (
+                                <div key={row.key}>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <p className="text-xs font-bold text-slate-800 truncate">
+                                            {row.name}{row.details && <span className="font-normal text-slate-500"> · {row.details}</span>}
+                                        </p>
+                                        <p className="text-[11px] font-bold text-amber-700 tabular-nums shrink-0">
+                                            {totalQty.toLocaleString(undefined, { maximumFractionDigits: 2 })} {row.unit} · {totalBoxes} box{totalBoxes !== 1 ? 'es' : ''}
+                                        </p>
+                                    </div>
+                                    <ul className="mt-1 space-y-0.5">
+                                        {row.boxes.map((b, i) => {
+                                            const bc = parseFloat(b.box_count) || 0;
+                                            const qpb = parseFloat(b.qty_per_box) || 0;
+                                            return (
+                                                <li key={i} className="flex items-center justify-between gap-2 text-[10px] text-slate-500">
+                                                    <span className="font-mono">{bc.toLocaleString()} box{bc !== 1 ? 'es' : ''} × {qpb.toLocaleString(undefined, { maximumFractionDigits: 2 })} {row.unit}</span>
+                                                    <span className="tabular-nums shrink-0 font-bold text-slate-600">{(bc * qpb).toLocaleString(undefined, { maximumFractionDigits: 2 })} {row.unit}</span>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+
     // Build the final items array: split each PO-item-linked entry into per-PR
     // entries when the user has allocated qty to specific requirements, leaving
     // any remainder as a PO-item entry.
@@ -287,6 +397,14 @@ export default function InwardReviewModal({
                 notes:         payload.notes || undefined,
                 items:         outgoing,
             };
+            // eslint-disable-next-line no-console
+            console.log('[Inward] payload → BE', {
+                mode: isCreate ? 'create' : 'update',
+                poId, inwardId: inward?.id ?? null,
+                scanFile: payload.scanFile?.name ?? null,
+                body,
+                items: JSON.parse(JSON.stringify(outgoing)),
+            });
             const res = isCreate
                 ? await purchaseDeptApi.createInward(poId, body, payload.scanFile)
                 : await purchaseDeptApi.updateInward(inward.id, body, payload.scanFile);
@@ -426,6 +544,8 @@ export default function InwardReviewModal({
                             );
                         })}
                     </div>
+
+                    {breakdownPanel}
 
                     {payload?.notes && (
                         <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
@@ -606,6 +726,8 @@ export default function InwardReviewModal({
                             );
                         })}
                     </div>
+
+                    {breakdownPanel}
 
                     {payload?.notes && (
                         <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">

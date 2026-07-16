@@ -74,6 +74,35 @@ export const mapRolls = (rolls) => (rolls || [])
         uom:     r.uom || 'meter',
     }));
 
+// Distribute physical fabric rolls across ordered targets (requirements or PO
+// items) in FCFS order, capped by each target's pending qty. A roll that
+// straddles a cap boundary is split into fragments that keep the same
+// bale_no/uom, so every received metre stays tied to a real bale instead of
+// being collapsed into one anonymous total. The final target absorbs any
+// over-receipt (its cap is treated as unbounded) so no metres are ever dropped
+// — approval downstream catches the excess. Targets are [{ id, cap }]; returns
+// { [id]: [{ _k, bale_no, meter, uom }] } with only the non-empty buckets.
+export const distributeRolls = (rolls, targets) => {
+    const out = {};
+    const queue = mapRolls(rolls).map(r => ({ ...r })); // { bale_no:string|null, meter:number, uom }
+    let qi = 0;
+    (targets || []).forEach((t, idx) => {
+        const isLast = idx === targets.length - 1;
+        let cap = isLast ? Infinity : Math.max(0, t.cap || 0);
+        const bucket = [];
+        while (qi < queue.length && cap > 1e-6) {
+            const roll = queue[qi];
+            const take = Math.min(roll.meter, cap);
+            bucket.push({ _k: rk(), bale_no: roll.bale_no ?? '', meter: String(take), uom: roll.uom || 'meter' });
+            roll.meter -= take;
+            cap -= take;
+            if (roll.meter <= 1e-6) qi += 1;
+        }
+        if (bucket.length > 0) out[t.id] = bucket;
+    });
+    return out;
+};
+
 // ── Box helpers (trim) ───────────────────────────────────────────────────────
 // Trim items are received in boxes: N boxes × Q per box = total qty.
 export const newTrimBox = (init = {}) => ({

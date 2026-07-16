@@ -14,6 +14,7 @@ import {
     reqTotal, reqUnit, reqLabel,
     newRoll, sumRolls, rk,
     sumTrimBoxes,
+    distributeRolls,
     pendingByReqMap, pendingByPoItemMap,
     buildItemsFromState, labelFromGroup,
 } from './inwardShared';
@@ -409,27 +410,15 @@ export default function InwardCreateModal({
             const reqs = (group.requirements || []).filter(r => !removedReqIds.has(r.id));
             if (reqs.length === 0) return;
             if (group.item_type === 'fabric') {
+                // Spread the actual rolls (with their bale numbers) across the
+                // group's requirements — splitting a bale only when it straddles
+                // a pending-qty boundary — so roll-level detail reaches the BE.
                 const rolls = fabricRollsByGroup[group.id] || [];
-                const totalMeters = sumRolls(rolls);
-                const rollUom = rolls.find(r => r.uom)?.uom || 'meter';
-                let remaining = totalMeters;
+                const dist = distributeRolls(rolls, reqs.map(r => ({ id: r.id, cap: pendingByReq[r.id] || 0 })));
                 reqs.forEach(r => {
-                    const cap = pendingByReq[r.id] || 0;
-                    const allocated = Math.min(remaining, cap);
-                    if (allocated > 0.001) {
-                        distFabricByReq[r.id] = [{ _k: rk(), bale_no: '', meter: String(allocated), uom: rollUom }];
-                    } else {
-                        delete distFabricByReq[r.id];
-                    }
-                    remaining = Math.max(0, remaining - allocated);
+                    if (dist[r.id]) distFabricByReq[r.id] = dist[r.id];
+                    else delete distFabricByReq[r.id];
                 });
-                // Over-receipt: record the excess on the last requirement (approval catches it) — never drop it.
-                if (remaining > 0.001 && reqs.length > 0) {
-                    const last = reqs[reqs.length - 1];
-                    const ex = distFabricByReq[last.id];
-                    if (ex && ex[0]) ex[0] = { ...ex[0], meter: String((parseFloat(ex[0].meter) || 0) + remaining) };
-                    else distFabricByReq[last.id] = [{ _k: rk(), bale_no: '', meter: String(remaining), uom: rollUom }];
-                }
             } else {
                 const total = parseFloat(trimTotalByGroup[group.id] || 0);
                 let remaining = total;
@@ -464,26 +453,14 @@ export default function InwardCreateModal({
             const activeItems = items.filter(g => !removedPoItemIds.has(g.id));
             if (activeItems.length === 0) return;
             if (isFabric) {
+                // Same roll-preserving distribution for free-form fabric merged
+                // by variant across its PO-item lines.
                 const rolls = freeFormFabricRollsByVar[key] || [];
-                const totalMeters = sumRolls(rolls);
-                const rollUom = rolls.find(r => r.uom)?.uom || 'meter';
-                let remaining = totalMeters;
+                const dist = distributeRolls(rolls, activeItems.map(g => ({ id: g.id, cap: pendingByPoItem[g.id] || 0 })));
                 activeItems.forEach(g => {
-                    const cap = pendingByPoItem[g.id] || 0;
-                    const allocated = Math.min(remaining, cap);
-                    if (allocated > 0.001) {
-                        distFreeFormFabricRolls[g.id] = [{ _k: rk(), bale_no: '', meter: String(allocated), uom: rollUom }];
-                    } else {
-                        delete distFreeFormFabricRolls[g.id];
-                    }
-                    remaining = Math.max(0, remaining - allocated);
+                    if (dist[g.id]) distFreeFormFabricRolls[g.id] = dist[g.id];
+                    else delete distFreeFormFabricRolls[g.id];
                 });
-                if (remaining > 0.001 && activeItems.length > 0) {
-                    const last = activeItems[activeItems.length - 1];
-                    const ex = distFreeFormFabricRolls[last.id];
-                    if (ex && ex[0]) ex[0] = { ...ex[0], meter: String((parseFloat(ex[0].meter) || 0) + remaining) };
-                    else distFreeFormFabricRolls[last.id] = [{ _k: rk(), bale_no: '', meter: String(remaining), uom: rollUom }];
-                }
             } else {
                 const total = parseFloat(freeFormTrimTotalsByVar[key] || 0);
                 let remaining = total;

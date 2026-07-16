@@ -9,4 +9,6 @@ export const generalItemsApi = {
     getLedger:      (params) => api.get('/general-items/ledger', { params }),
     createIssue:    (data)   => api.post('/general-items/issues', data),
     getIssues:      (params) => api.get('/general-items/issues', { params }),
+    exportInventory:     ()     => api.get('/general-items/export'),
+    bulkUpdateInventory: (data) => api.post('/general-items/bulk-update', data),
 };

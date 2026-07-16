@@ -543,6 +543,7 @@ const TrimOrderDetailPage = () => {
     const [fulfillErr, setFulfillErr] = useState(null);
     const [refModalOpen, setRefModalOpen] = useState(false);
     const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
+    const [productModalOpen, setProductModalOpen] = useState(false);
 
     // Toast
     const [toast, setToast] = useState(null);
@@ -697,7 +698,16 @@ const TrimOrderDetailPage = () => {
                 status: response.data.status,
                 batchId: response.data.production_batch_id,
                 batch_code: response.data.batch_code,
+                batch_index: response.data.batch_index ?? null,
                 sopId: response.data.sales_order_product_id ?? null,
+                salesOrderNumber: response.data.sales_order_number ?? null,
+                purchaseOrderCode: response.data.purchase_order_code ?? null,
+                productId: response.data.product_id ?? null,
+                productName: response.data.product_name ?? null,
+                productBrand: response.data.product_brand ?? null,
+                productType: response.data.product_type ?? null,
+                sizeBreakdown: response.data.size_breakdown ?? null,
+                productionReadiness: response.data.production_readiness ?? null,
             });
         } catch (err) {
             setError('Could not load order details.');
@@ -1148,11 +1158,14 @@ const TrimOrderDetailPage = () => {
                 <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
                     <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
                         <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-3">
+                            <div className="flex items-center gap-3 mb-1">
                                 <h1 className="text-2xl font-extrabold text-gray-900">
                                     Batch #{orderInfo?.batchId ?? '—'}
                                     {orderInfo?.batch_code && (
                                         <span className="ml-2 text-lg font-bold text-gray-500">({orderInfo.batch_code})</span>
+                                    )}
+                                    {orderInfo?.batch_index != null && (
+                                        <span className="ml-2 text-sm font-bold text-gray-400">#{orderInfo.batch_index}</span>
                                     )}
                                 </h1>
                                 {orderInfo?.status && (
@@ -1161,7 +1174,20 @@ const TrimOrderDetailPage = () => {
                                     </span>
                                 )}
                             </div>
-                            
+
+                            {orderInfo?.productName && (
+                                <button
+                                    type="button"
+                                    onClick={() => setProductModalOpen(true)}
+                                    className="group flex items-center gap-2 mb-3 text-left"
+                                    title="View product details"
+                                >
+                                    <LuPackage className="h-4 w-4 text-indigo-500 shrink-0" />
+                                    <span className="text-base font-bold text-gray-800 group-hover:text-indigo-700 group-hover:underline transition-colors">{orderInfo.productName}</span>
+                                    <Info className="h-3.5 w-3.5 text-gray-400 group-hover:text-indigo-500 transition-colors" />
+                                </button>
+                            )}
+
                             {orderInfo && (
                                 <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-600 bg-gray-50 border border-gray-100 p-3 rounded-lg inline-flex">
                                     <div className="flex items-center">
@@ -1756,6 +1782,88 @@ const TrimOrderDetailPage = () => {
 
             <ReferenceDataModal isOpen={refModalOpen} onClose={() => setRefModalOpen(false)} orderId={orderId} />
             <BarcodePrintModal isOpen={barcodeModalOpen} onClose={() => setBarcodeModalOpen(false)} batchId={orderInfo?.batchId} />
+
+            {/* Product detail popup — opened from the product name in the header */}
+            {productModalOpen && orderInfo && createPortal(
+                <div className="fixed inset-0 bg-gray-900/50 flex items-center justify-center p-4 z-[600]" onMouseDown={(e) => { if (e.target === e.currentTarget) setProductModalOpen(false); }}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
+                        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-indigo-100 rounded-lg"><LuPackage className="w-5 h-5 text-indigo-600" /></div>
+                                <div>
+                                    <h2 className="text-lg font-extrabold text-gray-900">{orderInfo.productName || 'Product'}</h2>
+                                    <p className="text-xs text-gray-500 font-medium">Product details for this batch</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setProductModalOpen(false)} className="text-gray-400 hover:text-gray-600"><LuX className="w-5 h-5" /></button>
+                        </div>
+
+                        <div className="px-6 py-4 overflow-y-auto flex-1 space-y-4">
+                            <div className="flex flex-wrap gap-2">
+                                {orderInfo.productBrand && (
+                                    <span className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full">{orderInfo.productBrand}</span>
+                                )}
+                                {orderInfo.productType && (
+                                    <span className="text-xs font-medium text-gray-600 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-full">{orderInfo.productType}</span>
+                                )}
+                                {orderInfo.productionReadiness && (
+                                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${orderInfo.productionReadiness === 'READY' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                                        {orderInfo.productionReadiness}
+                                    </span>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                                {orderInfo.salesOrderNumber && (
+                                    <div>
+                                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Sales Order</p>
+                                        <p className="font-semibold text-gray-800">{orderInfo.salesOrderNumber}</p>
+                                    </div>
+                                )}
+                                {orderInfo.purchaseOrderCode && (
+                                    <div>
+                                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Purchase Order</p>
+                                        <p className="font-semibold text-gray-800">{orderInfo.purchaseOrderCode}</p>
+                                    </div>
+                                )}
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Batch</p>
+                                    <p className="font-semibold text-gray-800">#{orderInfo.batchId}{orderInfo.batch_code ? ` (${orderInfo.batch_code})` : ''}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Trim Order</p>
+                                    <p className="font-semibold text-gray-800">#{orderId}</p>
+                                </div>
+                            </div>
+
+                            {orderInfo.sizeBreakdown && Object.keys(orderInfo.sizeBreakdown).length > 0 && (() => {
+                                const entries = Object.entries(orderInfo.sizeBreakdown);
+                                const totalPcs = entries.reduce((s, [, q]) => s + (Number(q) || 0), 0);
+                                return (
+                                    <div>
+                                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
+                                            Size breakdown · {totalPcs.toLocaleString('en-IN')} pcs
+                                        </p>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {entries.map(([size, qty]) => (
+                                                <span key={size} className="inline-flex items-baseline gap-1 bg-white border border-gray-200 rounded-md px-2 py-1">
+                                                    <span className="text-xs font-bold text-gray-700">{size}</span>
+                                                    <span className="text-xs font-mono text-indigo-600 tabular-nums">{(Number(qty) || 0).toLocaleString('en-IN')}</span>
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+                        </div>
+
+                        <div className="px-6 py-4 border-t border-gray-100 flex justify-end shrink-0">
+                            <button onClick={() => setProductModalOpen(false)} className="px-5 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-bold text-sm hover:bg-gray-200 transition-colors">Close</button>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
 
             {/* Mark-ready review — confirm exactly what will go to the loader before locking the kit */}
             {markReadyOpen && createPortal(

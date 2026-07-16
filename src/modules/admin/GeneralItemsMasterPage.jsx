@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
     Package, Search, Plus, AlertTriangle, Loader2, CheckCircle2,
     ArrowUpRight, Tags, Pencil, Ban, RotateCcw,
+    FileSpreadsheet, Upload, Check,
 } from 'lucide-react';
 import { generalItemsApi } from '../../api/generalItemsApi';
 import { CreateEditModal } from '../store_manager/GeneralItemsPage';
@@ -10,6 +11,74 @@ import { CreateEditModal } from '../store_manager/GeneralItemsPage';
 const money = (v) => {
     const n = parseFloat(v);
     return Number.isFinite(n) ? `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—';
+};
+
+// ─── CSV helpers (mirror TrimManagementPage export/import) ────────────────────
+const downloadAsExcel = (data, fileName = 'general_items.csv') => {
+    if (!data || !data.length) return alert('No data available to export.');
+    const headers = Object.keys(data[0]);
+    const csvContent = [
+        headers.join(','),
+        ...data.map(row =>
+            headers.map(fieldName => {
+                const val = row[fieldName] === null || row[fieldName] === undefined ? '' : row[fieldName].toString();
+                return `"${val.replace(/"/g, '""')}"`;
+            }).join(',')
+        ),
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', fileName);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+};
+
+// Robust CSV parser that handles commas/quotes inside a cell.
+const parseCSVRow = (str) => {
+    const result = [];
+    let cur = '';
+    let inQuote = false;
+    for (let i = 0; i < str.length; i++) {
+        if (inQuote) {
+            if (str[i] === '"') {
+                if (i < str.length - 1 && str[i + 1] === '"') { cur += '"'; i++; }
+                else { inQuote = false; }
+            } else { cur += str[i]; }
+        } else {
+            if (str[i] === '"') { inQuote = true; }
+            else if (str[i] === ',') { result.push(cur); cur = ''; }
+            else { cur += str[i]; }
+        }
+    }
+    result.push(cur);
+    return result;
+};
+
+const parseCSV = (csvText) => {
+    const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
+    if (lines.length < 2) return [];
+    const headers = parseCSVRow(lines[0]).map(h => h.trim());
+    return lines.slice(1).map(line => {
+        const values = parseCSVRow(line);
+        return headers.reduce((obj, header, index) => {
+            obj[header] = values[index];
+            return obj;
+        }, {});
+    });
+};
+
+// Cell is "present" when it has a non-empty value — empty cells leave the field alone.
+const has = (v) => v !== undefined && v !== null && String(v).trim() !== '';
+const parseBool = (v) => {
+    const s = String(v).trim().toLowerCase();
+    return ['true', 'yes', '1', 'active', 'y'].includes(s);
 };
 
 function Toast({ toast }) {
@@ -92,6 +161,10 @@ export default function GeneralItemsMasterPage() {
     const [modal,      setModal]      = useState(null);  // null | 'create' | 'edit'
     const [selected,   setSelected]   = useState(null);
     const [togglingId, setTogglingId] = useState(null);
+    const [isExporting,   setIsExporting]   = useState(false);
+    const [isImporting,   setIsImporting]   = useState(false);
+    const [importPreview, setImportPreview] = useState(null); // { updates, fileName, totalRows } | null
+    const fileInputRef = useRef(null);
 
     useEffect(() => {
         if (!toast) return;
@@ -154,6 +227,85 @@ export default function GeneralItemsMasterPage() {
         setToast({ kind: 'success', message: 'Item saved.' });
     };
 
+    // ─── Export / Import ─────────────────────────────────────────────────────
+    const handleExport = async () => {
+        setIsExporting(true);
+        try {
+            const res = await generalItemsApi.exportInventory();
+            const rows = res.data?.data ?? res.data ?? [];
+            const date = new Date().toISOString().split('T')[0];
+            downloadAsExcel(rows, `General_Items_Export_${date}.csv`);
+            setToast({ kind: 'success', message: 'Inventory exported.' });
+        } catch (e) {
+            setToast({ kind: 'error', message: e?.response?.data?.error || 'Export failed.' });
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const handleImportClick = () => fileInputRef.current?.click();
+
+    const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setIsImporting(true);
+        const reader = new FileReader();
+
+        reader.onload = (event) => {
+            try {
+                const parsed = parseCSV(event.target.result);
+                if (parsed.length === 0) throw new Error('The CSV file is empty or invalid.');
+                if (!('ID' in parsed[0])) throw new Error("The CSV must contain an 'ID' column. Download the template via Export first.");
+
+                // Map human-readable columns back to the bulk-update payload.
+                // Only non-empty cells become fields — omit a column → left alone.
+                const updates = parsed.map(row => {
+                    const u = { id: parseInt(row['ID'], 10) };
+                    if (has(row['Name']))                 u.name = row['Name'].trim();
+                    if (has(row['Item Code']))            u.item_code = row['Item Code'].trim();
+                    if (has(row['Category ID']))          u.category_id = parseInt(row['Category ID'], 10);
+                    if (has(row['UOM']))                  u.uom = row['UOM'].trim();
+                    if (has(row['Unit Cost']))            u.unit_cost = parseFloat(row['Unit Cost']);
+                    if (has(row['Low Stock Alert Limit'])) u.low_stock_threshold = parseFloat(row['Low Stock Alert Limit']);
+                    if (has(row['Active']))               u.is_active = parseBool(row['Active']);
+                    if (has(row['Current Stock']))        u.stock = parseFloat(row['Current Stock']);
+                    return u;
+                }).filter(u => !isNaN(u.id));
+
+                if (updates.length === 0) throw new Error('No valid item IDs found to update.');
+
+                // Stage as a preview — the user reviews and clicks Apply.
+                setImportPreview({ updates, fileName: file.name, totalRows: parsed.length });
+                setToast({ kind: 'success', message: `Parsed ${updates.length} row${updates.length === 1 ? '' : 's'}. Review and apply.` });
+            } catch (err) {
+                setToast({ kind: 'error', message: `Import failed: ${err.message}` });
+            } finally {
+                setIsImporting(false);
+                e.target.value = null;
+            }
+        };
+        reader.onerror = () => {
+            setToast({ kind: 'error', message: 'Failed to read the file.' });
+            setIsImporting(false);
+        };
+        reader.readAsText(file);
+    };
+
+    const applyImportPreview = async () => {
+        if (!importPreview?.updates?.length) return;
+        setIsImporting(true);
+        try {
+            const res = await generalItemsApi.bulkUpdateInventory({ updates: importPreview.updates });
+            setToast({ kind: 'success', message: res.data?.message || `Applied ${importPreview.updates.length} update(s).` });
+            setImportPreview(null);
+            load();
+        } catch (e) {
+            setToast({ kind: 'error', message: `Import failed: ${e?.response?.data?.error || e.message}` });
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
     return (
         <div className="max-w-6xl mx-auto space-y-5">
             <div className="flex flex-wrap items-end justify-between gap-3">
@@ -166,13 +318,40 @@ export default function GeneralItemsMasterPage() {
                         Manage the item master: create, edit, categorize, and deactivate. Stock itself only moves via purchase inwards and issue slips.
                     </p>
                 </div>
-                <Link
-                    to="/store-manager/general-items"
-                    title="Opens Store Manager portal"
-                    className="flex items-center gap-1 text-xs font-bold text-slate-600 border border-slate-200 bg-white hover:bg-slate-50 px-3 py-2 rounded-xl transition"
-                >
-                    Store view — stock, ledger & issues <ArrowUpRight size={12} className="opacity-60" />
-                </Link>
+                <div className="flex flex-wrap items-center gap-2">
+                    <input
+                        type="file"
+                        accept=".csv"
+                        ref={fileInputRef}
+                        onChange={handleFileUpload}
+                        className="hidden"
+                    />
+                    <button
+                        onClick={handleImportClick}
+                        disabled={isImporting}
+                        title="Bulk-update items from a CSV (rows matched by ID)"
+                        className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 px-3 py-2 rounded-xl transition disabled:opacity-50"
+                    >
+                        {isImporting ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                        {isImporting ? 'Importing…' : 'Import CSV'}
+                    </button>
+                    <button
+                        onClick={handleExport}
+                        disabled={isExporting}
+                        title="Export the item master to CSV"
+                        className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-2 rounded-xl transition disabled:opacity-50"
+                    >
+                        {isExporting ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />}
+                        {isExporting ? 'Exporting…' : 'Export'}
+                    </button>
+                    <Link
+                        to="/store-manager/general-items"
+                        title="Opens Store Manager portal"
+                        className="flex items-center gap-1 text-xs font-bold text-slate-600 border border-slate-200 bg-white hover:bg-slate-50 px-3 py-2 rounded-xl transition"
+                    >
+                        Store view — stock, ledger & issues <ArrowUpRight size={12} className="opacity-60" />
+                    </Link>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-5 items-start">
@@ -280,6 +459,67 @@ export default function GeneralItemsMasterPage() {
                     onSaved={handleSaved}
                     onClose={() => { setModal(null); setSelected(null); }}
                 />
+            )}
+
+            {importPreview && (
+                <div className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center p-4" onClick={() => !isImporting && setImportPreview(null)}>
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="px-5 py-4 border-b border-slate-100">
+                            <h2 className="text-base font-bold text-slate-800">Review Import</h2>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                                <span className="font-mono">{importPreview.fileName}</span> · parsed {importPreview.totalRows} row{importPreview.totalRows === 1 ? '' : 's'} · <span className="font-bold text-indigo-600">{importPreview.updates.length}</span> valid update{importPreview.updates.length === 1 ? '' : 's'}. Empty cells are left unchanged; a changed stock value is recorded as a ledger correction.
+                            </p>
+                        </div>
+                        <div className="flex-1 overflow-auto px-5 py-3">
+                            <table className="w-full text-xs">
+                                <thead className="text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-white border-b border-slate-100">
+                                    <tr>
+                                        <th className="text-left py-2 pr-3">ID</th>
+                                        <th className="text-left py-2 pr-3">Name</th>
+                                        <th className="text-left py-2 pr-3">Code</th>
+                                        <th className="text-right py-2 pr-3">Cat ID</th>
+                                        <th className="text-left py-2 pr-3">UOM</th>
+                                        <th className="text-right py-2 pr-3">Unit Cost</th>
+                                        <th className="text-right py-2 pr-3">Threshold</th>
+                                        <th className="text-right py-2 pr-3">Stock</th>
+                                        <th className="text-center py-2">Active</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {importPreview.updates.slice(0, 100).map((u, i) => {
+                                        const dash = <span className="text-slate-300">—</span>;
+                                        return (
+                                            <tr key={i} className="hover:bg-slate-50">
+                                                <td className="py-1.5 pr-3 font-mono">{u.id}</td>
+                                                <td className="py-1.5 pr-3">{u.name ?? dash}</td>
+                                                <td className="py-1.5 pr-3 font-mono">{u.item_code ?? dash}</td>
+                                                <td className="py-1.5 pr-3 text-right tabular-nums">{u.category_id ?? dash}</td>
+                                                <td className="py-1.5 pr-3">{u.uom ?? dash}</td>
+                                                <td className="py-1.5 pr-3 text-right tabular-nums">{u.unit_cost != null ? Number(u.unit_cost).toFixed(2) : dash}</td>
+                                                <td className="py-1.5 pr-3 text-right tabular-nums">{u.low_stock_threshold ?? dash}</td>
+                                                <td className="py-1.5 pr-3 text-right tabular-nums font-bold">{u.stock ?? dash}</td>
+                                                <td className="py-1.5 text-center">{u.is_active == null ? dash : u.is_active ? 'Yes' : 'No'}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                            {importPreview.updates.length > 100 && (
+                                <p className="text-[10px] text-slate-400 italic text-center py-2">
+                                    Showing first 100 rows. {importPreview.updates.length - 100} more will be applied.
+                                </p>
+                            )}
+                        </div>
+                        <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
+                            <button onClick={() => setImportPreview(null)} disabled={isImporting} className="px-4 py-2 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition disabled:opacity-40">Cancel</button>
+                            <button onClick={applyImportPreview} disabled={isImporting}
+                                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 rounded-xl transition shadow-sm">
+                                {isImporting ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                                Apply {importPreview.updates.length} update{importPreview.updates.length === 1 ? '' : 's'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             <Toast toast={toast} />
