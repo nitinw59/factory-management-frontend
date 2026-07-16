@@ -238,19 +238,54 @@ const ReferenceDataModal = ({ isOpen, onClose, orderId }) => {
                                     <thead className="bg-gray-100 text-xs uppercase text-gray-600 font-bold sticky top-0">
                                         <tr>
                                             <th className="py-3 px-5 border-b">Material Name</th>
-                                            <th className="py-3 px-5 border-b text-center">Req. Qty / Pc</th>
-                                            <th className="py-3 px-5 border-b">Notes</th>
+                                            <th className="py-3 px-5 border-b text-center">Type</th>
+                                            <th className="py-3 px-5 border-b">Req. Qty / Pc</th>
+                                            <th className="py-3 px-5 border-b text-center">Wastage</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-200 bg-white">
-                                        {data.bom.length > 0 ? data.bom.map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-gray-50">
-                                                <td className="py-3 px-5 font-semibold text-gray-800">{item.item_name}</td>
-                                                <td className="py-3 px-5 text-center font-mono font-bold text-indigo-600 bg-indigo-50/30">{parseFloat(item.quantity_per_piece).toFixed(4)}</td>
-                                                <td className="py-3 px-5 text-sm text-gray-500 italic">{item.notes || '-'}</td>
-                                            </tr>
-                                        )) : (
-                                            <tr><td colSpan="3" className="py-10 text-center text-gray-400">No BOM data found for this product.</td></tr>
+                                        {data.bom.length > 0 ? data.bom.map((item, idx) => {
+                                            const isPerSize = item.calculation_type === 'PER_SIZE';
+                                            const qty       = parseFloat(item.quantity_per_piece);
+                                            const waste     = parseFloat(item.wastage_percentage);
+                                            return (
+                                                <tr key={item.trim_item_id ?? idx} className="hover:bg-gray-50 align-top">
+                                                    <td className="py-3 px-5">
+                                                        <span className="font-semibold text-gray-800">{(item.item_name || '').trim() || '—'}</span>
+                                                        {item.is_color_agnostic && (
+                                                            <span className="ml-2 text-[10px] font-medium text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded-full border border-purple-100">Generic</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="py-3 px-5 text-center">
+                                                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${isPerSize ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                                                            {isPerSize ? 'Per size' : 'Fixed'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-3 px-5">
+                                                        {isPerSize ? (
+                                                            (item.size_consumptions || []).length > 0 ? (
+                                                                <div className="flex flex-wrap gap-1">
+                                                                    {item.size_consumptions.map(sc => (
+                                                                        <span key={sc.size} className="inline-flex items-baseline gap-1 bg-blue-50/60 border border-blue-100 rounded px-1.5 py-0.5 text-[11px]">
+                                                                            <span className="font-bold text-gray-700">{sc.size}</span>
+                                                                            <span className="font-mono text-blue-700">{Number(sc.quantity).toFixed(2)}</span>
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-xs text-amber-600 italic">Per-size, but no sizes defined</span>
+                                                            )
+                                                        ) : (
+                                                            <span className="font-mono font-bold text-indigo-600">{Number.isFinite(qty) ? qty.toFixed(4) : '—'}</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="py-3 px-5 text-center text-sm font-medium text-gray-500">
+                                                        {Number.isFinite(waste) && waste > 0 ? `+${waste}%` : '—'}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        }) : (
+                                            <tr><td colSpan="4" className="py-10 text-center text-gray-400">No BOM data found for this product.</td></tr>
                                         )}
                                     </tbody>
                                 </table>
@@ -560,6 +595,20 @@ const TrimOrderDetailPage = () => {
             const res = await storeManagerApi.getOrderReferenceData(orderId);
             const refRaw = res.data || { bom: [], cutting: [] };
             console.log('[TrimOrderDetail] refData loaded:', refRaw);
+            console.log('[TrimOrderDetail] raw BOM fetched —', (refRaw.bom || []).length, 'row(s):', refRaw.bom);
+            console.log('[TrimOrderDetail] raw BOM JSON:', JSON.stringify(refRaw.bom ?? [], null, 2));
+            console.log('[TrimOrderDetail] raw CUTTING fetched —', (refRaw.cutting || []).length, 'row(s):', refRaw.cutting);
+            console.log('[TrimOrderDetail] raw CUTTING JSON:', JSON.stringify(refRaw.cutting ?? [], null, 2));
+            // The `sizes` string is what PER_SIZE BOM derivation matches against — log the raw
+            // strings and the tokens they parse into, so a size-format mismatch is obvious.
+            console.log('[TrimOrderDetail] cutting `sizes` strings:', (refRaw.cutting || []).map(c => c.sizes));
+            const dbgSizeMap = {};
+            (refRaw.cutting || []).forEach(c => (c.sizes || '').split(',').forEach(part => {
+                const [sz, qty] = part.trim().split(':').map(s => s.trim());
+                if (sz && qty) dbgSizeMap[sz] = (dbgSizeMap[sz] || 0) + Number(qty);
+            }));
+            console.log('[TrimOrderDetail] cutting sizes parsed → qty by size:', dbgSizeMap);
+            console.log('[TrimOrderDetail] distinct cutting size tokens:', Object.keys(dbgSizeMap));
             setRefData(refRaw);
         } catch (err) {
             console.error('[TrimOrderDetail] refData fetch failed:', err?.response?.data || err.message);
@@ -1397,7 +1446,9 @@ const TrimOrderDetailPage = () => {
                                                 const wastage    = bomEntry ? parseFloat(bomEntry.wastage_percentage || 0) : 0;
                                                 const wasteFactor = 1 + wastage / 100;
                                                 const calcType   = bomEntry?.calculation_type || 'FIXED';
-                                                const qtyPerPc   = bomEntry ? parseFloat(bomEntry.quantity_per_piece) : null;
+                                                // quantity_per_piece is null on PER_SIZE rows — parseFloat gives NaN, which passes `!= null`.
+                                                const qtyPerPcRaw = bomEntry ? parseFloat(bomEntry.quantity_per_piece) : NaN;
+                                                const qtyPerPc    = Number.isFinite(qtyPerPcRaw) ? qtyPerPcRaw : null;
 
                                                 // Parse "28: 5, 30: 5, ..." per cutting roll, aggregate by size
                                                 const sizeCutMap = {};
