@@ -1,14 +1,79 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Package, Search, Plus, AlertTriangle,
-    Filter, ShoppingCart, X, Loader2, Truck, CheckCircle2,
+    Filter, X, Loader2, CheckCircle2,
+    FileSpreadsheet, Upload, Check,
 } from 'lucide-react';
 
 import { sparesApi } from '../../api/sparesApi';
 import { sparesErrorMessage } from '../../utils/sparesErrors';
 import { useAuth } from '../../context/AuthContext';
-import SpareInwardModal from './SpareInwardModal';
+
+// ─── CSV helpers (mirror GeneralItemsMasterPage export/import) ────────────────
+const downloadAsExcel = (data, fileName = 'spares.csv') => {
+    if (!data || !data.length) return alert('No data available to export.');
+    const headers = Object.keys(data[0]);
+    const csvContent = [
+        headers.join(','),
+        ...data.map(row =>
+            headers.map(fieldName => {
+                const val = row[fieldName] === null || row[fieldName] === undefined ? '' : row[fieldName].toString();
+                return `"${val.replace(/"/g, '""')}"`;
+            }).join(',')
+        ),
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', fileName);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+};
+
+// Robust CSV parser that handles commas/quotes inside a cell.
+const parseCSVRow = (str) => {
+    const result = [];
+    let cur = '';
+    let inQuote = false;
+    for (let i = 0; i < str.length; i++) {
+        if (inQuote) {
+            if (str[i] === '"') {
+                if (i < str.length - 1 && str[i + 1] === '"') { cur += '"'; i++; }
+                else { inQuote = false; }
+            } else { cur += str[i]; }
+        } else {
+            if (str[i] === '"') { inQuote = true; }
+            else if (str[i] === ',') { result.push(cur); cur = ''; }
+            else { cur += str[i]; }
+        }
+    }
+    result.push(cur);
+    return result;
+};
+
+const parseCSV = (csvText) => {
+    const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
+    if (lines.length < 2) return [];
+    const headers = parseCSVRow(lines[0]).map(h => h.trim());
+    return lines.slice(1).map(line => {
+        const values = parseCSVRow(line);
+        return headers.reduce((obj, header, index) => {
+            obj[header] = values[index];
+            return obj;
+        }, {});
+    });
+};
+
+// Cell is "present" when it has a non-empty value — empty cells leave the field alone.
+const has = (v) => v !== undefined && v !== null && String(v).trim() !== '';
+
 // --- SHARED COMPONENTS ---
 const Spinner = () => <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-indigo-600" /></div>;
 
@@ -93,8 +158,8 @@ const CreatePartForm = ({ categories, onSave, onCancel }) => {
 // --- MAIN PAGE COMPONENT ---
 const SparePartsPage = () => {
     const { user } = useAuth();
-    const isStoreManager = user?.role === 'store_manager';
     const isAdmin = user?.role === 'factory_admin';
+    const isStoreManager = user?.role === 'store_manager';
 
     const [spares, setSpares] = useState([]);
     const [categories, setCategories] = useState([]);
@@ -103,8 +168,13 @@ const SparePartsPage = () => {
     const [filterCategory, setFilterCategory] = useState('');
 
     // Modal States
-    const [activeModal, setActiveModal] = useState(null); // 'create' | 'inward'
-    const [selectedPart, setSelectedPart] = useState(null);
+    const [activeModal, setActiveModal] = useState(null); // 'create'
+
+    // Export / Import
+    const [isExporting, setIsExporting] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
+    const [importPreview, setImportPreview] = useState(null); // { updates, fileName, totalRows } | null
+    const fileInputRef = useRef(null);
 
     // Toast
     const [toast, setToast] = useState(null); // { kind: 'success' | 'error', message }
@@ -144,11 +214,82 @@ const SparePartsPage = () => {
         }
     };
 
-    const handleInwardSuccess = (payload) => {
-        setActiveModal(null);
-        setSelectedPart(null);
-        setToast({ kind: 'success', message: `Stock received${payload?.id ? ` (#${payload.id})` : ''}` });
-        fetchData();
+    // --- Export / Import ---
+    const handleExport = async () => {
+        setIsExporting(true);
+        try {
+            const res = await sparesApi.exportInventory();
+            const rows = res.data?.data ?? res.data ?? [];
+            const date = new Date().toISOString().split('T')[0];
+            downloadAsExcel(rows, `Spares_Export_${date}.csv`);
+            setToast({ kind: 'success', message: 'Inventory exported.' });
+        } catch (e) {
+            setToast({ kind: 'error', message: e?.response?.data?.error || 'Export failed.' });
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const handleImportClick = () => fileInputRef.current?.click();
+
+    const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setIsImporting(true);
+        const reader = new FileReader();
+
+        reader.onload = (event) => {
+            try {
+                const parsed = parseCSV(event.target.result);
+                if (parsed.length === 0) throw new Error('The CSV file is empty or invalid.');
+                if (!('ID' in parsed[0])) throw new Error("The CSV must contain an 'ID' column. Download the template via Export first.");
+
+                // Map human-readable columns back to the bulk-update payload. Only
+                // non-empty cells become fields — omit a column → left alone. Master
+                // fields only: Current Stock / Est. Value / Category are ignored.
+                const updates = parsed.map(row => {
+                    const u = { id: parseInt(row['ID'], 10) };
+                    if (has(row['Name']))                u.name = row['Name'].trim();
+                    if (has(row['Part Number']))         u.part_number = row['Part Number'].trim();
+                    if (has(row['Category ID']))         u.category_id = parseInt(row['Category ID'], 10);
+                    if (has(row['Location']))            u.location = row['Location'].trim();
+                    if (has(row['Unit Cost']))           u.unit_cost = parseFloat(row['Unit Cost']);
+                    if (has(row['Min Stock Threshold'])) u.min_stock_threshold = parseFloat(row['Min Stock Threshold']);
+                    return u;
+                }).filter(u => !isNaN(u.id));
+
+                if (updates.length === 0) throw new Error('No valid spare IDs found to update.');
+
+                // Stage as a preview — the user reviews and clicks Apply.
+                setImportPreview({ updates, fileName: file.name, totalRows: parsed.length });
+                setToast({ kind: 'success', message: `Parsed ${updates.length} row${updates.length === 1 ? '' : 's'}. Review and apply.` });
+            } catch (err) {
+                setToast({ kind: 'error', message: `Import failed: ${err.message}` });
+            } finally {
+                setIsImporting(false);
+                e.target.value = null;
+            }
+        };
+        reader.onerror = () => {
+            setToast({ kind: 'error', message: 'Failed to read the file.' });
+            setIsImporting(false);
+        };
+        reader.readAsText(file);
+    };
+
+    const applyImportPreview = async () => {
+        if (!importPreview?.updates?.length) return;
+        setIsImporting(true);
+        try {
+            const res = await sparesApi.bulkUpdateInventory({ updates: importPreview.updates });
+            setToast({ kind: 'success', message: res.data?.message || `Applied ${importPreview.updates.length} update(s).` });
+            setImportPreview(null);
+            fetchData();
+        } catch (e) {
+            setToast({ kind: 'error', message: `Import failed: ${e?.response?.data?.error || e.message}` });
+        } finally {
+            setIsImporting(false);
+        }
     };
 
     // Filtering
@@ -174,12 +315,35 @@ const SparePartsPage = () => {
                         <p className="text-gray-500 text-sm mt-1">Manage spare parts, stock levels, and purchases.</p>
                     </div>
                     <div className="flex items-center gap-3">
-                        {isStoreManager && (
+                        {isAdmin && (
+                            <input
+                                type="file"
+                                accept=".csv"
+                                ref={fileInputRef}
+                                onChange={handleFileUpload}
+                                className="hidden"
+                            />
+                        )}
+                        {(isAdmin || isStoreManager) && (
                             <button
-                                onClick={() => { setSelectedPart(null); setActiveModal('inward'); }}
-                                className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg shadow-md font-bold flex items-center transition-all"
+                                onClick={handleExport}
+                                disabled={isExporting}
+                                title="Export the parts master to CSV"
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg shadow-md font-bold flex items-center transition-all disabled:opacity-50"
                             >
-                                <Truck size={18} className="mr-2"/> Receive Stock
+                                {isExporting ? <Loader2 size={18} className="mr-2 animate-spin"/> : <FileSpreadsheet size={18} className="mr-2"/>}
+                                {isExporting ? 'Exporting…' : 'Export'}
+                            </button>
+                        )}
+                        {isAdmin && (
+                            <button
+                                onClick={handleImportClick}
+                                disabled={isImporting}
+                                title="Bulk-update parts from a CSV (rows matched by ID)"
+                                className="bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-5 py-2.5 rounded-lg shadow-sm font-bold flex items-center transition-all disabled:opacity-50"
+                            >
+                                {isImporting ? <Loader2 size={18} className="mr-2 animate-spin"/> : <Upload size={18} className="mr-2"/>}
+                                {isImporting ? 'Importing…' : 'Import CSV'}
                             </button>
                         )}
                         {isAdmin && (
@@ -228,12 +392,11 @@ const SparePartsPage = () => {
                                     <th className="px-6 py-3 font-semibold text-gray-700 hidden sm:table-cell">Location</th>
                                     <th className="px-6 py-3 font-semibold text-gray-700 text-right">Stock Level</th>
                                     <th className="px-6 py-3 font-semibold text-gray-700 text-right">Value</th>
-                                    <th className="px-6 py-3 font-semibold text-gray-700 text-center">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                                 {filteredSpares.length === 0 && (
-                                    <tr><td colSpan="5" className="p-8 text-center text-gray-400 italic">No parts found matching your search.</td></tr>
+                                    <tr><td colSpan="4" className="p-8 text-center text-gray-400 italic">No parts found matching your search.</td></tr>
                                 )}
                                 {filteredSpares.map(part => {
                                     const isLowStock = part.current_stock <= part.min_stock_threshold;
@@ -259,16 +422,6 @@ const SparePartsPage = () => {
                                                 <div className="font-medium text-gray-900">₹{parseFloat(part.unit_cost).toFixed(2)}</div>
                                                 <div className="text-xs text-gray-400">per unit</div>
                                             </td>
-                                            <td className="px-6 py-3 text-center">
-                                                <button
-                                                    onClick={() => { setSelectedPart(part); setActiveModal('inward'); }}
-                                                    disabled={!isStoreManager}
-                                                    className="bg-white border border-gray-300 text-gray-700 hover:bg-green-50 hover:text-green-700 hover:border-green-200 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center justify-center mx-auto disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:text-gray-700 disabled:hover:border-gray-300"
-                                                    title={isStoreManager ? 'Receive stock for this part' : 'Only store managers can receive stock'}
-                                                >
-                                                    <ShoppingCart size={14} className="mr-1.5"/> Receive
-                                                </button>
-                                            </td>
                                         </tr>
                                     );
                                 })}
@@ -285,13 +438,62 @@ const SparePartsPage = () => {
                 </Modal>
             )}
 
-            {activeModal === 'inward' && (
-                <SpareInwardModal
-                    spares={spares}
-                    prefilledPartId={selectedPart?.id}
-                    onClose={() => { setActiveModal(null); setSelectedPart(null); }}
-                    onSuccess={handleInwardSuccess}
-                />
+            {/* Import preview */}
+            {importPreview && (
+                <div className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center p-4 backdrop-blur-sm" onClick={() => !isImporting && setImportPreview(null)}>
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="px-5 py-4 border-b border-gray-100">
+                            <h2 className="text-base font-bold text-gray-800">Review Import</h2>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                                <span className="font-mono">{importPreview.fileName}</span> · parsed {importPreview.totalRows} row{importPreview.totalRows === 1 ? '' : 's'} · <span className="font-bold text-indigo-600">{importPreview.updates.length}</span> valid update{importPreview.updates.length === 1 ? '' : 's'}. Empty cells are left unchanged. Stock is not importable — it stays owned by inwards and issuance.
+                            </p>
+                        </div>
+                        <div className="flex-1 overflow-auto px-5 py-3">
+                            <table className="w-full text-xs">
+                                <thead className="text-[10px] font-bold text-gray-400 uppercase tracking-wider sticky top-0 bg-white border-b border-gray-100">
+                                    <tr>
+                                        <th className="text-left py-2 pr-3">ID</th>
+                                        <th className="text-left py-2 pr-3">Name</th>
+                                        <th className="text-left py-2 pr-3">Part Number</th>
+                                        <th className="text-right py-2 pr-3">Cat ID</th>
+                                        <th className="text-left py-2 pr-3">Location</th>
+                                        <th className="text-right py-2 pr-3">Unit Cost</th>
+                                        <th className="text-right py-2">Min Threshold</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                    {importPreview.updates.slice(0, 100).map((u, i) => {
+                                        const dash = <span className="text-gray-300">—</span>;
+                                        return (
+                                            <tr key={i} className="hover:bg-gray-50">
+                                                <td className="py-1.5 pr-3 font-mono">{u.id}</td>
+                                                <td className="py-1.5 pr-3">{u.name ?? dash}</td>
+                                                <td className="py-1.5 pr-3 font-mono">{u.part_number ?? dash}</td>
+                                                <td className="py-1.5 pr-3 text-right tabular-nums">{u.category_id ?? dash}</td>
+                                                <td className="py-1.5 pr-3">{u.location ?? dash}</td>
+                                                <td className="py-1.5 pr-3 text-right tabular-nums">{u.unit_cost != null ? Number(u.unit_cost).toFixed(2) : dash}</td>
+                                                <td className="py-1.5 text-right tabular-nums">{u.min_stock_threshold ?? dash}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                            {importPreview.updates.length > 100 && (
+                                <p className="text-[10px] text-gray-400 italic text-center py-2">
+                                    Showing first 100 rows. {importPreview.updates.length - 100} more will be applied.
+                                </p>
+                            )}
+                        </div>
+                        <div className="px-5 py-3 border-t border-gray-100 flex justify-end gap-2">
+                            <button onClick={() => setImportPreview(null)} disabled={isImporting} className="px-4 py-2 text-xs font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition disabled:opacity-40">Cancel</button>
+                            <button onClick={applyImportPreview} disabled={isImporting}
+                                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 rounded-xl transition shadow-sm">
+                                {isImporting ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                                Apply {importPreview.updates.length} update{importPreview.updates.length === 1 ? '' : 's'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* Toast */}

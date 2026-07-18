@@ -179,6 +179,7 @@ const KitOrderPage = () => {
         try {
             const res = await trimKitsApi.getKitOrder(orderId);
             console.log('[trimkits] getKitOrder raw:', res.data);
+            console.log('[trimkits] getKitOrder raw JSON:\n' + JSON.stringify(res.data, null, 2));
             setKit(res.data);
         } catch (err) {
             setError(err.response?.data?.error || 'Failed to load kit.');
@@ -202,7 +203,10 @@ const KitOrderPage = () => {
     }, [kit]);
 
     const unissuedItems = useMemo(() => (kit?.items || []).filter(it => Number(it.unissued_qty) > 0), [kit]);
-    const issuedItems = useMemo(() => (kit?.items || []).filter(it => !(Number(it.unissued_qty) > 0)), [kit]);
+    // "Already handed over" = something was actually issued. An item never picked
+    // (quantity_fulfilled 0) also has unissued_qty 0 — it belongs in "Still missing",
+    // not here, so require quantity_fulfilled > 0 or it renders as a bogus "✓ 0".
+    const issuedItems = useMemo(() => (kit?.items || []).filter(it => !(Number(it.unissued_qty) > 0) && Number(it.quantity_fulfilled) > 0), [kit]);
 
     // Batch-wide "still missing" — what's short across ALL kits of this batch, not just the current one:
     //  • per ordered item, required − fulfilled = qty never picked in any kit
@@ -532,6 +536,7 @@ const KitOrderPage = () => {
             });
             const data = res.data || {};
             console.log('[trimkits] verifyKit raw:', data);
+            console.log('[trimkits] verifyKit raw JSON:\n' + JSON.stringify(data, null, 2));
             if (data.result === 'MISMATCH') {
                 setResult({ kind: 'MISMATCH', discrepancies: data.discrepancies, order_status: data.order_status });
             } else if (data.signed) {

@@ -7,6 +7,7 @@ export const KIT_STATUS_CONFIG = {
     READY_FOR_PICKUP: { label: 'Ready for Pickup', badge: 'bg-indigo-100 text-indigo-800 border-indigo-200', dot: 'bg-indigo-500' },
     PARTIALLY_ISSUED: { label: 'Partially Issued', badge: 'bg-purple-100 text-purple-800 border-purple-200', dot: 'bg-purple-500' },
     ISSUED: { label: 'Issued', badge: 'bg-green-100 text-green-800 border-green-200', dot: 'bg-green-500' },
+    CLOSED: { label: 'Closed', badge: 'bg-gray-200 text-gray-700 border-gray-300', dot: 'bg-gray-500' },
 };
 
 export const kitStatusOf = (status) =>

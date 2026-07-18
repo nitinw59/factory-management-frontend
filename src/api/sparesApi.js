@@ -25,6 +25,11 @@ export const sparesApi = {
         return response.data;
     },
     updateSpare: (spareId, data) => api.put(`/spares/${spareId}`, data),
+
+    // Master export / bulk-update. Master fields only — current_stock stays owned
+    // by spare-inwards (IN) and issuance (OUT) so the stock ledger stays complete.
+    exportInventory:     ()     => api.get('/spares/export'),
+    bulkUpdateInventory: (data) => api.post('/spares/bulk-update', data),
     // Spare inward (replaces the removed /spares/restock).
     // Free-form payload: { received_date, supplier_id?, grn_number?, condition?, notes?, items: [{ spare_part_id, qty_received, unit_price?, description? }] }
     // PO-linked payload: { purchase_order_id, received_date, grn_number?, condition?, notes?, items: [{ purchase_order_item_id, qty_received, unit_price? }] }

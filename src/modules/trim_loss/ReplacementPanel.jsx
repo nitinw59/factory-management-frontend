@@ -4,11 +4,23 @@ import { useAuth } from '../../context/AuthContext';
 import { trimLossApi } from '../../api/trimLossApi';
 import { hrApi } from '../../api/hrApi';
 import SearchableSelect from '../../shared/SearchableSelect';
-import { fmtDateTime } from './format';
-import { Loader2, AlertTriangle, CheckCircle2, X, Repeat, PackageCheck, ShoppingCart, Stamp } from 'lucide-react';
+import { fmtDateTime, fmtMoney, variantText } from './format';
+import { Loader2, AlertTriangle, CheckCircle2, X, Repeat, PackageCheck, ShoppingCart, Stamp, Clock } from 'lucide-react';
 
 const PM_ROLES = ['production_manager', 'factory_admin'];
 const SECOND_APPROVER_ROLES = ['factory_admin', 'purchase_manager'];
+const STORE_ROLES = ['store_manager', 'factory_admin'];
+
+// Item label + outstanding qty — what the store physically hands over as the replacement.
+const itemLabelOf = (c) => {
+    const name = c.item_name || c.item?.name || c.trim_item_name || '—';
+    const v = variantText(c.item ? c.item : c);
+    return v ? `${name} — ${v}` : name;
+};
+const outstandingQtyOf = (c) => {
+    if (c.outstanding_qty != null) return Number(c.outstanding_qty);
+    return Math.max(0, (Number(c.missing_qty) || 0) - (Number(c.found_qty) || 0));
+};
 
 const Banner = ({ msg, onClose }) => msg && (
     <div className={`mb-3 p-3 rounded-lg text-sm font-medium flex items-start ${msg.kind === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
@@ -24,6 +36,7 @@ const ReplacementPanel = ({ caseData, onChanged }) => {
     const role = user?.role;
     const isPm = PM_ROLES.includes(role);
     const isSecond = SECOND_APPROVER_ROLES.includes(role);
+    const isStore = STORE_ROLES.includes(role);
 
     const issued = caseData.replacement_issue_id || caseData.replacement_issue_number;
     const mode = caseData.replacement_mode; // STOCK | PURCHASE | null
@@ -44,16 +57,20 @@ const ReplacementPanel = ({ caseData, onChanged }) => {
         if (issued) return;
         hrApi.getAllEmployees()
             .then(r => {
-                const list = Array.isArray(r.data) ? r.data : (r.data?.data || []);
-                setEmployees(list.filter(e => e.is_active !== false && e.status !== 'INACTIVE'));
+                // Response shape: { employees: [{ emp_id, employee_name, status, line_name, dept_name }] }
+                const list = r.data?.employees ?? r.data?.data ?? r.data ?? [];
+                setEmployees((Array.isArray(list) ? list : [])
+                    .filter(e => !e.status || e.status === 'Active'));
             })
             .catch(() => setEmployees([]));
     }, [issued]);
 
-    const empOptions = useMemo(() => employees.map(e => ({
-        value: e.id ?? e.employee_id,
-        label: e.name || e.employee_name || e.full_name || [e.first_name, e.last_name].filter(Boolean).join(' ') || `#${e.id ?? e.employee_id}`,
-    })), [employees]);
+    const empOptions = useMemo(() => employees.map(e => {
+        const id = e.emp_id ?? e.id ?? e.employee_id;
+        const unit = e.line_name || e.dept_name;
+        const name = e.employee_name || e.name || e.full_name || [e.first_name, e.last_name].filter(Boolean).join(' ') || `#${id}`;
+        return { value: id, label: `${name.trim()}${unit ? ` · ${unit.trim()}` : ''}` };
+    }), [employees]);
 
     const issueFromStock = async () => {
         if (isKitSlip && !issuedTo) { setMsg({ kind: 'error', text: 'This is a kit slip with no default recipient — choose who receives the replacement.' }); return; }
@@ -111,12 +128,37 @@ const ReplacementPanel = ({ caseData, onChanged }) => {
         }
     };
 
+    const itemLabel = itemLabelOf(caseData);
+    const outstanding = outstandingQtyOf(caseData);
+    const unitCost = Number(caseData.unit_cost) || 0;
+
+    // What the store hands over — shown in both the pending and issued states.
+    const ItemToGive = () => (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm mb-3">
+            <div className="col-span-2 sm:col-span-1">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Item to give</p>
+                <p className="font-semibold text-gray-800 mt-0.5">{itemLabel}</p>
+            </div>
+            <div>
+                <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Qty</p>
+                <p className="font-mono font-bold text-gray-900 mt-0.5">{outstanding} pcs</p>
+            </div>
+            {unitCost > 0 && (
+                <div>
+                    <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Value</p>
+                    <p className="font-mono font-semibold text-gray-700 mt-0.5">{fmtMoney(outstanding * unitCost)}</p>
+                </div>
+            )}
+        </div>
+    );
+
     // ── Already replaced ──
     if (issued) {
         return (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="px-5 py-3 border-b border-gray-100 flex items-center"><Repeat className="w-4 h-4 mr-2 text-indigo-600" /><h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider">Replacement</h3></div>
                 <div className="p-5">
+                    <ItemToGive />
                     <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800 font-medium flex items-center">
                         <PackageCheck className="w-4 h-4 mr-2 shrink-0" />
                         Replacement issued on slip <span className="font-mono font-bold mx-1">{caseData.replacement_issue_number || `#${caseData.replacement_issue_id}`}</span>.
@@ -126,7 +168,27 @@ const ReplacementPanel = ({ caseData, onChanged }) => {
         );
     }
 
-    if (!isPm && !isSecond) return null;
+    // ── Store manager (read-only) — see what to prep, but issuing stays with the PM ──
+    if (!isPm && !isSecond) {
+        if (!isStore) return null;
+        return (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="px-5 py-3 border-b border-gray-100">
+                    <div className="flex items-center"><Repeat className="w-4 h-4 mr-2 text-indigo-600" /><h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider">Replacement to hand over</h3></div>
+                    <p className="text-xs text-gray-400 font-medium mt-0.5">What the line needs back — prep this stock; the production manager issues the slip.</p>
+                </div>
+                <div className="p-5">
+                    <ItemToGive />
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 font-medium flex items-center">
+                        <Clock className="w-4 h-4 mr-2 shrink-0" />
+                        {mode === 'PURCHASE'
+                            ? 'Out of stock — an urgent purchase is being raised for this replacement.'
+                            : 'Awaiting the production manager to issue this replacement from stock.'}
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">

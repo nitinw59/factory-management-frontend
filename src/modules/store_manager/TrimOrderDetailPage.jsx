@@ -5,14 +5,29 @@ import {
     LuPackage, LuTriangleAlert, LuRefreshCw,
     LuReplace, LuArrowLeft, LuListOrdered, LuCircleCheck, LuWand,
     LuTrash2, LuFileText, LuBookOpen, LuScissors, LuTag, LuPrinter, LuDownload, LuX,
-    LuSend, LuUndo2, LuChevronDown, LuChevronsDownUp, LuChevronsUpDown
+    LuSend, LuUndo2, LuChevronDown, LuChevronsDownUp, LuChevronsUpDown, LuLock, LuLockOpen
 } from 'react-icons/lu';
 import { Loader2, Info } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import { trimKitsApi } from '../../api/trimKitsApi';
 import { kitStatusOf } from '../trim_kits/kitStatusConfig';
+import { downloadHandoverById } from '../trim_kits/handoverSlip';
 import ExchangePanel from '../trim_kits/ExchangePanel';
+import { trimLossApi } from '../../api/trimLossApi';
+import { caseStatusOf } from '../trim_loss/trimLossStatusConfig';
 const Spinner = () => <div className="flex justify-center items-center p-12"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
+
+// Aggregate cutting rolls' "28: 5, 30: 5" size strings into { size: totalCutForSize }.
+// Shared by the BOM reconciliation block (PER_SIZE derivation) so the parse lives in one place.
+const parseSizeCutMap = (cutting = []) => {
+    const map = {};
+    (cutting || []).forEach(c => (c.sizes || '').split(',').forEach(part => {
+        const [sz, qty] = part.trim().split(':').map(s => s.trim());
+        if (sz && qty) map[sz] = (map[sz] || 0) + Number(qty);
+    }));
+    return map;
+};
 
 // --- Barcode Print/Download Modal ---
 const BarcodePrintModal = ({ isOpen, onClose, batchId }) => {
@@ -37,7 +52,6 @@ const BarcodePrintModal = ({ isOpen, onClose, batchId }) => {
             }
             const res = await storeManagerApi.markBatchBarcodePrinted(payload);
             setResult(res.data);
-            console.log("Mark Barcode Result:", res.data);
         } catch (err) {
             setError(err.response?.data?.error || 'Failed to mark barcodes.');
         } finally {
@@ -48,7 +62,6 @@ const BarcodePrintModal = ({ isOpen, onClose, batchId }) => {
     const handleDownloadCSV = () => {
         if (!result?.garments?.length) return;
         const header = 'sr_no,garment_uid,size,piece_sequence,barcode_printed_at';
-        console.log("Garments for CSV:", result.garments);
         const rows = result.garments.map((g, i) =>
             `${i + 1},${g.garment_uid},${g.size},${g.piece_sequence},${g.barcode_printed_at}`
         );
@@ -135,25 +148,11 @@ const BarcodePrintModal = ({ isOpen, onClose, batchId }) => {
 };
 
 // --- Reference Data Modal (BOM & Cutting) ---
-const ReferenceDataModal = ({ isOpen, onClose, orderId }) => {
+// Reference data is already loaded once at page level; the modal reuses it rather than refetching.
+const ReferenceDataModal = ({ isOpen, onClose, data = { bom: [], cutting: [] }, loading = false }) => {
     const [activeTab, setActiveTab] = useState('bom');
-    const [loading, setLoading] = useState(true);
-    const [data, setData] = useState({ bom: [], cutting: [] });
 
-    useEffect(() => {
-        if (isOpen) {
-            setLoading(true);
-            storeManagerApi.getOrderReferenceData(orderId)
-                .then(res => setData(res.data))
-                .catch(err => console.error("Failed to load reference data", err))
-                .finally(() => setLoading(false));
-               
-        }
-
-        console.log("Reference MModal Data:", data);
-    }, [isOpen, orderId]);
-
-    const totalCutSum = data.cutting.reduce(
+    const totalCutSum = (data.cutting || []).reduce(
     (sum, cut) => sum + Number(cut.total_cut || 0),
     0
     );
@@ -345,7 +344,6 @@ const FulfillmentModal = ({ item, sopId, onClose, onSubmit, apiError }) => {
         if (!selectedVariantId) { setReservationInfo(null); return; }
         const params = { trim_item_variant_id: selectedVariantId };
         if (sopId) params.sales_order_product_id = sopId;
-        console.log('[FulfillmentModal] fetching reservation', params);
         setReservationLoading(true);
         storeManagerApi.getTrimReservations(params)
             .then(res => {
@@ -357,10 +355,9 @@ const FulfillmentModal = ({ item, sopId, onClose, onSubmit, apiError }) => {
                     consumed: Number(variant.total_reserved || 0) - Number(variant.total_active || 0),
                     scopedToSop: !!sopId,
                 } : null;
-                console.log('[FulfillmentModal] reservation result', info ?? 'none found');
                 setReservationInfo(info);
             })
-            .catch(err => { console.log('[FulfillmentModal] reservation fetch failed', err); setReservationInfo(null); })
+            .catch(() => setReservationInfo(null))
             .finally(() => setReservationLoading(false));
     }, [sopId, selectedVariantId]);
 
@@ -373,13 +370,6 @@ const FulfillmentModal = ({ item, sopId, onClose, onSubmit, apiError }) => {
         if (isNaN(quantity) || quantity <= 0) { setValidationErr("Invalid quantity. Please enter a number greater than 0."); return; }
         if (quantity > maxAllowed) { setValidationErr(`Quantity cannot exceed available stock (${selectedOption.available_stock}) or remaining required (${remainingRequired}).`); return; }
         setValidationErr(null);
-        console.log('[FulfillmentModal] submitting allocation', {
-            orderItemId: item.id,
-            variantId: selectedVariantId,
-            quantity,
-            reservationActive: reservationInfo?.active ?? 'unknown',
-            reservationReserved: reservationInfo?.reserved ?? 'unknown',
-        });
         onSubmit({
             orderItemId: item.id,
             quantityToFulfill: quantity,
@@ -392,7 +382,7 @@ const FulfillmentModal = ({ item, sopId, onClose, onSubmit, apiError }) => {
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
                 <div className="p-6 border-b">
                     <h3 className="text-xl font-bold text-gray-800">Fulfill Order Item</h3>
-                    <p className="text-sm text-gray-500">Required: <strong>{item.item_name} - {item.color_name} - {item.color_number}</strong></p>
+                    <p className="text-sm text-gray-500">Required: <strong>{item.item_name} - {item.color_name} - {item.color_number}{item.variant_size ? ` - ${item.variant_size}` : ''}</strong></p>
                 </div>
                 <div className="p-6 space-y-5 bg-gray-50">
                     <div>
@@ -412,6 +402,7 @@ const FulfillmentModal = ({ item, sopId, onClose, onSubmit, apiError }) => {
                                             <span>
                                                 {option.color_name}
                                                 {option.color_number && <span className="ml-1.5 text-[10px] font-mono text-gray-400">{option.color_number}</span>}
+                                                {option.variant_size && <span className="ml-1.5 text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded">{option.variant_size}</span>}
                                             </span>
                                             <span className="bg-gray-100 px-2 rounded">Stock: {option.available_stock}</span>
                                         </div>
@@ -528,8 +519,11 @@ const intentDisplay = (decision, fulfillingVariant) => {
     };
 };
 
+const FORCE_CLOSE_ROLES = ['store_manager', 'factory_admin'];
+
 const TrimOrderDetailPage = () => {
     const { orderId } = useParams();
+    const { user } = useAuth();
     const [orderInfo, setOrderInfo] = useState(null);
     const [items, setItems] = useState([]);
     const [missingItems, setMissingItems] = useState([]);
@@ -544,6 +538,15 @@ const TrimOrderDetailPage = () => {
     const [refModalOpen, setRefModalOpen] = useState(false);
     const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
     const [productModalOpen, setProductModalOpen] = useState(false);
+
+    // Force close / re-open
+    const [closeModalOpen, setCloseModalOpen] = useState(false);
+    const [closeReason, setCloseReason] = useState('');
+    const [closeBusy, setCloseBusy] = useState(false);
+    const isClosed = orderInfo?.status === 'CLOSED';
+    const canForceClose = FORCE_CLOSE_ROLES.includes(user?.role);
+    // Custody transferred → not force-closable; use the trim-loss workflow instead.
+    const closeBlockedByIssued = orderInfo?.status === 'ISSUED';
 
     // Toast
     const [toast, setToast] = useState(null);
@@ -595,21 +598,6 @@ const TrimOrderDetailPage = () => {
         try {
             const res = await storeManagerApi.getOrderReferenceData(orderId);
             const refRaw = res.data || { bom: [], cutting: [] };
-            console.log('[TrimOrderDetail] refData loaded:', refRaw);
-            console.log('[TrimOrderDetail] raw BOM fetched —', (refRaw.bom || []).length, 'row(s):', refRaw.bom);
-            console.log('[TrimOrderDetail] raw BOM JSON:', JSON.stringify(refRaw.bom ?? [], null, 2));
-            console.log('[TrimOrderDetail] raw CUTTING fetched —', (refRaw.cutting || []).length, 'row(s):', refRaw.cutting);
-            console.log('[TrimOrderDetail] raw CUTTING JSON:', JSON.stringify(refRaw.cutting ?? [], null, 2));
-            // The `sizes` string is what PER_SIZE BOM derivation matches against — log the raw
-            // strings and the tokens they parse into, so a size-format mismatch is obvious.
-            console.log('[TrimOrderDetail] cutting `sizes` strings:', (refRaw.cutting || []).map(c => c.sizes));
-            const dbgSizeMap = {};
-            (refRaw.cutting || []).forEach(c => (c.sizes || '').split(',').forEach(part => {
-                const [sz, qty] = part.trim().split(':').map(s => s.trim());
-                if (sz && qty) dbgSizeMap[sz] = (dbgSizeMap[sz] || 0) + Number(qty);
-            }));
-            console.log('[TrimOrderDetail] cutting sizes parsed → qty by size:', dbgSizeMap);
-            console.log('[TrimOrderDetail] distinct cutting size tokens:', Object.keys(dbgSizeMap));
             setRefData(refRaw);
         } catch (err) {
             console.error('[TrimOrderDetail] refData fetch failed:', err?.response?.data || err.message);
@@ -628,11 +616,9 @@ const TrimOrderDetailPage = () => {
         try {
             const res = await storeManagerApi.getTrimBillsForOrder(orderId);
             const bills = res.data || [];
-            console.log('[TrimBilling] raw bills from API:', bills);
             const keys = new Set(
                 bills.flatMap(b => (b.items || []).map(i => billKey(i.item_name, i.color_name, i.color_number)))
             );
-            console.log('[TrimBilling] billed composite keys:', [...keys]);
             setBilledKeys(keys);
         } catch (err) {
             console.warn('[TrimBilling] failed to load bills — revert buttons remain enabled:', err?.response?.data || err.message);
@@ -644,10 +630,22 @@ const TrimOrderDetailPage = () => {
     // Handover slips + loader custody — both live on the kit endpoint.
     const [handoverSlips, setHandoverSlips] = useState([]);
     const [kitCustodyVariants, setKitCustodyVariants] = useState([]);
+    const [downloadingSlipId, setDownloadingSlipId] = useState(null);
+    const handleDownloadSlip = async (slip) => {
+        const issueId = slip.issue_id ?? slip.id;
+        if (issueId == null) return;
+        setDownloadingSlipId(slip.id);
+        try {
+            await downloadHandoverById(issueId);
+        } catch (err) {
+            showToast('error', `Could not download slip ${slip.issue_number || ''}.`);
+        } finally {
+            setDownloadingSlipId(null);
+        }
+    };
     const fetchHandovers = useCallback(async () => {
         try {
             const res = await trimKitsApi.getKitOrder(orderId);
-            console.log('[trimkits] store getKitOrder raw:', res.data);
             setHandoverSlips(res.data?.slips || []);
             // Net custody per variant = signed out (qty) minus not-yet-issued (unissued_qty).
             const cust = {};
@@ -676,17 +674,30 @@ const TrimOrderDetailPage = () => {
 
     useEffect(() => { fetchHandovers(); }, [fetchHandovers]);
 
+    // Trim-loss cases raised against this batch (missing trim reported off the signed slips).
+    // Linked by production_batch_id; server filter is best-effort so we also narrow client-side.
+    const [lossCases, setLossCases] = useState([]);
+    const fetchLossCases = useCallback(async (batchId) => {
+        if (!batchId) { setLossCases([]); return; }
+        try {
+            const res = await trimLossApi.getCases({
+                status: 'ESCALATED,UNDER_INVESTIGATION,RESPONSIBILITY_FIXED,DEBIT_APPROVED,CLOSED,CANCELLED',
+                production_batch_id: batchId,
+            });
+            const rows = res.data?.data ?? res.data ?? [];
+            setLossCases((Array.isArray(rows) ? rows : [])
+                .filter(r => String(r.production_batch_id ?? '') === String(batchId)));
+        } catch (err) {
+            // Store manager may lack trim-loss read access — non-fatal, card just hides.
+            setLossCases([]);
+        }
+    }, []);
+
     const fetchDetails = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         try {
             const response = await storeManagerApi.getTrimOrderDetails(orderId);
-            console.log("Order Details Response:", response.data);
-            console.log('[TrimOrderDetail] key fields from API:', {
-                sales_order_product_id: response.data.sales_order_product_id,
-                trim_item_id_on_first_item: response.data.items?.[0]?.trim_item_id,
-                first_item_keys: response.data.items?.[0] ? Object.keys(response.data.items[0]) : [],
-            });
             const sanitizedItems = (response.data.items || []).map(item => ({
                 ...item,
                 quantity_fulfilled: parseInt(item.quantity_fulfilled) || 0,
@@ -708,6 +719,11 @@ const TrimOrderDetailPage = () => {
                 productType: response.data.product_type ?? null,
                 sizeBreakdown: response.data.size_breakdown ?? null,
                 productionReadiness: response.data.production_readiness ?? null,
+                // Force-close stamps (present only when status === 'CLOSED')
+                statusBeforeClose: response.data.status_before_close ?? null,
+                forceCloseReason: response.data.force_close_reason ?? null,
+                forceClosedAt: response.data.force_closed_at ?? null,
+                forceClosedByName: response.data.force_closed_by_name ?? response.data.force_closed_by ?? null,
             });
         } catch (err) {
             setError('Could not load order details.');
@@ -719,6 +735,8 @@ const TrimOrderDetailPage = () => {
     useEffect(() => {
         fetchDetails();
     }, [fetchDetails]);
+
+    useEffect(() => { fetchLossCases(orderInfo?.batchId); }, [orderInfo?.batchId, fetchLossCases]);
 
     // 1. Primary Exact Fulfillable Items
     const exactFulfillableItems = useMemo(() => {
@@ -739,6 +757,7 @@ const TrimOrderDetailPage = () => {
     }, [items]);
 
     const handleFulfillAllExact = async () => {
+        if (isClosed) return;
         if (!window.confirm(`Auto-fulfill ${exactFulfillableItems.length} items using exact matches?`)) return;
         setIsFulfillingAll(true);
         try {
@@ -754,6 +773,7 @@ const TrimOrderDetailPage = () => {
     };
 
     const handleFulfillAllSubs = async () => {
+        if (isClosed) return;
         if (!window.confirm(`Auto-fulfill ${substituteFulfillableItems.length} items using available substitutes?`)) return;
         setIsFulfillingAll(true);
         try {
@@ -792,13 +812,16 @@ const TrimOrderDetailPage = () => {
         // Aggregate counts so the left card can show "12 ready / 5 sub / 3 missing"
         return [...map.values()].map(g => {
             const counts = { exact: 0, substitute: 0, insufficient: 0, fulfilled: 0 };
+            // A variant is "handed over" once one of its allocations went out on a signed slip (has issue_id).
+            let handedOver = 0;
             g.items.forEach(it => {
                 const plan = getEffectivePlan(it);
                 counts[plan.decision] = (counts[plan.decision] || 0) + 1;
+                if ((it.fulfillment_log || []).some(log => log.issue_id)) handedOver += 1;
             });
             const total = g.items.length;
             const done  = counts.fulfilled;
-            return { ...g, counts, total, donePct: total ? Math.round((done / total) * 100) : 0 };
+            return { ...g, counts, handedOver, total, donePct: total ? Math.round((done / total) * 100) : 0 };
         });
     }, [items, getEffectivePlan]);
 
@@ -808,10 +831,13 @@ const TrimOrderDetailPage = () => {
         return trimItemGroups.filter(g => {
             if (q && !g.name.toLowerCase().includes(q)) return false;
             if (statusFilter === 'all')          return true;
-            if (statusFilter === 'ready')        return g.counts.exact > 0;
-            if (statusFilter === 'sub')          return g.counts.substitute > 0;
-            if (statusFilter === 'insufficient') return g.counts.insufficient > 0;
-            if (statusFilter === 'fulfilled')    return g.counts.fulfilled > 0;
+            if (g.total === 0)                   return false;
+            // A trim item matches a status only when EVERY variant is in that state.
+            if (statusFilter === 'ready')        return g.counts.exact        === g.total;
+            if (statusFilter === 'sub')          return g.counts.substitute   === g.total;
+            if (statusFilter === 'insufficient') return g.counts.insufficient === g.total;
+            if (statusFilter === 'fulfilled')    return g.counts.fulfilled     === g.total;
+            if (statusFilter === 'handed')       return g.handedOver          === g.total;
             return true;
         });
     }, [trimItemGroups, search, statusFilter]);
@@ -830,12 +856,10 @@ const TrimOrderDetailPage = () => {
     useEffect(() => {
         const sopId = orderInfo?.sopId;
         if (!sopId || !selectedTrimGroup) {
-            console.log('[TrimOrderDetail] skipping panel reservation fetch — missing sopId or no selected group', { sopId, group: selectedTrimGroup?.name });
             setTrimReservation(null);
             return;
         }
         const variantIds = new Set(selectedTrimGroup.items.map(it => String(it.trim_item_variant_id)));
-        console.log('[TrimOrderDetail] fetching panel reservations', { sopId, trimName: selectedTrimGroup.name, variantIds: [...variantIds] });
         setTrimResLoading(true);
         storeManagerApi.getTrimReservations({ sales_order_product_id: sopId })
             .then(res => {
@@ -850,10 +874,9 @@ const TrimOrderDetailPage = () => {
                     })
                 );
                 const info = reserved > 0 ? { reserved, active, consumed: reserved - active } : null;
-                console.log('[TrimOrderDetail] panel reservation result', info ?? 'none found');
                 setTrimReservation(info);
             })
-            .catch(err => { console.log('[TrimOrderDetail] panel reservation fetch failed', err); setTrimReservation(null); })
+            .catch(() => setTrimReservation(null))
             .finally(() => setTrimResLoading(false));
     }, [selectedTrimGroup?.name, orderInfo?.sopId]);
     const intentGroups = useMemo(() => {
@@ -916,6 +939,7 @@ const TrimOrderDetailPage = () => {
 
     // ── Override actions: pick a different variant for a single row ──────────
     const handlePickOverride = (item, source) => {
+        if (isClosed) return;
         // `source` is either an entry from item.substitutes (substitute) or the item itself (exact).
         const isExact = source.__isExact === true;
         const variantId    = isExact ? item.trim_item_variant_id : (source.substitute_variant_id || source.id);
@@ -965,6 +989,7 @@ const TrimOrderDetailPage = () => {
 
     // Bulk fulfill every row in one intent group, committing each row's effective plan.
     const handleBulkFulfillGroup = async (group) => {
+        if (isClosed) return;
         const fulfillable = group.rows.filter(r => r.plan.decision !== 'fulfilled' && r.plan.fulfilling_variant_id && r.plan.quantity_to_fulfill > 0);
         if (fulfillable.length === 0) { showToast('error', 'Nothing to fulfill in this group.'); return; }
 
@@ -1027,9 +1052,10 @@ const TrimOrderDetailPage = () => {
         }
     };
 
-    const handleFulfillClick = (item) => setModalState({ isOpen: true, item: item });
+    const handleFulfillClick = (item) => { if (isClosed) return; setModalState({ isOpen: true, item: item }); };
 
     const handleFulfillmentSubmit = async (fulfillmentData) => {
+        if (isClosed) return;
         setIsFulfillingAll(true);   // keep the page-level spinner off so scroll position survives the refresh
         setFulfillErr(null);
         try {
@@ -1049,6 +1075,7 @@ const TrimOrderDetailPage = () => {
     };
 
     const handleRevertFulfillment = async (logId) => {
+        if (isClosed) return;
         if (!window.confirm("Revert this fulfillment? This reverts the allocation only — no stock moves. You will need to pick this again.")) return;
         setIsReverting(true);
         try {
@@ -1121,6 +1148,7 @@ const TrimOrderDetailPage = () => {
     const toggleAllReview = () => setReviewOpen(allReviewCollapsed ? Object.fromEntries(reviewByItem.map(e => [e.name, true])) : {});
 
     const handleConfirmMarkReady = async () => {
+        if (isClosed) return;
         setKitBusy(true);
         try {
             await storeManagerApi.markKitReady(orderId);
@@ -1144,6 +1172,40 @@ const TrimOrderDetailPage = () => {
             showToast('error', err.response?.data?.error || 'Failed to pull back kit.');
         } finally {
             setKitBusy(false);
+        }
+    };
+
+    // ── Force close / re-open ─────────────────────────────────────────────
+    const handleForceClose = async () => {
+        setCloseBusy(true);
+        try {
+            const reason = closeReason.trim();
+            await storeManagerApi.forceCloseTrimOrder(orderId, reason ? { reason } : {});
+            showToast('success', 'Order closed.');
+            setCloseModalOpen(false);
+            setCloseReason('');
+            await fetchDetails();
+        } catch (err) {
+            // 409 = already closed / issued — refetch so the UI reflects real state.
+            const msg = err.response?.data?.error || 'Failed to close the order.';
+            showToast('error', msg);
+            if (err.response?.status === 409) { setCloseModalOpen(false); fetchDetails(); }
+        } finally {
+            setCloseBusy(false);
+        }
+    };
+
+    const handleForceOpen = async () => {
+        setCloseBusy(true);
+        try {
+            const res = await storeManagerApi.forceOpenTrimOrder(orderId);
+            showToast('success', `Order re-opened${res.data?.status ? ` (${kitStatusOf(res.data.status).label})` : ''}.`);
+            await fetchDetails();
+        } catch (err) {
+            showToast('error', err.response?.data?.error || 'Failed to re-open the order.');
+            if (err.response?.status === 409) fetchDetails();
+        } finally {
+            setCloseBusy(false);
         }
     };
 
@@ -1175,6 +1237,23 @@ const TrimOrderDetailPage = () => {
                                 )}
                             </div>
 
+                            {isClosed && (
+                                <div className="mb-3 flex items-start gap-2 bg-gray-100 border border-gray-300 rounded-lg px-3 py-2">
+                                    <LuLock className="h-4 w-4 text-gray-500 shrink-0 mt-0.5" />
+                                    <div className="text-xs text-gray-600">
+                                        <p className="font-bold text-gray-700">This order is closed — fulfillment is locked.</p>
+                                        {orderInfo.forceCloseReason && <p className="mt-0.5 italic">“{orderInfo.forceCloseReason}”</p>}
+                                        {(orderInfo.forceClosedByName || orderInfo.forceClosedAt) && (
+                                            <p className="mt-0.5 text-gray-500">
+                                                {orderInfo.forceClosedByName ? `Closed by ${orderInfo.forceClosedByName}` : 'Closed'}
+                                                {orderInfo.forceClosedAt ? ` · ${new Date(orderInfo.forceClosedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}` : ''}
+                                                {orderInfo.statusBeforeClose ? ` · was ${kitStatusOf(orderInfo.statusBeforeClose).label}` : ''}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
                             {orderInfo?.productName && (
                                 <button
                                     type="button"
@@ -1199,7 +1278,26 @@ const TrimOrderDetailPage = () => {
                         </div>
                         
                         <div className="flex flex-col sm:flex-row items-end gap-3 shrink-0 mt-2 md:mt-0">
-                            {orderInfo?.status === 'READY_FOR_PICKUP' ? (
+                            {canForceClose && (isClosed ? (
+                                <button
+                                    onClick={handleForceOpen}
+                                    disabled={closeBusy}
+                                    className="px-5 py-2.5 bg-emerald-600 text-white hover:bg-emerald-700 border border-emerald-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center disabled:opacity-50"
+                                    title="Re-open the order and restore its previous status"
+                                >
+                                    {closeBusy ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LuLockOpen className="mr-2 h-5 w-5" />} Re-open
+                                </button>
+                            ) : !closeBlockedByIssued && (
+                                <button
+                                    onClick={() => { setCloseReason(''); setCloseModalOpen(true); }}
+                                    disabled={closeBusy}
+                                    className="px-5 py-2.5 bg-white text-red-600 hover:bg-red-600 hover:text-white border border-red-200 hover:border-red-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center disabled:opacity-50"
+                                    title="Force-close this order and lock fulfillment"
+                                >
+                                    <LuLock className="mr-2 h-5 w-5" /> Close
+                                </button>
+                            ))}
+                            {!isClosed && (orderInfo?.status === 'READY_FOR_PICKUP' ? (
                                 <button
                                     onClick={handleUnmarkReady}
                                     disabled={kitBusy}
@@ -1217,14 +1315,14 @@ const TrimOrderDetailPage = () => {
                                 >
                                     <LuSend className="mr-2 h-5 w-5" /> Mark Kit Ready
                                 </button>
-                            )}
+                            ))}
                             {/* ✅ NEW BUTTON: Opens Reference Modal */}
                             <button 
                                 onClick={() => setRefModalOpen(true)}
                                 className="px-5 py-2.5 bg-white text-gray-700 hover:bg-gray-100 border border-gray-300 hover:border-gray-400 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center"
                             >
-                                <Info className="mr-2 h-5 w-5 text-gray-500" /> 
-                                View Ref & BOMm
+                                <Info className="mr-2 h-5 w-5 text-gray-500" />
+                                View Ref &amp; BOM
                             </button>
 
                             <Link
@@ -1290,6 +1388,7 @@ const TrimOrderDetailPage = () => {
                                         <th className="px-5 py-2.5 text-left">Taken by</th>
                                         <th className="px-5 py-2.5 text-right">Value</th>
                                         <th className="px-5 py-2.5 text-left">Bill</th>
+                                        <th className="px-5 py-2.5 text-right">Slip PDF</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -1300,6 +1399,19 @@ const TrimOrderDetailPage = () => {
                                             <td className="px-5 py-2.5 font-medium text-gray-700">{s.issued_to_name || '—'}</td>
                                             <td className="px-5 py-2.5 text-right font-mono">₹{parseFloat(s.total_value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                             <td className="px-5 py-2.5 text-gray-600">{s.bill_number || '—'}</td>
+                                            <td className="px-5 py-2.5 text-right">
+                                                <button
+                                                    onClick={() => handleDownloadSlip(s)}
+                                                    disabled={downloadingSlipId === s.id}
+                                                    className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    title="Download this handover as an issue-slip PDF"
+                                                >
+                                                    {downloadingSlipId === s.id
+                                                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                        : <LuDownload className="w-3.5 h-3.5" />}
+                                                    PDF
+                                                </button>
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -1311,6 +1423,57 @@ const TrimOrderDetailPage = () => {
                         Show once anything has been handed over (status-based so it doesn't depend on the slips fetch). */}
                     {(['PARTIALLY_ISSUED', 'ISSUED'].includes(orderInfo?.status) || handoverSlips.length > 0) && (
                         <ExchangePanel orderId={orderId} custodyVariants={kitCustodyVariants} onChanged={fetchHandovers} />
+                    )}
+
+                    {/* Trim-loss cases — missing trim reported off this batch's signed slips */}
+                    {lossCases.length > 0 && (
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                            <div className="px-5 py-3 border-b border-gray-100 flex items-center">
+                                <LuTriangleAlert className="w-4 h-4 mr-2 text-red-600" />
+                                <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider">Trim-loss cases</h3>
+                                <span className="ml-2 text-xs text-gray-400 font-medium">missing trim reported against this batch</span>
+                                <span className="ml-auto text-xs font-bold text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full">{lossCases.length}</span>
+                            </div>
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50 text-[10px] uppercase text-gray-500 font-bold tracking-wider">
+                                    <tr>
+                                        <th className="px-5 py-2.5 text-left">Case</th>
+                                        <th className="px-5 py-2.5 text-left">Status</th>
+                                        <th className="px-5 py-2.5 text-left">Item</th>
+                                        <th className="px-5 py-2.5 text-left">Slip</th>
+                                        <th className="px-5 py-2.5 text-right">Outstanding</th>
+                                        <th className="px-5 py-2.5 text-right">Loss value</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {lossCases.map(c => {
+                                        const meta = caseStatusOf(c.status);
+                                        const itemName = c.item_name || c.trim_item_name || '—';
+                                        const variant = [c.color_number ? `${c.color_number} - ${c.color_name || ''}`.trim() : c.color_name, c.variant_size].filter(Boolean).join(' / ');
+                                        const outstanding = c.outstanding_qty != null ? c.outstanding_qty : Math.max(0, (Number(c.missing_qty) || 0) - (Number(c.found_qty) || 0));
+                                        return (
+                                            <tr key={c.id} className="hover:bg-gray-50/60">
+                                                <td className="px-5 py-2.5">
+                                                    <Link to={`/trim-loss/cases/${c.id}`} className="font-mono font-bold text-indigo-600 hover:text-indigo-800 hover:underline">
+                                                        {c.case_number || `#${c.id}`}
+                                                    </Link>
+                                                </td>
+                                                <td className="px-5 py-2.5">
+                                                    <span className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full border ${meta.badge}`}>{meta.label}</span>
+                                                </td>
+                                                <td className="px-5 py-2.5 text-gray-700">
+                                                    <span className="font-semibold">{itemName}</span>
+                                                    {variant && <span className="text-gray-500"> — {variant}</span>}
+                                                </td>
+                                                <td className="px-5 py-2.5 font-mono text-gray-600">{c.issue_number || c.original_issue_number || '—'}</td>
+                                                <td className="px-5 py-2.5 text-right font-mono font-bold text-gray-900">{outstanding}</td>
+                                                <td className="px-5 py-2.5 text-right font-mono text-gray-700">{c.loss_value != null ? `₹${parseFloat(c.loss_value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     )}
 
                     {/* Order-level progress strip */}
@@ -1345,14 +1508,14 @@ const TrimOrderDetailPage = () => {
                                 </span>
                             </h3>
                             <div className="flex items-center gap-2">
-                                {substituteFulfillableItems.length > 0 && (
+                                {!isClosed && substituteFulfillableItems.length > 0 && (
                                     <button onClick={handleFulfillAllSubs} disabled={isFulfillingAll || isReverting}
                                         className="px-3 py-1.5 bg-purple-600 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-purple-700 transition-colors flex items-center disabled:opacity-70">
                                         {isFulfillingAll ? <Loader2 className="animate-spin h-3.5 w-3.5 mr-1"/> : <LuWand className="mr-1 h-3.5 w-3.5"/>}
                                         Auto-Fulfill {substituteFulfillableItems.length} Subs
                                     </button>
                                 )}
-                                {exactFulfillableItems.length > 0 && (
+                                {!isClosed && exactFulfillableItems.length > 0 && (
                                     <button onClick={handleFulfillAllExact} disabled={isFulfillingAll || isReverting}
                                         className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-blue-700 transition-colors flex items-center disabled:opacity-70">
                                         {isFulfillingAll ? <Loader2 className="animate-spin h-3.5 w-3.5 mr-1"/> : <LuCircleCheck className="mr-1 h-3.5 w-3.5"/>}
@@ -1387,6 +1550,7 @@ const TrimOrderDetailPage = () => {
                                             { key: 'sub',          label: 'Substitute',   color: 'purple' },
                                             { key: 'insufficient', label: 'Insufficient', color: 'red'    },
                                             { key: 'fulfilled',    label: 'Fulfilled',    color: 'green'  },
+                                            { key: 'handed',       label: 'Handed over',  color: 'teal'   },
                                         ].map(opt => {
                                             const active = statusFilter === opt.key;
                                             const cs = STATUS_STYLES[opt.color];
@@ -1413,9 +1577,16 @@ const TrimOrderDetailPage = () => {
                                                 className={`w-full text-left p-3 rounded-lg border transition ${isSel ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-300' : 'border-gray-200 bg-white hover:border-blue-200'}`}>
                                                 <div className="flex items-start justify-between gap-2 mb-1.5">
                                                     <p className="text-sm font-bold text-gray-800 truncate">{group.name}</p>
-                                                    <span className="text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded shrink-0">
-                                                        {group.total}
-                                                    </span>
+                                                    <div className="flex items-center gap-1 shrink-0">
+                                                        {group.handedOver > 0 && (
+                                                            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded" title={`${group.handedOver} of ${group.total} variant(s) handed over on a signed slip`}>
+                                                                <LuFileText className="h-2.5 w-2.5" /> {group.handedOver}
+                                                            </span>
+                                                        )}
+                                                        <span className="text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded">
+                                                            {group.total}
+                                                        </span>
+                                                    </div>
                                                 </div>
                                                 {/* Legend: green = allocated (done) · blue = ready to allocate · purple = via substitute · red = missing/short */}
                                                 <div className="flex h-1.5 rounded-full overflow-hidden bg-gray-100 mb-1.5">
@@ -1465,8 +1636,6 @@ const TrimOrderDetailPage = () => {
                                                     selectedTrimGroup.items.map(it => String(it.trim_item_id)).filter(Boolean)
                                                 );
                                                 const idMatchResult = refData.bom.find(b => groupItemIds.has(String(b.trim_item_id)));
-                                                console.log('[BOM match] group trim_item_ids:', [...groupItemIds], '| BOM match:', idMatchResult ? `FOUND — ${idMatchResult.item_name} (id=${idMatchResult.trim_item_id})` : 'NO MATCH');
-
                                                 const bomEntry = refDataLoaded ? idMatchResult : undefined;
                                                 const totalCut   = refData.cutting.reduce((s, c) => s + Number(c.total_cut || 0), 0);
                                                 const wastage    = bomEntry ? parseFloat(bomEntry.wastage_percentage || 0) : 0;
@@ -1476,14 +1645,8 @@ const TrimOrderDetailPage = () => {
                                                 const qtyPerPcRaw = bomEntry ? parseFloat(bomEntry.quantity_per_piece) : NaN;
                                                 const qtyPerPc    = Number.isFinite(qtyPerPcRaw) ? qtyPerPcRaw : null;
 
-                                                // Parse "28: 5, 30: 5, ..." per cutting roll, aggregate by size
-                                                const sizeCutMap = {};
-                                                refData.cutting.forEach(c => {
-                                                    (c.sizes || '').split(',').forEach(part => {
-                                                        const [sz, qty] = part.trim().split(':').map(s => s.trim());
-                                                        if (sz && qty) sizeCutMap[sz] = (sizeCutMap[sz] || 0) + Number(qty);
-                                                    });
-                                                });
+                                                // Cut quantities aggregated by size (used for PER_SIZE BOM derivation)
+                                                const sizeCutMap = parseSizeCutMap(refData.cutting);
 
                                                 let bomDerived = null;
                                                 let bomFormula = null;
@@ -1657,7 +1820,7 @@ const TrimOrderDetailPage = () => {
                                                                     {totalShort > 0 && <span className="text-red-600 font-bold"> · {totalShort} short</span>}
                                                                 </p>
                                                             </div>
-                                                            {fulfillable.length > 0 && group.key !== 'fulfilled' && group.key !== 'insufficient' && (
+                                                            {!isClosed && fulfillable.length > 0 && group.key !== 'fulfilled' && group.key !== 'insufficient' && (
                                                                 <button onClick={() => handleBulkFulfillGroup(group)}
                                                                     disabled={isBusy || isFulfillingAll || isReverting}
                                                                     className={`flex items-center gap-1.5 text-xs font-bold text-white ${group.color === 'blue' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-purple-600 hover:bg-purple-700'} disabled:opacity-50 px-3 py-1.5 rounded-lg shadow-sm transition`}>
@@ -1684,17 +1847,19 @@ const TrimOrderDetailPage = () => {
                                                                     <button
                                                                         key={item.id}
                                                                         onClick={(e) => {
-                                                                            if (isFulfilledRow) return;
+                                                                            if (isFulfilledRow || isClosed) return;
                                                                             if (isOpen) { setPopoverAnchor(null); return; }
                                                                             const rect = e.currentTarget.getBoundingClientRect();
                                                                             setPopoverAnchor({ itemId: item.id, rect: { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height } });
                                                                         }}
-                                                                        disabled={isFulfilledRow}
-                                                                        title={isFulfilledRow
-                                                                            ? `Fulfilled · ${item.quantity_fulfilled} pcs`
-                                                                            : overReserved
-                                                                                ? `Planned ${plan.quantity_to_fulfill} but only ${fulfillingNet} net after ${fulfillingRes} reserved`
-                                                                                : 'Click to override the planned variant'}
+                                                                        disabled={isFulfilledRow || isClosed}
+                                                                        title={isClosed
+                                                                            ? 'Order is closed — fulfillment is locked'
+                                                                            : isFulfilledRow
+                                                                                ? `Fulfilled · ${item.quantity_fulfilled} pcs`
+                                                                                : overReserved
+                                                                                    ? `Planned ${plan.quantity_to_fulfill} but only ${fulfillingNet} net after ${fulfillingRes} reserved`
+                                                                                    : 'Click to override the planned variant'}
                                                                         className={`group inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-bold transition ${isFulfilledRow ? 'bg-green-50 text-green-700 border-green-200 cursor-default' : 'bg-white text-gray-800 border-gray-200 hover:border-blue-300'} ${isOverridden ? 'ring-1 ring-amber-300' : ''} ${overReserved ? 'ring-1 ring-amber-400 bg-amber-50' : ''} ${isOpen ? 'ring-2 ring-blue-400' : ''}`}>
                                                                         <span className={isFulfilledRow ? 'text-green-700' : 'text-gray-500'}>{item.color_name || 'AGNOSTIC'}</span>
                                                                         <span className="text-[9px] text-gray-400 font-mono">{item.color_number}</span>
@@ -1751,9 +1916,9 @@ const TrimOrderDetailPage = () => {
                                                                             ) : (
                                                                             <button
                                                                                 onClick={() => handleRevertFulfillment(log.id)}
-                                                                                disabled={isBilled}
-                                                                                className={`p-1 rounded transition-colors ${isBilled ? 'text-gray-300 cursor-not-allowed' : 'text-red-400 hover:text-white hover:bg-red-500'}`}
-                                                                                title={isBilled ? 'Cannot revert — this variant has been billed' : 'Undo this allocation (no stock moves)'}>
+                                                                                disabled={isBilled || isClosed}
+                                                                                className={`p-1 rounded transition-colors ${(isBilled || isClosed) ? 'text-gray-300 cursor-not-allowed' : 'text-red-400 hover:text-white hover:bg-red-500'}`}
+                                                                                title={isClosed ? 'Order is closed — fulfillment is locked' : isBilled ? 'Cannot revert — this variant has been billed' : 'Undo this allocation (no stock moves)'}>
                                                                                 <LuTrash2 size={11} />
                                                                             </button>
                                                                             )}
@@ -1780,8 +1945,42 @@ const TrimOrderDetailPage = () => {
                 <FulfillmentModal item={modalState.item} sopId={orderInfo?.sopId} onClose={() => { setModalState({ isOpen: false, item: null }); setFulfillErr(null); }} onSubmit={handleFulfillmentSubmit} apiError={fulfillErr} />
             )}
 
-            <ReferenceDataModal isOpen={refModalOpen} onClose={() => setRefModalOpen(false)} orderId={orderId} />
+            <ReferenceDataModal isOpen={refModalOpen} onClose={() => setRefModalOpen(false)} data={refData} loading={!refDataLoaded} />
             <BarcodePrintModal isOpen={barcodeModalOpen} onClose={() => setBarcodeModalOpen(false)} batchId={orderInfo?.batchId} />
+
+            {/* Force-close confirmation with optional reason */}
+            {closeModalOpen && createPortal(
+                <div className="fixed inset-0 bg-black/50 z-[650] flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !closeBusy) setCloseModalOpen(false); }}>
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md border border-gray-200">
+                        <div className="flex items-center gap-2 p-5 border-b border-gray-100">
+                            <LuLock className="h-5 w-5 text-red-600" />
+                            <h2 className="text-base font-bold text-gray-900">Close this trim order?</h2>
+                        </div>
+                        <div className="p-5 space-y-3">
+                            <p className="text-sm text-gray-500">Closing locks the order — no fulfilling, editing, or marking ready until it's re-opened. You can re-open it later.</p>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Reason <span className="normal-case font-medium text-gray-400">(optional)</span></label>
+                                <textarea
+                                    value={closeReason}
+                                    onChange={e => setCloseReason(e.target.value)}
+                                    rows={3}
+                                    placeholder="e.g. batch cancelled by planning"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-red-300"
+                                />
+                            </div>
+                        </div>
+                        <div className="flex gap-3 px-5 pb-5">
+                            <button onClick={() => setCloseModalOpen(false)} disabled={closeBusy} className="flex-1 px-4 py-2.5 text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50">
+                                Cancel
+                            </button>
+                            <button onClick={handleForceClose} disabled={closeBusy} className="flex-1 px-4 py-2.5 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50">
+                                {closeBusy ? <><Loader2 className="h-4 w-4 animate-spin" /> Closing…</> : <><LuLock className="h-4 w-4" /> Close order</>}
+                            </button>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
 
             {/* Product detail popup — opened from the product name in the header */}
             {productModalOpen && orderInfo && createPortal(

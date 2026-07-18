@@ -50,6 +50,11 @@ export const storeManagerApi = {
     markKitReady: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/mark-ready`),
     unmarkKitReady: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/unmark-ready`),
 
+    // Force close / re-open (store_manager, factory_admin). Close stashes the prior status;
+    // re-open restores it. Both 409 when the state doesn't allow the action.
+    forceCloseTrimOrder: (orderId, data) => api.post(`/store-manager/trim-orders/${orderId}/force-close`, data),
+    forceOpenTrimOrder: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/force-open`),
+
 
     // Billing  
     getTrimBillsForOrder: (orderId) => api.get(`/store-manager/trim-orders/${orderId}/bills`),

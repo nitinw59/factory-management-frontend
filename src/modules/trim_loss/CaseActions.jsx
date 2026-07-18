@@ -9,6 +9,7 @@ import { Loader2, AlertTriangle, CheckCircle2, X, Search, PackageX, Scale, Gavel
 const REPORTER_ROLES = ['line_loader', 'line_supervisor', 'line_manager', 'production_manager', 'factory_admin'];
 const PM_ROLES = ['production_manager', 'factory_admin'];
 const SECOND_APPROVER_ROLES = ['factory_admin', 'purchase_manager'];
+const STORE_ROLES = ['store_manager', 'factory_admin'];
 // Replacement is offered once responsibility is fixed (or later, incl. after a slip is already issued).
 const REPLACEMENT_STATUSES = ['RESPONSIBILITY_FIXED', 'DEBIT_APPROVED', 'CLOSED'];
 
@@ -223,6 +224,7 @@ const CaseActions = ({ caseData, onChanged }) => {
     const isReporter = REPORTER_ROLES.includes(role);
     const isPm = PM_ROLES.includes(role);
     const isSecond = SECOND_APPROVER_ROLES.includes(role);
+    const isStore = STORE_ROLES.includes(role);
     const status = caseData?.status;
     const replacementStarted = caseData?.replacement_mode || caseData?.replacement_issue_id;
 
@@ -236,7 +238,7 @@ const CaseActions = ({ caseData, onChanged }) => {
         zones.push(<PmZone key="pm" caseData={caseData} onChanged={onChanged} />);
     }
 
-    if ((isPm || isSecond) && (REPLACEMENT_STATUSES.includes(status) || replacementStarted)) {
+    if ((isPm || isSecond || isStore) && (REPLACEMENT_STATUSES.includes(status) || replacementStarted)) {
         zones.push(<ReplacementPanel key="replacement" caseData={caseData} onChanged={onChanged} />);
     }
 

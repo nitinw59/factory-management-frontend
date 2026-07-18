@@ -31,7 +31,7 @@ export const HandoverDetailModal = ({ issueId, orderId, onClose }) => {
     useEffect(() => {
         let alive = true;
         trimKitsApi.getKitHistoryDetail(issueId)
-            .then(r => { console.log('[trimkits] getKitHistoryDetail raw:', r.data); if (alive) setData(r.data); })
+            .then(r => { console.log('[trimkits] getKitHistoryDetail raw:', r.data); console.log('[trimkits] getKitHistoryDetail raw JSON:\n' + JSON.stringify(r.data, null, 2)); if (alive) setData(r.data); })
             .catch(err => { if (alive) setError(err.response?.data?.error || 'Failed to load handover.'); });
         return () => { alive = false; };
     }, [issueId]);
@@ -180,6 +180,7 @@ const KitHistoryPage = () => {
             if (order_id) q.order_id = order_id;
             const res = await trimKitsApi.getKitHistory(q);
             console.log('[trimkits] getKitHistory raw:', res.data);
+            console.log('[trimkits] getKitHistory raw JSON:\n' + JSON.stringify(res.data, null, 2));
             setRows(res.data || []);
         } catch (err) {
             setError(err.response?.data?.error || 'Failed to load pickup history.');
@@ -214,6 +215,7 @@ const KitHistoryPage = () => {
                 orderIds.map(id => trimKitsApi.getKitOrder(id).then(r => r.data).catch(() => null))
             );
             console.log('[trimkits] pending source orders raw:', orders);
+            console.log('[trimkits] pending source orders raw JSON:\n' + JSON.stringify(orders, null, 2));
             const out = [];
             orders.filter(Boolean).forEach(order => {
                 (order.items || []).forEach(it => {

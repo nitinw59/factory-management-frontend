@@ -82,7 +82,7 @@ const StoreManagerLayout = () => {
 
 
 
-                            <NavDropdown title="Requests">
+                            <NavDropdown title="General">
                                 <NavLink to="/store-manager/general-items" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                     <LuBoxes className="mr-2" /> General Items
                                 </NavLink>

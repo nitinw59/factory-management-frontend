@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { storeManagerApi } from '../../api/storeManagerApi';
-import { FiClock, FiCheckCircle, FiList, FiPackage, FiSend, FiTruck } from 'react-icons/fi';
+import { FiClock, FiCheckCircle, FiList, FiPackage, FiSend, FiTruck, FiLock } from 'react-icons/fi';
 import { ChevronRight, Search, RefreshCw, AlertCircle, Receipt, IndianRupee, Loader2 } from 'lucide-react';
 import { kitStatusOf } from '../trim_kits/kitStatusConfig';
 
@@ -30,6 +30,7 @@ const OrderCard = ({ order }) => {
         READY_FOR_PICKUP: FiSend,
         PARTIALLY_ISSUED: FiTruck,
         ISSUED: FiCheckCircle,
+        CLOSED: FiLock,
     }[order.status] || FiList;
 
     const Icon = statusIcon;
@@ -41,6 +42,7 @@ const OrderCard = ({ order }) => {
         READY_FOR_PICKUP: 'border-indigo-500 hover:border-indigo-600',
         PARTIALLY_ISSUED: 'border-purple-500 hover:border-purple-600',
         ISSUED: 'border-green-500 hover:border-green-600',
+        CLOSED: 'border-gray-400 hover:border-gray-500',
     }[order.status] || 'border-gray-500 hover:border-gray-600';
 
     const badgeColorClass = statusMeta.badge;

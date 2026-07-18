@@ -28,16 +28,20 @@ const FixResponsibilityModal = ({ caseData, onClose, onDone }) => {
     useEffect(() => {
         hrApi.getAllEmployees()
             .then(r => {
-                const list = Array.isArray(r.data) ? r.data : (r.data?.data || []);
-                setEmployees(list.filter(e => e.is_active !== false && e.status !== 'INACTIVE'));
+                // Response shape: { employees: [{ emp_id, employee_name, status, line_name, dept_name }] }
+                const list = r.data?.employees ?? r.data?.data ?? r.data ?? [];
+                setEmployees((Array.isArray(list) ? list : [])
+                    .filter(e => !e.status || e.status === 'Active'));
             })
             .catch(() => setEmployees([]));
     }, []);
 
-    const empOptions = useMemo(() => employees.map(e => ({
-        value: e.id ?? e.employee_id,
-        label: e.name || e.employee_name || e.full_name || [e.first_name, e.last_name].filter(Boolean).join(' ') || `#${e.id ?? e.employee_id}`,
-    })), [employees]);
+    const empOptions = useMemo(() => employees.map(e => {
+        const id = e.emp_id ?? e.id ?? e.employee_id;
+        const unit = e.line_name || e.dept_name;
+        const name = e.employee_name || e.name || e.full_name || [e.first_name, e.last_name].filter(Boolean).join(' ') || `#${id}`;
+        return { value: id, label: `${name.trim()}${unit ? ` · ${unit.trim()}` : ''}` };
+    }), [employees]);
 
     const addRow = () => { setRows(prev => [...prev, { key: nextKey, employee_id: '', qty: '', reason: '' }]); setNextKey(k => k + 1); };
     const removeRow = (key) => setRows(prev => prev.filter(r => r.key !== key));

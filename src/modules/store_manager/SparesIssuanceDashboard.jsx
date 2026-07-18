@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-    Package, Users, Wrench, Search, FileText, CheckCircle, 
+    Package, Wrench, Search, FileText, CheckCircle,
     Clock, AlertCircle, Loader2, Plus, Trash2, Printer, User, X, ChevronDown, RefreshCcw
 } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -105,9 +105,7 @@ export default function SparesIssuanceDashboard() {
     const [invoiceToView, setInvoiceToView] = useState(null);
 
     // Direct Issuance Form States
-    const [directIsUnregistered, setDirectIsUnregistered] = useState(false);
     const [directUserId, setDirectUserId] = useState('');
-    const [directUnregisteredName, setDirectUnregisteredName] = useState('');
     const [directItems, setDirectItems] = useState([{ spare_part_id: '', quantity: 1 }]);
     const [directNotes, setDirectNotes] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -272,11 +270,7 @@ export default function SparesIssuanceDashboard() {
         e.preventDefault();
         setDirectPriceError(null);
 
-        if (directIsUnregistered) {
-            if (!directUnregisteredName.trim()) return alert("Please enter the recipient's name.");
-        } else {
-            if (!directUserId) return alert("Please select a user to issue spares to.");
-        }
+        if (!directUserId) return alert("Please select a user to issue spares to.");
 
         const validItems = directItems.filter(i => i.spare_part_id && i.quantity > 0);
         if (validItems.length === 0) return alert("Please add at least one valid spare part with a quantity greater than 0.");
@@ -292,16 +286,13 @@ export default function SparesIssuanceDashboard() {
 
         setIsSubmitting(true);
         try {
-            const payload = directIsUnregistered
-                ? { unregistered_user_name: directUnregisteredName.trim(), items: validItems, notes: directNotes }
-                : { target_user_id: directUserId, items: validItems, notes: directNotes };
+            const payload = { target_user_id: directUserId, items: validItems, notes: directNotes };
 
             await storeManagerApi.generateInvoice(payload);
             alert("Direct Issuance Logged & Invoice Generated Successfully!");
 
             // Reset Form
             setDirectUserId('');
-            setDirectUnregisteredName('');
             setDirectItems([{ spare_part_id: '', quantity: 1 }]);
             setDirectNotes('');
 
@@ -488,45 +479,17 @@ export default function SparesIssuanceDashboard() {
                             <p className="text-sm text-gray-500 font-medium">Bypass requests to issue stock directly to any registered factory user. This automatically deducts from the main store and logs the invoice.</p>
                         </div>
 
-                        {/* Receiver Type Toggle */}
-                        <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-xl w-max mb-6">
-                            <button
-                                type="button"
-                                onClick={() => { setDirectIsUnregistered(false); setDirectUnregisteredName(''); }}
-                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${!directIsUnregistered ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                            >
-                                <Users className="inline w-4 h-4 mr-1.5 -mt-0.5"/>Registered User
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => { setDirectIsUnregistered(true); setDirectUserId(''); }}
-                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${directIsUnregistered ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                            >
-                                <User className="inline w-4 h-4 mr-1.5 -mt-0.5"/>Unregistered Person
-                            </button>
-                        </div>
-
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                                     Issue To (Receiver) *
                                 </label>
-                                {directIsUnregistered ? (
-                                    <input
-                                        type="text"
-                                        value={directUnregisteredName}
-                                        onChange={e => setDirectUnregisteredName(e.target.value)}
-                                        placeholder="Enter recipient's full name..."
-                                        className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition-all bg-gray-50 focus:bg-white font-medium"
-                                    />
-                                ) : (
-                                    <SearchableDropdown
-                                        options={users}
-                                        value={directUserId}
-                                        onChange={setDirectUserId}
-                                        placeholder="Search by name or role..."
-                                    />
-                                )}
+                                <SearchableDropdown
+                                    options={users}
+                                    value={directUserId}
+                                    onChange={setDirectUserId}
+                                    placeholder="Search by name or role..."
+                                />
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Notes / Reference</label>
