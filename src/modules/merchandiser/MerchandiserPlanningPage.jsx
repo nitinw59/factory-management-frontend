@@ -1284,6 +1284,32 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
             .catch(() => {});
     }, [sop.id]);
 
+    // Per-trim recalculation (single trim_item_id, leaves fabric + other trims untouched)
+    const [recalcTrimId, setRecalcTrimId] = useState(null); // trim_item_id currently recalculating
+    const [recalcMsg,    setRecalcMsg]    = useState(null);  // transient success banner
+
+    useEffect(() => {
+        if (!recalcMsg) return;
+        const t = setTimeout(() => setRecalcMsg(null), 3500);
+        return () => clearTimeout(t);
+    }, [recalcMsg]);
+
+    const handleRecalcTrim = async (item) => {
+        if (item?.trim_item_id == null || recalcTrimId != null) return;
+        setRecalcTrimId(item.trim_item_id);
+        setErr(null);
+        try {
+            const res = await planningApi.recalculateTrim(sop.id, item.trim_item_id);
+            setRecalcMsg(res.data?.message || res.data?.data?.message || 'Trim requirement recalculated.');
+            refetchLocal();   // re-hydrate stock suggestions, reservations, PRs, breakdowns
+            onRefresh();      // refresh parent (production_readiness may have flipped)
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Recalculation failed');
+        } finally {
+            setRecalcTrimId(null);
+        }
+    };
+
     useEffect(() => {
         setLoadingLocal(true);
         planningApi.getRequirements(sop.id)
@@ -2227,6 +2253,13 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                     </div>
                 )}
 
+                {/* Transient per-trim recalculation confirmation */}
+                {recalcMsg && (
+                    <div className="mx-5 mt-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 flex items-center gap-1.5">
+                        <CheckCircle2 size={13} className="shrink-0" /> {recalcMsg}
+                    </div>
+                )}
+
                 {/* Timeline body */}
                 <div className="flex-1 overflow-y-auto">
                     {/* Navigation bar */}
@@ -2501,6 +2534,19 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                                         </span>
                                                                     );
                                                                 })()}
+                                                                {item.type === 'trim' && item.isReq && item.trim_item_id != null && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={e => { e.stopPropagation(); handleRecalcTrim(item); }}
+                                                                        disabled={recalcTrimId != null}
+                                                                        title="Recalculate this trim's requirement"
+                                                                        className="ml-1 p-0.5 text-slate-400 hover:text-violet-600 disabled:opacity-40 shrink-0"
+                                                                    >
+                                                                        {recalcTrimId === item.trim_item_id
+                                                                            ? <Loader2 size={11} className="animate-spin" />
+                                                                            : <RotateCw size={11} />}
+                                                                    </button>
+                                                                )}
                                                             </div>
 
                                                             {/* Bar track */}
@@ -2873,6 +2919,19 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                                                 <CheckCircle2 size={13} /> Available · Completed
                                                                             </span>
                                                                         )}
+                                                                        {item.type === 'trim' && item.isReq && item.trim_item_id != null && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={e => { e.stopPropagation(); handleRecalcTrim(item); }}
+                                                                                disabled={recalcTrimId != null}
+                                                                                title="Recalculate this trim's requirement (fabric and other trims untouched)"
+                                                                                className="flex items-center gap-1.5 text-xs font-bold text-violet-700 bg-violet-50 border border-violet-200 hover:bg-violet-100 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors">
+                                                                                {recalcTrimId === item.trim_item_id
+                                                                                    ? <Loader2 size={12} className="animate-spin" />
+                                                                                    : <RotateCw size={12} />}
+                                                                                Recalculate
+                                                                            </button>
+                                                                        )}
                                                                     </div>
                                                                     );
                                                                 })()}
@@ -3206,14 +3265,28 @@ const MarkerAllocationModal = ({ sop, onClose, onDone }) => {
                 const colorId = String(c.fabric_color_id);
                 const rgId    = markerChoice[colorId];
                 const calc    = rgId ? calcRuns(c.sizes, rgId) : null;
+                const orderedTotal = (c.sizes || []).reduce((s, sz) => s + (Number(sz.quantity) || 0), 0);
                 return {
-                    fabric_color_id:    c.fabric_color_id,
+                    fabric_color_id:    Number(c.fabric_color_id),
                     ratio_group_id:     rgId ? parseInt(rgId) : null,
-                    marker_runs:        calc?.runs        ?? 0,
-                    finalized_quantity: calc?.totalProduced ?? (Number(c.total_quantity || c.quantity) || 0),
+                    marker_runs:        calc?.runs ?? 0,
+                    // `||` (not `??`) so a 0-producing marker falls back to the ordered qty,
+                    // whose source of truth is c.sizes — c.total_quantity/quantity are often absent.
+                    finalized_quantity: calc?.totalProduced || orderedTotal || Number(c.total_quantity || c.quantity) || 0,
                     selected_option:    'exact',
                 };
             });
+            const invalid = quantities.find(q => !q.fabric_color_id || !q.finalized_quantity);
+            if (invalid) {
+                setError('Cannot finalize: a color has no valid quantity or fabric color. Check size quantities and marker selection.');
+                setSubmitting(false);
+                return;
+            }
+            console.group(`%c[RECALC · CALCULATE] SOP #${sop.id} — ${sop.product_name || ''}`, 'color:#7c3aed;font-weight:bold');
+            console.log('finalize-quantities payload (drives gross recompute):');
+            console.table(quantities);
+            console.log('%cBE: recompute GROSS from finalized_quantity above; existing reservations must be PRESERVED and their reserved amounts EXCLUDED from new PR/PO (net = gross − reserved).', 'color:#b91c1c');
+            console.groupEnd();
             await planningApi.finalizeQuantities(sop.id, { quantities });
             await planningApi.calculateRequirements(sop.id);
             onDone();
@@ -3417,6 +3490,95 @@ const MarkerAllocationModal = ({ sop, onClose, onDone }) => {
             </div>
         </div>
     );
+};
+
+// ─── RECALCULATION DEBUG BRIEF (for BE) ───────────────────────────────────────
+// Emits a structured console report of the recalculation lifecycle so the backend
+// team can see, at each phase, exactly what existing data the preview returned and
+// how already-reserved quantities net against the (about-to-be-recomputed) gross
+// requirements.
+//
+// Netting rule mirrored from the reservation UI (see reserve modals):
+//     net_to_procure = max(0, required - already_reserved)
+//
+// BE contract this brief documents:
+//   1. Recompute GROSS requirements from the finalized marker quantities.
+//   2. Do NOT delete existing reservations — carry them over (match by requirement,
+//      or by substitute link). Reserved stock stays reserved across a recalc.
+//   3. NET procurement = gross_required − already_reserved (floored at 0). ONLY the
+//      NET drives new purchase requests / purchase orders. Anything already reserved
+//      is EXCLUDED from the new recalculation's procurement output.
+const logRecalcBrief = (phase, sop, preview) => {
+    if (typeof console === 'undefined') return;
+    const p            = preview || {};
+    const fabReqs      = p.fabric_requirements || [];
+    const trimReqs     = p.trim_requirements   || [];
+    const reservations = p.reservations        || [];
+
+    console.group(`%c[RECALC · ${phase}] SOP #${sop?.id} — ${sop?.product_name || ''}`,
+        'color:#7c3aed;font-weight:bold');
+    console.log('sop_id:', sop?.id, '| bom_id:', sop?.bom_id,
+        '| has_existing_data:', p.has_existing_data, '| summary:', p.summary || {});
+
+    // Fabric: gross required vs already-reserved → net to procure (reserved EXCLUDED)
+    const fabRows = fabReqs.map(r => {
+        const required = Number(r.meters_required ?? r.meters ?? 0);
+        const reserved = Number(r.meters_reserved ?? 0);
+        return {
+            requirement_id:     r.id,
+            fabric:             `${r.fabric_type_name || r.type || 'Fabric'}${(r.color_name || r.color) ? ' · ' + (r.color_name || r.color) : ''}${r.color_number ? ' · ' + r.color_number : ''}`,
+            required_m:         +required.toFixed(2),
+            already_reserved_m: +reserved.toFixed(2),
+            net_to_procure_m:   +Math.max(0, required - reserved).toFixed(2),
+        };
+    });
+    console.log('%cFabric — already-reserved EXCLUDED from net_to_procure:', 'color:#0369a1;font-weight:bold');
+    console.table(fabRows);
+
+    // Trim: gross required vs already-reserved → net to procure (reserved EXCLUDED)
+    const trimRows = trimReqs.map(r => {
+        const required = Number(r.quantity_required ?? r.quantity ?? 0);
+        const reserved = Number(r.quantity_reserved ?? 0);
+        return {
+            requirement_id:       r.id,
+            trim:                 `${r.trim_item_name || r.item || 'Trim'}${(r.color_name || r.color) ? ' · ' + (r.color_name || r.color) : ''}${r.variant_size ? ' · Sz ' + r.variant_size : ''}`,
+            unit:                 r.unit_of_measure ?? r.unit ?? 'pcs',
+            required_qty:         required,
+            already_reserved_qty: reserved,
+            net_to_procure_qty:   Math.max(0, required - reserved),
+        };
+    });
+    console.log('%cTrim — already-reserved EXCLUDED from net_to_procure:', 'color:#0369a1;font-weight:bold');
+    console.table(trimRows);
+
+    // Raw reservations the BE must PRESERVE (never re-procured)
+    console.log('%cReservations to PRESERVE (excluded from new procurement):', 'color:#059669;font-weight:bold');
+    console.table(reservations.map(r => {
+        const isFabric = (r.type || '').toLowerCase() === 'fabric' || r.meters_reserved != null || r.meters != null;
+        return {
+            reservation_id: r.id,
+            requirement_id: r.fabric_requirement_id ?? r.trim_requirement_id ?? r.requirement_id ?? null,
+            kind:           isFabric ? 'fabric' : 'trim',
+            is_substitute:  !!r.is_substitute,
+            reserved:       isFabric
+                ? +Number(r.meters_reserved ?? r.reserved ?? r.meters ?? 0).toFixed(2)
+                : Number(r.quantity_reserved ?? r.reserved ?? r.quantity ?? 0),
+            source:         r.color_name ? `${r.color_name}${r.color_number ? ' (' + r.color_number + ')' : ''}` : undefined,
+        };
+    }));
+
+    const totReservedFab = fabRows.reduce((s, r) => s + r.already_reserved_m, 0);
+    const totNetFab      = fabRows.reduce((s, r) => s + r.net_to_procure_m, 0);
+    const totReservedTrim = trimRows.reduce((s, r) => s + r.already_reserved_qty, 0);
+    const totNetTrim      = trimRows.reduce((s, r) => s + r.net_to_procure_qty, 0);
+    console.log('%cBE CONTRACT — reserved stock is EXCLUDED from recalculated procurement:',
+        'color:#b91c1c;font-weight:bold',
+        '\n • Recompute GROSS from finalized marker quantities.',
+        '\n • Carry existing reservations over (never delete on recalc).',
+        '\n • NET = gross_required − already_reserved (floor 0); only NET drives new PR/PO.',
+        `\n • Fabric totals → reserved ${totReservedFab.toFixed(2)} m | net-to-procure ${totNetFab.toFixed(2)} m`,
+        `\n • Trim totals   → reserved ${totReservedTrim.toLocaleString()} | net-to-procure ${totNetTrim.toLocaleString()}`);
+    console.groupEnd();
 };
 
 const RecalculateConfirmModal = ({ preview, sopName, onClose, onConfirm, busy, err }) => {
@@ -3844,20 +4006,36 @@ const LinkAndAllocateModal = ({ sop, bomOptions, onClose, onDone, onLink, onPrev
                     Object.entries(choices).filter(([, v]) => v).map(([id]) => parseInt(id))
                 )
             )];
-            await onLink(sop.id, parseInt(pickedBomId), usedRgIds);
             const quantities = (sop.colors || []).map(c => {
                 const colorId  = String(c.fabric_color_id);
                 const calc     = calcAllForColor(c.sizes, colorId);
                 const selectedIds = Object.entries(markerChoices[colorId] || {})
                     .filter(([, v]) => v).map(([id]) => id);
+                const orderedTotal = (c.sizes || []).reduce((s, sz) => s + (Number(sz.quantity) || 0), 0);
                 return {
-                    fabric_color_id:    c.fabric_color_id,
+                    fabric_color_id:    Number(c.fabric_color_id),
                     ratio_group_id:     selectedIds.length === 1 ? parseInt(selectedIds[0]) : null,
-                    marker_runs:        calc?.totalRuns        ?? 0,
-                    finalized_quantity: calc?.grandTotal       ?? (Number(c.total_quantity || c.quantity) || 0),
+                    marker_runs:        calc?.totalRuns ?? 0,
+                    // `||` (not `??`) so a 0-producing marker falls back to the ordered qty,
+                    // whose source of truth is c.sizes — c.total_quantity/quantity are often absent.
+                    finalized_quantity: calc?.grandTotal || orderedTotal || Number(c.total_quantity || c.quantity) || 0,
                     selected_option:    'exact',
                 };
             });
+            // Validate before onLink so we never leave the BOM linked but quantities un-finalized.
+            const invalid = quantities.find(q => !q.fabric_color_id || !q.finalized_quantity);
+            if (invalid) {
+                setError('Cannot finalize: a color has no valid quantity or fabric color. Check size quantities and marker selection.');
+                setSubmitting(false);
+                return;
+            }
+            console.group(`%c[RECALC · LINK+CALCULATE] SOP #${sop.id} — ${sop.product_name || ''}`, 'color:#7c3aed;font-weight:bold');
+            console.log('bom_id:', parseInt(pickedBomId), '| ratio_group_ids:', usedRgIds);
+            console.log('finalize-quantities payload (drives gross recompute):');
+            console.table(quantities);
+            console.log('%cBE: recompute GROSS from finalized_quantity above; existing reservations must be PRESERVED and their reserved amounts EXCLUDED from new PR/PO (net = gross − reserved).', 'color:#b91c1c');
+            console.groupEnd();
+            await onLink(sop.id, parseInt(pickedBomId), usedRgIds);
             await planningApi.finalizeQuantities(sop.id, { quantities });
             await planningApi.calculateRequirements(sop.id);
             onDone();
@@ -4232,6 +4410,9 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
     // Confirm "delete & recalc" → hand off to the marker-run picker (pre-populated
     // with previous finalized choices). The picker calls finalize + calculate.
     const doRecalculate = () => {
+        // Confirm phase — user accepted the destructive recalc. Re-emit the brief so
+        // the BE log trail shows the reserved amounts that must survive the recompute.
+        logRecalcBrief('CONFIRM', sop, preview);
         setShowRecalcConfirm(false);
         setPreview(null);
         setRecalcErr(null);
@@ -4244,6 +4425,9 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
         try {
             const res  = await planningApi.getRecalculationPreview(sop.id);
             const data = res.data?.data ?? res.data;
+            // Preview phase — dump the full recalc brief (existing reqs, reservations,
+            // and the reserved-EXCLUDED net that the BE recompute must honour).
+            logRecalcBrief('PREVIEW', sop, data);
             if (!data?.has_existing_data) {
                 // First-time calc — go through the marker-run picker (finalize quantities → calculate)
                 setShowQuantityPicker(true);

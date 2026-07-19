@@ -18,6 +18,7 @@ export const planningApi = {
     // Use purchaseDeptApi.raiseRequirement / cancelRequirement instead.
     // Trim
     updateTrimRequirement:    (reqId, body)      => api.put(`/planning/trim-requirements/${reqId}`, body),
+    recalculateTrim:          (sopId, trimItemId) => api.post(`/planning/sales-order-products/${sopId}/trim-items/${trimItemId}/recalculate`),
     reserveTrim:              (reqId, body)      => api.post(`/planning/trim-requirements/${reqId}/reservations`, body),
     deleteTrimReservation:    (reservationId)    => api.delete(`/planning/trim-requirements/reservations/${reservationId}`),
     // Removed: createTrimPurchase / deleteTrimPurchase
