@@ -198,6 +198,7 @@ function App() {
     <Routes>
       {/* --- 1. PUBLIC ROUTES --- */}
       <Route path="/" element={<LoginPage />} />
+      <Route path="/login" element={<LoginPage />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 

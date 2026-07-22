@@ -1,9 +1,20 @@
+import { Navigate, useLocation } from 'react-router-dom';
 import { API_BASE_URL } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 
 const LoginPage = () => {
+    const { user } = useAuth();
+    const location = useLocation();
+    const sessionExpired = location.state?.reason === 'session_expired';
+
     const handleLogin = () => {
         window.location.href = `${API_BASE_URL}/api/auth/google`;
     };
+
+    // Already authenticated — go straight to the role-based portal redirect.
+    if (user) {
+        return <Navigate to="/init" replace />;
+    }
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-slate-100 px-4">
@@ -15,6 +26,15 @@ const LoginPage = () => {
                 />
                 <h1 className="text-2xl font-black tracking-[0.3em] text-slate-800">MATRIX</h1>
                 <p className="text-xs text-slate-500 uppercase tracking-widest mt-1">Factory Management Platform</p>
+
+                {sessionExpired && (
+                    <div className="w-full mt-6 flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-medium rounded-xl px-3.5 py-3">
+                        <svg className="w-4 h-4 flex-shrink-0 mt-px" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                        </svg>
+                        <span>Your session has expired. Please sign in again.</span>
+                    </div>
+                )}
 
                 <div className="w-full mt-8">
                     <button

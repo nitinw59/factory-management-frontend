@@ -1103,7 +1103,7 @@ const CompletedBatchCard = ({ batch }) => {
             >
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono font-black text-slate-800 text-sm">{batch.batch_code}</span>
+                        <span className="font-mono font-black text-slate-800 text-sm">BATCH #{batch.batch_id}</span>
                         {batch.is_dispatch_closed && (
                             <span className="flex items-center gap-0.5 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border bg-emerald-100 text-emerald-700 border-emerald-200">
                                 <CheckCircle2 size={8} /> Dispatched
@@ -1235,6 +1235,7 @@ const HistoryPanel = ({ onClose }) => {
         if (!search.trim()) return batches;
         const lower = search.toLowerCase();
         return batches.filter(b =>
+            String(b.batch_id ?? '').toLowerCase().includes(lower) ||
             (b.batch_code                      || '').toLowerCase().includes(lower) ||
             (b.product?.name                   || '').toLowerCase().includes(lower) ||
             (b.sales_order?.order_number       || '').toLowerCase().includes(lower) ||

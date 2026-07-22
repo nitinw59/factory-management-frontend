@@ -13,7 +13,7 @@ import { getCompanyProfileOnce } from './handoverSlip';
 import {
     Loader2, ArrowLeft, AlertCircle, AlertTriangle, CheckCircle2, ClipboardCheck,
     Replace, FileText, History, Download, PartyPopper, PackageX, RefreshCw, ArrowLeftRight,
-    Minus, Plus, Search, ChevronDown, ChevronsDownUp, ChevronsUpDown, X
+    Minus, Plus, Search, ChevronDown, ChevronsDownUp, ChevronsUpDown, X, Scale
 } from 'lucide-react';
 
 const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
@@ -25,25 +25,161 @@ const variantLabel = (v) =>
 
 const _norm = (s) => String(s ?? '').trim().toLowerCase();
 
-// Stable physical-trim key iff the item's WHOLE unissued fill is one substitute
-// trim; otherwise null (mixed/partial/own-variant items never merge).
-const substituteFillKey = (item) => {
+// ── Count-by-weight helper ───────────────────────────────────────────────────
+// Small trims (2,500 buttons…) aren't countable piece by piece. The loader weighs
+// a fixed sample, we scale it to what the whole expected qty should weigh, and can
+// derive a counted qty from the whole pile's weight to feed back into the checklist.
+const SAMPLE_SIZES = [10, 20, 30];
+const fmtWeight = (g) =>
+    g >= 1000
+        ? `${(g / 1000).toLocaleString('en-IN', { maximumFractionDigits: 3 })} kg`
+        : `${g.toLocaleString('en-IN', { maximumFractionDigits: 1 })} g`;
+
+const WeighHelper = ({ expectedQty, onCounted }) => {
+    const [open, setOpen] = useState(false);
+    const [sampleSize, setSampleSize] = useState(10);
+    const [sampleWeight, setSampleWeight] = useState('');
+    const [pileWeight, setPileWeight] = useState('');
+
+    const perPiece = Number(sampleWeight) > 0 ? Number(sampleWeight) / sampleSize : null;
+    const targetWeight = perPiece ? perPiece * expectedQty : null;
+    const derivedCount = perPiece && Number(pileWeight) > 0 ? Math.round(Number(pileWeight) / perPiece) : null;
+    const diff = derivedCount != null ? derivedCount - expectedQty : 0;
+
+    if (!open) {
+        return (
+            <button
+                type="button"
+                onClick={() => setOpen(true)}
+                className="mt-2 flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800"
+            >
+                <Scale className="w-3.5 h-3.5" /> Count by weight
+            </button>
+        );
+    }
+    return (
+        <div className="mt-3 bg-indigo-50/60 border border-indigo-200 rounded-xl p-3 space-y-3">
+            <div className="flex items-center justify-between">
+                <p className="text-xs font-bold text-indigo-800 flex items-center gap-1.5">
+                    <Scale className="w-3.5 h-3.5" /> Count by weight
+                </p>
+                <button type="button" onClick={() => setOpen(false)} className="text-indigo-400 hover:text-indigo-600" aria-label="Close weight counter">
+                    <X className="w-4 h-4" />
+                </button>
+            </div>
+
+            {/* Step 1 — weigh a fixed sample */}
+            <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium text-gray-600">Weigh</span>
+                {SAMPLE_SIZES.map(n => (
+                    <button
+                        key={n}
+                        type="button"
+                        onClick={() => setSampleSize(n)}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-bold border-2 transition-all active:scale-95 ${
+                            sampleSize === n
+                                ? 'border-indigo-500 bg-white text-indigo-700 shadow-sm'
+                                : 'border-indigo-200 bg-white/60 text-gray-500 hover:border-indigo-300'
+                        }`}
+                    >
+                        {n}
+                    </button>
+                ))}
+                <span className="text-xs font-medium text-gray-600">pieces →</span>
+                <div className="flex items-center gap-1">
+                    <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="any"
+                        value={sampleWeight}
+                        onChange={e => setSampleWeight(e.target.value)}
+                        placeholder="weight"
+                        className="w-24 border border-indigo-200 rounded-lg p-2 text-sm text-right font-mono bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <span className="text-xs font-bold text-gray-500">g</span>
+                </div>
+            </div>
+
+            {targetWeight != null && (
+                <p className="text-sm font-bold text-indigo-900 bg-white border border-indigo-200 rounded-lg px-3 py-2">
+                    {expectedQty.toLocaleString('en-IN')} pcs should weigh ≈ <span className="text-lg font-black">{fmtWeight(targetWeight)}</span>
+                    <span className="ml-2 text-[10px] uppercase tracking-wider font-bold text-indigo-400">({fmtWeight(perPiece)} / pc)</span>
+                </p>
+            )}
+
+            {/* Step 2 — optional: weigh the whole pile and take the derived count */}
+            {perPiece != null && (
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-gray-600">Whole pile weighs</span>
+                    <div className="flex items-center gap-1">
+                        <input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="any"
+                            value={pileWeight}
+                            onChange={e => setPileWeight(e.target.value)}
+                            placeholder="weight"
+                            className="w-24 border border-indigo-200 rounded-lg p-2 text-sm text-right font-mono bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <span className="text-xs font-bold text-gray-500">g</span>
+                    </div>
+                    {derivedCount != null && (
+                        <>
+                            <span className={`text-sm font-black ${diff === 0 ? 'text-green-700' : 'text-amber-700'}`}>
+                                ≈ {derivedCount.toLocaleString('en-IN')} pcs
+                            </span>
+                            {diff !== 0 && (
+                                <span className="text-xs font-bold text-amber-700">
+                                    ({Math.abs(diff).toLocaleString('en-IN')} {diff < 0 ? 'short' : 'over'})
+                                </span>
+                            )}
+                            {onCounted && (
+                                <button
+                                    type="button"
+                                    onClick={() => onCounted(derivedCount)}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-bold border-2 border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95 transition-all"
+                                >
+                                    Use as counted
+                                </button>
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
+// Stable physical-trim key iff the item's WHOLE unissued fill is one physical
+// trim — its own variant or a substitute; otherwise null (mixed/partial fills
+// never merge). Keyed on the physical trim so an exact-match line and lines
+// substituted with that same trim land in the same pile.
+const physicalFillKey = (item) => {
     const active = (item.fulfilled_with || []).filter(fw => Number(fw.unissued_qty) > 0);
     if (active.length !== 1) return null;                    // 0 or multiple fills → don't merge
     const fw = active[0];
-    if (!fw.is_substitute) return null;                      // own variant → don't merge
     if (Number(fw.unissued_qty) !== Number(item.unissued_qty)) return null; // partial → don't merge
-    return ['sub', _norm(fw.item_name), _norm(fw.color_number), _norm(fw.color_name), _norm(fw.variant_size)].join('|');
+    // Own-variant fill rows may omit variant fields — fall back to the order line's own.
+    const own = !fw.is_substitute;
+    return [
+        _norm(fw.item_name || item.item_name),
+        _norm(own ? (fw.color_number ?? item.color_number) : fw.color_number),
+        _norm(own ? (fw.color_name ?? item.color_name) : fw.color_name),
+        _norm(own ? (fw.variant_size ?? item.variant_size) : fw.variant_size),
+    ].join('|');
 };
 
 // Regroup a name-group's items into render units: singles, plus merged clusters
-// where 2+ originals were fully substituted with the SAME physical trim (one pile).
+// where 2+ order lines are fully filled from the SAME physical trim (one pile) —
+// the trim's own ordered line included, so the loader counts one physical pile once.
 // A cluster sits at the position of its first constituent; a cluster of <2 demotes to a single.
 const clustersOf = (items) => {
     const byKey = new Map();
     const units = [];
     items.forEach(it => {
-        const k = substituteFillKey(it);
+        const k = physicalFillKey(it);
         if (!k) { units.push({ type: 'single', item: it }); return; }
         if (!byKey.has(k)) { const c = { type: 'merged', key: k, items: [] }; byKey.set(k, c); units.push(c); }
         byKey.get(k).items.push(it);
@@ -371,6 +507,15 @@ const KitOrderPage = () => {
                                 </button>
                             </div>
 
+                            {/* Weigh a sample instead of counting piece by piece — a matching pile
+                                weight marks the line present; a mismatch drops into the shortage flow. */}
+                            <WeighHelper
+                                expectedQty={expected}
+                                onCounted={(n) => setCount(item.id, n === expected
+                                    ? { mode: 'exact', counted_qty: String(n), issue_kind: '', notes: '' }
+                                    : { mode: 'diff', counted_qty: String(n) })}
+                            />
+
                             {mode === 'diff' && (
                                 <div className="mt-3 space-y-3">
                                     {/* Big +/- stepper — no keyboard needed on a handheld */}
@@ -435,11 +580,17 @@ const KitOrderPage = () => {
         );
     };
 
-    // One merged row standing in for a cluster of ordered variants all substituted with the
-    // SAME physical trim (one pile). "All present" fans out to per-item exact counts; "Shortage"
-    // expands the cluster into its real rows so each order line gets its own qty/issue/notes.
+    // One merged row standing in for a cluster of order lines all filled from the SAME
+    // physical trim (one pile) — substitutes plus, when present, that trim's own ordered
+    // line. "All present" fans out to per-item exact counts; "Shortage" expands the
+    // cluster into its real rows so each order line gets its own qty/issue/notes.
     const renderMergedRow = (group, unit, cid) => {
-        const fw0 = unit.items[0].fulfilled_with.find(f => Number(f.unissued_qty) > 0);
+        const fills = unit.items.map(it => it.fulfilled_with.find(f => Number(f.unissued_qty) > 0));
+        const subCount = fills.filter(f => f.is_substitute).length;
+        // Substitute fill rows carry the physical trim's fields; own-variant rows may not.
+        const fw0 = fills.find(f => f.is_substitute) || fills[0];
+        const ownItem = unit.items.find((it, i) => !fills[i].is_substitute);
+        const pileLabel = variantLabel(fw0) || (ownItem && variantLabel(ownItem)) || '';
         const total = unit.items.reduce((s, it) => s + Number(it.unissued_qty), 0);
         const allExact = unit.items.every(it => counts[it.id]?.mode === 'exact');
         const anyCounted = unit.items.some(it => isValidCount(counts[it.id]?.counted_qty));
@@ -449,13 +600,16 @@ const KitOrderPage = () => {
                 <div className="flex flex-wrap justify-between items-start gap-4">
                     <div className="min-w-0 flex-1">
                         <p className="font-bold text-gray-900 flex items-center gap-2 flex-wrap">
-                            {fw0.item_name || group.name} — {variantLabel(fw0)}
-                            <span className="inline-flex items-center text-[10px] uppercase tracking-wider font-bold bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded">
-                                <Replace className="w-3 h-3 mr-1" /> Substitute
-                            </span>
+                            {fw0.item_name || group.name} — {pileLabel}
+                            {subCount > 0 && (
+                                <span className="inline-flex items-center text-[10px] uppercase tracking-wider font-bold bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded">
+                                    <Replace className="w-3 h-3 mr-1" /> {subCount < unit.items.length ? `Substitute for ${subCount}` : 'Substitute'}
+                                </span>
+                            )}
                         </p>
                         <p className="text-xs text-gray-500 mt-1">
-                            One pile — covers {unit.items.length} ordered variants ({unit.items.map(it => variantLabel(it) || it.item_name).join(', ')})
+                            One pile — covers {unit.items.length} ordered variants ({unit.items.map((it, i) =>
+                                `${variantLabel(it) || it.item_name}${fills[i].is_substitute ? '' : ' (as ordered)'}`).join(', ')})
                         </p>
                     </div>
                     <div className="text-center shrink-0">
@@ -464,7 +618,8 @@ const KitOrderPage = () => {
                     </div>
                 </div>
                 {canVerify && (
-                    <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-2 gap-2">
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                    <div className="grid grid-cols-2 gap-2">
                         <button
                             type="button"
                             onClick={() => markItemsPresent(unit.items)}
@@ -483,6 +638,17 @@ const KitOrderPage = () => {
                         >
                             <AlertTriangle className="w-5 h-5" /> Shortage / issue
                         </button>
+                    </div>
+                    {/* Weigh the whole pile instead of counting — a matching weight marks every
+                        constituent line present; a mismatch expands the cluster so the loader
+                        records where the shortfall sits per order line. */}
+                    <WeighHelper
+                        expectedQty={total}
+                        onCounted={(n) => {
+                            if (n === total) markItemsPresent(unit.items);
+                            else setExpandedClusters(p => ({ ...p, [cid]: true }));
+                        }}
+                    />
                     </div>
                 )}
             </div>
