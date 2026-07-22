@@ -15,6 +15,10 @@ export const trimLossApi = {
     reportCase: (data) => api.post('/trim-loss/cases', data),
     recordSearchOutcome: (id, data) => api.patch(`/trim-loss/cases/${id}/search-outcome`, data),
 
+    // Role-filtered user lookup (e.g. the production manager to notify on WhatsApp).
+    // Mirrors productionManagerApi.getLineManagers — factory_users carries the mobile column.
+    getUsersByRole: (role) => api.get('/shared/factory_users', { params: { role } }),
+
     // ── PM investigation → debits → approval ──
     startInvestigation: (id, data) => api.patch(`/trim-loss/cases/${id}/start-investigation`, data),
     fixResponsibility: (id, data) => api.post(`/trim-loss/cases/${id}/fix-responsibility`, data),

@@ -38,6 +38,8 @@ export const storeManagerApi = {
 
     updateTrimOrder: (orderId, data) => api.put(`/store-manager/trim-orders/${orderId}`, data),
     recheckMissingItems: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/recheck`),
+    recomputeTrimItem: (orderId, trimItemId) =>
+        api.post(`/store-manager/trim-orders/${orderId}/trim-items/${trimItemId}/recompute`),
 
     autoFulfillOrder: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/auto-fulfill`),
 

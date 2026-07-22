@@ -1,9 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Modal from '../../shared/Modal';
 import { trimLossApi } from '../../api/trimLossApi';
 import { variantText } from './format';
-import { Loader2, PackageX, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Loader2, PackageX, AlertTriangle, CheckCircle2, MessageCircle } from 'lucide-react';
+
+// ── WhatsApp click-to-chat helpers ─────────────────────────────────────────
+// Normalise a raw phone into wa.me digits: strip everything non-numeric; a bare
+// 10-digit number is assumed Indian and gets the 91 country code (app is en-IN).
+const toWaNumber = (raw) => {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (!digits) return '';
+    return digits.length === 10 ? `91${digits}` : digits;
+};
+
+const openWhatsApp = (number, message) => {
+    const num = toWaNumber(number);
+    const text = encodeURIComponent(message);
+    const url = num ? `https://wa.me/${num}?text=${text}` : `https://wa.me/?text=${text}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+};
 
 // SOP search checklist shown to the loader after a case is reported.
 export const SEARCH_CHECKLIST = [
@@ -27,6 +43,23 @@ const ReportMissingModal = ({ line, header, onClose, onCreated }) => {
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState(null);
     const [created, setCreated] = useState(null); // server response after success
+
+    // Production manager to ping on WhatsApp. Number comes from the factory_users mobile column;
+    // absent → generic WhatsApp share (reporter picks the contact). Non-blocking, best-effort.
+    const [pmContact, setPmContact] = useState({ name: null, phone: '' });
+    useEffect(() => {
+        let alive = true;
+        trimLossApi.getUsersByRole('production_manager')
+            .then(res => {
+                const list = res.data?.data ?? res.data ?? [];
+                const pm = (Array.isArray(list) ? list : [])[0];
+                if (!alive || !pm) return;
+                const phone = pm.mobile_no ?? pm.mobile ?? pm.phone ?? pm.whatsapp ?? pm.contact_number ?? '';
+                setPmContact({ name: pm.name || pm.employee_name || null, phone });
+            })
+            .catch(() => { /* leave empty → generic share */ });
+        return () => { alive = false; };
+    }, []);
 
     const qtyNum = parseInt(missingQty, 10);
     const qtyValid = Number.isInteger(qtyNum) && qtyNum > 0 && (!maxQty || qtyNum <= maxQty);
@@ -58,6 +91,22 @@ const ReportMissingModal = ({ line, header, onClose, onCreated }) => {
 
     if (created) {
         const caseId = created.id;
+        const itemLabel = `${line?.item_name || 'Trim'}${variantText(line) ? ` — ${variantText(line)}` : ''}`;
+        const caseUrl = caseId != null ? `${window.location.origin}/trim-loss/cases/${caseId}` : window.location.origin;
+        const notifyPm = () => {
+            const parts = [`Missing: ${qtyNum} pcs`];
+            if (header?.delivery_line_name) parts.push(`Line ${header.delivery_line_name}`);
+            if (header?.issue_number) parts.push(`Slip ${header.issue_number}`);
+            const message = [
+                `Trim-loss case ${created.case_number || `#${caseId}`}`,
+                `Item: ${itemLabel}`,
+                parts.join(' · '),
+                '',
+                'Please fix responsibility and raise the debit note:',
+                caseUrl,
+            ].join('\n');
+            openWhatsApp(pmContact.phone, message);
+        };
         return (
             <Modal title="Case reported" onClose={onClose}>
                 <div className="space-y-4">
@@ -72,6 +121,14 @@ const ReportMissingModal = ({ line, header, onClose, onCreated }) => {
                         </ul>
                         <p className="text-xs text-gray-500 mt-2">Then open the case and record the search outcome (found / not found).</p>
                     </div>
+                    <button
+                        onClick={notifyPm}
+                        className="w-full px-4 py-2.5 bg-green-600 text-white rounded-lg font-bold text-sm hover:bg-green-700 flex items-center justify-center"
+                        title={pmContact.phone ? `Send the case link to ${pmContact.name || 'the production manager'} on WhatsApp` : 'Open WhatsApp and pick the production manager to send the case link'}
+                    >
+                        <MessageCircle className="w-4 h-4 mr-2" />
+                        {pmContact.phone ? 'Notify PM on WhatsApp' : 'Share on WhatsApp'}
+                    </button>
                     <div className="flex gap-2">
                         <button onClick={onClose} className="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-bold text-sm hover:bg-gray-200">Close</button>
                         {caseId != null && (

@@ -548,6 +548,10 @@ const TrimOrderDetailPage = () => {
     // Custody transferred → not force-closable; use the trim-loss workflow instead.
     const closeBlockedByIssued = orderInfo?.status === 'ISSUED';
 
+    // Per-trim recompute — backend rejects (409) these states; disable the button to match.
+    const [recomputingId, setRecomputingId] = useState(null);
+    const recomputeBlocked = ['CLOSED', 'READY_FOR_PICKUP', 'ISSUED', 'PARTIALLY_ISSUED'].includes(orderInfo?.status);
+
     // Toast
     const [toast, setToast] = useState(null);
     const showToast = useCallback((kind, message) => setToast({ kind, message }), []);
@@ -1103,6 +1107,44 @@ const TrimOrderDetailPage = () => {
         }
     };
 
+    // Re-run the BOM × cut-pieces calculation for one trim item (or every distinct
+    // trim_item_id in the selected group), reconciling its lines & missing items.
+    const handleRecomputeTrim = async (group) => {
+        if (recomputeBlocked) return;   // defensive; the button is also disabled
+        const trimIds = [...new Set((group.items || []).map(it => it.trim_item_id).filter(Boolean))];
+        if (trimIds.length === 0) return;
+        setRecomputingId(group.name);
+        setIsFulfillingAll(true);       // overlay spinner; preserves scroll position
+        try {
+            const agg = { updated: 0, inserted: 0, deleted: 0, kept: 0, mAdded: 0, mRemoved: 0 };
+            let lastStatus;
+            for (const tid of trimIds) {
+                const { data } = await storeManagerApi.recomputeTrimItem(orderId, tid);
+                agg.updated  += data.lines?.updated  || 0;
+                agg.inserted += data.lines?.inserted || 0;
+                agg.deleted  += data.lines?.deleted  || 0;
+                agg.kept     += data.lines?.kept_with_fulfillment || 0;
+                agg.mAdded   += data.missing_items?.added   || 0;
+                agg.mRemoved += data.missing_items?.removed || 0;
+                lastStatus = data.order_status;
+            }
+            const parts = [];
+            if (agg.updated)  parts.push(`${agg.updated} updated`);
+            if (agg.inserted) parts.push(`${agg.inserted} added`);
+            if (agg.deleted)  parts.push(`${agg.deleted} removed`);
+            if (agg.kept)     parts.push(`${agg.kept} kept (already fulfilled)`);
+            const missing = (agg.mAdded || agg.mRemoved) ? ` · missing +${agg.mAdded}/-${agg.mRemoved}` : '';
+            showToast('success', `Recomputed ${group.name}: ${parts.join(', ') || 'no changes'}${missing}. Status: ${lastStatus}.`);
+            await fetchDetails();
+        } catch (err) {
+            showToast('error', `Recompute failed: ${err.response?.data?.error || 'Server error'}`);
+            if (err.response?.status === 409) fetchDetails();   // re-sync status on conflict
+        } finally {
+            setIsFulfillingAll(false);
+            setRecomputingId(null);
+        }
+    };
+
     // ── Kit custody: mark ready / pull back ───────────────────────────────
     const [kitBusy, setKitBusy] = useState(false);
     const [markReadyOpen, setMarkReadyOpen] = useState(false);
@@ -1624,6 +1666,18 @@ const TrimOrderDetailPage = () => {
                                                 {' · '}{selectedTrimGroup.counts.exact + selectedTrimGroup.counts.substitute} actionable
                                                 {selectedTrimGroup.counts.insufficient > 0 && <span className="text-red-600 font-bold"> · {selectedTrimGroup.counts.insufficient} blocked</span>}
                                             </p>
+                                            <button
+                                                onClick={() => handleRecomputeTrim(selectedTrimGroup)}
+                                                disabled={recomputeBlocked || isFulfillingAll || isReverting}
+                                                title={recomputeBlocked
+                                                    ? `Recompute is locked while the order is ${orderInfo?.status}`
+                                                    : 'Re-run the BOM × cut-pieces calculation for this trim item and reconcile its lines & missing items'}
+                                                className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 px-3 py-1.5 rounded-lg shadow-sm transition">
+                                                {recomputingId === selectedTrimGroup.name
+                                                    ? <Loader2 className="animate-spin h-3.5 w-3.5" />
+                                                    : <LuRefreshCw className="h-3.5 w-3.5" />}
+                                                Re-verify calculation
+                                            </button>
                                             {/* Unified stats + BOM cards */}
                                             {(() => {
                                                 const totalRequired  = selectedTrimGroup.items.reduce((s, it) => s + Number(it.quantity_required  || 0), 0);

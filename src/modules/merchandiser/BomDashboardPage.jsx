@@ -49,7 +49,26 @@ const BomDetailModal = ({ bomId, onClose, onEdit }) => {
     useEffect(() => {
         Promise.all([bomApi.getById(bomId), accountingApi.getSizes()])
             .then(([bomRes, sizesRes]) => {
-                setBom(bomRes.data?.data ?? bomRes.data);
+                const detail = bomRes.data?.data ?? bomRes.data;
+                console.log(`[BOM raw · Dashboard detail] GET /boms/${bomId} — raw:`, detail);
+                const fabConsumptions = (detail?.ratio_groups || []).flatMap(rg =>
+                    (rg.fabric_consumptions || []).map(fc => ({
+                        ratio_group:        rg.ratio_group_name || rg.ratio_group_id || rg.id,
+                        fabric_type_id:     fc.fabric_type_id,
+                        fabric_type_name:   fc.fabric_type_name,
+                        consumption_inches: fc.consumption_inches,
+                    }))
+                );
+                console.log(`[BOM · Dashboard detail] #${detail?.id} — ratio_groups: ${(detail?.ratio_groups || []).length}`,
+                    `| fabric_consumptions: ${fabConsumptions.length}`,
+                    `| material_consumptions (trims): ${(detail?.material_consumptions || []).length}`);
+                if (fabConsumptions.length === 0) {
+                    console.warn('%c⚠ This BOM has NO fabric_consumptions — calculate-requirements will produce ZERO fabric rows.',
+                        'color:#b91c1c;font-weight:bold');
+                } else {
+                    console.table(fabConsumptions);
+                }
+                setBom(detail);
                 setSizes(sizesRes.data?.data ?? sizesRes.data ?? []);
             })
             .catch(e => setErr(e?.response?.data?.error || e.message || 'Failed to load'))
@@ -478,7 +497,9 @@ export default function BomDashboardPage() {
         setLoading(true); setError(null);
         try {
             const res = await bomApi.getAll();
-            setBoms(res.data?.data ?? res.data ?? []);
+            const list = res.data?.data ?? res.data ?? [];
+            console.log(`[BOM raw · Dashboard list] GET /boms — ${list.length} BOMs, raw:`, list);
+            setBoms(list);
         } catch {
             setError('Failed to load BOMs.');
         } finally {

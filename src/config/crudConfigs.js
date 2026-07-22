@@ -7,7 +7,8 @@ export const factoryUserConfig = {
   fields: [
     { name: 'name', label: 'Full Name', type: 'text', required: true },
     { name: 'email', label: 'User Email', type: 'email', required: true },
-    { 
+    { name: 'mobile_no', label: 'Mobile Number', type: 'text' },
+    {
       name: 'role', 
       label: 'Role', 
       type: 'select',
@@ -31,7 +32,7 @@ export const factoryUserConfig = {
                 ],
     },
   ],
-  columns: [ { key: 'name', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'role', label: 'Role' } ]
+  columns: [ { key: 'name', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'mobile_no', label: 'Mobile' }, { key: 'role', label: 'Role' } ]
 };
 
 // For: supplier table

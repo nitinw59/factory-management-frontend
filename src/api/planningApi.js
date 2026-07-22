@@ -13,6 +13,7 @@ export const planningApi = {
     // Fabric
     updateFabricRequirement:  (reqId, body)      => api.put(`/planning/fabric-requirements/${reqId}`, body),
     reserveFabric:            (reqId, body)      => api.post(`/planning/fabric-requirements/${reqId}/reservations`, body),
+    recalculateFabric:        (sopId, fabricTypeId) => api.post(`/planning/sales-order-products/${sopId}/fabric-types/${fabricTypeId}/recalculate`),
     deleteFabricReservation:  (reservationId)    => api.delete(`/planning/fabric-requirements/reservations/${reservationId}`),
     // Removed: createFabricPurchase / deleteFabricPurchase
     // Use purchaseDeptApi.raiseRequirement / cancelRequirement instead.

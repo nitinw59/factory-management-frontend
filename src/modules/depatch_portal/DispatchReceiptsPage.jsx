@@ -33,7 +33,24 @@ export default function DispatchReceiptsPage() {
             const res = await dispatchManagerApi.getAllReceipts();
             const fetchedReceipts = res.data?.data || res.data || [];
             console.log("Fetched receipts:", fetchedReceipts);
-            setReceipts(Array.isArray(fetchedReceipts) ? fetchedReceipts : []);
+
+            // API returns snake_case; normalize to the camelCase shape the UI expects.
+            const normalized = (Array.isArray(fetchedReceipts) ? fetchedReceipts : []).map(r => ({
+                receiptId: r.receipt_number,                         // display "Receipt Number"
+                receiptNumber: r.receipt_number,
+                rawId: r.receipt_id,                                 // numeric id (stable key / lookups)
+                dispatchDate: r.dispatch_date
+                    ? new Date(r.dispatch_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                    : '—',
+                batchId: r.batch_code || (r.batch_id ? `Batch ${r.batch_id}` : '—'),
+                style: r.product_name || '—',
+                client: r.customer_name || '—',
+                po_code: r.order_number || null,
+                totalDispatched: r.total_dispatched ?? 0,
+                notes: r.notes || null,
+                dispatchedBy: r.dispatched_by || null,
+            }));
+            setReceipts(normalized);
         } catch (err) {
             console.error(err);
             setError("Failed to load receipt history.");
@@ -48,7 +65,7 @@ export default function DispatchReceiptsPage() {
     const handleViewReceipt = async (receiptSummary) => {
         setIsReceiptLoading(true);
         try {
-            const res = await dispatchManagerApi.getReceiptDetails(receiptSummary.receiptId);
+            const res = await dispatchManagerApi.getReceiptDetails(receiptSummary.receiptNumber);
             const detailData = res.data?.data || res.data || {};
             console.log("Fetched receipt details for receiptId", receiptSummary.receiptId, ":", detailData);
             setReceiptView({
@@ -72,12 +89,13 @@ export default function DispatchReceiptsPage() {
         if (!searchQuery) return safeReceipts;
         
         const lower = searchQuery.toLowerCase();
-        return safeReceipts.filter(r => 
-            r.receiptId?.toLowerCase().includes(lower) || 
-            r.batchId?.toLowerCase().includes(lower) || 
-            r.client?.toLowerCase().includes(lower) || 
+        return safeReceipts.filter(r =>
+            r.receiptId?.toLowerCase().includes(lower) ||
+            r.batchId?.toLowerCase().includes(lower) ||
+            r.client?.toLowerCase().includes(lower) ||
             r.style?.toLowerCase().includes(lower) ||
-            r.po_code?.toLowerCase().includes(lower)
+            r.po_code?.toLowerCase().includes(lower) ||
+            r.dispatchedBy?.toLowerCase().includes(lower)
         );
     }, [receipts, searchQuery]);
 
@@ -126,7 +144,7 @@ export default function DispatchReceiptsPage() {
                         {/* --- MOBILE VIEW: CARDS --- */}
                         <div className="block sm:hidden space-y-4">
                             {filteredReceipts.map((receipt) => (
-                                <div key={receipt.receiptId} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+                                <div key={receipt.rawId} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
                                     <div className="flex justify-between items-start mb-3 border-b border-slate-100 pb-3">
                                         <div className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg border border-slate-200 flex items-center shadow-sm max-w-[70%]">
                                             <FileText size={14} className="mr-1.5 opacity-70 shrink-0" />
@@ -195,7 +213,7 @@ export default function DispatchReceiptsPage() {
                                 </thead>
                                 <tbody>
                                     {filteredReceipts.map((receipt) => (
-                                        <tr key={receipt.receiptId} className="border-b border-slate-100 hover:bg-slate-50/80 transition-colors group">
+                                        <tr key={receipt.rawId} className="border-b border-slate-100 hover:bg-slate-50/80 transition-colors group">
                                             <td className="p-4">
                                                 <div className="font-bold text-slate-800 flex items-center space-x-2">
                                                     <FileText size={16} className="text-blue-500" />

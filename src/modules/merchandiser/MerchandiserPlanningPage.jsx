@@ -3,7 +3,7 @@ import {
     Loader2, Link2, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
     AlertTriangle, CheckCircle2, Search,
     Calculator, ShoppingBag, X, Eye, Plus, Pencil,
-    ShieldCheck, ShieldOff, RotateCw, Component, Calendar,
+    ShieldCheck, ShieldOff, RotateCw, Component, Calendar, Trash2,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { planningApi } from '../../api/planningApi';
@@ -55,6 +55,52 @@ const PRIORITY = {
     critical: { label: 'Critical', dot: 'bg-red-600'    },
 };
 
+// ─── BOM DEBUG SUMMARY ────────────────────────────────────────────────────────
+// Fabric requirements are generated from ratio_groups[].fabric_consumptions[].
+// If a linked BOM has NO fabric_consumptions, calculate-requirements yields zero
+// fabric rows — which is exactly the "fabric_requirements: []" symptom. This
+// summary makes that visible at link time.
+const summarizeBom = (bom) => {
+    const rgs = bom?.ratio_groups || [];
+    const fabricConsumptions = rgs.flatMap(rg =>
+        (rg.fabric_consumptions || []).map(fc => ({
+            ratio_group:        rg.ratio_group_name || rg.ratio_group_id || rg.id,
+            fabric_type_id:     fc.fabric_type_id,
+            fabric_type_name:   fc.fabric_type_name,
+            consumption_inches: fc.consumption_inches,
+        }))
+    );
+    return {
+        bom_id:                     bom?.id,
+        bom_name:                   bom?.bom_name,
+        ratio_group_count:          rgs.length,
+        fabric_consumption_count:   fabricConsumptions.length,
+        material_consumption_count: (bom?.material_consumptions || []).length,
+        fabricConsumptions,
+    };
+};
+
+const logBomBrief = (phase, bom) => {
+    try {
+        const s = summarizeBom(bom);
+        console.group(`%c[BOM · ${phase}] #${s.bom_id} — ${s.bom_name || ''}`, 'color:#0369a1;font-weight:bold');
+        console.log('ratio_groups:', s.ratio_group_count,
+            '| fabric_consumptions:', s.fabric_consumption_count,
+            '| material_consumptions (trims):', s.material_consumption_count);
+        if (s.fabric_consumption_count === 0) {
+            console.warn('%c⚠ This BOM has NO fabric_consumptions — calculate-requirements will produce ZERO fabric rows.',
+                'color:#b91c1c;font-weight:bold');
+        } else {
+            console.log('%cFabric consumptions found:', 'color:#059669;font-weight:bold');
+            console.table(s.fabricConsumptions);
+        }
+        console.log('raw BOM:', bom);
+        console.groupEnd();
+    } catch (e) {
+        console.warn('[BOM] logBomBrief failed (non-fatal):', e);
+    }
+};
+
 // ─── BOM PREVIEW MODAL ────────────────────────────────────────────────────────
 
 const BomPreviewModal = ({ bomId, onClose }) => {
@@ -64,8 +110,12 @@ const BomPreviewModal = ({ bomId, onClose }) => {
 
     useEffect(() => {
         bomApi.getById(bomId)
-            .then(res => setBom(res.data?.data ?? res.data))
-            .then(() => console.log('BOM detail:', bom))
+            .then(res => {
+                const detail = res.data?.data ?? res.data;
+                console.log(`[BOM raw · Preview] GET /boms/${bomId} — raw:`, detail);
+                logBomBrief('PREVIEW', detail);
+                setBom(detail);
+            })
             .catch(e  => setErr(e?.response?.data?.error || e.message || 'Failed to load BOM'))
             .finally(() => setLoading(false));
            
@@ -1256,6 +1306,8 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
     const [actionMode, setActionMode] = useState(null);
     const [openReqId,  setOpenReqId]  = useState(null);
     const [reservationsItem, setReservationsItem] = useState(null);  // null = closed; item = show its reservations modal
+    const [releasingResId, setReleasingResId] = useState(null);      // reservation id currently being released
+    const [releaseErr, setReleaseErr] = useState(null);              // error shown inside the reservations modal
     const [expandAll,  setExpandAll]  = useState(false);
     const [expandedTrimGroups, setExpandedTrimGroups] = useState(new Set());
     const toggleTrimGroup = useCallback((tid) => setExpandedTrimGroups(s => {
@@ -1280,12 +1332,17 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
 
     const refetchLocal = useCallback(() => {
         planningApi.getRequirements(sop.id)
-            .then(r => setLocalReqs(r.data?.data ?? r.data))
+            .then(r => {
+                console.log(`[FETCH requirements · refetch] GET /planning/sales-order-products/${sop.id}/requirements — raw:`, r.data);
+                setLocalReqs(r.data?.data ?? r.data);
+            })
             .catch(() => {});
     }, [sop.id]);
 
     // Per-trim recalculation (single trim_item_id, leaves fabric + other trims untouched)
     const [recalcTrimId, setRecalcTrimId] = useState(null); // trim_item_id currently recalculating
+    // Per-fabric-type recalculation (single fabric_type_id across all its colors, leaves trims + other fabrics untouched)
+    const [recalcFabricId, setRecalcFabricId] = useState(null); // fabric_type_id currently recalculating
     const [recalcMsg,    setRecalcMsg]    = useState(null);  // transient success banner
 
     useEffect(() => {
@@ -1294,12 +1351,16 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
         return () => clearTimeout(t);
     }, [recalcMsg]);
 
+    // Drop any release error once the reservations modal is closed.
+    useEffect(() => { if (!reservationsItem) setReleaseErr(null); }, [reservationsItem]);
+
     const handleRecalcTrim = async (item) => {
         if (item?.trim_item_id == null || recalcTrimId != null) return;
         setRecalcTrimId(item.trim_item_id);
         setErr(null);
         try {
             const res = await planningApi.recalculateTrim(sop.id, item.trim_item_id);
+            console.log(`[RECALC trim] POST /planning/sales-order-products/${sop.id}/trim-items/${item.trim_item_id}/recalculate — raw:`, res.data);
             setRecalcMsg(res.data?.message || res.data?.data?.message || 'Trim requirement recalculated.');
             refetchLocal();   // re-hydrate stock suggestions, reservations, PRs, breakdowns
             onRefresh();      // refresh parent (production_readiness may have flipped)
@@ -1310,10 +1371,54 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
         }
     };
 
+    const handleRecalcFabric = async (item) => {
+        if (item?.fabric_type_id == null || recalcFabricId != null || recalcTrimId != null) return;
+        setRecalcFabricId(item.fabric_type_id);
+        setErr(null);
+        try {
+            const res = await planningApi.recalculateFabric(sop.id, item.fabric_type_id);
+            console.log(`[RECALC fabric] POST /planning/sales-order-products/${sop.id}/fabric-types/${item.fabric_type_id}/recalculate — raw:`, res.data);
+            setRecalcMsg(res.data?.message || res.data?.data?.message || 'Fabric requirement recalculated.');
+            refetchLocal();   // re-hydrate stock suggestions, reservations, PRs, breakdowns
+            onRefresh();      // refresh parent (production_readiness may have flipped)
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Recalculation failed');
+        } finally {
+            setRecalcFabricId(null);
+        }
+    };
+
+    // Release a single reservation (fabric or trim) — frees the reserved stock.
+    const handleReleaseReservation = async (item, rs) => {
+        if (releasingResId != null) return;
+        const unit = item.type === 'fabric' ? 'm' : (item.unit || 'pcs');
+        const amount = Number(rs.meters_reserved ?? rs.quantity_reserved ?? 0);
+        if (!window.confirm(`Release this reservation of ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${unit}? The reserved stock will be freed.`)) return;
+        setReleasingResId(rs.id);
+        setReleaseErr(null);
+        try {
+            if (item.type === 'fabric') await planningApi.deleteFabricReservation(rs.id);
+            else                        await planningApi.deleteTrimReservation(rs.id);
+            // Drop the released row from the open modal snapshot for instant feedback.
+            setReservationsItem(prev => prev
+                ? { ...prev, reservations: (prev.reservations || []).filter(x => x.id !== rs.id) }
+                : prev);
+            refetchLocal();   // re-hydrate reservations/stock/PRs on the main list
+            onRefresh();      // parent (production_readiness may have flipped)
+        } catch (e) {
+            setReleaseErr(e?.response?.data?.error || 'Failed to release reservation.');
+        } finally {
+            setReleasingResId(null);
+        }
+    };
+
     useEffect(() => {
         setLoadingLocal(true);
         planningApi.getRequirements(sop.id)
-            .then(r => setLocalReqs(r.data?.data ?? r.data))
+            .then(r => {
+                console.log(`[FETCH requirements · modal mount] GET /planning/sales-order-products/${sop.id}/requirements — raw:`, r.data);
+                setLocalReqs(r.data?.data ?? r.data);
+            })
             .catch(() => {})
             .finally(() => setLoadingLocal(false));
     }, [sop.id]);
@@ -1507,6 +1612,7 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
             notes:                 r.ta_notes || null,
             isReq:                 true,
             unit:                  'm',
+            fabric_type_id:        r.fabric_type_id ?? null,
             meters_required:       r.meters_required || 0,
             meters_reserved:       r.meters_reserved || 0,
             meters_available:      r.stock_suggestion?.total_meters_available || 0,
@@ -2547,6 +2653,19 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                                             : <RotateCw size={11} />}
                                                                     </button>
                                                                 )}
+                                                                {item.type === 'fabric' && item.isReq && item.fabric_type_id != null && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={e => { e.stopPropagation(); handleRecalcFabric(item); }}
+                                                                        disabled={recalcFabricId != null || recalcTrimId != null}
+                                                                        title="Recalculate this fabric type's requirement"
+                                                                        className="ml-1 p-0.5 text-slate-400 hover:text-violet-600 disabled:opacity-40 shrink-0"
+                                                                    >
+                                                                        {recalcFabricId === item.fabric_type_id
+                                                                            ? <Loader2 size={11} className="animate-spin" />
+                                                                            : <RotateCw size={11} />}
+                                                                    </button>
+                                                                )}
                                                             </div>
 
                                                             {/* Bar track */}
@@ -2932,6 +3051,19 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                                                 Recalculate
                                                                             </button>
                                                                         )}
+                                                                        {item.type === 'fabric' && item.isReq && item.fabric_type_id != null && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={e => { e.stopPropagation(); handleRecalcFabric(item); }}
+                                                                                disabled={recalcFabricId != null || recalcTrimId != null}
+                                                                                title="Recalculate this fabric type's requirement (trims and other fabrics untouched)"
+                                                                                className="flex items-center gap-1.5 text-xs font-bold text-violet-700 bg-violet-50 border border-violet-200 hover:bg-violet-100 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors">
+                                                                                {recalcFabricId === item.fabric_type_id
+                                                                                    ? <Loader2 size={12} className="animate-spin" />
+                                                                                    : <RotateCw size={12} />}
+                                                                                Recalculate
+                                                                            </button>
+                                                                        )}
                                                                     </div>
                                                                     );
                                                                 })()}
@@ -3110,6 +3242,9 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                 </button>
                             </div>
                             <div className="overflow-auto flex-1 px-5 py-4">
+                                {releaseErr && (
+                                    <p className="mb-3 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{releaseErr}</p>
+                                )}
                                 {list.length === 0 ? (
                                     <p className="text-sm text-slate-400 italic text-center py-8">No reservations recorded yet.</p>
                                 ) : (
@@ -3147,6 +3282,16 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                             {String(rollStatus).replace(/_/g, ' ')}
                                                         </span>
                                                     )}
+                                                    <button
+                                                        onClick={() => handleReleaseReservation(item, rs)}
+                                                        disabled={releasingResId != null}
+                                                        title="Release this reservation — frees the reserved stock"
+                                                        className="shrink-0 flex items-center gap-1 text-[10px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-2 py-1 rounded-md transition disabled:opacity-40 disabled:cursor-not-allowed">
+                                                        {releasingResId === rs.id
+                                                            ? <Loader2 size={11} className="animate-spin" />
+                                                            : <Trash2 size={11} />}
+                                                        Release
+                                                    </button>
                                                 </div>
                                             );
                                         })}
@@ -3204,6 +3349,8 @@ const MarkerAllocationModal = ({ sop, onClose, onDone }) => {
         bomApi.getById(sop.bom_id)
             .then(r => {
                 const detail = r.data?.data ?? r.data;
+                console.log(`[BOM raw · MarkerAllocation] GET /boms/${sop.bom_id} — raw:`, detail);
+                logBomBrief('MARKER-ALLOC', detail);
                 setBomDetail(detail);
                 // Default every color to the first ratio group
                 const firstRg = detail?.ratio_groups?.[0];
@@ -3508,12 +3655,31 @@ const MarkerAllocationModal = ({ sop, onClose, onDone }) => {
 //   3. NET procurement = gross_required − already_reserved (floored at 0). ONLY the
 //      NET drives new purchase requests / purchase orders. Anything already reserved
 //      is EXCLUDED from the new recalculation's procurement output.
+// The recalculation-preview endpoint returns reservations as { fabric: [...], trim: [...] },
+// whereas the per-requirement endpoints return a flat array. Normalize to a flat array so
+// both the debug brief and the confirm modal can consume it uniformly.
+const flattenReservations = (res) => {
+    if (Array.isArray(res)) return res;
+    if (res && typeof res === 'object') {
+        return [
+            ...(Array.isArray(res.fabric) ? res.fabric : []),
+            ...(Array.isArray(res.trim)   ? res.trim   : []),
+        ];
+    }
+    return [];
+};
+
 const logRecalcBrief = (phase, sop, preview) => {
+  // A debug logger must NEVER be able to break the actual recalc flow. Any bad
+  // shape from the backend (e.g. reservations returned as an object, not an array)
+  // is swallowed here instead of bubbling up into handleRecalcClick's catch.
+  try {
     if (typeof console === 'undefined') return;
     const p            = preview || {};
-    const fabReqs      = p.fabric_requirements || [];
-    const trimReqs     = p.trim_requirements   || [];
-    const reservations = p.reservations        || [];
+    const asArray      = (v) => (Array.isArray(v) ? v : []);
+    const fabReqs      = asArray(p.fabric_requirements);
+    const trimReqs     = asArray(p.trim_requirements);
+    const reservations = flattenReservations(p.reservations);
 
     console.group(`%c[RECALC · ${phase}] SOP #${sop?.id} — ${sop?.product_name || ''}`,
         'color:#7c3aed;font-weight:bold');
@@ -3579,12 +3745,16 @@ const logRecalcBrief = (phase, sop, preview) => {
         `\n • Fabric totals → reserved ${totReservedFab.toFixed(2)} m | net-to-procure ${totNetFab.toFixed(2)} m`,
         `\n • Trim totals   → reserved ${totReservedTrim.toLocaleString()} | net-to-procure ${totNetTrim.toLocaleString()}`);
     console.groupEnd();
+  } catch (logErr) {
+    // Debug-only failure — do not let it abort the recalc flow.
+    console.warn('[RECALC] logRecalcBrief failed (non-fatal):', logErr);
+  }
 };
 
 const RecalculateConfirmModal = ({ preview, sopName, onClose, onConfirm, busy, err }) => {
     const fabReqs      = preview?.fabric_requirements || [];
     const trimReqs     = preview?.trim_requirements   || [];
-    const reservations = preview?.reservations        || [];
+    const reservations = flattenReservations(preview?.reservations);
     const purchReqs    = preview?.purchase_requests   || [];
     const purchOrders  = preview?.purchase_orders     || [];
     const summary      = preview?.summary             || {};
@@ -3948,6 +4118,8 @@ const LinkAndAllocateModal = ({ sop, bomOptions, onClose, onDone, onLink, onPrev
         try {
             const res    = await bomApi.getById(parseInt(bomId));
             const detail = res.data?.data ?? res.data;
+            console.log(`[BOM raw · LinkPick] GET /boms/${bomId} — raw:`, detail);
+            logBomBrief('LINK-PICK', detail);
             setPickedBomDetail(detail);
         } catch { }
         finally { setLoadingDetail(false); }
@@ -4035,9 +4207,25 @@ const LinkAndAllocateModal = ({ sop, bomOptions, onClose, onDone, onLink, onPrev
             console.table(quantities);
             console.log('%cBE: recompute GROSS from finalized_quantity above; existing reservations must be PRESERVED and their reserved amounts EXCLUDED from new PR/PO (net = gross − reserved).', 'color:#b91c1c');
             console.groupEnd();
-            await onLink(sop.id, parseInt(pickedBomId), usedRgIds);
-            await planningApi.finalizeQuantities(sop.id, { quantities });
-            await planningApi.calculateRequirements(sop.id);
+            // Log the BOM being committed one more time so its consumption shape is
+            // captured right next to the calculate result (the two must be read together).
+            logBomBrief('LINK-CONFIRM', pickedBomDetail);
+
+            const linkRes = await onLink(sop.id, parseInt(pickedBomId), usedRgIds);
+            console.log('[LINK] linkBom done →', linkRes);
+
+            const finRes = await planningApi.finalizeQuantities(sop.id, { quantities });
+            console.log('[LINK] finalize-quantities response →', finRes?.data);
+
+            const calcRes = await planningApi.calculateRequirements(sop.id);
+            const calcData = calcRes?.data?.data ?? calcRes?.data;
+            const fabCount  = (calcData?.fabric_requirements || []).length;
+            const trimCount = (calcData?.trim_requirements   || []).length;
+            console.log(`[LINK] calculate-requirements response → fabric_rows: ${fabCount}, trim_rows: ${trimCount}`, calcData);
+            if (fabCount === 0) {
+                console.warn('%c⚠ calculate-requirements produced ZERO fabric rows for SOP ' + sop.id +
+                    ' — check the BOM brief above: it likely has no fabric_consumptions.', 'color:#b91c1c;font-weight:bold');
+            }
             onDone();
         } catch (e) {
             setError(e?.response?.data?.error || 'Failed to link and allocate');
@@ -4402,7 +4590,10 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
         if (!sop.bom_id) return;
         setLoadingReqs(true);
         planningApi.getRequirements(sop.id)
-        .then(r => setSopReqs(r.data?.data ?? r.data))
+        .then(r => {
+            console.log(`[FETCH requirements · SopCard] GET /planning/sales-order-products/${sop.id}/requirements — raw:`, r.data);
+            setSopReqs(r.data?.data ?? r.data);
+        })
         .catch(() => setSopReqs(null))
         .finally(() => setLoadingReqs(false));
     }, [sop.bom_id, sop.id, refreshTick]);
@@ -4424,6 +4615,7 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
         setRecalcing(true);
         try {
             const res  = await planningApi.getRecalculationPreview(sop.id);
+            console.log(`[RECALC preview] GET /planning/sales-order-products/${sop.id}/recalculation-preview — raw:`, res.data);
             const data = res.data?.data ?? res.data;
             // Preview phase — dump the full recalc brief (existing reqs, reservations,
             // and the reserved-EXCLUDED net that the BE recompute must honour).
@@ -4436,7 +4628,22 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
                 setShowRecalcConfirm(true);
             }
         } catch (e) {
-            setRecalcErr(e?.response?.data?.error || 'Recalculation preview failed');
+            // Surface the real cause — status, backend payload, and the URL that failed.
+            console.error('[Recalculation preview] failed', {
+                sopId:    sop.id,
+                role:     user?.role,
+                status:   e?.response?.status,
+                url:      e?.config?.url,
+                data:     e?.response?.data,
+                message:  e?.message,
+            });
+            const status = e?.response?.status;
+            setRecalcErr(
+                e?.response?.data?.error
+                || (status === 403 ? 'Not permitted for your role.'
+                    : status ? `Recalculation preview failed (HTTP ${status})`
+                    : 'Recalculation preview failed')
+            );
         } finally {
             setRecalcing(false);
         }
@@ -4696,7 +4903,7 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
                                     <Loader2 size={10} className="animate-spin" /> Loading requirements…
                                 </span>
                             )}
-                            {user?.role === 'merchandiser' && (
+                            {['merchandiser', 'cutting_manager'].includes(user?.role) && (
                                 <button
                                     onClick={handleRecalcClick}
                                     disabled={recalcing}
@@ -4916,13 +5123,23 @@ const ProductionPlanningPage = () => {
     const handleLink = useCallback(async (sopId, bomId, ratioGroupIds) => {
         setLinking(l => ({ ...l, [sopId]: true }));
         try {
-            await planningApi.linkBom(sopId, {
+            console.log(`[LINK] POST /planning/sales-order-products/${sopId}/link-bom — payload:`,
+                { bom_id: bomId, ratio_group_ids: ratioGroupIds });
+            const res = await planningApi.linkBom(sopId, {
                 bom_id: bomId,
                 ratio_group_ids: ratioGroupIds,
             });
+            console.log('[LINK] link-bom response →', res?.data);
             await refreshOrder(selectedOrderId);
+            return res?.data;
         } catch (e) {
-            console.error('Link BOM failed', e);
+            console.error('[LINK] Link BOM failed', {
+                sopId, bomId, ratioGroupIds,
+                status: e?.response?.status,
+                data:   e?.response?.data,
+                message: e?.message,
+            });
+            throw e;
         } finally {
             setLinking(l => ({ ...l, [sopId]: false }));
         }
