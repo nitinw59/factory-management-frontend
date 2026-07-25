@@ -7,6 +7,7 @@ import {
   LuSettings, LuBuilding2, LuChartLine, LuPackage, LuArrowUpRight,
 } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
+import ReportBugButton from './ReportBugButton';
 
 // --- DESKTOP DROPDOWN ---
 const DesktopNavDropdown = ({ title, children, matchPaths = [] }) => {
@@ -170,6 +171,11 @@ const AdminLayout = () => {
                   <LuSettings size={17} />
                 </NavLink>
 
+                <NavLink to="/admin/bug-reports" className={({ isActive }) =>
+                  `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                  Bug Reports
+                </NavLink>
+
               </nav>
             </div>
 
@@ -183,6 +189,10 @@ const AdminLayout = () => {
                   <span className="hidden lg:inline text-sm font-medium text-gray-700">{user.name}</span>
                 </NavLink>
               )}
+
+              <div className="hidden md:flex">
+                <ReportBugButton />
+              </div>
 
               <div className="hidden md:flex">
                 <NotificationBell />
@@ -256,9 +266,15 @@ const AdminLayout = () => {
                 Planning <LuArrowUpRight size={12} className="opacity-50" />
               </NavLink>
 
+              <NavLink to="/admin/bug-reports" onClick={closeMenu} className={({ isActive }) =>
+                `block py-2 text-base font-medium ${isActive ? 'text-blue-600' : 'text-gray-700'}`}>
+                Bug Reports
+              </NavLink>
+
               {/* Footer: notifications + profile + logout */}
               <div className="border-t border-gray-200 pt-4 mt-2 space-y-3">
-                <div className="pb-1">
+                <div className="pb-1 flex items-center gap-4">
+                  <ReportBugButton />
                   <NotificationBell />
                 </div>
                 <p className="text-sm text-gray-500">Signed in as <span className="font-bold">{user?.name}</span></p>

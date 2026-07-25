@@ -4,6 +4,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import MatrixBrand from './MatrixBrand';
 import { useAuth } from '../context/AuthContext';
 import { LuLogOut, LuClipboardCheck, LuMenu, LuX, LuBell ,LuFileText } from 'react-icons/lu';
+import ReportBugButton from './ReportBugButton';
 
 const PreparationUnloadLayout = () => {
     const { user, logout } = useAuth();
@@ -47,14 +48,16 @@ const PreparationUnloadLayout = () => {
                     </nav>
 
                     <div className="flex items-center space-x-4">
+                        <ReportBugButton />
+
                         {/* Placeholder for Notifications */}
                         <button className="text-gray-600 hover:text-blue-600"><LuBell size={20} /></button>
-                        
+
                         <div className="hidden md:flex items-center space-x-4">
                             <span className="text-sm font-medium">Welcome, {user?.name}</span>
                             <button onClick={handleLogout} className="flex items-center text-sm text-gray-600 hover:text-red-600"><LuLogOut className="mr-1" /> Logout</button>
                         </div>
-                        
+
                         {/* Hamburger Menu Button */}
                         <div className="md:hidden">
                             <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
@@ -68,31 +71,32 @@ const PreparationUnloadLayout = () => {
                 {isMobileMenuOpen && (
                     <div className="md:hidden bg-white shadow-md">
                         <nav className="flex flex-col p-4 space-y-4">
-                            <NavLink 
-                                to="/preparation-unload/dashboard" 
-                                onClick={closeMobileMenu} 
+                            <NavLink
+                                to="/preparation-unload/dashboard"
+                                onClick={closeMobileMenu}
                                 className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
                             >
                                 <LuClipboardCheck className="mr-2" /> Unload Queue
                             </NavLink>
-                           
-                            <NavLink 
-                                to="/preparation-unload/summary" 
-                                onClick={closeMobileMenu} 
+
+                            <NavLink
+                                to="/preparation-unload/summary"
+                                onClick={closeMobileMenu}
                                 className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
                             >
                                 <LuFileText className="mr-2" /> Batch QC Summary
                             </NavLink>
 
-                            <NavLink 
-                                to="/preparation-unload-portal/sewing-machine-complaints" 
-                                onClick={closeMobileMenu} 
+                            <NavLink
+                                to="/preparation-unload-portal/sewing-machine-complaints"
+                                onClick={closeMobileMenu}
                                 className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
                             >
                                 <LuFileText className="mr-2" /> Sewing Machine Complaints
                             </NavLink>
                             <hr />
                             <div className="px-4 py-2 text-sm text-gray-500">Welcome, {user?.name}</div>
+                            <div className="px-4 py-1"><ReportBugButton /></div>
                             <button onClick={handleLogout} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"><LuLogOut className="mr-2" /> Logout</button>
                         </nav>
                     </div>

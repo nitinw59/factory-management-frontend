@@ -3,6 +3,7 @@ import MatrixBrand from './MatrixBrand';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LuLogOut, LuClipboardCheck, LuTruck, LuMenu, LuX, LuArchive, LuFactory } from 'react-icons/lu';
+import ReportBugButton from './ReportBugButton';
 
 export const DispatchLayout = () => {
     const { logout } = useAuth();
@@ -51,9 +52,11 @@ export const DispatchLayout = () => {
                             </NavLink>
                         </nav>
 
+                        <ReportBugButton />
+
                         {/* Logout Action */}
-                        <button 
-                            onClick={handleLogout} 
+                        <button
+                            onClick={handleLogout}
                             className="flex items-center text-sm font-medium text-slate-500 hover:text-rose-600 transition-colors bg-slate-50 hover:bg-rose-50 px-3 py-1.5 rounded-lg"
                         >
                             <LuLogOut className="mr-1.5" size={16} />
@@ -101,9 +104,10 @@ export const DispatchLayout = () => {
                             </NavLink>
                         </nav>
                         
-                        <div className="pt-4 mt-2 border-t border-slate-100">
-                            <button 
-                                onClick={() => { closeMobileMenu(); handleLogout(); }} 
+                        <div className="pt-4 mt-2 border-t border-slate-100 flex flex-col gap-2">
+                            <ReportBugButton />
+                            <button
+                                onClick={() => { closeMobileMenu(); handleLogout(); }}
                                 className="w-full flex items-center justify-center text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors px-4 py-3 rounded-lg"
                             >
                                 <LuLogOut className="mr-2" size={18} />

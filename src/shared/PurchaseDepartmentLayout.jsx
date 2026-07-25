@@ -6,6 +6,7 @@ import {
     LuLogOut, LuMenu, LuX, LuClipboardList, LuPackageCheck, LuLayers, LuBookOpen, LuTag, LuInbox, LuFilePlus, LuPackageX,
 } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
+import ReportBugButton from './ReportBugButton';
 
 const NAV = [
     { to: '/purchase-department/requirements',         icon: LuClipboardList, label: 'Requirements' },
@@ -45,6 +46,7 @@ const PurchaseDepartmentLayout = () => {
                                 </NavLink>
                             ))}
                         </nav>
+                        <ReportBugButton />
                         <NotificationBell />
                         <button
                             onClick={handleLogout}

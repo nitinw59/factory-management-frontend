@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { assemblyApi } from '../api/assemblyApi';
 
 import { FiLogOut, FiClipboard, FiMenu, FiX, FiBell } from 'react-icons/fi';
+import ReportBugButton from './ReportBugButton';
 
 const AssemblyLayout = () => {
     const { user, logout } = useAuth();
@@ -50,6 +51,7 @@ const AssemblyLayout = () => {
                     </nav>
 
                     <div className="flex items-center space-x-4">
+                        <ReportBugButton />
                         <button className="text-gray-600 hover:text-blue-600"><FiBell size={20} /></button>
 
                         <div className="hidden md:flex items-center space-x-4">
@@ -94,6 +96,7 @@ const AssemblyLayout = () => {
                                 <div className="text-sm text-gray-700">{user?.name}</div>
                                 {user?.email && <div className="text-xs text-gray-400">{user.email}</div>}
                             </div>
+                            <div className="px-4 py-2"><ReportBugButton /></div>
                             <button onClick={handleLogout} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"><FiLogOut className="mr-2" /> Logout</button>
                         </nav>
                     </div>

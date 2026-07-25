@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
 import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag, LuScrollText, LuInbox, LuFilePlus, LuBoxes, LuPackageX } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
+import ReportBugButton from './ReportBugButton';
 
 // No changes to NavDropdown component
 const NavDropdown = ({ title, children }) => {
@@ -118,6 +119,7 @@ const StoreManagerLayout = () => {
                         </nav>
                     </div>
                     <div className="flex items-center space-x-4">
+                        <ReportBugButton />
                         <NotificationBell />
                         {user && (
                             // Hide user name on smaller screens to save space

@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
 import { LuLogOut, LuClipboardCheck } from 'react-icons/lu'; // Changed icon
+import ReportBugButton from './ReportBugButton';
 
 const CheckingPortalLayout = () => {
   const { user, logout } = useAuth();
@@ -35,6 +36,7 @@ const CheckingPortalLayout = () => {
             {user && (
               <>
                 <span className="text-sm font-medium mr-4">Welcome, {user.name}</span>
+                <span className="mr-4"><ReportBugButton /></span>
                 <button onClick={handleLogout} className="flex items-center text-sm text-gray-600 hover:text-red-600">
                   <LuLogOut className="mr-1" />
                   Logout

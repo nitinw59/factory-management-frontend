@@ -7,6 +7,7 @@ import {
     LuThumbsUp, LuClock, LuLayers, LuChevronRight,
 } from 'react-icons/lu';
 import { universalApi } from '../api/universalApi';
+import ReportBugButton from './ReportBugButton';
 
 const STATS_REFRESH_MS = 60_000;
 
@@ -359,6 +360,7 @@ const NumberingPortalLayout = () => {
                     </div>
                     <div className="flex items-center gap-3">
                         <span className="text-sm text-gray-500 hidden sm:block">{user?.name}</span>
+                        <ReportBugButton />
                         <button onClick={handleLogout} className="flex items-center text-sm text-gray-600 hover:text-red-600">
                             <LuLogOut className="mr-1" size={14} /> Logout
                         </button>

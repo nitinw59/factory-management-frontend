@@ -1,5 +1,6 @@
 // src/shared/AccountsLayout.jsx
 import { Outlet, Link, useLocation } from 'react-router-dom';
+import ReportBugButton from './ReportBugButton';
 
 const SALES_NAV = [
     { to: '/accounts/sales/orders', label: 'Sales Orders' },
@@ -40,7 +41,8 @@ const AccountsLayout = () => {
     return (
         <div className="flex flex-col h-screen bg-gray-100">
             <header className="bg-white shadow-sm border-b border-gray-200 flex-shrink-0">
-                <div className="flex items-center gap-3 px-6 h-14 overflow-x-auto">
+                <div className="flex items-center gap-3 px-6 h-14">
+                <div className="flex items-center gap-3 overflow-x-auto flex-1 min-w-0">
                     <Link
                         to="/accounts/production-workflow"
                         className="flex items-center gap-1.5 text-sm font-semibold text-gray-400 hover:text-gray-600 transition-colors"
@@ -134,6 +136,10 @@ const AccountsLayout = () => {
                             </Link>
                         ))}
                     </nav>
+                </div>
+                <div className="shrink-0 pl-3 border-l border-gray-200">
+                    <ReportBugButton />
+                </div>
                 </div>
             </header>
 

@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LuLogOut } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
+import ReportBugButton from './ReportBugButton';
 
 const LineLoaderLayout = () => {
   const { user, logout } = useAuth();
@@ -42,6 +43,7 @@ const LineLoaderLayout = () => {
             {user && (
               <>
                 <span className="text-sm font-medium text-gray-700">Welcome, {user.name}</span>
+                <ReportBugButton />
                 <NotificationBell />
                 <button onClick={handleLogout} className="flex items-center text-sm text-gray-600 hover:text-red-600">
                   <LuLogOut className="mr-1" />

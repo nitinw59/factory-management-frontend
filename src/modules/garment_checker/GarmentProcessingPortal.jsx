@@ -345,6 +345,7 @@ const AssemblyProcessingPortal = () => {
     const [garment, setGarment] = useState(null);
     const [mismatch, setMismatch] = useState(null);
     const [dnaDefect, setDnaDefect] = useState(null);
+    const [batchInactive, setBatchInactive] = useState(null);
     const [defectCodes, setDefectCodes] = useState([]);
     const [showDefectModal, setShowDefectModal] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -391,7 +392,24 @@ const AssemblyProcessingPortal = () => {
     };
 
     // --- AUDIO FEEDBACK ENGINE ---
+    const SPEECH_MESSAGES = {
+        already_approved: 'Already approved',
+        batch_inactive: 'Batch not loaded on your line. Please ask the loader to load the batch.',
+    };
     const playFeedback = (type) => {
+        if (SPEECH_MESSAGES[type]) {
+            try {
+                if (window.speechSynthesis) {
+                    window.speechSynthesis.cancel();
+                    const utter = new SpeechSynthesisUtterance(SPEECH_MESSAGES[type]);
+                    utter.rate = 1;
+                    utter.pitch = 1;
+                    utter.volume = 1;
+                    window.speechSynthesis.speak(utter);
+                    return;
+                }
+            } catch (e) { /* fall through to tone below */ }
+        }
         try {
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const osc = audioCtx.createOscillator();
@@ -403,6 +421,10 @@ const AssemblyProcessingPortal = () => {
                 osc.frequency.setValueAtTime(880, audioCtx.currentTime);
                 gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
                 osc.start(); osc.stop(audioCtx.currentTime + 0.2);
+            } else if (type === 'already_approved' || type === 'batch_inactive') {
+                osc.frequency.setValueAtTime(660, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.3);
             } else {
                 osc.frequency.setValueAtTime(220, audioCtx.currentTime);
                 gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
@@ -506,19 +528,24 @@ const AssemblyProcessingPortal = () => {
     const handlePieceClick = async (piece) => {
         setIsPieceLoading(true);
         setError(null);
+        setBatchInactive(null);
         setGarment(null);
         setSelectedPiece(piece);
         try {
             const res = await assemblyApi.getGarmentDetails(piece.garment_uid);
             setGarment(res.data);
-            playFeedback('success');
+            playFeedback(res.data?.qc_status === STATUS.APPROVED ? 'already_approved' : 'success');
         } catch (err) {
             const status  = err.response?.status;
             const errData = err.response?.data;
-            playFeedback('error');
             if (status === 400 && errData?.error === 'DNA Defect') {
+                playFeedback('error');
                 setDnaDefect(errData);
+            } else if (status === 400 && errData?.error === 'Batch Not Active') {
+                playFeedback('batch_inactive');
+                setBatchInactive(errData);
             } else {
+                playFeedback('error');
                 setError(errData?.message || errData?.error || 'Failed to load piece.');
             }
             setSelectedPiece(null);
@@ -543,23 +570,29 @@ const AssemblyProcessingPortal = () => {
         setError(null);
         setMismatch(null);
         setDnaDefect(null);
+        setBatchInactive(null);
         setGarment(null);
         setScannedTextVisual(cleanUid);
 
         try {
             const res = await assemblyApi.getGarmentDetails(cleanUid);
             setGarment(res.data);
-            playFeedback('success');
+            playFeedback(res.data?.qc_status === STATUS.APPROVED ? 'already_approved' : 'success');
             setScannedTextVisual('');
         } catch (err) {
             const status  = err.response?.status;
             const errData = err.response?.data;
-            playFeedback('error');
             if (status === 403 && errData?.error === 'Batch Mismatch') {
+                playFeedback('error');
                 setMismatch(errData);
             } else if (status === 400 && errData?.error === 'DNA Defect') {
+                playFeedback('error');
                 setDnaDefect(errData);
+            } else if (status === 400 && errData?.error === 'Batch Not Active') {
+                playFeedback('batch_inactive');
+                setBatchInactive(errData);
             } else {
+                playFeedback('error');
                 setError(errData?.message || errData?.error || 'Invalid Scan: Check Barcode Integrity.');
             }
         } finally {
@@ -677,6 +710,82 @@ const AssemblyProcessingPortal = () => {
                 </div>
             )}
 
+            {/* BATCH NOT LOADED ALERT — batch isn't IN_PROGRESS on this line */}
+            {batchInactive && (
+                <div className="fixed inset-0 z-[400] bg-rose-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-white border-[8px] border-rose-500 rounded-[3rem] p-10 md:p-14 max-w-xl w-full text-center shadow-2xl animate-in zoom-in-95">
+                        <div className="w-24 h-24 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <AlertCircle className="w-14 h-14 text-rose-600" />
+                        </div>
+                        <h2 className="text-4xl md:text-5xl font-black text-rose-600 tracking-tight mb-3">BATCH NOT LOADED</h2>
+                        <p className="text-slate-500 font-bold text-lg mb-6">This batch is not active on your line. Ask your line loader to load it.</p>
+                        <div className="bg-rose-50 border-2 border-rose-100 rounded-3xl p-6 mb-8 text-left space-y-2.5">
+                            <div className="flex justify-between items-center">
+                                <span className="text-slate-400 font-bold text-xs uppercase tracking-widest">Batch ID</span>
+                                <span className="font-mono font-black text-rose-700 text-lg">{batchInactive.batch_id}</span>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => { setBatchInactive(null); setSelectedPiece(null); }}
+                            className="px-14 py-5 bg-rose-600 text-white font-black text-xl rounded-3xl hover:bg-rose-700 active:scale-95 transition-all shadow-xl w-full"
+                        >
+                            OK
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ALREADY APPROVED ALERT — piece was scanned again after passing QC */}
+            {garment && garment.qc_status === STATUS.APPROVED && (
+                <div className="fixed inset-0 z-[400] bg-emerald-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-white border-[8px] border-emerald-400 rounded-[3rem] p-10 md:p-14 max-w-xl w-full text-center shadow-2xl animate-in zoom-in-95">
+                        <div className="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <ShieldCheck className="w-14 h-14 text-emerald-500" />
+                        </div>
+                        <h2 className="text-4xl md:text-5xl font-black text-emerald-600 tracking-tight mb-3">ALREADY APPROVED</h2>
+                        <p className="text-slate-500 font-bold text-lg mb-6">This piece already passed QC. No action needed.</p>
+                        <div className="bg-emerald-50 border-2 border-emerald-100 rounded-3xl p-6 mb-8 text-left space-y-2.5">
+                            <div className="flex justify-between items-center">
+                                <span className="text-slate-400 font-bold text-xs uppercase tracking-widest">UID</span>
+                                <span className="font-mono font-black text-slate-900 text-lg">{garment.garment_uid}</span>
+                            </div>
+                            {garment.batch_id && (
+                                <div className="flex justify-between items-center">
+                                    <span className="text-slate-400 font-bold text-xs uppercase tracking-widest">Batch</span>
+                                    <span className="font-mono font-black text-indigo-600">{garment.batch_id}</span>
+                                </div>
+                            )}
+                            <div className="flex justify-between items-center">
+                                <span className="text-slate-400 font-bold text-xs uppercase tracking-widest">Product</span>
+                                <span className="font-black text-slate-700">{garment.product_name}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-slate-400 font-bold text-xs uppercase tracking-widest">Size</span>
+                                <span className="font-black text-slate-700">{garment.size}</span>
+                            </div>
+                            {garment.fabric_roll_id != null && (
+                                <div className="flex justify-between items-center">
+                                    <span className="text-slate-400 font-bold text-xs uppercase tracking-widest">Roll</span>
+                                    <span className="font-mono font-black text-slate-700">#{garment.fabric_roll_id}</span>
+                                </div>
+                            )}
+                            {(garment.fabric_color_number || garment.fabric_color_name) && (
+                                <div className="flex justify-between items-center">
+                                    <span className="text-slate-400 font-bold text-xs uppercase tracking-widest">Color</span>
+                                    <span className="font-black text-slate-700">{[garment.fabric_color_number, garment.fabric_color_name].filter(Boolean).join(' · ')}</span>
+                                </div>
+                            )}
+                        </div>
+                        <button
+                            onClick={() => { setGarment(null); setSelectedPiece(null); }}
+                            className="px-14 py-5 bg-emerald-600 text-white font-black text-xl rounded-3xl hover:bg-emerald-700 active:scale-95 transition-all shadow-xl w-full"
+                        >
+                            OK
+                        </button>
+                    </div>
+                </div>
+            )}
+
             <div className="max-w-6xl mx-auto">
                 
                 {/* API ERROR BANNER */}
@@ -767,7 +876,7 @@ const AssemblyProcessingPortal = () => {
                     <div className="animate-in fade-in zoom-in-95 duration-200">
                         
                         {/* IDLE SCAN STATE WITH SCANNED TEXT VISUAL */}
-                        {!garment && !mismatch && !dnaDefect && (
+                        {!garment && !mismatch && !dnaDefect && !batchInactive && (
                             <div className="text-center py-32 bg-white rounded-[3rem] border-4 border-dashed border-slate-200 shadow-inner">
                                 <div className="relative inline-block mb-8">
                                     <QrCode size={140} className="text-slate-100" />
@@ -878,7 +987,7 @@ const AssemblyProcessingPortal = () => {
                         )}
 
                         {/* GARMENT VERIFICATION VIEW */}
-                        {garment && (
+                        {garment && garment.qc_status !== STATUS.APPROVED && (
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in slide-in-from-bottom-10">
                                 {/* LEFT: DNA COMPONENT MAP */}
                                 <div className="lg:col-span-2 bg-white rounded-[3.5rem] shadow-xl border border-slate-200 overflow-hidden">
@@ -1230,7 +1339,7 @@ const AssemblyProcessingPortal = () => {
             )}
 
             {/* FIXED BOTTOM DRAWER — piece action panel (BATCH mode) */}
-            {viewMode === 'BATCH' && (garment || isPieceLoading) && (
+            {viewMode === 'BATCH' && (garment || isPieceLoading) && garment?.qc_status !== STATUS.APPROVED && (
                 <div className="fixed bottom-0 left-0 right-0 z-[200] animate-in slide-in-from-bottom-4 duration-200">
                     <div className="max-w-6xl mx-auto px-4 pb-4">
                         <div className="bg-white rounded-[2rem] shadow-2xl border-2 border-indigo-200 overflow-hidden">

@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
 import { LuLogOut, LuChevronDown, LuLayoutDashboard, LuHammer, LuMenu, LuX, LuBell ,LuFileText} from 'react-icons/lu';
+import ReportBugButton from './ReportBugButton';
 // Assuming notificationApi exists
 // import { notificationApi } from '../api/notificationApi';
 
@@ -61,9 +62,11 @@ const PreparationManagerLayout = () => {
                     </nav>
 
                     <div className="flex items-center space-x-4">
+                        <ReportBugButton />
+
                         {/* Placeholder for Notifications */}
                         <button className="text-gray-600 hover:text-blue-600"><LuBell size={20} /></button>
-                        
+
                         <div className="hidden md:flex items-center space-x-4">
                             <span className="text-sm font-medium">Welcome, {user?.name}</span>
                             <button onClick={handleLogout} className="flex items-center text-sm text-gray-600 hover:text-red-600"><LuLogOut className="mr-1" /> Logout</button>
@@ -91,6 +94,7 @@ const PreparationManagerLayout = () => {
                             </NavLink>
                             <hr />
                             <div className="px-4 py-2 text-sm text-gray-500">Welcome, {user?.name}</div>
+                            <div className="px-4 py-1"><ReportBugButton /></div>
                             <button onClick={handleLogout} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"><LuLogOut className="mr-2" /> Logout</button>
                         </nav>
                     </div>

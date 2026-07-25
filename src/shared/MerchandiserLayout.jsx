@@ -7,6 +7,7 @@ import {
     LuLayoutDashboard, LuPackage, LuClipboardList, LuLayers,
 } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
+import ReportBugButton from './ReportBugButton';
 
 const NAV = [
     { to: '/merchandiser/bom',                 icon: LuFileText,        label: 'BOM Management'       },
@@ -43,6 +44,7 @@ const MerchandiserLayout = () => {
                                 </NavLink>
                             ))}
                         </nav>
+                        <ReportBugButton />
                         <NotificationBell />
                         <button
                             onClick={handleLogout}

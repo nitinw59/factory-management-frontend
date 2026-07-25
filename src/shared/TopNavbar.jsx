@@ -2,6 +2,7 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LuCircleUserRound, LuLogOut } from 'react-icons/lu';
+import ReportBugButton from './ReportBugButton';
 
 // This is the new, "dumber" top navbar. Its only jobs are to display the
 // portal title, the user's profile, and the logout button.
@@ -41,6 +42,7 @@ const TopNavbar = () => {
                 {user.picture ? <img src={user.picture} alt="User" className="w-8 h-8 rounded-full" /> : <LuCircleUserRound size={24} />}
                 <span className="hidden md:inline text-sm font-medium">{user.name}</span>
               </div>
+              <span className="ml-6"><ReportBugButton /></span>
               <button onClick={handleLogout} className="ml-6 flex items-center text-sm text-gray-600 hover:text-red-600">
                 <LuLogOut className="mr-1" /> Logout
               </button>

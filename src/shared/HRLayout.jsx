@@ -14,6 +14,7 @@ import {
     Building2,
     PackageX
 } from 'lucide-react';
+import ReportBugButton from './ReportBugButton';
 
 const HRLayout = () => {
     const { user, logout } = useAuth();
@@ -90,6 +91,9 @@ const HRLayout = () => {
                             <ShieldCheck size={10} /> {user?.role ? user.role.replace('_', ' ') : 'HR Staff'}
                         </p>
                     </div>
+                </div>
+                <div className="flex justify-center mb-3">
+                    <ReportBugButton className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-rose-400 transition-colors" />
                 </div>
                 <button
                     onClick={handleLogout}

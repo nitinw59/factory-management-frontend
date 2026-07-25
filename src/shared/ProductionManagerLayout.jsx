@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { LuCircleUserRound, LuLogOut, LuChevronDown, LuPencil, LuSettings } from 'react-icons/lu';
 import MatrixBrand from './MatrixBrand';
 import NotificationBell from './NotificationBell';
+import ReportBugButton from './ReportBugButton';
 
 // A reusable dropdown component for the navbar
 const NavDropdown = ({ title, children }) => {
@@ -99,13 +100,17 @@ const ProductionManagerLayout = () => {
                   Trim Loss
                 </NavLink>
 
+                <NavLink to="/production-manager/bug-reports" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                  Bug Reports
+                </NavLink>
+
                 <NavLink to="/production-manager/settings" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                   Settings
                 </NavLink>
 
             </nav>
           </div>
-          
+
           <div className="flex items-center space-x-6">
             {user && (
               <>
@@ -118,6 +123,8 @@ const ProductionManagerLayout = () => {
                   <LuSettings className="mr-1.5" />
                   Settings
                 </NavLink>
+
+                <ReportBugButton />
 
                 <NotificationBell />
 

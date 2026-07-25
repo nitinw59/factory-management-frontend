@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LuLogOut, LuArrowLeft, LuPackageX } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
+import ReportBugButton from './ReportBugButton';
 
 // Where "back to my portal" sends each role.
 const PORTAL_HOME = {
@@ -56,6 +57,7 @@ const TrimLossLayout = () => {
                     </div>
                     <div className="flex items-center gap-4 shrink-0">
                         {user && <span className="hidden lg:inline text-sm font-medium text-slate-700">Welcome, {user.name}</span>}
+                        <ReportBugButton />
                         <NotificationBell />
                         <button onClick={handleLogout} className="flex items-center text-sm font-medium text-slate-500 hover:text-rose-600 transition-colors gap-1.5">
                             <LuLogOut size={15} /> <span className="hidden sm:inline">Logout</span>

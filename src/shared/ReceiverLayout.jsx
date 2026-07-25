@@ -3,6 +3,7 @@ import MatrixBrand from './MatrixBrand';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LuLogOut, LuPackageCheck } from 'react-icons/lu';
+import ReportBugButton from './ReportBugButton';
 
 export const ReceiverLayout = () => {
     const { logout } = useAuth();
@@ -32,6 +33,8 @@ export const ReceiverLayout = () => {
                                 Receiving Queue
                             </NavLink>
                         </nav>
+
+                        <ReportBugButton />
 
                         <button
                             onClick={handleLogout}

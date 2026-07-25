@@ -192,6 +192,10 @@ import TrimLossRegisterPage from './modules/trim_loss/TrimLossRegisterPage';
 import CaseDetailPage from './modules/trim_loss/CaseDetailPage';
 import HrRecoveryQueuePage from './modules/trim_loss/HrRecoveryQueuePage';
 
+import MyBugReportsPage from './modules/bug_reports/MyBugReportsPage';
+import BugReportDetailPage from './modules/bug_reports/BugReportDetailPage';
+import BugReportAdminDashboardPage from './modules/bug_reports/BugReportAdminDashboardPage';
+
 
 function App() {
   return (
@@ -207,6 +211,9 @@ function App() {
         {/* The root path is the main entry point that redirects based on role */}
         <Route path="/init" element={<InitialRedirect />} />
         <Route path="/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+        {/* Bug Reporting — any logged-in user can file/view their own reports */}
+        <Route path="/bug-reports" element={<MyBugReportsPage />} />
+        <Route path="/bug-reports/:id" element={<BugReportDetailPage />} />
         {/* Notification link_to aliases — backend paths mapped onto real portal routes */}
         <Route path="/store/trim-orders/:orderId" element={<RedirectWithParams to="/store-manager/trim-orders" />} />
         <Route path="/trim-kits/orders/:orderId" element={<TrimKitLinkResolver />} />
@@ -243,6 +250,8 @@ function App() {
           <Route path="spares-analytics" element={<SparesAnalyticsPage />} />
           <Route path="spares" element={<SparePartsPage />} />
           <Route path="general-items" element={<GeneralItemsMasterPage />} />
+          <Route path="bug-reports" element={<BugReportAdminDashboardPage />} />
+          <Route path="bug-reports/:id" element={<BugReportDetailPage />} />
       </Route>
 
               {/* Store Manager Portal */}
@@ -314,6 +323,8 @@ function App() {
           <Route path="planning" element={<MerchandiserPlanningPage />} />
           <Route path="trim-kits/orders/:orderId" element={<KitOrderPage />} />
           <Route path="trim-kits/history" element={<KitHistoryPage />} />
+          <Route path="bug-reports" element={<BugReportAdminDashboardPage />} />
+          <Route path="bug-reports/:id" element={<BugReportDetailPage />} />
 
         </Route>
       </Route>

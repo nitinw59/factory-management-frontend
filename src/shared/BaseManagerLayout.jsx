@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { 
-    LuLogOut, LuMenu, LuX, LuBell, LuChevronDown, 
-    LuUsers, LuWrench, LuTrendingUp, LuReceipt 
+import {
+    LuLogOut, LuMenu, LuX, LuBell, LuChevronDown,
+    LuUsers, LuWrench, LuTrendingUp, LuReceipt
 } from 'react-icons/lu';
+import ReportBugButton from './ReportBugButton';
 
 // --- Shared Dropdown Component ---
 const NavDropdown = ({ title, children }) => {
@@ -126,6 +127,8 @@ export default function BaseManagerLayout({ portalName, basePath, customLinks = 
 
                     {/* Right: Controls */}
                     <div className="flex items-center gap-4">
+                        <ReportBugButton />
+
                         <button className="p-2 text-slate-400 hover:text-indigo-600 transition-colors rounded-full hover:bg-slate-50">
                             <LuBell size={20} />
                         </button>
@@ -188,6 +191,9 @@ export default function BaseManagerLayout({ portalName, basePath, customLinks = 
 
                             <hr className="my-2 border-slate-100" />
                             <div className="px-3 py-2 text-sm font-bold text-slate-700 bg-slate-50 rounded-lg">User: {user?.name}</div>
+                            <div className="px-3 py-1">
+                                <ReportBugButton />
+                            </div>
                             <button onClick={handleLogout} className="flex items-center w-full px-3 py-2 text-sm font-bold text-rose-600 hover:bg-rose-50 rounded-lg transition-colors mt-2">
                                 <LuLogOut className="mr-3" size={18} /> Logout
                             </button>

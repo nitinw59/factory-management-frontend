@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
 import { LuLogOut, LuClipboardCheck } from 'react-icons/lu';
+import ReportBugButton from './ReportBugButton';
 
 const PreparationPortalLayout = () => {
   const { logout } = useAuth();
@@ -26,10 +27,13 @@ const PreparationPortalLayout = () => {
               </NavLink>
             </nav>
           </div>
-          <button onClick={handleLogout} className="flex items-center text-sm text-gray-600 hover:text-red-600">
-            <LuLogOut className="mr-1" />
-            Logout
-          </button>
+          <div className="flex items-center gap-4">
+            <ReportBugButton />
+            <button onClick={handleLogout} className="flex items-center text-sm text-gray-600 hover:text-red-600">
+              <LuLogOut className="mr-1" />
+              Logout
+            </button>
+          </div>
         </div>
       </header>
       <main className="flex-1 p-6 overflow-y-auto">
