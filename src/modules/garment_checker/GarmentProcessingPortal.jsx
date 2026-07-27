@@ -6,6 +6,7 @@ import {
     ThumbsUp, FileText, Download, ChevronRight, Loader2,
 } from 'lucide-react';
 import { assemblyApi } from '../../api/assemblyApi';
+import { universalApi } from '../../api/universalApi';
 
 // ── Work Log helpers ──────────────────────────────────────────────────────────
 const STATS_REFRESH_MS = 60_000;
@@ -345,6 +346,7 @@ const AssemblyProcessingPortal = () => {
     const [garment, setGarment] = useState(null);
     const [mismatch, setMismatch] = useState(null);
     const [dnaDefect, setDnaDefect] = useState(null);
+    const [approvingPieceId, setApprovingPieceId] = useState(null);
     const [batchInactive, setBatchInactive] = useState(null);
     const [defectCodes, setDefectCodes] = useState([]);
     const [showDefectModal, setShowDefectModal] = useState(null);
@@ -533,6 +535,7 @@ const AssemblyProcessingPortal = () => {
         setSelectedPiece(piece);
         try {
             const res = await assemblyApi.getGarmentDetails(piece.garment_uid);
+            console.log('assemblyApi.getGarmentDetails raw data:', res.data);
             setGarment(res.data);
             playFeedback(res.data?.qc_status === STATUS.APPROVED ? 'already_approved' : 'success');
         } catch (err) {
@@ -576,6 +579,7 @@ const AssemblyProcessingPortal = () => {
 
         try {
             const res = await assemblyApi.getGarmentDetails(cleanUid);
+            console.log('assemblyApi.getGarmentDetails raw data:', res.data);
             setGarment(res.data);
             playFeedback(res.data?.qc_status === STATUS.APPROVED ? 'already_approved' : 'success');
             setScannedTextVisual('');
@@ -698,6 +702,49 @@ const AssemblyProcessingPortal = () => {
             alert(err.response?.data?.error || 'Transaction failed.');
         } finally {
             setIsProcessingAction(false);
+        }
+    };
+
+    // Lets the checker clear a DNA-Defect-blocking component directly from this screen,
+    // instead of routing the piece back to the Universal Workstation dashboard.
+    const handleApproveComponent = async (comp) => {
+        if (!comp.cut_piece_log_id || approvingPieceId) {
+            return;
+        }
+        // approve-repair requires batchId — the blocked garment's own batch_id is the
+        // correct source (the piece's production batch, not necessarily the assembly
+        // line's currently-selected batch); fall back to the selected batch if absent.
+        const batchId = dnaDefect?.garment?.batch_id ?? selectedBatch?.batch_id ?? null;
+        if (!batchId) {
+            alert('Cannot approve — missing batch context for this garment.');
+            return;
+        }
+        setApprovingPieceId(comp.cut_piece_log_id);
+        try {
+            await universalApi.approveAlteredPieces({
+                batchId,
+                pieceIds: [comp.cut_piece_log_id],
+                status: 'APPROVED',
+                defectCodeIds: [],
+                // cut_piece_log_id values are sewing-stage piece records (PRIMARY_ONLY
+                // scope tracks only the primary part) — tells BE which tracking table
+                // (sewing_piece_log) to resolve the defect against.
+                processingMode: 'PIECE',
+                processingScope: 'PRIMARY_ONLY',
+            });
+            setDnaDefect(prev => prev ? {
+                ...prev,
+                garment: {
+                    ...prev.garment,
+                    components: prev.garment.components.map(c =>
+                        c.cut_piece_log_id === comp.cut_piece_log_id ? { ...c, has_active_defect: false } : c
+                    ),
+                },
+            } : prev);
+        } catch (err) {
+            alert(err.response?.data?.error || 'Failed to approve piece.');
+        } finally {
+            setApprovingPieceId(null);
         }
     };
 
@@ -954,14 +1001,28 @@ const AssemblyProcessingPortal = () => {
                                 </div>
                                 {dnaDefect.garment?.components?.length > 0 && (
                                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-xl mx-auto mb-10">
-                                        {dnaDefect.garment.components.map((comp, i) => (
-                                            <div key={i} className={`px-4 py-3 rounded-2xl border-2 flex items-center gap-3 ${comp.has_active_defect ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-100'}`}>
-                                                <div className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${comp.has_active_defect ? 'bg-rose-500 text-white' : 'bg-white text-slate-700 border border-slate-200'}`}>
-                                                    {comp.has_active_defect ? <X size={14} strokeWidth={3}/> : <Check size={14} strokeWidth={3}/>}
+                                        {dnaDefect.garment.components.map((comp, i) => {
+                                            const isApproving = approvingPieceId === comp.cut_piece_log_id;
+                                            const clickable = comp.has_active_defect && !!comp.cut_piece_log_id;
+                                            return (
+                                                <div
+                                                    key={i}
+                                                    onClick={clickable ? () => handleApproveComponent(comp) : undefined}
+                                                    title={clickable ? 'Click to approve this piece' : undefined}
+                                                    className={`px-4 py-3 rounded-2xl border-2 flex items-center gap-3 ${comp.has_active_defect ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-100'} ${clickable ? 'cursor-pointer hover:border-rose-400 hover:bg-rose-100 transition-colors' : ''}`}
+                                                >
+                                                    <div className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${comp.has_active_defect ? 'bg-rose-500 text-white' : 'bg-white text-slate-700 border border-slate-200'}`}>
+                                                        {isApproving
+                                                            ? <Loader2 size={14} className="animate-spin" />
+                                                            : comp.has_active_defect ? <X size={14} strokeWidth={3}/> : <Check size={14} strokeWidth={3}/>}
+                                                    </div>
+                                                    <span className={`font-bold text-sm ${comp.has_active_defect ? 'text-rose-700' : 'text-slate-600'}`}>{comp.part_name}</span>
+                                                    {clickable && !isApproving && (
+                                                        <span className="ml-auto text-[9px] font-black uppercase tracking-wider text-rose-500">Approve</span>
+                                                    )}
                                                 </div>
-                                                <span className={`font-bold text-sm ${comp.has_active_defect ? 'text-rose-700' : 'text-slate-600'}`}>{comp.part_name}</span>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 )}
                                 <div className="flex justify-center">

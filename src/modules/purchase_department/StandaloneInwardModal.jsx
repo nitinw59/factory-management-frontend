@@ -9,7 +9,7 @@ import { storeManagerApi } from '../../api/storeManagerApi';
 import { trimsApi } from '../../api/trimsApi';
 import { sparesApi } from '../../api/sparesApi';
 import { generalItemsApi } from '../../api/generalItemsApi';
-import { newRoll, sumRolls, mapRolls, rk, sumTrimBoxes, mapTrimBoxes } from './inwardShared';
+import { newRoll, sumRolls, mapRolls, rk, sumTrimBoxes, mapTrimBoxes, UOM_OPTIONS, uomLabel } from './inwardShared';
 import InwardCreateModal from './InwardCreateModal';
 import InwardReviewModal from './InwardReviewModal';
 import SearchableSelect from '../../shared/SearchableSelect';
@@ -99,12 +99,18 @@ function RollRow({ roll, onChange, onRemove, removable }) {
                 type="number"
                 min="0.01"
                 step="0.01"
-                placeholder="Meters"
+                placeholder="Qty"
                 value={roll.meter}
                 onChange={e => onChange({ ...roll, meter: e.target.value })}
                 className="w-24 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400 tabular-nums"
             />
-            <span className="text-[10px] text-slate-400">m</span>
+            <select
+                value={roll.uom}
+                onChange={e => onChange({ ...roll, uom: e.target.value })}
+                className="w-16 text-xs border border-slate-200 rounded-lg px-1 py-1.5 bg-white focus:outline-none focus:border-violet-400"
+            >
+                {UOM_OPTIONS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
+            </select>
             {removable && (
                 <button
                     type="button"
@@ -171,6 +177,9 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
     const removeRoll = (i) => onPatch(l => ({ rolls: l.rolls.filter((_, j) => j !== i) }));
 
     const rollTotal = sumRolls(line.rolls);
+    const rollUoms = [...new Set(line.rolls.map(r => r.uom || 'meter'))];
+    const rollUnitLabel = rollUoms.length === 1 ? uomLabel(rollUoms[0]) : 'mixed units';
+    const selectedTrimItem = trimItems.find(t => String(t.id) === String(line.trim_item_id));
 
     return (
         <div className="border border-slate-200 rounded-xl p-3 space-y-3 bg-white">
@@ -220,7 +229,7 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
                     </div>
                     <div>
                         <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">
-                            Rolls · <span className="normal-case text-emerald-600 font-bold">{rollTotal.toFixed(2)} m total</span>
+                            Rolls · <span className="normal-case text-emerald-600 font-bold">{rollTotal.toFixed(2)} {rollUnitLabel} total</span>
                         </label>
                         <div className="space-y-1.5">
                             {line.rolls.map((r, i) => (
@@ -266,7 +275,14 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
                         </select>
                     </div>
                     <div>
-                        <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Qty *</label>
+                        <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1 flex items-center gap-1.5">
+                            Qty *
+                            {selectedTrimItem?.unit_of_measure && (
+                                <span className="normal-case text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded">
+                                    {selectedTrimItem.unit_of_measure}
+                                </span>
+                            )}
+                        </label>
                         <input type="number" min="0.01" step="1" placeholder={hasBoxes ? 'from boxes' : '0'} value={hasBoxes ? sumTrimBoxes(line.boxes) : line.qty} onChange={e => set('qty', e.target.value)}
                             disabled={hasBoxes}
                             className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400 tabular-nums disabled:bg-slate-100 disabled:text-slate-500" />
@@ -365,7 +381,7 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
             {/* Unit price for fabric (shared row below rolls) */}
             {line.type === 'fabric' && (
                 <div>
-                    <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Unit Price / m (optional)</label>
+                    <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Unit Price / {rollUnitLabel} (optional)</label>
                     <input type="number" min="0" step="0.01" placeholder="0.00" value={line.unit_price} onChange={e => set('unit_price', e.target.value)}
                         className="w-32 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400 tabular-nums" />
                 </div>

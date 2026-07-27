@@ -10,6 +10,7 @@ import { useAuth } from '../../context/AuthContext';
 import { IMAGE_BASE_URL } from '../../utils/api';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import StandaloneInwardModal from './StandaloneInwardModal';
+import { uomLabel } from './inwardShared';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -144,7 +145,12 @@ function InwardDetailModal({ inward, canApprove, onApprove, onReject, onClose })
         }
         // For PENDING fabric items, show pending_rolls instead of real rolls
         const rolls = (type === 'fabric' && isPending) ? (it.pending_rolls || []) : (it.rolls || []);
-        return { key: `r${idx}`, type, name, details, qty: parseFloat(it.qty_received || 0), unit: type === 'fabric' ? 'm' : (it.uom || 'pcs'), rolls };
+        let unit = it.uom || 'pcs';
+        if (type === 'fabric') {
+            const rollUoms = [...new Set(rolls.map(r => r.uom || 'meter'))];
+            unit = rollUoms.length === 0 ? 'm' : rollUoms.length === 1 ? uomLabel(rollUoms[0]) : 'mixed';
+        }
+        return { key: `r${idx}`, type, name, details, qty: parseFloat(it.qty_received || 0), unit, rolls };
     }), [inward, isPending]);
 
     const handleApprove = async () => {
@@ -232,7 +238,7 @@ function InwardDetailModal({ inward, canApprove, onApprove, onReject, onClose })
                                             <ul className="mt-1 text-[10px] text-slate-500 space-y-0.5">
                                                 {row.rolls.map((r, i) => (
                                                     <li key={i} className="font-mono">
-                                                        {r.bale_no || '—'} · {Number(r.meter).toLocaleString(undefined, { maximumFractionDigits: 2 })} {r.uom || 'm'}
+                                                        {r.bale_no || '—'} · {Number(r.meter).toLocaleString(undefined, { maximumFractionDigits: 2 })} {uomLabel(r.uom)}
                                                     </li>
                                                 ))}
                                             </ul>

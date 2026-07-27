@@ -157,6 +157,7 @@ const BomDetail = ({ bomId }) => {
     const [history, setHistory]       = useState(null);
     const [historyLoading, setHistLoading] = useState(false);
     const [showHistory, setShowHistory]   = useState(false);
+    const [selectedTrim, setSelectedTrim] = useState(null);
 
     useEffect(() => {
         setLoading(true);
@@ -220,7 +221,8 @@ const BomDetail = ({ bomId }) => {
                     </p>
                     <div className="grid grid-cols-2 gap-2">
                         {bom.material_consumptions.map((mc, i) => (
-                            <div key={i} className="border border-slate-200 rounded-xl px-3 py-2">
+                            <div key={i} onClick={() => setSelectedTrim(mc)}
+                                className="border border-slate-200 rounded-xl px-3 py-2 cursor-pointer hover:bg-slate-50 hover:border-slate-300 transition-colors">
                                 <div className="flex items-center justify-between gap-1 mb-0.5">
                                     <span className="font-semibold text-slate-700 text-xs truncate">
                                         {mc.trim_item_name || `Trim #${mc.trim_item_id}`}
@@ -273,6 +275,7 @@ const BomDetail = ({ bomId }) => {
                     </div>
                 )}
             </div>
+            {selectedTrim && <TrimDetailModal mc={selectedTrim} onClose={() => setSelectedTrim(null)} />}
         </div>
     );
 };
@@ -451,7 +454,7 @@ const RatioGroupDiffRow = ({ entry, isFirstApproval }) => {
 
 // ─── material diff row ────────────────────────────────────────────────────────
 
-const MaterialDiffRow = ({ entry, isFirstApproval }) => {
+const MaterialDiffRow = ({ entry, isFirstApproval, onClick }) => {
     const item = entry.new || entry.old;
     const s    = isFirstApproval ? DIFF_STYLE.same : DIFF_STYLE[entry.type];
 
@@ -462,7 +465,7 @@ const MaterialDiffRow = ({ entry, isFirstApproval }) => {
     };
 
     return (
-        <div className={`border rounded-xl px-3 py-2 ${s.row}`}>
+        <div onClick={onClick} className={`border rounded-xl px-3 py-2 cursor-pointer hover:brightness-95 transition-[filter] ${s.row}`}>
             <div className="flex items-center justify-between gap-1 mb-0.5">
                 <span className="font-semibold text-slate-700 text-xs truncate">
                     {item.trim_item_name || `Trim #${item.trim_item_id}`}
@@ -492,9 +495,143 @@ const MaterialDiffRow = ({ entry, isFirstApproval }) => {
     );
 };
 
+// ─── trim detail modal ─────────────────────────────────────────────────────────
+
+const effectiveQty = (qty, wastagePct) => {
+    const q = parseFloat(qty);
+    if (Number.isNaN(q)) return null;
+    const w = parseFloat(wastagePct) || 0;
+    return q * (1 + w / 100);
+};
+
+const TrimDetailModal = ({ mc, onClose }) => {
+    const [variantSizes, setVariantSizes] = useState([]);
+    const [loadingSizes, setLoadingSizes] = useState(true);
+
+    useEffect(() => {
+        if (!mc.trim_item_id) { setLoadingSizes(false); return; }
+        setLoadingSizes(true);
+        bomApi.getTrimVariantSizes(mc.trim_item_id)
+            .then(res => setVariantSizes(res.data?.data ?? res.data ?? []))
+            .catch(() => setVariantSizes([]))
+            .finally(() => setLoadingSizes(false));
+    }, [mc.trim_item_id]);
+
+    const fixedEff = mc.calculation_type === 'FIXED' ? effectiveQty(mc.fixed_quantity, mc.wastage_percentage) : null;
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col"
+                 onClick={e => e.stopPropagation()}>
+
+                {/* Header */}
+                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
+                    <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <Tag size={15} className="text-violet-600 shrink-0" />
+                            <h2 className="text-sm font-extrabold text-slate-800 truncate">
+                                {mc.trim_item_name || `Trim #${mc.trim_item_id}`}
+                            </h2>
+                            {mc.unit_of_measure && (
+                                <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold shrink-0">
+                                    {mc.unit_of_measure}
+                                </span>
+                            )}
+                        </div>
+                        {mc.placement_description && (
+                            <p className="text-xs text-slate-500 mt-1">📍 {mc.placement_description}</p>
+                        )}
+                    </div>
+                    <button onClick={onClose}
+                        className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors shrink-0">
+                        <X size={16} />
+                    </button>
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Calculation</p>
+                            <p className="text-xs font-semibold text-slate-700">{mc.calculation_type === 'FIXED' ? 'Fixed quantity' : 'Per size'}</p>
+                        </div>
+                        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Wastage</p>
+                            <p className="text-xs font-semibold text-slate-700">{mc.wastage_percentage || '0'}%</p>
+                        </div>
+                    </div>
+
+                    {mc.calculation_type === 'FIXED' ? (
+                        <div className="border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between">
+                            <div>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Fixed Quantity</p>
+                                <p className="text-sm font-bold text-slate-700">{mc.fixed_quantity} {mc.unit_of_measure || 'unit'}</p>
+                            </div>
+                            {fixedEff != null && (
+                                <div className="text-right">
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Effective (w/ wastage)</p>
+                                    <p className="text-sm font-bold text-violet-600">{fixedEff.toFixed(2)} {mc.unit_of_measure || 'unit'}</p>
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                                Per-size Breakdown ({(mc.size_consumptions || []).length})
+                            </p>
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr className="text-slate-400 font-bold border-b border-slate-100">
+                                        <th className="text-left pb-1.5">Product Size</th>
+                                        <th className="text-left pb-1.5 px-2">Trim Variant Size</th>
+                                        <th className="text-right pb-1.5">Qty</th>
+                                        <th className="text-right pb-1.5 pl-2">Effective</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(mc.size_consumptions || []).map((sc, i) => {
+                                        const eff = effectiveQty(sc.quantity, mc.wastage_percentage);
+                                        return (
+                                            <tr key={i} className="border-b border-slate-50">
+                                                <td className="py-1.5">
+                                                    <span className="inline-flex items-center justify-center min-w-[2.5rem] px-2 py-0.5 text-[11px] font-bold rounded border border-violet-100 bg-violet-50 text-violet-700">
+                                                        {sc.size}
+                                                    </span>
+                                                </td>
+                                                <td className="py-1.5 px-2 text-slate-600">{sc.target_variant_size || <span className="text-slate-300 italic">same as product</span>}</td>
+                                                <td className="py-1.5 text-right font-semibold text-slate-700">{sc.quantity ?? '—'}</td>
+                                                <td className="py-1.5 pl-2 text-right text-slate-500">{eff != null ? eff.toFixed(2) : '—'}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {!loadingSizes && variantSizes.length > 0 && (
+                        <div className="pt-1 border-t border-slate-100">
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Available Trim Variant Sizes</p>
+                            <div className="flex flex-wrap gap-1.5">
+                                {variantSizes.map(vs => (
+                                    <span key={vs} className="bg-slate-50 text-slate-600 border border-slate-200 rounded px-2 py-0.5 text-[10px] font-bold">
+                                        {vs}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ─── changes tab ──────────────────────────────────────────────────────────────
 
 const ChangesTab = ({ currBom, prevBom }) => {
+    const [selectedTrim, setSelectedTrim] = useState(null);
+
     if (!currBom) return (
         <p className="text-sm text-slate-400 text-center py-12">No BOM data available.</p>
     );
@@ -548,7 +685,8 @@ const ChangesTab = ({ currBom, prevBom }) => {
                     </p>
                     <div className="grid grid-cols-2 gap-2">
                         {matDiff.map((entry, i) => (
-                            <MaterialDiffRow key={i} entry={entry} isFirstApproval={isFirst} />
+                            <MaterialDiffRow key={i} entry={entry} isFirstApproval={isFirst}
+                                onClick={() => setSelectedTrim(entry.new || entry.old)} />
                         ))}
                     </div>
                 </section>
@@ -557,6 +695,7 @@ const ChangesTab = ({ currBom, prevBom }) => {
             {rgDiff.length === 0 && matDiff.length === 0 && (
                 <p className="text-sm text-slate-400 italic text-center py-8">No BOM content defined.</p>
             )}
+            {selectedTrim && <TrimDetailModal mc={selectedTrim} onClose={() => setSelectedTrim(null)} />}
         </div>
     );
 };
@@ -836,6 +975,37 @@ const BomApprovalModal = ({ bom, onClose, onApproved }) => {
     );
 };
 
+// ─── revision change-count badge ──────────────────────────────────────────────
+
+const ChangeCountBadge = ({ bomId }) => {
+    const [changes, setChanges] = useState(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        bomApi.getApprovalPreview(bomId)
+            .then(res => {
+                if (cancelled) return;
+                const preview = res.data?.data ?? res.data;
+                const currBom = preview?.current_bom;
+                const prevBom = preview?.previous_approved_bom;
+                if (!currBom || !prevBom) { setChanges(0); return; }
+                const matDiff = diffByKey(prevBom.material_consumptions ?? [], currBom.material_consumptions ?? [], materialKey, materialChanged);
+                const rgDiff  = diffByKey(prevBom.ratio_groups ?? [],          currBom.ratio_groups ?? [],          ratioGroupKey, ratioGroupChanged);
+                setChanges([...matDiff, ...rgDiff].filter(d => d.type !== 'same').length);
+            })
+            .catch(() => { if (!cancelled) setChanges(0); });
+        return () => { cancelled = true; };
+    }, [bomId]);
+
+    if (!changes) return null;
+
+    return (
+        <span className="inline-flex items-center gap-1 bg-violet-50 text-violet-600 border border-violet-100 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+            <Eye size={9} /> {changes} changed
+        </span>
+    );
+};
+
 // ─── BOM card ─────────────────────────────────────────────────────────────────
 
 const BomCard = ({ bom, onApproved, onRejected, onArchived }) => {
@@ -896,6 +1066,7 @@ const BomCard = ({ bom, onApproved, onRejected, onArchived }) => {
                             <p className="text-xs text-slate-500 mt-0.5 truncate">{bom.product?.name}</p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
+                            {localStatus === 'PENDING_APPROVAL' && <ChangeCountBadge bomId={bom.id} />}
                             <StatusPill status={localStatus} />
                             {expanded
                                 ? <ChevronUp size={14} className="text-slate-400" />

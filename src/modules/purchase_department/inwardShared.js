@@ -53,6 +53,14 @@ export const labelFromGroup = (g) => {
     return { name: g.trim_item_name || 'Trim', details: parts.join(' · ') };
 };
 
+// ── UOM helpers (fabric rolls) ───────────────────────────────────────────────
+export const UOM_OPTIONS = [
+    { value: 'meter', label: 'm' },
+    { value: 'yard',  label: 'yd' },
+    { value: 'kg',    label: 'kg' },
+];
+export const uomLabel = (uom) => UOM_OPTIONS.find(u => u.value === uom)?.label || uom || 'm';
+
 // ── Roll helpers (fabric) ────────────────────────────────────────────────────
 export const rk = () => Math.random().toString(36).slice(2);
 

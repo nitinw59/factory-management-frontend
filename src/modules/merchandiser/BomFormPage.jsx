@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     Plus, FileText, Loader2, X, ChevronDown, ChevronRight,
-    AlertCircle, AlertTriangle, Scissors, ArrowLeft, Check, XCircle, Ruler,
+    AlertCircle, AlertTriangle, Scissors, ArrowLeft, Check, XCircle, Ruler, Copy,
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
 import { accountingApi } from '../../api/accountingApi';
@@ -27,6 +27,23 @@ const freshRatioGroup = () => ({
     fabrics: [freshFabric()],
     items: [],
 });
+
+// Sizes in markerSizes with no qty entered yet for a PER_SIZE material.
+const missingSizesFor = (mc, markerSizes) => {
+    if (mc.calculation_type !== 'PER_SIZE') return [];
+    return markerSizes.filter(s => {
+        const row = mc.size_consumptions.find(sc => sc.size === s);
+        return !row || row.quantity === '' || row.quantity == null;
+    });
+};
+
+// Effective qty = qty * (1 + wastage% / 100), null-safe.
+const effectiveQty = (qty, wastagePercentage) => {
+    const q = parseFloat(qty);
+    if (isNaN(q)) return null;
+    const w = parseFloat(wastagePercentage) || 0;
+    return q * (1 + w / 100);
+};
 
 const freshMaterial = () => ({
     _key: genKey(), trim_item_id: '',
@@ -91,10 +108,10 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                 <Scissors size={13} className="text-slate-400 shrink-0" />
                 <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
                     <span className="font-bold text-slate-700 text-sm">
-                        {group.ratio_group_name || <span className="text-slate-400 font-normal italic">Unnamed group</span>}
+                        {group.ratio_group_name || <span className="text-slate-500 font-normal italic">Unnamed group</span>}
                     </span>
                     {!expanded && sizeSummary && (
-                        <span className="text-xs text-slate-400">{sizeSummary}</span>
+                        <span className="text-xs text-slate-500">{sizeSummary}</span>
                     )}
                     {hasBadSize && (
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full shrink-0"
@@ -125,7 +142,7 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                 <div className="px-4 pb-4 pt-3 border-t border-slate-100 bg-white">
                     <div className="flex gap-3 mb-3">
                         <div className="flex-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Group Name</label>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Group Name</label>
                             <input type="text" value={group.ratio_group_name}
                                 onChange={e => onUpdate(gIdx, 'ratio_group_name', e.target.value)}
                                 placeholder="e.g. Main Marker"
@@ -133,7 +150,7 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                             />
                         </div>
                         <div className="w-36 shrink-0">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Marker Length (in)</label>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Marker Length (in)</label>
                             <input type="number" value={group.marker_length_inches}
                                 onChange={e => onUpdate(gIdx, 'marker_length_inches', e.target.value)}
                                 placeholder="72"
@@ -146,7 +163,7 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                     {group.items.length > 0 && (
                         <table className="w-full text-xs mb-2">
                             <thead>
-                                <tr className="text-slate-400 font-bold border-b border-slate-100">
+                                <tr className="text-slate-500 font-bold border-b border-slate-100">
                                     <th className="text-left pb-1.5">Size</th>
                                     <th className="text-right pb-1.5 pr-3">Pieces in Marker</th>
                                     <th className="w-7" />
@@ -201,7 +218,7 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                                 {available.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                             </select>
                         ) : (
-                            <p className="mb-4 text-[10px] text-slate-400 italic">
+                            <p className="mb-4 text-[10px] text-slate-600 italic">
                                 {sizes.length === 0 ? 'No sizes configured — add sizes in Admin → Inventory → Manage Sizes.' : 'All available sizes added.'}
                             </p>
                         );
@@ -210,14 +227,14 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                     {/* Fabric consumptions */}
                     <div className="border-t border-slate-100 pt-3">
                         <div className="flex items-center justify-between mb-2">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase">Fabric Consumptions</p>
+                            <p className="text-[10px] font-bold text-slate-500 uppercase">Fabric Consumptions</p>
                             <button onClick={addFab}
                                 className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 px-2 py-1 rounded-md transition-colors">
                                 <Plus size={9} /> Add Fabric
                             </button>
                         </div>
                         {fabrics.length === 0 && (
-                            <p className="text-xs text-slate-400 italic text-center py-2">No fabrics. Add fabric consumption for this ratio group.</p>
+                            <p className="text-xs text-slate-500 italic text-center py-2">No fabrics. Add fabric consumption for this ratio group.</p>
                         )}
                         {fabrics.map((fc, fIdx) => {
                             const ftName = fabricTypes.find(ft => String(ft.id) === String(fc.fabric_type_id))?.name;
@@ -234,7 +251,7 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                                         placeholder="85.5"
                                         className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 text-right"
                                     />
-                                    <span className="text-[10px] text-slate-400 shrink-0">in</span>
+                                    <span className="text-[10px] text-slate-600 shrink-0">in</span>
                                     <button onClick={() => removeFab(fIdx)} className="text-slate-300 hover:text-red-400 shrink-0">
                                         <X size={12} />
                                     </button>
@@ -250,13 +267,16 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
 
 // ─── Searchable trim select ───────────────────────────────────────────────────
 
-const TrimSearchSelect = ({ value, trimItems, onChange, onCreateNew }) => {
+const TrimSearchSelect = ({ value, trimItems, excludeIds, onChange, onCreateNew }) => {
     const [open, setOpen]     = useState(false);
     const [query, setQuery]   = useState('');
     const containerRef        = useRef(null);
     const inputRef            = useRef(null);
 
     const selected = trimItems.find(t => String(t.id) === String(value));
+    // Trims already used on another material row can't be picked again — a BOM
+    // shouldn't have two consumption lines for the same trim item.
+    const selectable = trimItems.filter(t => !excludeIds?.has(String(t.id)));
 
     useEffect(() => {
         if (!open) return;
@@ -270,7 +290,7 @@ const TrimSearchSelect = ({ value, trimItems, onChange, onCreateNew }) => {
         return () => document.removeEventListener('mousedown', handler);
     }, [open]);
 
-    const filtered = trimItems.filter(t => {
+    const filtered = selectable.filter(t => {
         const q = query.toLowerCase();
         return !q || t.name?.toLowerCase().includes(q) || t.item_code?.toLowerCase().includes(q);
     });
@@ -284,7 +304,7 @@ const TrimSearchSelect = ({ value, trimItems, onChange, onCreateNew }) => {
                 onClick={() => setOpen(o => !o)}
                 className="w-full mt-0.5 flex items-center justify-between border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 bg-white text-left"
             >
-                <span className={selected ? 'text-slate-800' : 'text-slate-400'}>
+                <span className={selected ? 'text-slate-800' : 'text-slate-500'}>
                     {selected
                         ? `${selected.name}${selected.item_code ? ` · ${selected.item_code}` : ''}${selected.unit_of_measure ? ` (${selected.unit_of_measure})` : ''}`
                         : '— Select trim item —'}
@@ -306,7 +326,7 @@ const TrimSearchSelect = ({ value, trimItems, onChange, onCreateNew }) => {
                     </div>
                     <ul className="max-h-48 overflow-y-auto text-sm">
                         {filtered.length === 0 && (
-                            <li className="px-3 py-2 text-xs text-slate-400 italic">No results</li>
+                            <li className="px-3 py-2 text-xs text-slate-500 italic">No results</li>
                         )}
                         {filtered.map(t => (
                             <li key={t.id}>
@@ -383,14 +403,14 @@ const CreateTrimModal = ({ onClose, onCreated }) => {
                         </div>
                     )}
                     <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Item Name *</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Item Name *</label>
                         <input autoFocus type="text" value={name} onChange={e => setName(e.target.value)}
                             placeholder="e.g. Main Label"
                             className="mt-0.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300"
                         />
                     </div>
                     <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Brand *</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Brand *</label>
                         <input type="text" value={brand} onChange={e => setBrand(e.target.value)}
                             placeholder="e.g. YKK"
                             className="mt-0.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300"
@@ -398,14 +418,14 @@ const CreateTrimModal = ({ onClose, onCreated }) => {
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Item Code</label>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Item Code</label>
                             <input type="text" value={itemCode} onChange={e => setItemCode(e.target.value)}
                                 placeholder="SKU-001"
                                 className="mt-0.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300"
                             />
                         </div>
                         <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Unit *</label>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Unit *</label>
                             <select value={uom} onChange={e => setUom(e.target.value)}
                                 className="mt-0.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 bg-white">
                                 {UOM_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
@@ -431,18 +451,21 @@ const CreateTrimModal = ({ onClose, onCreated }) => {
 
 // ─── Material Accordion ───────────────────────────────────────────────────────
 
-const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, onUpdate, onRemove, onTrimCreated }) => {
+const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, onUpdate, onRemove, onDuplicate, onTrimCreated, excludeTrimIds }) => {
     const trimItem = trimItems.find(t => String(t.id) === String(mc.trim_item_id));
     const uom = trimItem?.unit_of_measure;
     const upd = (field, val) => onUpdate(mIdx, field, val);
 
     const [createTrimOpen, setCreateTrimOpen] = useState(false);
     const [variantSizes, setVariantSizes] = useState([]);
+    const [variantSizesLoading, setVariantSizesLoading] = useState(false);
     useEffect(() => {
-        if (!mc.trim_item_id) { setVariantSizes([]); return; }
+        if (!mc.trim_item_id) { setVariantSizes([]); setVariantSizesLoading(false); return; }
+        setVariantSizesLoading(true);
         bomApi.getTrimVariantSizes(mc.trim_item_id)
             .then(res => setVariantSizes(res.data?.data ?? res.data ?? []))
-            .catch(() => setVariantSizes([]));
+            .catch(() => setVariantSizes([]))
+            .finally(() => setVariantSizesLoading(false));
     }, [mc.trim_item_id]);
 
     // Sync size_consumptions whenever calculation_type or marker sizes change
@@ -465,45 +488,99 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
         upd('size_consumptions', sc);
     };
 
+    const [bulkFillValue, setBulkFillValue] = useState('');
+    const fillSizes = (mode) => {
+        const sc = mc.size_consumptions.map(row => {
+            const isEmpty = row.quantity === '' || row.quantity == null;
+            if (mode === 'empty' && !isEmpty) return row;
+            return { ...row, quantity: bulkFillValue };
+        });
+        upd('size_consumptions', sc);
+    };
+
+    const missing = missingSizesFor(mc, markerSizes);
+    const isDuplicateTrim = !!mc.trim_item_id && excludeTrimIds?.has(String(mc.trim_item_id));
+    const fixedEffQty = mc.calculation_type === 'FIXED' ? effectiveQty(mc.fixed_quantity, mc.wastage_percentage) : null;
+
     return (
-        <div className="border border-slate-200 rounded-xl">
+        <div className={`border rounded-xl ${isDuplicateTrim ? 'border-red-300' : 'border-slate-200'}`}>
             <button onClick={onToggle}
-                className="w-full flex items-center gap-2 px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left rounded-t-xl">
+                className="w-full flex items-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left rounded-t-xl">
                 {expanded
                     ? <ChevronDown size={13} className="text-slate-400 shrink-0" />
                     : <ChevronRight size={13} className="text-slate-400 shrink-0" />}
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-bold text-slate-700 text-sm">
-                            {trimItem?.name || <span className="text-slate-400 font-normal italic">No item selected</span>}
-                        </span>
-                        {trimItem?.item_code && (
-                            <span className="text-[10px] text-slate-400">· {trimItem.item_code}</span>
-                        )}
-                        {uom && (
-                            <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold">{uom}</span>
-                        )}
-                    </div>
-                    {!expanded && mc.placement_description && (
-                        <p className="text-[10px] text-slate-400 mt-0.5 truncate">{mc.placement_description}</p>
+
+                {/* Trim */}
+                <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
+                    <span className="font-bold text-slate-700 text-sm truncate">
+                        {trimItem?.name || <span className="text-slate-500 font-normal italic">No item selected</span>}
+                    </span>
+                    {trimItem?.item_code && (
+                        <span className="text-[10px] text-slate-600 shrink-0">· {trimItem.item_code}</span>
+                    )}
+                    {uom && (
+                        <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold shrink-0">{uom}</span>
                     )}
                 </div>
-                {!expanded && (
-                    <div className="shrink-0 text-right mr-1">
-                        {mc.calculation_type === 'FIXED' ? (
-                            <span className="text-sm font-bold text-slate-700">{mc.fixed_quantity || '—'}</span>
-                        ) : (
-                            <span className="text-[10px] text-indigo-600 font-bold">Per Size</span>
-                        )}
-                    </div>
-                )}
-                <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full border shrink-0 ${
+
+                {/* Calc */}
+                <span className={`w-16 text-center text-[9px] font-bold uppercase px-2 py-0.5 rounded-full border shrink-0 ${
                     mc.calculation_type === 'FIXED'
                         ? 'bg-slate-100 text-slate-500 border-slate-200'
                         : 'bg-violet-50 text-violet-600 border-violet-100'
                 }`}>{mc.calculation_type}</span>
+
+                {/* Qty */}
+                <div className="w-16 shrink-0 text-right">
+                    {mc.calculation_type === 'FIXED' ? (
+                        <span className="text-sm font-bold text-slate-700">{mc.fixed_quantity || '—'}</span>
+                    ) : (
+                        <span className="text-[10px] text-indigo-600 font-bold">Per Size</span>
+                    )}
+                </div>
+
+                {/* Effective qty (qty x (1+wastage%)) */}
+                <div className="w-16 shrink-0 text-right" title="Effective qty = qty × (1 + wastage%)">
+                    <span className="text-xs text-slate-500">
+                        {mc.calculation_type === 'FIXED'
+                            ? (fixedEffQty != null ? fixedEffQty.toFixed(2) : '—')
+                            : '—'}
+                    </span>
+                </div>
+
+                {/* Wastage% */}
+                <div className="w-12 shrink-0 text-right">
+                    <span className="text-[10px] text-slate-600">{mc.wastage_percentage || '0'}%</span>
+                </div>
+
+                {/* Placement */}
+                <div className="w-28 shrink-0 truncate text-[10px] text-slate-600" title={mc.placement_description || undefined}>
+                    {mc.placement_description || '—'}
+                </div>
+
+                {/* Warnings */}
+                <div className="shrink-0 flex items-center gap-1">
+                    {missing.length > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full"
+                            title={`Qty required for: ${missing.join(', ')}`}>
+                            <AlertCircle size={10} /> {missing.length}
+                        </span>
+                    )}
+                    {isDuplicateTrim && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full"
+                            title="This trim item is already used on another material row">
+                            <AlertTriangle size={10} /> Duplicate
+                        </span>
+                    )}
+                </div>
+
+                {/* Actions */}
+                <button onClick={e => { e.stopPropagation(); onDuplicate(mIdx); }}
+                    className="p-1 text-slate-300 hover:text-violet-500 transition-colors shrink-0" title="Duplicate this material">
+                    <Copy size={13} />
+                </button>
                 <button onClick={e => { e.stopPropagation(); onRemove(mIdx); }}
-                    className="p-1 text-slate-300 hover:text-red-400 transition-colors shrink-0 ml-1">
+                    className="p-1 text-slate-300 hover:text-red-400 transition-colors shrink-0">
                     <X size={13} />
                 </button>
             </button>
@@ -518,16 +595,23 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                     )}
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Trim Item</label>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Trim Item</label>
                             <TrimSearchSelect
                                 value={mc.trim_item_id}
                                 trimItems={trimItems}
+                                excludeIds={excludeTrimIds}
                                 onChange={id => upd('trim_item_id', id)}
                                 onCreateNew={() => setCreateTrimOpen(true)}
                             />
+                            {isDuplicateTrim && (
+                                <p className="text-[10px] text-red-600 font-bold mt-1 flex items-center gap-1">
+                                    <AlertTriangle size={10} className="shrink-0" />
+                                    Already used on another material row — pick a different trim or remove one.
+                                </p>
+                            )}
                         </div>
                         <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Calculation</label>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Calculation</label>
                             <select value={mc.calculation_type} onChange={e => upd('calculation_type', e.target.value)}
                                 className="w-full mt-0.5 border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 bg-white">
                                 <option value="FIXED">Fixed (same qty all sizes)</option>
@@ -538,7 +622,7 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                     <div className="flex gap-3">
                         {mc.calculation_type === 'FIXED' && (
                             <div className="w-36 shrink-0">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">
                                     Fixed Qty{uom ? ` (${uom})` : ''}
                                 </label>
                                 <input type="number" min="0" step="0.0001" value={mc.fixed_quantity}
@@ -546,10 +630,15 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                                     placeholder="7"
                                     className="w-full mt-0.5 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300"
                                 />
+                                {fixedEffQty != null && (
+                                    <p className="text-[10px] text-slate-600 mt-1">
+                                        Effective: {fixedEffQty.toFixed(2)}{uom ? ` ${uom}` : ''} (with wastage)
+                                    </p>
+                                )}
                             </div>
                         )}
                         <div className="flex-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Placement</label>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Placement</label>
                             <input type="text" value={mc.placement_description}
                                 onChange={e => upd('placement_description', e.target.value)}
                                 placeholder="e.g. Front placket"
@@ -557,7 +646,7 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                             />
                         </div>
                         <div className="w-24 shrink-0">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Wastage %</label>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Wastage %</label>
                             <input type="number" min="0" max="100" value={mc.wastage_percentage}
                                 onChange={e => upd('wastage_percentage', e.target.value)}
                                 placeholder="0"
@@ -567,29 +656,40 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                     </div>
                     {mc.calculation_type === 'PER_SIZE' && (
                         <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-1.5">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase mb-1.5">
                                 Qty Per Size{uom ? ` (${uom})` : ''}
                             </p>
                             {markerSizes.length === 0 && (
-                                <p className="text-[10px] text-slate-400 italic mb-2">
+                                <p className="text-[10px] text-slate-600 italic mb-2">
                                     No marker sizes yet — add sizes to a ratio group first. Per-size quantities follow the marker.
                                 </p>
                             )}
-                            {markerSizes.length > 0 && (() => {
-                                const missing = markerSizes.filter(s => {
-                                    const row = mc.size_consumptions.find(sc => sc.size === s);
-                                    return !row || row.quantity === '' || row.quantity == null;
-                                });
-                                return missing.length > 0 ? (
-                                    <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2 text-[10px] text-amber-700 font-bold">
-                                        <AlertCircle size={11} className="shrink-0" />
-                                        Qty required for: {missing.join(', ')}
-                                    </div>
-                                ) : null;
-                            })()}
+                            {markerSizes.length > 0 && missing.length > 0 && (
+                                <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2 text-[10px] text-amber-700 font-bold">
+                                    <AlertCircle size={11} className="shrink-0" />
+                                    Qty required for: {missing.join(', ')}
+                                </div>
+                            )}
+                            {markerSizes.length > 0 && (
+                                <div className="flex items-center gap-2 mb-2">
+                                    <input type="number" min="0" step="0.0001" value={bulkFillValue}
+                                        onChange={e => setBulkFillValue(e.target.value)}
+                                        placeholder="Qty"
+                                        className="w-20 border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-violet-300 text-right"
+                                    />
+                                    <button type="button" onClick={() => fillSizes('empty')} disabled={bulkFillValue === ''}
+                                        className="text-[10px] font-bold text-violet-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 disabled:opacity-40 px-2 py-1 rounded-lg transition-colors">
+                                        Fill empty sizes
+                                    </button>
+                                    <button type="button" onClick={() => fillSizes('all')} disabled={bulkFillValue === ''}
+                                        className="text-[10px] font-bold text-slate-500 hover:text-slate-700 disabled:opacity-40 px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors">
+                                        Fill all sizes
+                                    </button>
+                                </div>
+                            )}
                             <table className="w-full text-xs mb-2">
                                 <thead>
-                                    <tr className="text-slate-400 font-bold border-b border-slate-100">
+                                    <tr className="text-slate-500 font-bold border-b border-slate-100">
                                         <th className="text-left pb-1">Product Size</th>
                                         <th className="text-left pb-1 px-2">Trim Variant Size</th>
                                         <th className="text-right pb-1 pr-3">Qty{uom ? ` (${uom})` : ''}</th>
@@ -607,16 +707,20 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                                                 </span>
                                             </td>
                                             <td className="py-1.5 px-2">
-                                                <select
-                                                    value={sc.target_variant_size || ''}
-                                                    onChange={e => updateSize(sIdx, 'target_variant_size', e.target.value || null)}
-                                                    className="w-full border border-slate-200 rounded px-2 py-0.5 text-xs outline-none focus:ring-1 focus:ring-violet-300 bg-white"
-                                                >
-                                                    <option value="">— same as product —</option>
-                                                    {(variantSizes || []).map(vs => (
-                                                        <option key={vs} value={vs}>{vs}</option>
-                                                    ))}
-                                                </select>
+                                                <div className="flex items-center gap-1">
+                                                    <select
+                                                        value={sc.target_variant_size || ''}
+                                                        onChange={e => updateSize(sIdx, 'target_variant_size', e.target.value || null)}
+                                                        disabled={variantSizesLoading}
+                                                        className="w-full border border-slate-200 rounded px-2 py-0.5 text-xs outline-none focus:ring-1 focus:ring-violet-300 bg-white disabled:opacity-50"
+                                                    >
+                                                        <option value="">{variantSizesLoading ? 'Loading sizes…' : '— same as product —'}</option>
+                                                        {(variantSizes || []).map(vs => (
+                                                            <option key={vs} value={vs}>{vs}</option>
+                                                        ))}
+                                                    </select>
+                                                    {variantSizesLoading && <Loader2 size={11} className="animate-spin text-slate-300 shrink-0" />}
+                                                </div>
                                             </td>
                                             <td className="py-1.5 text-right pr-3">
                                                 <input type="number" min="0" step="0.0001" value={sc.quantity}
@@ -624,6 +728,12 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                                                     placeholder="6"
                                                     className={`w-20 border rounded px-2 py-0.5 text-xs outline-none text-right ${isEmpty ? 'border-amber-300 focus:ring-amber-300' : 'border-slate-200'}`}
                                                 />
+                                                {(() => {
+                                                    const eff = effectiveQty(sc.quantity, mc.wastage_percentage);
+                                                    return eff != null ? (
+                                                        <span className="text-[9px] text-slate-600 block text-right mt-0.5">= {eff.toFixed(2)}</span>
+                                                    ) : null;
+                                                })()}
                                             </td>
                                             <td className="py-1.5 text-center">
                                                 <span className="w-5 inline-block" title="Required by marker" />
@@ -682,6 +792,8 @@ export default function BomFormPage() {
     useEffect(() => {
         Promise.all([bomApi.getFormData(), accountingApi.getSizes()])
             .then(([formRes, sizesRes]) => {
+                console.log('[BOM] raw form-data response:', formRes.data);
+                console.log('[BOM] raw sizes response:', sizesRes.data);
                 const d = formRes.data?.data ?? formRes.data ?? {};
                 setFormMeta({
                     products:    d.products    || [],
@@ -698,6 +810,7 @@ export default function BomFormPage() {
         bomApi.getById(bomId)
             .then(res => {
                 const bom = res.data?.data ?? res.data;
+                console.log('[BOM] raw getById response:', bom);
                 setBomStatus(bom.status || null);
                 setRejectionNotes(bom.rejection_notes || null);
                 setForm({
@@ -767,6 +880,20 @@ export default function BomFormPage() {
     const toggleMaterial = (key) => setExpandedMaterials(prev => {
         const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s;
     });
+    const duplicateMaterial = (idx) => {
+        const src = form.material_consumptions[idx];
+        const clone = {
+            ...src,
+            _key: genKey(),
+            size_consumptions: src.size_consumptions.map(sc => ({ ...sc, _key: genKey() })),
+        };
+        setForm(f => {
+            const list = [...f.material_consumptions];
+            list.splice(idx + 1, 0, clone);
+            return { ...f, material_consumptions: list };
+        });
+        setExpandedMaterials(prev => new Set([...prev, clone._key]));
+    };
 
     const serialize = () => ({
         product_id: parseInt(form.product_id),
@@ -808,21 +935,47 @@ export default function BomFormPage() {
         return markerSizes.filter(isBad);
     }, [markerSizes, formMeta.sizes]);
 
+    // trim_item_id -> count across all material rows, to catch the same trim being added twice.
+    const duplicateTrimIds = useMemo(() => {
+        const counts = {};
+        form.material_consumptions.forEach(mc => {
+            if (!mc.trim_item_id) return;
+            counts[mc.trim_item_id] = (counts[mc.trim_item_id] || 0) + 1;
+        });
+        return new Set(Object.keys(counts).filter(id => counts[id] > 1));
+    }, [form.material_consumptions]);
+
+    const materialIssueCount = useMemo(() => (
+        form.material_consumptions.filter(mc =>
+            missingSizesFor(mc, markerSizes).length > 0
+            || (mc.trim_item_id && duplicateTrimIds.has(String(mc.trim_item_id)))
+        ).length
+    ), [form.material_consumptions, markerSizes, duplicateTrimIds]);
+
     const handleSave = async () => {
         if (!form.product_id) { setErr('Please select a product.'); return; }
         if (!form.bom_name.trim()) { setErr('BOM name is required.'); return; }
-        for (const mc of form.material_consumptions) {
-            if (mc.calculation_type !== 'PER_SIZE') continue;
-            const missing = markerSizes.filter(s => {
-                const row = mc.size_consumptions.find(sc => sc.size === s);
-                return !row || row.quantity === '' || row.quantity == null;
-            });
+
+        const issues = [];
+        const rowsToExpand = new Set();
+        form.material_consumptions.forEach(mc => {
+            const name = formMeta.trimItems.find(t => String(t.id) === String(mc.trim_item_id))?.name || 'Unnamed material';
+            const missing = missingSizesFor(mc, markerSizes);
             if (missing.length > 0) {
-                const name = formMeta.trimItems.find(t => String(t.id) === String(mc.trim_item_id))?.name || 'a material';
-                setErr(`"${name}" is missing qty for sizes: ${missing.join(', ')}`);
-                return;
+                issues.push(`"${name}" is missing qty for: ${missing.join(', ')}`);
+                rowsToExpand.add(mc._key);
             }
+            if (mc.trim_item_id && duplicateTrimIds.has(String(mc.trim_item_id))) {
+                issues.push(`"${name}" is used on more than one material row — remove the duplicate`);
+                rowsToExpand.add(mc._key);
+            }
+        });
+        if (issues.length > 0) {
+            setErr(issues.length === 1 ? issues[0] : `${issues.length} issues to fix: ${issues.join('; ')}`);
+            setExpandedMaterials(prev => new Set([...prev, ...rowsToExpand]));
+            return;
         }
+
         setSaving(true); setErr(null);
         try {
             const payload = serialize();
@@ -868,7 +1021,7 @@ export default function BomFormPage() {
                         <ArrowLeft size={14} /> BOMs
                     </button>
                     <div className="flex-1 min-w-0">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                             {isEdit ? 'Editing BOM' : 'New BOM'}
                         </p>
                         <p className="font-extrabold text-slate-800 text-sm truncate">
@@ -960,7 +1113,7 @@ export default function BomFormPage() {
                 <Section title="Ratio Groups" action={<AddBtn onClick={addRatioGroup} label="Add Group" />}>
                     <div className="space-y-2">
                         {form.ratio_groups.length === 0 && (
-                            <p className="text-slate-400 text-sm italic text-center py-4">No ratio groups. Add one to define your marker lay plan.</p>
+                            <p className="text-slate-500 text-sm italic text-center py-4">No ratio groups. Add one to define your marker lay plan.</p>
                         )}
                         {form.ratio_groups.map((group, gIdx) => (
                             <RatioGroupCard key={group._key}
@@ -978,27 +1131,52 @@ export default function BomFormPage() {
                 </Section>
 
                 {/* Material Consumptions */}
-                <Section title="Trim / Material Consumptions">
+                <Section
+                    title="Trim / Material Consumptions"
+                    action={
+                        <div className="flex items-center gap-2">
+                            {form.material_consumptions.length > 0 && (
+                                <span className="text-[10px] font-bold text-slate-600">
+                                    {form.material_consumptions.length} material{form.material_consumptions.length > 1 ? 's' : ''}
+                                    {materialIssueCount > 0 && (
+                                        <span className="text-amber-600"> · {materialIssueCount} need{materialIssueCount === 1 ? 's' : ''} attention</span>
+                                    )}
+                                </span>
+                            )}
+                            <AddBtn onClick={addMaterial} label="Add Material" />
+                        </div>
+                    }
+                >
                     <div className="space-y-2">
                         {form.material_consumptions.length === 0 && (
-                            <p className="text-slate-400 text-sm italic text-center py-4">No materials added. Add trim items required for this product.</p>
+                            <p className="text-slate-500 text-sm italic text-center py-4">No materials added. Add trim items required for this product.</p>
                         )}
-                        {form.material_consumptions.map((mc, mIdx) => (
-                            <MaterialCard key={mc._key}
-                                mc={mc} mIdx={mIdx}
-                                trimItems={formMeta.trimItems}
-                                markerSizes={markerSizes}
-                                expanded={expandedMaterials.has(mc._key)}
-                                onToggle={() => toggleMaterial(mc._key)}
-                                onUpdate={updateMaterial}
-                                onRemove={removeMaterial}
-                                onTrimCreated={newTrim => {
-                                    setFormMeta(prev => ({ ...prev, trimItems: [...prev.trimItems, newTrim] }));
-                                    updateMaterial(mIdx, 'trim_item_id', String(newTrim.id));
-                                }}
-                            />
-                        ))}
-                        <AddBtn onClick={addMaterial} label="Add Material" />
+                        {form.material_consumptions.map((mc, mIdx) => {
+                            const excludeTrimIds = new Set(
+                                form.material_consumptions
+                                    .filter((_, i) => i !== mIdx)
+                                    .map(m => m.trim_item_id)
+                                    .filter(Boolean)
+                                    .map(String)
+                            );
+                            return (
+                                <MaterialCard key={mc._key}
+                                    mc={mc} mIdx={mIdx}
+                                    trimItems={formMeta.trimItems}
+                                    markerSizes={markerSizes}
+                                    excludeTrimIds={excludeTrimIds}
+                                    expanded={expandedMaterials.has(mc._key)}
+                                    onToggle={() => toggleMaterial(mc._key)}
+                                    onUpdate={updateMaterial}
+                                    onRemove={removeMaterial}
+                                    onDuplicate={duplicateMaterial}
+                                    onTrimCreated={newTrim => {
+                                        setFormMeta(prev => ({ ...prev, trimItems: [...prev.trimItems, newTrim] }));
+                                        updateMaterial(mIdx, 'trim_item_id', String(newTrim.id));
+                                    }}
+                                />
+                            );
+                        })}
                     </div>
                 </Section>
 
