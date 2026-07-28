@@ -347,6 +347,7 @@ const AssemblyProcessingPortal = () => {
     const [mismatch, setMismatch] = useState(null);
     const [dnaDefect, setDnaDefect] = useState(null);
     const [approvingPieceId, setApprovingPieceId] = useState(null);
+    const [componentInfo, setComponentInfo] = useState(null); // { comp, loading, items }
     const [batchInactive, setBatchInactive] = useState(null);
     const [defectCodes, setDefectCodes] = useState([]);
     const [showDefectModal, setShowDefectModal] = useState(null);
@@ -748,6 +749,23 @@ const AssemblyProcessingPortal = () => {
         }
     };
 
+    // Shows piece history/defect info for a component before the checker commits to
+    // approving it — same endpoint/response-shape handling as UniversalWorkstationDashboard.
+    const openComponentInfo = async (comp) => {
+        if (!comp.cut_piece_log_id) {
+            return;
+        }
+        setComponentInfo({ comp, loading: true, items: [] });
+        try {
+            const res = await universalApi.getPieceHistory(comp.cut_piece_log_id);
+            const raw = res.data;
+            const items = Array.isArray(raw) ? raw : (raw?.items ?? raw?.rework_items ?? raw?.defects ?? []);
+            setComponentInfo({ comp, loading: false, items });
+        } catch {
+            setComponentInfo({ comp, loading: false, items: [] });
+        }
+    };
+
     return (
         <div className="min-h-screen bg-[#F8FAFC] p-4 md:p-10 font-inter select-none">
             {/* Global Loader for Batch Selection only */}
@@ -1007,8 +1025,8 @@ const AssemblyProcessingPortal = () => {
                                             return (
                                                 <div
                                                     key={i}
-                                                    onClick={clickable ? () => handleApproveComponent(comp) : undefined}
-                                                    title={clickable ? 'Click to approve this piece' : undefined}
+                                                    onClick={clickable ? () => openComponentInfo(comp) : undefined}
+                                                    title={clickable ? 'Click for piece details' : undefined}
                                                     className={`px-4 py-3 rounded-2xl border-2 flex items-center gap-3 ${comp.has_active_defect ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-100'} ${clickable ? 'cursor-pointer hover:border-rose-400 hover:bg-rose-100 transition-colors' : ''}`}
                                                 >
                                                     <div className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${comp.has_active_defect ? 'bg-rose-500 text-white' : 'bg-white text-slate-700 border border-slate-200'}`}>
@@ -1018,7 +1036,7 @@ const AssemblyProcessingPortal = () => {
                                                     </div>
                                                     <span className={`font-bold text-sm ${comp.has_active_defect ? 'text-rose-700' : 'text-slate-600'}`}>{comp.part_name}</span>
                                                     {clickable && !isApproving && (
-                                                        <span className="ml-auto text-[9px] font-black uppercase tracking-wider text-rose-500">Approve</span>
+                                                        <span className="ml-auto text-[9px] font-black uppercase tracking-wider text-rose-500">Details</span>
                                                     )}
                                                 </div>
                                             );
@@ -1029,6 +1047,67 @@ const AssemblyProcessingPortal = () => {
                                     <button onClick={() => setDnaDefect(null)} className="px-14 py-6 bg-slate-900 text-white font-black rounded-3xl hover:bg-black active:scale-95 transition-all shadow-xl">
                                         RETURN TO SCANNER
                                     </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* COMPONENT INFO MODAL — piece history before committing to approve */}
+                        {componentInfo && (
+                            <div className="fixed inset-0 z-[80] bg-black/60 flex items-center justify-center p-4" onClick={() => setComponentInfo(null)}>
+                                <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                                    <div className="flex items-start justify-between gap-3 px-7 py-6 border-b border-slate-100">
+                                        <div>
+                                            <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-1">Component Details</p>
+                                            <h3 className="text-2xl font-black text-slate-900">{componentInfo.comp.part_name}</h3>
+                                            <p className="text-xs font-mono font-bold text-slate-400 mt-0.5">Piece #{componentInfo.comp.cut_piece_log_id}</p>
+                                        </div>
+                                        <button onClick={() => setComponentInfo(null)} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-full hover:bg-slate-100 transition-colors shrink-0">
+                                            <X size={18} />
+                                        </button>
+                                    </div>
+
+                                    <div className="flex-1 overflow-y-auto px-7 py-5">
+                                        {componentInfo.loading ? (
+                                            <div className="flex items-center gap-2 text-slate-400">
+                                                <Loader2 size={14} className="animate-spin" />
+                                                <span className="text-xs font-bold">Loading piece history…</span>
+                                            </div>
+                                        ) : componentInfo.items.length === 0 ? (
+                                            <p className="text-xs text-slate-400 italic">No defect history found for this piece.</p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {componentInfo.items.map((item, i) => (
+                                                    <div key={i} className="bg-rose-50 border border-rose-200 rounded-xl px-3 py-2.5">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="font-mono font-black text-rose-700 text-xs">{item.defect_code ?? item.code ?? '—'}</span>
+                                                            {(item.logged_at ?? item.created_at) && (
+                                                                <span className="text-[10px] text-rose-400 font-bold">
+                                                                    {new Date(item.logged_at ?? item.created_at).toLocaleDateString()}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        {(item.defect_description ?? item.description) && (
+                                                            <p className="text-xs text-rose-600 mt-1">{item.defect_description ?? item.description}</p>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex items-center justify-end gap-2 px-7 py-5 border-t border-slate-100">
+                                        <button onClick={() => setComponentInfo(null)}
+                                            className="text-sm font-bold text-slate-500 hover:text-slate-700 px-4 py-2 rounded-xl hover:bg-slate-100 transition-colors">
+                                            Close
+                                        </button>
+                                        <button
+                                            onClick={() => { const comp = componentInfo.comp; setComponentInfo(null); handleApproveComponent(comp); }}
+                                            disabled={approvingPieceId === componentInfo.comp.cut_piece_log_id}
+                                            className="flex items-center gap-1.5 text-sm font-black text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 px-5 py-2 rounded-xl transition-colors"
+                                        >
+                                            <ShieldCheck size={14} /> Approve Piece
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         )}
