@@ -438,6 +438,8 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
     );
 
     // ── Fabric: per-roll selection map { [roll_id]: meters_string } ──────────
+    const [rollSearch, setRollSearch] = useState('');
+
     const [rollSel, setRollSel] = useState(() => {
         if (item.type !== 'fabric') return {};
         const needed = (item.meters_required || 0) - (item.meters_reserved || 0);
@@ -490,6 +492,22 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
         return offenders;
     }, [item, rollSel]);
     const fabricOver = item.type === 'fabric' && fabricOverRolls.length > 0;
+
+    // ── Fabric: filter rolls by roll ID or meters (total/free) ──────────────
+    const filteredRolls = useMemo(() => {
+        const rolls = item.available_rolls || [];
+        const q = rollSearch.trim().toLowerCase();
+        if (!q) return rolls;
+        return rolls.filter(roll => {
+            const id      = String(roll.roll_id ?? '').toLowerCase();
+            const total   = parseFloat(roll.meter ?? roll.total_meter ?? 0);
+            const free    = parseFloat(roll.free_meters ?? roll.meter ?? 0);
+            return id.includes(q)
+                || `r-${id}`.includes(q)
+                || total.toFixed(2).includes(q)
+                || free.toFixed(2).includes(q);
+        });
+    }, [item, rollSearch]);
 
     const handleConfirm = async () => {
         setBusy(true); setErr(null);
@@ -567,11 +585,38 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                             </p>
                         ) : (
                             <div>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                                    Select Rolls to Reserve
-                                </p>
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                                        Select Rolls to Reserve
+                                    </p>
+                                    <span className="text-[9px] text-slate-400 font-medium">
+                                        {filteredRolls.length} of {item.available_rolls.length}
+                                    </span>
+                                </div>
+                                <div className="relative mb-2">
+                                    <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        value={rollSearch}
+                                        onChange={e => setRollSearch(e.target.value)}
+                                        placeholder="Search rolls by ID or meters…"
+                                        className="w-full text-xs border border-slate-200 rounded-lg pl-8 pr-7 py-1.5 focus:outline-none focus:border-violet-400 bg-white"
+                                    />
+                                    {rollSearch && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setRollSearch('')}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    )}
+                                </div>
+                                {filteredRolls.length === 0 ? (
+                                    <p className="text-xs text-slate-400 italic px-1 py-2">No rolls match "{rollSearch}".</p>
+                                ) : (
                                 <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                                    {item.available_rolls.map(roll => {
+                                    {filteredRolls.map(roll => {
                                         const free     = parseFloat(roll.free_meters ?? roll.meter ?? 0);
                                         const checked  = roll.roll_id in rollSel;
                                         const metersV  = rollSel[roll.roll_id] ?? '';
@@ -620,6 +665,7 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                                         );
                                     })}
                                 </div>
+                                )}
 
                                 {/* Running total */}
                                 <div className={`mt-3 flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold ${
@@ -4903,7 +4949,7 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
                                     <Loader2 size={10} className="animate-spin" /> Loading requirements…
                                 </span>
                             )}
-                            {['merchandiser', 'cutting_manager'].includes(user?.role) && (
+                            {user?.role === 'merchandiser' && (
                                 <button
                                     onClick={handleRecalcClick}
                                     disabled={recalcing}
