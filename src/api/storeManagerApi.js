@@ -57,14 +57,13 @@ export const storeManagerApi = {
     forceCloseTrimOrder: (orderId, data) => api.post(`/store-manager/trim-orders/${orderId}/force-close`, data),
     forceOpenTrimOrder: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/force-open`),
 
-
-    // Billing  
-    getTrimBillsForOrder: (orderId) => api.get(`/store-manager/trim-orders/${orderId}/bills`),
-    saveTrimBill: (orderId, data) => api.post(`/store-manager/trim-orders/${orderId}/bills`, data),
-
-
     // Trim reservations browser (store-manager scope; release uses planningApi.deleteTrimReservation)
     getTrimReservations: (params) => api.get('/store-manager/trim-reservations', { params }),
+    // Per-batch consumption breakdown for a reservation — NEEDS BACKEND: expects
+    // { sales_order_product_id, trim_item_variant_ids: "1,2,3" } → { data: [{ production_batch_id,
+    // batch_code, trim_order_id, trim_order_status, trim_item_variant_id, color_name, color_number,
+    // variant_size, quantity_used, used_at }] }. Not implemented server-side yet.
+    getTrimReservationUsage: (params) => api.get('/store-manager/trim-reservations/usage', { params }),
 
     // Barcode
     markBatchBarcodePrinted: (data) => api.post('/store-manager/batch-barcode-printed', data),

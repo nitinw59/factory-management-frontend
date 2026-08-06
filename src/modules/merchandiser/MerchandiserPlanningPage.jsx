@@ -3,7 +3,7 @@ import {
     Loader2, Link2, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
     AlertTriangle, CheckCircle2, Search,
     Calculator, ShoppingBag, X, Eye, Plus, Pencil,
-    ShieldCheck, ShieldOff, RotateCw, Component, Calendar, Trash2,
+    ShieldCheck, ShieldOff, RotateCw, Component, Calendar, Trash2, FileSpreadsheet,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { planningApi } from '../../api/planningApi';
@@ -13,6 +13,7 @@ import { taApi } from '../../api/taApi';
 import { stdSize } from '../../utils/sizeUtils';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -427,6 +428,10 @@ const TAItemFormModal = ({ sop, item, onClose, onSaved }) => {
 
 // ─── RESERVE / FULFIL MODAL ─────────────────────────────────────────────────────
 
+// Buyer reservations may not exceed the calculated requirement by more than this —
+// caps accidental over-reservation while still allowing a small rounding buffer.
+const RESERVE_OVER_LIMIT_PCT = 0.10;
+
 const ReserveFulfillModal = ({ item, onClose, onDone }) => {
     const [busy,     setBusy]     = useState(false);
     const [err,      setErr]      = useState(null);
@@ -468,6 +473,9 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
     const totalSelected = Object.values(rollSel).reduce((s, v) => s + (parseFloat(v) || 0), 0);
     const needed        = (item.meters_required || 0) - (item.meters_reserved || 0);
     const overReserving = totalSelected > item.meters_required + 0.001;
+    // Hard cap: total reserved (existing + this action) may not exceed required +10%.
+    const fabricMaxReservable = Math.max(0, (item.meters_required || 0) * (1 + RESERVE_OVER_LIMIT_PCT) - (item.meters_reserved || 0));
+    const overFabricCap       = totalSelected > fabricMaxReservable + 0.001;
 
     // ── Trim: what stock does the currently-selected source actually have? ──
     const trimAvailable = useMemo(() => {
@@ -478,7 +486,11 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
     }, [item, sourceId]);
     const trimQtyNum  = parseFloat(trimQty) || 0;
     const trimNeeded  = Math.max(0, (item.quantity_required || 0) - (item.quantity_reserved || 0));
-    const trimOver    = item.type === 'trim' && trimQtyNum > trimAvailable;
+    // Hard cap: total reserved (existing + this action) may not exceed required +10%.
+    const trimMaxReservable = Math.max(0, (item.quantity_required || 0) * (1 + RESERVE_OVER_LIMIT_PCT) - (item.quantity_reserved || 0));
+    const trimOverStock = item.type === 'trim' && trimQtyNum > trimAvailable;
+    const trimOverCap   = item.type === 'trim' && trimQtyNum > trimMaxReservable + 0.001;
+    const trimOver       = trimOverStock || trimOverCap;
 
     // ── Fabric: which rolls have been over-reserved past their free meters? ──
     const fabricOverRolls = useMemo(() => {
@@ -491,7 +503,7 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
         }
         return offenders;
     }, [item, rollSel]);
-    const fabricOver = item.type === 'fabric' && fabricOverRolls.length > 0;
+    const fabricOver = item.type === 'fabric' && (fabricOverRolls.length > 0 || overFabricCap);
 
     // ── Fabric: filter rolls by roll ID or meters (total/free) ──────────────
     const filteredRolls = useMemo(() => {
@@ -520,6 +532,11 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                     setBusy(false);
                     return;
                 }
+                if (overFabricCap) {
+                    setErr(`Cannot reserve ${totalSelected.toFixed(2)} m — max reservable is ${fabricMaxReservable.toFixed(2)} m (required +${RESERVE_OVER_LIMIT_PCT * 100}%).`);
+                    setBusy(false);
+                    return;
+                }
                 for (const [rollId, v] of entries) {
                     await planningApi.reserveFabric(item.req_id, {
                         fabric_roll_id:  parseInt(rollId),
@@ -531,6 +548,11 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                 if (!q || q <= 0) { setErr('Enter a quantity greater than 0'); setBusy(false); return; }
                 if (q > trimAvailable) {
                     setErr(`Only ${trimAvailable.toLocaleString()} ${item.unit} available from the selected source.`);
+                    setBusy(false);
+                    return;
+                }
+                if (q > trimMaxReservable + 0.001) {
+                    setErr(`Cannot reserve ${q.toLocaleString()} ${item.unit} — max reservable is ${trimMaxReservable.toLocaleString()} ${item.unit} (required +${RESERVE_OVER_LIMIT_PCT * 100}%).`);
                     setBusy(false);
                     return;
                 }
@@ -669,22 +691,29 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
 
                                 {/* Running total */}
                                 <div className={`mt-3 flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold ${
-                                    overReserving
-                                        ? 'bg-amber-50 border border-amber-200 text-amber-700'
-                                        : totalSelected >= needed - 0.001
-                                            ? 'bg-emerald-50 border border-emerald-200 text-emerald-700'
-                                            : 'bg-slate-50 border border-slate-200 text-slate-600'
+                                    overFabricCap
+                                        ? 'bg-red-50 border border-red-200 text-red-700'
+                                        : overReserving
+                                            ? 'bg-amber-50 border border-amber-200 text-amber-700'
+                                            : totalSelected >= needed - 0.001
+                                                ? 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                                                : 'bg-slate-50 border border-slate-200 text-slate-600'
                                 }`}>
                                     <span>Selected total</span>
                                     <span>{totalSelected.toFixed(2)} m
-                                        {overReserving
-                                            ? <span className="ml-1 font-normal text-amber-600">· exceeds requirement</span>
-                                            : needed > 0
-                                                ? <span className="ml-1 font-normal opacity-70">of {needed.toFixed(2)} m needed</span>
-                                                : null
+                                        {overFabricCap
+                                            ? <span className="ml-1 font-normal text-red-600">· exceeds max reservable ({fabricMaxReservable.toFixed(2)} m)</span>
+                                            : overReserving
+                                                ? <span className="ml-1 font-normal text-amber-600">· exceeds requirement</span>
+                                                : needed > 0
+                                                    ? <span className="ml-1 font-normal opacity-70">of {needed.toFixed(2)} m needed</span>
+                                                    : null
                                         }
                                     </span>
                                 </div>
+                                <p className="mt-1 text-[10px] text-slate-400">
+                                    Max reservable: {fabricMaxReservable.toFixed(2)} m (required +{RESERVE_OVER_LIMIT_PCT * 100}%)
+                                </p>
 
                                 {fabricOverRolls.length > 0 && (
                                     <p className="mt-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-semibold">
@@ -795,10 +824,16 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                                     ? <span className="text-emerald-600"> · enough in stock</span>
                                     : <span className="text-amber-600"> · only {trimAvailable.toLocaleString()} in stock</span>
                                 )}
+                                {' · '}max {trimMaxReservable.toLocaleString()} reservable (required +{RESERVE_OVER_LIMIT_PCT * 100}%)
                             </p>
-                            {trimOver && (
+                            {trimOverStock && (
                                 <p className="text-[11px] text-red-600 mt-1 font-semibold">
                                     Cannot reserve {trimQtyNum.toLocaleString()} {item.unit} — only {trimAvailable.toLocaleString()} available from the selected source.
+                                </p>
+                            )}
+                            {!trimOverStock && trimOverCap && (
+                                <p className="text-[11px] text-red-600 mt-1 font-semibold">
+                                    Cannot reserve {trimQtyNum.toLocaleString()} {item.unit} — max reservable is {trimMaxReservable.toLocaleString()} {item.unit} (required +{RESERVE_OVER_LIMIT_PCT * 100}%).
                                 </p>
                             )}
                         </div>
@@ -813,11 +848,15 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                     </button>
                     <button onClick={handleConfirm}
                         disabled={busy || trimOver || fabricOver}
-                        title={trimOver
+                        title={trimOverStock
                             ? `Quantity exceeds the ${trimAvailable.toLocaleString()} ${item.unit} available from this source.`
-                            : fabricOver
-                                ? 'One or more rolls exceed available meters.'
-                                : undefined}
+                            : trimOverCap
+                                ? `Quantity exceeds the max reservable of ${trimMaxReservable.toLocaleString()} ${item.unit} (required +${RESERVE_OVER_LIMIT_PCT * 100}%).`
+                                : fabricOverRolls.length > 0
+                                    ? 'One or more rolls exceed available meters.'
+                                    : overFabricCap
+                                        ? `Selected total exceeds the max reservable of ${fabricMaxReservable.toFixed(2)} m (required +${RESERVE_OVER_LIMIT_PCT * 100}%).`
+                                        : undefined}
                         className="flex items-center gap-1.5 text-sm font-bold text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-1.5 rounded-lg transition-colors">
                         {busy && <Loader2 size={13} className="animate-spin" />}
                         Reserve & Mark Complete
@@ -1479,6 +1518,26 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
     const trimReqs = localReqs?.trim_requirements   || [];
     const taItems  = sop.timeline || [];
     console.log('TA items:', taItems);
+
+    // Debug: raw substitute-variant fields per trim requirement, straight off the API
+    // response — no client-side filtering/grouping applied. The "SUB" badge (timeline row)
+    // and the PDF's "(substitute)" tag both key off is_substitute / trim_item_variant_id /
+    // reservations[].is_substitute — if those come back empty/false here, the gap is on the
+    // backend response, not the UI.
+    console.group(`%c[TRIM SUBSTITUTE RAW] SOP #${sop.id} — ${trimReqs.length} trim requirement(s)`, 'color:#a855f7;font-weight:bold');
+    trimReqs.forEach(r => {
+        console.log(`${r.trim_item_name}${r.color_name ? ' – ' + r.color_name : ''}`, {
+            requirement_id:        r.id,
+            is_substitute:         r.is_substitute,
+            trim_item_variant_id:  r.trim_item_variant_id,
+            variant_color_name:    r.variant_color_name,
+            quantity_required:     r.quantity_required,
+            quantity_reserved:     r.quantity_reserved,
+            reservations:          r.reservations,
+            stock_suggestion:      r.stock_suggestion,
+        });
+    });
+    console.groupEnd();
     // ── Bulk-procurement groups: trims with substitutes covering ≥2 colors ──
     const trimGroups = useMemo(() => {
         const reqs = localReqs?.trim_requirements || [];
@@ -1674,6 +1733,36 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
             const reqQ = Number(r.quantity_required || 0);
             const resQ = Number(r.quantity_reserved || 0);
             const uom  = r.unit_of_measure || 'pcs';
+
+            const exactVariantId = r.stock_suggestion?.exact_variant?.id ?? null;
+            // The backend never sends an `is_substitute` flag on the requirement or on
+            // individual reservations (confirmed off the raw payload — the field is simply
+            // absent). Derive it instead by comparing the variant actually reserved against
+            // the requirement's exact-match variant: if they differ, that reservation is a
+            // substitute. This is what the "SUB" badge and the PDF's "(substitute)" tag key off.
+            const derivedReservations = (r.reservations || []).map(rs => {
+                const rsVariantId = rs.trim_item_variant_id ?? null;
+                const isSub = rs.is_substitute != null
+                    ? !!rs.is_substitute
+                    : (rsVariantId != null && exactVariantId != null && String(rsVariantId) !== String(exactVariantId));
+                return {
+                    ...rs,
+                    is_substitute: isSub,
+                    color_name:    rs.color_name   ?? rs.variant_color_name   ?? null,
+                    color_number:  rs.color_number ?? rs.variant_color_number ?? null,
+                };
+            });
+            // Variant actually reserved (falls back to the requirement's own configured
+            // variant, then the exact-match variant) — what the PDF groups by.
+            const reservedVariantId =
+                derivedReservations.find(rs => Number(rs.quantity_reserved ?? 0) > 0)?.trim_item_variant_id
+                ?? r.trim_item_variant_id
+                ?? exactVariantId
+                ?? null;
+            const itemIsSubstitute = r.is_substitute != null
+                ? !!r.is_substitute
+                : derivedReservations.some(rs => rs.is_substitute);
+
             return ({
             id:                    r.ta_id,
             req_id:                r.id,
@@ -1690,11 +1779,12 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
             inStock:               r.is_fulfilled,
             trim_item_id:          r.trim_item_id ?? null,
             trim_item_name:        r.trim_item_name || '',
-            trim_item_variant_id:  r.trim_item_variant_id ?? null,
+            trim_item_variant_id:  reservedVariantId,
             color_name:            r.color_name || '',
-            variant_color_name:    r.variant_color_name || null,
-            is_substitute:         !!r.is_substitute,
-            exact_variant_id:      r.stock_suggestion?.exact_variant?.id || null,
+            color_number:          r.color_number ?? null,
+            variant_color_name:    r.variant_color_name || derivedReservations.find(rs => rs.is_substitute)?.color_name || null,
+            is_substitute:         itemIsSubstitute,
+            exact_variant_id:      exactVariantId,
             exact_variant_stock:   r.stock_suggestion?.exact_variant?.in_stock ?? null,
             // Defensive cleanup for backend join-fanout (see trim_item_substitutes — UNIQUE
             // (original_variant_id, substitute_variant_id) guarantees no duplicate rows in the
@@ -1732,7 +1822,7 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
             quantity_reserved:     r.quantity_reserved || 0,
             calculation_breakdown: r.calculation_breakdown || null,
             procurement_events:    r.procurement_events    || [],
-            reservations:          r.reservations          || [],
+            reservations:          derivedReservations,
             purchase_requirements: r.purchase_requirements || [],
             });
         }),
@@ -1919,9 +2009,10 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
         const pageW = doc.internal.pageSize.getWidth();
         const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en', { dateStyle: 'short' }) : '—';
 
+        const soLabel = salesOrder?.order_number ? `SO #${salesOrder.order_number}` : 'SO —';
         doc.setFontSize(14);
         doc.setFont(undefined, 'bold');
-        doc.text(`Fabric T&A — ${sop.product_name}`, 14, 18);
+        doc.text(`Fabric T&A — ${soLabel} — ${sop.product_name}`, 14, 18);
         doc.setFont(undefined, 'normal');
         doc.setFontSize(9);
         doc.text(`Generated: ${new Date().toLocaleDateString('en', { dateStyle: 'medium' })}`, 14, 25);
@@ -2025,124 +2116,131 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
         doc.save(`fabric-ta-${sop.product_name.replace(/\s+/g, '-')}.pdf`);
     };
 
-    const generateTrimPDF = () => {
-        const completed = allItems.filter(it => it.type === 'trim' && it.status === 'completed');
-        const doc   = new jsPDF();
-        const pageW = doc.internal.pageSize.getWidth();
-        doc.setFontSize(14);
-        doc.text(`Trim T&A — ${sop.product_name}`, 14, 18);
-        doc.setFontSize(9);
-        doc.text(`Generated: ${new Date().toLocaleDateString('en', { dateStyle: 'medium' })}`, 14, 25);
+    // Flat, one-row-per-requirement Excel export — replaces the old grouped/nested PDF.
+    // Every completed trim requirement becomes one row: which variant+color actually got
+    // reserved (ground truth pulled off the matching reservation, same lookup used to fix the
+    // PDF grouping bug earlier), vs. which variant+color the product itself requested, plus
+    // Required/Reserved quantities and a derived Substitute flag.
+    const generateTrimExcel = () => {
+        const trimItems  = allItems.filter(it => it.type === 'trim');
+        const completed  = trimItems.filter(it => it.status === 'completed');
+        const inProgress = trimItems.filter(it => it.status === 'in-progress');
+        const pending     = trimItems.filter(it => it.status === 'pending');
 
-        // Group completed trim items by reserved variant.
-        const groupsMap = new Map();
-        completed.forEach(it => {
-            const key = String(it.trim_item_variant_id ?? `unassigned-${it.req_id ?? it.id}`);
-            if (!groupsMap.has(key)) {
-                groupsMap.set(key, {
-                    trim_item_variant_id: it.trim_item_variant_id ?? null,
-                    trim_item_name:       it.trim_item_name || (it.title || '').split(' – ')[0] || 'Trim',
-                    variant_color_name:   it.variant_color_name,
-                    is_substitute:        !!it.is_substitute,
-                    unit:                 it.unit || 'pcs',
-                    items:                [],
-                    totalRequired:        0,
-                    totalReserved:        0,
+        // Color name always carries its number alongside it — never one without the other
+        // when both are available.
+        const nameAndNumber = (name, number) => {
+            if (name && number) return `${name} (${number})`;
+            if (name)            return name;
+            if (number)          return String(number);
+            return '—';
+        };
+
+        const requestedVariantOf = (it) =>
+            nameAndNumber(it.color_name || (it.title || '').split(' – ')[1] || null, it.color_number);
+        const trimNameOf = (it) => it.trim_item_name || (it.title || '').split(' – ')[0] || 'Trim';
+
+        // Reservation-shaped row — used for both Completed and In Progress sheets, since
+        // in-progress requirements can already carry partial reservations.
+        const reservationRow = (it) => {
+            const reservedVariant = (it.reservations || [])
+                .find(rs => String(rs.trim_item_variant_id) === String(it.trim_item_variant_id));
+            const reservedColorName   = it.variant_color_name || reservedVariant?.color_name   || null;
+            const reservedColorNumber = reservedVariant?.color_number ?? null;
+            return {
+                'Reserved Variant':       trimNameOf(it),
+                'Reserved Variant Color': nameAndNumber(reservedColorName, reservedColorNumber),
+                'Requested Variant':      requestedVariantOf(it),
+                'Required':               `${fmt(it.quantity_required)} ${it.unit}`,
+                'Reserved':               `${fmt(it.quantity_reserved)} ${it.unit}`,
+                'Substitute':             it.is_substitute ? 'Yes' : 'No',
+            };
+        };
+        const reservationCols = [{ wch: 20 }, { wch: 22 }, { wch: 22 }, { wch: 14 }, { wch: 14 }, { wch: 12 }];
+
+        // Pending — nothing's reserved yet, so instead show every candidate variant (the exact
+        // match, plus each configured substitute) with its CURRENT stock, one row per
+        // candidate, so it's a long list you can scan for what's actually available to pull.
+        const pendingRows = [];
+        pending.forEach(it => {
+            const base = {
+                'Trim Item':          trimNameOf(it),
+                'Requested Variant':  requestedVariantOf(it),
+                'Required':           `${fmt(it.quantity_required)} ${it.unit}`,
+            };
+            const candidates = [];
+            if (it.exact_variant_id != null) {
+                candidates.push({
+                    'Candidate Type':          'Exact match',
+                    'Candidate Variant Color': requestedVariantOf(it),
+                    'In Stock':                `${fmt(it.exact_variant_stock)} ${it.unit}`,
                 });
             }
-            const g = groupsMap.get(key);
-            g.items.push(it);
-            g.totalRequired += Number(it.quantity_required || 0);
-            g.totalReserved += Number(it.quantity_reserved || 0);
-        });
-        const groups = [...groupsMap.values()];
-
-        let y = 30;
-        let grandRequired = 0;
-        let grandReserved = 0;
-
-        if (groups.length === 0) {
-            doc.setFontSize(10);
-            doc.text('No completed trim T&A items.', 14, y + 6);
-        }
-
-        groups.forEach((g, idx) => {
-            if (y > 250) { doc.addPage(); y = 14; }
-            // Variant header — "<Trim> <Variant Color> reserved for: <Color1>, <Color2>, …"
-            const requestedColors = g.items
-                .map(it => it.color_name || (it.title || '').split(' – ')[1] || '—')
-                .filter(Boolean);
-            doc.setFontSize(11);
-            doc.setFont(undefined, 'bold');
-            const variantLabel =
-                `${g.trim_item_name}` +
-                `${g.variant_color_name ? ` ${g.variant_color_name}` : ''}` +
-                `${g.variant_color_number ? ` · ${g.variant_color_number}` : ''}` +
-                `${g.variant_size ? ` · Sz ${g.variant_size}` : ''}` +
-                ` reserved for: ${requestedColors.join(', ') || '—'}` +
-                `${g.is_substitute ? '  (substitute)' : ''}`;
-            const wrapped = doc.splitTextToSize(variantLabel, pageW - 28);
-            doc.text(wrapped, 14, y);
-            const headerLines = Array.isArray(wrapped) ? wrapped.length : 1;
-            y += headerLines * 5;
-            doc.setFont(undefined, 'normal');
-            doc.setFontSize(8);
-            doc.text(
-                `Variant ID: ${g.trim_item_variant_id ?? '—'}  ·  ${g.items.length} requirement${g.items.length === 1 ? '' : 's'}`,
-                14, y
-            );
-            y += 4;
-
-            autoTable(doc, {
-                startY: y,
-                head: [['Requested Color', 'Required', 'Reserved', 'Formula']],
-                body: [
-                    ...g.items.map(it => [
-                        it.color_name || (it.title || '').split(' – ')[1] || '—',
-                        `${fmt(it.quantity_required)} ${g.unit}`,
-                        `${fmt(it.quantity_reserved)} ${g.unit}`,
-                        it.calculation_breakdown
-                            ? `${it.calculation_breakdown.base_quantity_per_set ?? ''}× ${it.calculation_breakdown.total_sets ?? ''} sets + ${it.calculation_breakdown.wastage_percentage ?? 0}% waste`
-                            : '—',
-                    ]),
-                    [
-                        { content: 'Subtotal', styles: { fontStyle: 'bold' } },
-                        { content: `${fmt(g.totalRequired)} ${g.unit}`, styles: { fontStyle: 'bold', halign: 'right' } },
-                        { content: `${fmt(g.totalReserved)} ${g.unit}`, styles: { fontStyle: 'bold', halign: 'right' } },
-                        { content: '', styles: {} },
-                    ],
-                ],
-                styles: { fontSize: 8 },
-                headStyles: { fillColor: [245, 158, 11] },
-                columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
+            (it.substitutes || []).forEach(s => {
+                candidates.push({
+                    'Candidate Type':          'Substitute',
+                    'Candidate Variant Color': nameAndNumber(s.color_name, s.color_number),
+                    'In Stock':                `${fmt(s.in_stock)} ${it.unit}`,
+                });
             });
-            y = doc.lastAutoTable.finalY + 5;
-            grandRequired += g.totalRequired;
-            grandReserved += g.totalReserved;
-
-            if (idx < groups.length - 1) {
-                if (y > 255) { doc.addPage(); y = 14; }
-                doc.setDrawColor(210);
-                doc.line(14, y, pageW - 14, y);
-                doc.setDrawColor(0);
-                y += 6;
+            if (candidates.length === 0) {
+                candidates.push({ 'Candidate Type': '—', 'Candidate Variant Color': '—', 'In Stock': '—' });
             }
+            candidates.forEach(c => pendingRows.push({ ...base, ...c }));
         });
+        const pendingCols = [{ wch: 20 }, { wch: 22 }, { wch: 14 }, { wch: 14 }, { wch: 22 }, { wch: 12 }];
 
-        // Grand total
-        if (groups.length > 0) {
-            if (y > 255) { doc.addPage(); y = 14; }
-            autoTable(doc, {
-                startY: y + 6,
-                head: [['', 'Total Required', 'Total Reserved']],
-                body: [['Grand Total', fmt(grandRequired), fmt(grandReserved)]],
-                styles: { fontSize: 9, fontStyle: 'bold' },
-                headStyles: { fillColor: [30, 41, 59] },
-                columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
+        // In Progress w/ raised PRs — of the in-progress trims, only the ones that actually
+        // have a purchase requirement raised against them, one row per PR (an item can have
+        // more than one raised over time — e.g. a cancelled one followed by a re-raise).
+        const raisedRows = [];
+        inProgress
+            .filter(it => (it.purchase_requirements?.length || 0) > 0)
+            .forEach(it => {
+                it.purchase_requirements.forEach(pr => {
+                    const qty = Number(pr.quantity_required ?? pr.quantity ?? pr.meters_required ?? 0);
+                    const uom = pr.unit_of_measure || pr.uom || it.unit || 'pcs';
+                    raisedRows.push({
+                        'Trim Item':         trimNameOf(it),
+                        'Requested Variant': requestedVariantOf(it),
+                        'PR ID':             pr.id ?? pr.requirement_id ?? '—',
+                        'Status':            (pr.status || 'PENDING').toString().replace(/_/g, ' '),
+                        'Urgency':           pr.urgency || '—',
+                        'Quantity':          `${fmt(qty)} ${uom}`,
+                        'PO Code':           pr.po_code || pr.purchase_order_code || '—',
+                        'Supplier':          pr.supplier_name || '—',
+                        'Expected Date':     pr.expected_date ? fmtD(pr.expected_date) : '—',
+                        'Raised Date':       pr.created_at ? fmtD(pr.created_at) : '—',
+                        'Notes':             pr.notes || '',
+                    });
+                });
             });
-        }
+        const raisedCols = [
+            { wch: 20 }, { wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 10 },
+            { wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 30 },
+        ];
 
-        doc.save(`trim-ta-${sop.product_name.replace(/\s+/g, '-')}.pdf`);
+        const wb = XLSX.utils.book_new();
+
+        const wsCompleted = XLSX.utils.json_to_sheet(completed.map(reservationRow));
+        wsCompleted['!cols'] = reservationCols;
+        XLSX.utils.book_append_sheet(wb, wsCompleted, 'Completed');
+
+        const wsInProgress = XLSX.utils.json_to_sheet(inProgress.map(reservationRow));
+        wsInProgress['!cols'] = reservationCols;
+        XLSX.utils.book_append_sheet(wb, wsInProgress, 'In Progress');
+
+        const wsPending = XLSX.utils.json_to_sheet(pendingRows);
+        wsPending['!cols'] = pendingCols;
+        XLSX.utils.book_append_sheet(wb, wsPending, 'Pending - Stock Options');
+
+        const wsRaised = XLSX.utils.json_to_sheet(raisedRows);
+        wsRaised['!cols'] = raisedCols;
+        XLSX.utils.book_append_sheet(wb, wsRaised, 'In Progress - Raised PRs');
+
+        const ts = new Date().toLocaleDateString('en', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+        const soPart = salesOrder?.order_number ? `SO${salesOrder.order_number}-` : '';
+        XLSX.writeFile(wb, `trim-reservations-${soPart}${sop.product_name.replace(/\s+/g, '-')}-${ts}.xlsx`);
     };
 
     return (
@@ -2183,11 +2281,11 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                             Fabric PDF
                         </button>
                         <button
-                            onClick={generateTrimPDF}
-                            className="text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1.5 rounded-lg transition-colors"
-                            title="Export completed trim T&A items as PDF"
+                            onClick={generateTrimExcel}
+                            className="flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1.5 rounded-lg transition-colors"
+                            title="Export trim T&A as Excel — Completed, In Progress, Pending (with stock per candidate variant), and In Progress Raised PRs sheets"
                         >
-                            Trim PDF
+                            <FileSpreadsheet size={13} /> Trim Excel
                         </button>
                         <button
                             onClick={() => { setEditItem(null); setAddModal(true); }}
@@ -2598,12 +2696,15 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                             className={`flex items-center cursor-pointer rounded-lg transition-all ${isSel ? 'bg-violet-50 ring-1 ring-violet-200' : 'hover:bg-slate-50'}`}
                                                         >
                                                             {/* Label */}
-                                                            <div className="w-72 shrink-0 flex items-center gap-2 px-2 py-2">
-                                                                <span className={`w-2 h-2 rounded-full shrink-0 ${overdue ? 'bg-red-500' : st.bg}`} />
+                                                            <div className="w-72 shrink-0 flex items-start gap-2 px-2 py-2">
+                                                                <span className={`w-2 h-2 rounded-full shrink-0 mt-1 ${overdue ? 'bg-red-500' : st.bg}`} />
                                                                 <div className="min-w-0 flex-1">
-                                                                    <p className="text-[10px] font-bold text-slate-700 break-words leading-tight">{item.title}</p>
+                                                                    <p className="text-[10px] font-bold text-slate-700 truncate leading-tight" title={item.title}>{item.title}</p>
                                                                     <p className="text-[8px] text-slate-400 truncate">{item.subtitle}</p>
-                                                                </div>
+                                                                {/* Badges wrap onto their own line(s) below the title instead of
+                                                                    squeezing it — with SUB/PR/due-date/etc. all shrink-0 in a single
+                                                                    non-wrapping row, the title had no room left and got chopped. */}
+                                                                <div className="flex flex-wrap items-center gap-1 mt-1">
                                                                 {(item.reservations?.length || 0) > 0 && (
                                                                     <span
                                                                         title={`${item.reservations.length} reservation${item.reservations.length === 1 ? '' : 's'} — click to view`}
@@ -2712,6 +2813,8 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                                             : <RotateCw size={11} />}
                                                                     </button>
                                                                 )}
+                                                                </div>
+                                                                </div>
                                                             </div>
 
                                                             {/* Bar track */}

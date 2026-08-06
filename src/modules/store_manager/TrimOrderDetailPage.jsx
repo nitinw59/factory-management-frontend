@@ -339,6 +339,7 @@ const FulfillmentModal = ({ item, sopId, onClose, onSubmit, apiError }) => {
 
     const [reservationInfo, setReservationInfo] = useState(null);
     const [reservationLoading, setReservationLoading] = useState(false);
+    const [usageOpen, setUsageOpen] = useState(false);
 
     useEffect(() => {
         if (!selectedVariantId) { setReservationInfo(null); return; }
@@ -425,7 +426,17 @@ const FulfillmentModal = ({ item, sopId, onClose, onSubmit, apiError }) => {
                             ) : reservationInfo ? (
                                 <div className="flex items-center gap-4">
                                     <span className="text-slate-600"><span className="font-bold text-blue-800">{reservationInfo.reserved.toLocaleString('en-IN')}</span> reserved</span>
-                                    <span className="text-slate-600"><span className="font-bold text-orange-700">{reservationInfo.consumed.toLocaleString('en-IN')}</span> already used</span>
+                                    <span className="text-slate-600">
+                                        <button
+                                            type="button"
+                                            onClick={() => setUsageOpen(true)}
+                                            disabled={reservationInfo.consumed <= 0}
+                                            className="font-bold text-orange-700 hover:underline disabled:no-underline disabled:cursor-default disabled:text-orange-700"
+                                            title={reservationInfo.consumed > 0 ? 'View batches this reservation was used against' : undefined}
+                                        >
+                                            {reservationInfo.consumed.toLocaleString('en-IN')}
+                                        </button> already used
+                                    </span>
                                     <span className="text-slate-600"><span className={`font-bold ${reservationInfo.active > 0 ? 'text-emerald-700' : 'text-red-600'}`}>{reservationInfo.active.toLocaleString('en-IN')}</span> available to allocate</span>
                                 </div>
                             ) : (
@@ -457,6 +468,93 @@ const FulfillmentModal = ({ item, sopId, onClose, onSubmit, apiError }) => {
                         <button onClick={handleSubmit} className="px-5 py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Confirm Fulfillment</button>
                     </div>
                 </div>
+            </div>
+            {usageOpen && (
+                <ReservationUsageModal
+                    sopId={sopId}
+                    variantIds={[selectedVariantId]}
+                    title={`${item.item_name}${item.color_name ? ` — ${item.color_name}` : ''}`}
+                    onClose={() => setUsageOpen(false)}
+                />
+            )}
+        </div>
+    );
+};
+
+// --- Reservation Usage Modal ---
+// Breaks a buyer reservation's "already used" total down by the production batch /
+// trim order that actually drew against it. Backend endpoint TBD — see storeManagerApi.
+const ReservationUsageModal = ({ sopId, variantIds, title, onClose }) => {
+    const [loading, setLoading] = useState(true);
+    const [rows, setRows] = useState([]);
+    const [err, setErr] = useState(null);
+    const idsKey = variantIds.join(',');
+
+    useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        setErr(null);
+        storeManagerApi.getTrimReservationUsage({
+            sales_order_product_id: sopId,
+            trim_item_variant_ids: idsKey,
+        })
+            .then(res => {
+                if (cancelled) return;
+                setRows(res.data?.data ?? res.data ?? []);
+            })
+            .catch(() => { if (!cancelled) setErr('Could not load usage breakdown.'); })
+            .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+    }, [sopId, idsKey]);
+
+    const total = rows.reduce((s, r) => s + Number(r.quantity_used || 0), 0);
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-70 z-[70] flex justify-center items-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+                    <div className="min-w-0">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Reservation usage by batch</p>
+                        <p className="text-sm font-bold text-slate-800 mt-0.5 truncate">{title}</p>
+                    </div>
+                    <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors shrink-0">
+                        <LuX className="h-4 w-4 text-gray-500" />
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                    {loading ? (
+                        <div className="flex justify-center py-10"><Loader2 className="animate-spin h-6 w-6 text-orange-500" /></div>
+                    ) : err ? (
+                        <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{err}</p>
+                    ) : rows.length === 0 ? (
+                        <p className="text-sm text-slate-400 italic text-center py-8">No usage recorded against this reservation yet.</p>
+                    ) : (
+                        rows.map((r, i) => (
+                            <div key={r.trim_order_id != null ? `${r.trim_order_id}-${r.trim_item_variant_id ?? i}` : i}
+                                className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                                <div className="min-w-0">
+                                    <p className="text-xs font-bold text-slate-800 truncate">
+                                        {r.batch_code || (r.production_batch_id ? `Batch #${r.production_batch_id}` : 'Unknown batch')}
+                                    </p>
+                                    <p className="text-[10px] text-slate-400 truncate">
+                                        {r.trim_order_id != null && <>Trim order #{r.trim_order_id}</>}
+                                        {r.color_name && <> · {r.color_name}{r.color_number ? ` (${r.color_number})` : ''}</>}
+                                        {r.used_at && <> · {new Date(r.used_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</>}
+                                    </p>
+                                </div>
+                                <span className="text-sm font-bold text-orange-700 tabular-nums shrink-0">{Number(r.quantity_used || 0).toLocaleString('en-IN')}</span>
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                {rows.length > 0 && (
+                    <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between text-sm shrink-0">
+                        <span className="font-bold text-slate-500">Total used</span>
+                        <span className="font-extrabold text-orange-700">{total.toLocaleString('en-IN')}</span>
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -560,12 +658,10 @@ const TrimOrderDetailPage = () => {
     const [refData, setRefData] = useState({ bom: [], cutting: [] });
     const [refDataLoaded, setRefDataLoaded] = useState(false);
 
-    // Billed composite keys (item_name|color_name|color_number) — fulfillment log entries matching these cannot be reverted
-    const [billedKeys, setBilledKeys] = useState(new Set());
-
     // Reservation info for the currently selected trim item
     const [trimReservation, setTrimReservation] = useState(null);
     const [trimResLoading, setTrimResLoading] = useState(false);
+    const [usageModal, setUsageModal] = useState(null); // { variantIds, title } | null
 
     // Master-detail + intent grouping
     const [selectedTrimName, setSelectedTrimName] = useState(null);
@@ -612,24 +708,6 @@ const TrimOrderDetailPage = () => {
     }, [orderId]);
 
     useEffect(() => { fetchRefData(); }, [fetchRefData]);
-
-    const billKey = (itemName, colorName, colorNumber) =>
-        `${String(itemName || '').trim().toLowerCase()}|${String(colorName || '').trim().toLowerCase()}|${String(colorNumber || '').toLowerCase()}`;
-
-    const fetchBills = useCallback(async () => {
-        try {
-            const res = await storeManagerApi.getTrimBillsForOrder(orderId);
-            const bills = res.data || [];
-            const keys = new Set(
-                bills.flatMap(b => (b.items || []).map(i => billKey(i.item_name, i.color_name, i.color_number)))
-            );
-            setBilledKeys(keys);
-        } catch (err) {
-            console.warn('[TrimBilling] failed to load bills — revert buttons remain enabled:', err?.response?.data || err.message);
-        }
-    }, [orderId]);
-
-    useEffect(() => { fetchBills(); }, [fetchBills]);
 
     // Handover slips + loader custody — both live on the kit endpoint.
     const [handoverSlips, setHandoverSlips] = useState([]);
@@ -1807,7 +1885,18 @@ const TrimOrderDetailPage = () => {
                                                             </div>
                                                             <div className="bg-white border border-orange-100 rounded-lg px-2 py-1.5 text-center">
                                                                 <p className="text-[9px] font-bold uppercase tracking-wider text-orange-500">Already used</p>
-                                                                <p className="text-base font-extrabold text-orange-700 tabular-nums">{trimReservation.consumed.toLocaleString('en-IN')}</p>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setUsageModal({
+                                                                        variantIds: selectedTrimGroup.items.map(it => it.trim_item_variant_id).filter(Boolean),
+                                                                        title: selectedTrimGroup.name,
+                                                                    })}
+                                                                    disabled={trimReservation.consumed <= 0}
+                                                                    className="text-base font-extrabold text-orange-700 tabular-nums hover:underline disabled:no-underline disabled:cursor-default"
+                                                                    title={trimReservation.consumed > 0 ? 'View batches this reservation was used against' : undefined}
+                                                                >
+                                                                    {trimReservation.consumed.toLocaleString('en-IN')}
+                                                                </button>
                                                             </div>
                                                             <div className={`bg-white rounded-lg px-2 py-1.5 text-center border ${trimReservation.active > 0 ? 'border-emerald-100' : 'border-red-100'}`}>
                                                                 <p className={`text-[9px] font-bold uppercase tracking-wider ${trimReservation.active > 0 ? 'text-emerald-600' : 'text-red-500'}`}>Allocatable</p>
@@ -1949,8 +2038,6 @@ const TrimOrderDetailPage = () => {
                                                                 </p>
                                                                 <div className="space-y-1">
                                                                     {it.fulfillment_log.map(log => {
-                                                                        const logKey = billKey(log.fulfilled_item_name, log.fulfilled_color_name, log.fulfilled_color_number);
-                                                                        const isBilled = billedKeys.has(logKey);
                                                                         const isIssued = !!log.issue_id;
                                                                         return (
                                                                         <div key={log.id} className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded text-[11px]">
@@ -1958,7 +2045,6 @@ const TrimOrderDetailPage = () => {
                                                                                 <span className="bg-gray-200 text-gray-700 px-1 rounded mr-1">{log.quantity_fulfilled}×</span>
                                                                                 {log.fulfilled_color_name} {log.fulfilled_color_number}
                                                                                 {log.used_substitute && <span className="text-purple-600 font-bold ml-1.5 bg-purple-50 px-1 rounded">sub</span>}
-                                                                                {isBilled && !isIssued && <span className="text-amber-700 font-bold ml-1.5 bg-amber-50 border border-amber-200 px-1 rounded">billed</span>}
                                                                             </span>
                                                                             {isIssued ? (
                                                                                 <span
@@ -1970,9 +2056,9 @@ const TrimOrderDetailPage = () => {
                                                                             ) : (
                                                                             <button
                                                                                 onClick={() => handleRevertFulfillment(log.id)}
-                                                                                disabled={isBilled || isClosed}
-                                                                                className={`p-1 rounded transition-colors ${(isBilled || isClosed) ? 'text-gray-300 cursor-not-allowed' : 'text-red-400 hover:text-white hover:bg-red-500'}`}
-                                                                                title={isClosed ? 'Order is closed — fulfillment is locked' : isBilled ? 'Cannot revert — this variant has been billed' : 'Undo this allocation (no stock moves)'}>
+                                                                                disabled={isClosed}
+                                                                                className={`p-1 rounded transition-colors ${isClosed ? 'text-gray-300 cursor-not-allowed' : 'text-red-400 hover:text-white hover:bg-red-500'}`}
+                                                                                title={isClosed ? 'Order is closed — fulfillment is locked' : 'Undo this allocation (no stock moves)'}>
                                                                                 <LuTrash2 size={11} />
                                                                             </button>
                                                                             )}
@@ -2001,6 +2087,15 @@ const TrimOrderDetailPage = () => {
 
             <ReferenceDataModal isOpen={refModalOpen} onClose={() => setRefModalOpen(false)} data={refData} loading={!refDataLoaded} />
             <BarcodePrintModal isOpen={barcodeModalOpen} onClose={() => setBarcodeModalOpen(false)} batchId={orderInfo?.batchId} />
+
+            {usageModal && (
+                <ReservationUsageModal
+                    sopId={orderInfo?.sopId}
+                    variantIds={usageModal.variantIds}
+                    title={usageModal.title}
+                    onClose={() => setUsageModal(null)}
+                />
+            )}
 
             {/* Force-close confirmation with optional reason */}
             {closeModalOpen && createPortal(

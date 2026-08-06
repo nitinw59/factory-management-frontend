@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import { FiClock, FiCheckCircle, FiList, FiPackage, FiSend, FiTruck, FiLock } from 'react-icons/fi';
-import { ChevronRight, Search, RefreshCw, AlertCircle, Receipt, IndianRupee, Loader2 } from 'lucide-react';
+import { ChevronRight, Search, RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
 import { kitStatusOf } from '../trim_kits/kitStatusConfig';
 
 const Spinner = () => <div className="flex justify-center items-center p-12"><Loader2 className="animate-spin h-10 w-10 text-blue-600" /></div>;
@@ -47,14 +47,6 @@ const OrderCard = ({ order }) => {
 
     const badgeColorClass = statusMeta.badge;
 
-    // Billing Status Logic
-    const billStatus = order.billing_status || 'UNBILLED';
-    const billColors = {
-        'BILLED': 'bg-emerald-100 text-emerald-800 border-emerald-200',
-        'PARTIAL': 'bg-amber-100 text-amber-800 border-amber-200',
-        'UNBILLED': 'bg-rose-100 text-rose-800 border-rose-200',
-    }[billStatus] || 'bg-gray-100 text-gray-800 border-gray-200';
-
     return (
         <div className={`bg-white rounded-xl shadow-sm border border-gray-200 border-l-4 ${borderColorClass} transition-all duration-200 flex flex-col h-full hover:shadow-md`}>
             <Link 
@@ -86,35 +78,12 @@ const OrderCard = ({ order }) => {
                         {new Date(order.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </p>
                 </div>
-
-                {/* BILLING DETAILS */}
-                <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg border border-slate-100">
-                    <div className="flex items-center text-xs font-medium text-slate-600">
-                        <Receipt size={14} className="mr-1.5 text-indigo-500" />
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${billColors}`}>
-                            {billStatus}
-                        </span>
-                    </div>
-                    <span className="text-sm font-bold text-slate-800 flex items-center">
-                        <IndianRupee size={12} className="mr-0.5 text-slate-500" />
-                        {parseFloat(order.billed_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                </div>
             </Link>
 
-            {/* FOOTER ACTIONS WITH BILLING LINK */}
-            <div className="px-4 py-3 bg-gray-50/80 border-t border-gray-100 rounded-b-xl flex flex-wrap justify-between items-center gap-2">
-                <div className="flex gap-1">
-                    <Link
-                        to={`/store-manager/trim-orders/${order.id}/billing`}
-                        className="text-xs font-bold text-emerald-600 hover:text-emerald-800 flex items-center transition-colors px-2 py-1.5 rounded hover:bg-emerald-50"
-                        title="Manage Billing"
-                    >
-                        <Receipt size={14} className="mr-1" /> Billing
-                    </Link>
-                </div>
-                <Link 
-                    to={`/store-manager/trim-orders/${order.id}`} 
+            {/* FOOTER ACTIONS */}
+            <div className="px-4 py-3 bg-gray-50/80 border-t border-gray-100 rounded-b-xl flex justify-end items-center gap-2">
+                <Link
+                    to={`/store-manager/trim-orders/${order.id}`}
                     className="text-xs font-bold text-white bg-gray-800 hover:bg-black flex items-center transition-colors px-3 py-1.5 rounded shadow-sm"
                 >
                     Process <ChevronRight size={14} className="ml-1" />
@@ -130,7 +99,7 @@ const TrimOrdersPage = () => {
     const [orders, setOrders] = useState([]);
     const [kpis, setKpis] = useState({
         pending: 0, prepared: 0, completedToday: 0,
-        pendingBilling: 0, totalBilled: 0, activeTotal: 0, completedTotal: 0,
+        activeTotal: 0, completedTotal: 0,
         readyForPickup: 0, partiallyIssued: 0, issued: 0
     });
     
@@ -274,22 +243,13 @@ const TrimOrdersPage = () => {
             </div>
 
             {/* --- KPI CARDS --- */}
-            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-4 mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
                 <KPICard title="Pending Fulfillment" count={kpis.pending || 0} icon={FiClock} colorClass="text-amber-600" bgColorClass="bg-amber-100" />
                 <KPICard title="Prepared / Partial" count={kpis.prepared || 0} icon={FiPackage} colorClass="text-blue-600" bgColorClass="bg-blue-100" />
                 <KPICard title="Ready for Pickup" count={kpis.readyForPickup || 0} icon={FiSend} colorClass="text-indigo-600" bgColorClass="bg-indigo-100" />
                 <KPICard title="Partially Issued" count={kpis.partiallyIssued || 0} icon={FiTruck} colorClass="text-purple-600" bgColorClass="bg-purple-100" />
                 <KPICard title="Issued" count={kpis.issued || 0} icon={FiCheckCircle} colorClass="text-green-600" bgColorClass="bg-green-100" />
                 <KPICard title="Allocated Today" count={kpis.completedToday || 0} icon={FiCheckCircle} colorClass="text-emerald-600" bgColorClass="bg-emerald-100" />
-                <KPICard title="Pending Billing" count={kpis.pendingBilling || 0} icon={Receipt} colorClass="text-rose-600" bgColorClass="bg-rose-100" />
-                <KPICard
-                    title="Total Billed"
-                    count={(kpis.totalBilled || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                    prefix="₹"
-                    icon={IndianRupee}
-                    colorClass="text-indigo-600"
-                    bgColorClass="bg-indigo-100"
-                />
             </div>
 
             {error && (

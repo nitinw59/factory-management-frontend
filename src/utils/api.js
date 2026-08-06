@@ -52,8 +52,11 @@ api.interceptors.response.use(
 
     const isAuthFailure = status === 401 || status === 403;
     // Only treat it as an expired session if we thought we were logged in,
-    // and never for the auth endpoints themselves (avoids redirect loops).
-    if (isAuthFailure && hasToken && !requestUrl.includes('/auth/')) {
+    // never for the auth endpoints themselves (avoids redirect loops), and never
+    // for a request explicitly opted out (role-gated lookups a lower-privileged
+    // user may legitimately 403 on without their whole session being invalid —
+    // e.g. a background company-profile fetch used only for optional PDF branding).
+    if (isAuthFailure && hasToken && !requestUrl.includes('/auth/') && !error.config?.skipSessionExpiry) {
       if (!sessionExpiryNotified) {
         sessionExpiryNotified = true;
         // Collapse bursts: a page firing 10 parallel requests that all fail

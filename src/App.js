@@ -109,7 +109,6 @@ import PurchaseInvoicesPage from './modules/accounts/purchase/PurchaseInvoicesPa
 import MechanicsLayout from './shared/MechanicsLayout';
 import MechanicsProtectedRoute from './shared/MechanicsProtectedRoute';
 import MechanicsDashboardPage from './modules/mechanics/MechanicsDashboardPage';
-import TrimBillingPage from './modules/store_manager/TrimBillingPage';
 
 import AdminMaintenanceDashboard from './modules/admin/AdminMaintenanceDashboard';
 import MaintenanceSchedulePage from './modules/maintenance/MaintenanceSchedulePage';
@@ -267,7 +266,6 @@ function App() {
           <Route path="trim-orders/:orderId" element={<TrimOrderDetailPage />} />
           
           <Route path="trim-orders/:orderId/summary" element={<TrimOrderSummaryPage />} />
-          <Route path="trim-orders/:orderId/billing" element={<TrimBillingPage />} />
           <Route path="trim-kits/history" element={<KitHistoryPage />} />
           <Route path="trim-reservations" element={<TrimReservationsPage />} />
           <Route path="supplier-color-codes" element={<SupplierColorCodesPage />} />

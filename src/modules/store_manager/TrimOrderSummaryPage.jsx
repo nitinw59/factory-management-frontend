@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, Package, Calendar, User, Layers,
-    Clock, CheckCircle, AlertCircle, Box, Download, Receipt, TriangleAlert, ChevronDown, ChevronUp,
+    Clock, CheckCircle, AlertCircle, Box, Download, TriangleAlert, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { storeManagerApi } from '../../api/storeManagerApi'; 
 import jsPDF from 'jspdf';
@@ -167,10 +167,6 @@ const TrimOrderSummaryPage = () => {
                     <button onClick={handleDownloadPDF} className="flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 text-sm font-medium transition-colors">
                         <Download className="w-4 h-4 mr-2" /> PDF Report
                     </button>
-                    {/* ✅ NEW: Manage Billing Button */}
-                    <Link to={`/store-manager/trim-orders/${order.id}/billing`} className="flex items-center px-4 py-2 bg-indigo-600 border border-transparent rounded-lg shadow-sm hover:bg-indigo-700 text-white text-sm font-bold transition-colors">
-                        <Receipt className="w-4 h-4 mr-2" /> Generate / Edit Bill
-                    </Link>
                 </div>
             </div>
 

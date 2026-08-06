@@ -49,8 +49,8 @@ const STATUS_CFG = {
 };
 
 // Variants from storeManagerApi.getVariantsByTrimItem use `variant_id` (NOT `id`) and carry
-// color_number/color_name/variant_size (see ExchangePanel / TrimBillingPage which read the
-// same endpoint). Build the label from those; fall back to any explicit name, then the id.
+// color_number/color_name/variant_size (see ExchangePanel which reads the same endpoint).
+// Build the label from those; fall back to any explicit name, then the id.
 const variantIdOf = (v) => v.variant_id ?? v.id;
 const variantLabel = (v) => {
     const parts = [];

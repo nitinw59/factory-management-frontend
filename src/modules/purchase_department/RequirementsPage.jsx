@@ -47,6 +47,11 @@ const TYPE_CFG = {
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en', { dateStyle: 'medium' }) : '—';
 const fmt = (n, dec = 1) => Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: dec });
 
+// Buffer over the calculated requirement a buyer is allowed to order — caps accidental
+// over-ordering while still letting them round up for pack sizes / minimums.
+const QTY_OVER_LIMIT_PCT = 0.10;
+const maxOrderQty = (defaultQty) => defaultQty * (1 + QTY_OVER_LIMIT_PCT);
+
 const bucketStats = (rows) => {
     let totalQty = 0, totalMeters = 0;
     let pendingQty = 0, pendingMeters = 0, pendingCount = 0;
@@ -286,6 +291,18 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
             return;
         }
 
+        // Belt-and-braces: the qty inputs already clamp to +10%, but re-check here
+        // in case `groups` changed underneath an in-flight edit.
+        const overLimit = groups.find(g => {
+            const defaultQty = g.type === 'fabric' ? g.totalMeters : g.totalQty;
+            const qty = parseFloat(quantities[g.key]);
+            return Number.isFinite(qty) && qty > maxOrderQty(defaultQty) + 0.001;
+        });
+        if (overLimit) {
+            setErr(`"${overLimit.label}" exceeds the max order qty (required +${QTY_OVER_LIMIT_PCT * 100}%). Reduce it before submitting.`);
+            return;
+        }
+
         setBusy(true); setErr(null);
         try {
             const items = groups.map(g => {
@@ -391,25 +408,37 @@ const CreatePoModal = ({ requirements, onClose, onCreated }) => {
                                             <div className="shrink-0">
                                                 {(() => {
                                                     const defaultQty = isFabric ? g.totalMeters : g.totalQty;
+                                                    const maxQty     = maxOrderQty(defaultQty);
+                                                    const unit       = isFabric ? 'm' : (g.unitOfMeasure || 'pcs');
                                                     const value      = quantities[g.key] ?? '';
                                                     const numeric    = parseFloat(value);
                                                     const isOver     = Number.isFinite(numeric) && numeric > defaultQty;
+                                                    const atCap      = Number.isFinite(numeric) && numeric >= maxQty - 0.001;
+                                                    const handleChange = (raw) => {
+                                                        const n = parseFloat(raw);
+                                                        if (Number.isFinite(n) && n > maxQty) {
+                                                            setQuantities(p => ({ ...p, [g.key]: String(maxQty) }));
+                                                        } else {
+                                                            setQuantities(p => ({ ...p, [g.key]: raw }));
+                                                        }
+                                                    };
                                                     return (
                                                         <div className="flex flex-col items-end">
                                                             <input
                                                                 type="number"
                                                                 min="0"
+                                                                max={maxQty}
                                                                 step="any"
                                                                 placeholder={fmt(defaultQty, isFabric ? 1 : 0)}
                                                                 value={value}
-                                                                onChange={e => setQuantities(p => ({ ...p, [g.key]: e.target.value }))}
-                                                                title={`Default: ${fmt(defaultQty, isFabric ? 1 : 0)} ${isFabric ? 'm' : (g.unitOfMeasure || 'pcs')}. Increase to keep stock buffer.`}
-                                                                className={`w-28 text-xs border rounded-lg px-2.5 py-1.5 focus:outline-none text-right ${isOver ? 'border-emerald-300 focus:border-emerald-400 bg-emerald-50' : 'border-slate-200 focus:border-orange-400'}`}
+                                                                onChange={e => handleChange(e.target.value)}
+                                                                title={`Default: ${fmt(defaultQty, isFabric ? 1 : 0)} ${unit}. Max: ${fmt(maxQty, isFabric ? 1 : 0)} ${unit} (required +${QTY_OVER_LIMIT_PCT * 100}%).`}
+                                                                className={`w-28 text-xs border rounded-lg px-2.5 py-1.5 focus:outline-none text-right ${atCap ? 'border-amber-300 focus:border-amber-400 bg-amber-50' : isOver ? 'border-emerald-300 focus:border-emerald-400 bg-emerald-50' : 'border-slate-200 focus:border-orange-400'}`}
                                                             />
-                                                            <span className={`text-[9px] mt-0.5 ${isOver ? 'text-emerald-600 font-bold' : 'text-slate-400'}`}>
+                                                            <span className={`text-[9px] mt-0.5 ${atCap ? 'text-amber-600 font-bold' : isOver ? 'text-emerald-600 font-bold' : 'text-slate-400'}`}>
                                                                 {isOver
-                                                                    ? `+${fmt(numeric - defaultQty, isFabric ? 1 : 0)} extra ${isFabric ? 'm' : (g.unitOfMeasure || 'pcs')}`
-                                                                    : `qty to order (${isFabric ? 'm' : (g.unitOfMeasure || 'pcs')})`}
+                                                                    ? `+${fmt(numeric - defaultQty, isFabric ? 1 : 0)} extra ${unit}${atCap ? ' (max)' : ''}`
+                                                                    : `qty to order (${unit}) · max +${QTY_OVER_LIMIT_PCT * 100}%`}
                                                             </span>
                                                         </div>
                                                     );
