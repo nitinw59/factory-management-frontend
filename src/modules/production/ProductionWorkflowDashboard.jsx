@@ -2367,11 +2367,11 @@ const ProductionWorkflowDashboard = () => {
         } catch { alert('Failed to create Purchase Order.'); }
     };
 
-    const canManage     = user && ['accountant', 'sales_manager', 'admin', 'factory_admin'].includes(user.role);
-    const canProduction = user && ['cutting_manager', 'production_manager', 'admin', 'factory_admin'].includes(user.role);
-    const canInward     = user?.role === 'accountant';
-    const canTrimOrders = user && ['production_manager', 'admin', 'factory_admin'].includes(user.role);
-    const canEditBatch  = user && ['production_manager', 'cutting_manager'].includes(user.role);
+    const canManage     = user && ['accountant', 'sales_manager', 'admin', 'factory_admin', 'store_manager'].includes(user.role);
+    const canProduction = user && ['cutting_manager', 'production_manager', 'admin', 'factory_admin', 'store_manager'].includes(user.role);
+    const canInward     = user?.role === 'accountant' || user?.role === 'store_manager';
+    const canTrimOrders = user && ['production_manager', 'admin', 'factory_admin', 'store_manager'].includes(user.role);
+    const canEditBatch  = user && ['production_manager', 'cutting_manager', 'store_manager'].includes(user.role);
 
     const handleInward      = (po) => setInwardPO({ ...po, id: po.po_id });
     const handleTrimOrders  = (batchId) => setTrimOrdersBatch(batchId);

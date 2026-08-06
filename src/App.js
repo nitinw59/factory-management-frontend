@@ -281,6 +281,7 @@ function App() {
           <Route path="general-items" element={<GeneralItemsPage />} />
           <Route path="planning" element={<MerchandiserPlanningPage />} />
           <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
+          <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
         </Route>
 
         {/* Production Manager Portal */}

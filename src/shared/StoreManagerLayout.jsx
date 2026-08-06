@@ -5,6 +5,7 @@ import MatrixBrand from './MatrixBrand';
 import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag, LuScrollText, LuInbox, LuFilePlus, LuBoxes, LuPackageX } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
 import ReportBugButton from './ReportBugButton';
+import { LuLayoutDashboard } from 'react-icons/lu';
 
 // No changes to NavDropdown component
 const NavDropdown = ({ title, children }) => {
@@ -56,6 +57,9 @@ const StoreManagerLayout = () => {
                         <MatrixBrand portal="Store Portal" />
                         {/* This is the original desktop navigation */}
                         <nav className="hidden md:flex items-center space-x-6">
+                            <NavLink to="/store-manager/production-workflow" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
+                                <LuLayoutDashboard className="mr-1" /> Production Workflow
+                            </NavLink>
                             <NavLink to="/store-manager/fabric-rolls" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
                                 <LuLayers className="mr-1" /> Fabric
                             </NavLink>
@@ -141,6 +145,9 @@ const StoreManagerLayout = () => {
                 {isMobileMenuOpen && (
                     <div className="md:hidden bg-white shadow-md">
                         <nav className="flex flex-col p-4 space-y-4">
+                            <NavLink to="/store-manager/production-workflow" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+                                <LuLayoutDashboard className="mr-2" /> Production Workflow
+                            </NavLink>
                             <NavLink to="/store-manager/fabric-rolls" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuLayers className="mr-2" /> Fabric
                             </NavLink>
