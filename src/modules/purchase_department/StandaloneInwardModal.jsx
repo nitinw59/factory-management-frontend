@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     X, Loader2, Plus, Trash2, Package, Scissors, Wrench, Tag, Upload,
-    FileText, AlertTriangle, CheckCircle2, ChevronDown, Boxes,
+    FileText, AlertTriangle, CheckCircle2, Boxes,
+    ClipboardList, ArrowRight, ArrowLeft, PackagePlus,
 } from 'lucide-react';
 import BoxBreakdownModal from './BoxBreakdownModal';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
@@ -393,6 +394,9 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
 // ── Main Modal ────────────────────────────────────────────────────────────────
 
 export default function StandaloneInwardModal({ onClose, onCreated }) {
+    // First-screen choice: null = chooser, 'po' = PO search, 'standalone' = free-form.
+    const [entryMode, setEntryMode] = useState(null);
+
     // Header fields
     const [receivedDate, setReceivedDate] = useState(new Date().toISOString().split('T')[0]);
     const [condition,    setCondition]    = useState('GOOD');
@@ -406,7 +410,6 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
     const [poListLoading, setPoListLoading] = useState(false);
     const [selectedPo,   setSelectedPo]   = useState(null);
     const [poLoading,    setPoLoading]    = useState(false);
-    const [showPoList,   setShowPoList]   = useState(false);
 
     // PO flow (when a PO is selected)
     const [poStep,  setPoStep]  = useState(null);  // null | 'create' | 'review'
@@ -459,15 +462,15 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
             .catch(() => {});
     }, []);
 
-    // Load PO list when search dropdown opens
+    // Load PO list once the user enters the "against a PO" screen
     useEffect(() => {
-        if (!showPoList || poList.length > 0) return;
+        if (entryMode !== 'po' || poList.length > 0) return;
         setPoListLoading(true);
         purchaseDeptApi.getOrders()
             .then(r => setPoList(r.data?.data ?? r.data ?? []))
             .catch(() => {})
             .finally(() => setPoListLoading(false));
-    }, [showPoList, poList.length]);
+    }, [entryMode, poList.length]);
 
     const filteredPos = useMemo(() => {
         const q = poSearch.toLowerCase();
@@ -779,7 +782,146 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
         );
     }
 
-    // ── Free-form modal ───────────────────────────────────────────────────────
+    // ── Entry chooser — first thing the user sees ─────────────────────────────
+
+    if (entryMode === null) {
+        return (
+            <div className="fixed inset-0 z-50 bg-white flex flex-col">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
+                    <div>
+                        <h3 className="font-black text-slate-800 text-base">Record Inward</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">How was this stock received?</p>
+                    </div>
+                    <button onClick={onClose} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition">
+                        <X size={18} />
+                    </button>
+                </div>
+
+                <div className="flex-1 flex items-center justify-center p-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 w-full max-w-2xl">
+                        <button
+                            type="button"
+                            onClick={() => setEntryMode('po')}
+                            className="group flex flex-col items-center text-center gap-4 border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50/50 rounded-2xl px-8 py-10 transition"
+                        >
+                            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-orange-100 text-orange-600 group-hover:bg-orange-500 group-hover:text-white transition">
+                                <ClipboardList size={28} />
+                            </div>
+                            <div>
+                                <p className="font-extrabold text-slate-800 text-base">Against a PO</p>
+                                <p className="text-xs text-slate-500 mt-1">Receiving goods against an existing Purchase Order</p>
+                            </div>
+                            <span className="flex items-center gap-1 text-xs font-bold text-orange-600 opacity-0 group-hover:opacity-100 transition">
+                                Continue <ArrowRight size={12} />
+                            </span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setEntryMode('standalone')}
+                            className="group flex flex-col items-center text-center gap-4 border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50/50 rounded-2xl px-8 py-10 transition"
+                        >
+                            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-orange-100 text-orange-600 group-hover:bg-orange-500 group-hover:text-white transition">
+                                <PackagePlus size={28} />
+                            </div>
+                            <div>
+                                <p className="font-extrabold text-slate-800 text-base">Without a PO</p>
+                                <p className="text-xs text-slate-500 mt-1">Standalone receipt — walk-in stock, samples, etc.</p>
+                            </div>
+                            <span className="flex items-center gap-1 text-xs font-bold text-orange-600 opacity-0 group-hover:opacity-100 transition">
+                                Continue <ArrowRight size={12} />
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // ── PO search screen ───────────────────────────────────────────────────────
+
+    if (entryMode === 'po') {
+        return (
+            <div className="fixed inset-0 z-50 bg-white flex flex-col">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => { setEntryMode(null); setSelectedPo(null); setPoSearch(''); setErr(null); }}
+                            className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition"
+                        >
+                            <ArrowLeft size={18} />
+                        </button>
+                        <div>
+                            <h3 className="font-black text-slate-800 text-base">Select Purchase Order</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">Pick the PO you're receiving goods against</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition">
+                        <X size={18} />
+                    </button>
+                </div>
+
+                <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 w-full max-w-xl mx-auto space-y-3">
+                    {err && (
+                        <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2 text-sm text-red-600">
+                            <AlertTriangle size={13} /> {err}
+                        </div>
+                    )}
+                    <input
+                        type="text"
+                        autoFocus
+                        placeholder="Search PO code or supplier…"
+                        value={poSearch}
+                        onChange={e => setPoSearch(e.target.value)}
+                        className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-orange-400"
+                    />
+                    {poListLoading ? (
+                        <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-slate-400" /></div>
+                    ) : (
+                        <div className="space-y-1.5">
+                            {filteredPos.map(po => (
+                                <button
+                                    key={po.id}
+                                    type="button"
+                                    onClick={() => setSelectedPo(po)}
+                                    className={`w-full flex items-center justify-between text-left px-4 py-3 rounded-xl border transition text-sm ${
+                                        selectedPo?.id === po.id
+                                            ? 'bg-orange-50 border-orange-300 text-orange-700'
+                                            : 'bg-white border-slate-200 hover:border-orange-200'
+                                    }`}
+                                >
+                                    <span className="font-bold">{po.po_code || `PO #${po.id}`}</span>
+                                    <span className="text-slate-400 text-xs">{po.supplier_name}</span>
+                                </button>
+                            ))}
+                            {filteredPos.length === 0 && !poListLoading && (
+                                <p className="text-sm text-slate-400 text-center py-8">No open POs found</p>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                <div className="shrink-0 px-5 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+                    <span className="text-xs text-slate-500">
+                        {selectedPo
+                            ? <>Selected: <span className="font-bold text-slate-700">{selectedPo.po_code || `PO #${selectedPo.id}`}</span></>
+                            : 'No PO selected'}
+                    </span>
+                    <button
+                        type="button"
+                        onClick={handleLoadPo}
+                        disabled={!selectedPo || poLoading}
+                        className="flex items-center gap-1.5 text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 px-5 py-2.5 rounded-xl transition"
+                    >
+                        {poLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+                        Continue <ArrowRight size={14} />
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // ── Free-form modal (entryMode === 'standalone') ───────────────────────────
 
     return (
         <>
@@ -788,9 +930,16 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
 
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50 rounded-t-2xl shrink-0">
-                    <div>
-                        <h3 className="font-black text-slate-800 text-base">Record Inward</h3>
-                        <p className="text-xs text-slate-500 mt-0.5">Standalone goods receipt — no PO required</p>
+                    <div className="flex items-center gap-3">
+                        {!saving && (
+                            <button onClick={() => setEntryMode(null)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition">
+                                <ArrowLeft size={18} />
+                            </button>
+                        )}
+                        <div>
+                            <h3 className="font-black text-slate-800 text-base">Record Inward</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">Standalone goods receipt — no PO required</p>
+                        </div>
                     </div>
                     {!saving && (
                         <button onClick={onClose} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition">
@@ -859,81 +1008,6 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                                 )}
                             </label>
                         </div>
-                    </div>
-
-                    {/* Optional PO picker */}
-                    <div className="border border-slate-200 rounded-xl overflow-hidden">
-                        <button
-                            type="button"
-                            onClick={() => setShowPoList(o => !o)}
-                            className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition text-left"
-                        >
-                            <div>
-                                <p className="text-xs font-bold text-slate-700">
-                                    {selectedPo ? `Linked to ${selectedPo.po_code || `PO #${selectedPo.id}`}` : 'Link to a Purchase Order (optional)'}
-                                </p>
-                                <p className="text-[10px] text-slate-400 mt-0.5">
-                                    {selectedPo ? 'Click to switch to PO-linked receiving flow' : 'If receiving against a specific PO, pick it here'}
-                                </p>
-                            </div>
-                            <ChevronDown size={14} className={`text-slate-400 transition-transform ${showPoList ? 'rotate-180' : ''}`} />
-                        </button>
-
-                        {showPoList && (
-                            <div className="px-4 pb-4 pt-2 space-y-2">
-                                <input
-                                    type="text"
-                                    placeholder="Search PO code or supplier…"
-                                    value={poSearch}
-                                    onChange={e => setPoSearch(e.target.value)}
-                                    className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-orange-400"
-                                />
-                                {poListLoading ? (
-                                    <div className="flex justify-center py-3"><Loader2 size={16} className="animate-spin text-slate-400" /></div>
-                                ) : (
-                                    <div className="space-y-1 max-h-44 overflow-y-auto">
-                                        {filteredPos.map(po => (
-                                            <button
-                                                key={po.id}
-                                                type="button"
-                                                onClick={() => { setSelectedPo(po); setPoSearch(''); }}
-                                                className={`w-full flex items-center justify-between text-left px-3 py-2 rounded-lg border transition text-xs ${
-                                                    selectedPo?.id === po.id
-                                                        ? 'bg-orange-50 border-orange-300 text-orange-700'
-                                                        : 'bg-white border-slate-200 hover:border-orange-200'
-                                                }`}
-                                            >
-                                                <span className="font-bold">{po.po_code || `PO #${po.id}`}</span>
-                                                <span className="text-slate-400">{po.supplier_name}</span>
-                                            </button>
-                                        ))}
-                                        {filteredPos.length === 0 && !poListLoading && (
-                                            <p className="text-xs text-slate-400 text-center py-3">No open POs found</p>
-                                        )}
-                                    </div>
-                                )}
-                                {selectedPo && (
-                                    <div className="flex items-center justify-between pt-1">
-                                        <span className="text-xs text-slate-500">
-                                            Selected: <span className="font-bold">{selectedPo.po_code || `PO #${selectedPo.id}`}</span>
-                                        </span>
-                                        <div className="flex gap-2">
-                                            <button type="button" onClick={() => { setSelectedPo(null); }}
-                                                className="text-xs text-slate-400 hover:text-slate-600 transition">Clear</button>
-                                            <button
-                                                type="button"
-                                                onClick={handleLoadPo}
-                                                disabled={poLoading}
-                                                className="flex items-center gap-1.5 text-xs font-bold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 px-3 py-1.5 rounded-lg transition"
-                                            >
-                                                {poLoading ? <Loader2 size={11} className="animate-spin" /> : null}
-                                                Switch to PO flow →
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
                     </div>
 
                     {/* Line items */}
