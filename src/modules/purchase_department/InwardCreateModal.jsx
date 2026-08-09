@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
     X, Loader2, AlertTriangle, Package, Scissors, Wrench, Tag, Trash2, Upload, FileText, Plus, Boxes, ArrowLeft,
+    Calculator,
 } from 'lucide-react';
 import { trimsApi } from '../../api/trimsApi';
 import { sparesApi } from '../../api/sparesApi';
@@ -18,6 +19,79 @@ import {
     pendingByReqMap, pendingByPoItemMap,
     buildItemsFromState, labelFromGroup,
 } from './inwardShared';
+
+// Box rate ÷ qty-per-box rarely divides evenly (e.g. ₹1000 / 300 pcs = ₹3.33333…) —
+// keep up to 5 decimal places so the rounding error doesn't compound across a
+// large quantity, but trim trailing zeros so simple divisions still read clean.
+const formatPricePrecise = (n) => {
+    if (n == null || Number.isNaN(n)) return null;
+    return n.toFixed(5).replace(/0+$/, '').replace(/\.$/, '');
+};
+
+// Compact "Unit Price" input + box-rate calculator for a PO-linked group card.
+// Optional — leaving it blank means the PO's/requirement's own unit_price is
+// used server-side, so this only needs filling in when the actual rate
+// received differs from what was ordered. Self-contained (its own calcOpen
+// state) and expands in normal flow, never absolutely positioned, so it's
+// safe to drop into any card regardless of that card's overflow handling.
+function GroupUnitPriceField({ value, onChange, unitLabel = 'unit' }) {
+    const [calcOpen,  setCalcOpen]  = useState(false);
+    const [boxRate,   setBoxRate]   = useState('');
+    const [qtyPerBox, setQtyPerBox] = useState('');
+    const computed = (parseFloat(boxRate) > 0 && parseFloat(qtyPerBox) > 0)
+        ? parseFloat(boxRate) / parseFloat(qtyPerBox)
+        : null;
+
+    return (
+        <div>
+            <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-bold text-amber-700 uppercase tracking-wide shrink-0">Unit price</span>
+                <input
+                    type="number" min="0" step="any" placeholder="from PO"
+                    value={value}
+                    onChange={e => onChange(e.target.value)}
+                    className="w-24 text-[11px] font-semibold text-slate-800 border border-amber-300 bg-amber-50/60 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-500"
+                />
+                <button
+                    type="button"
+                    onClick={() => setCalcOpen(o => !o)}
+                    title="Calculate from a box rate"
+                    className={`shrink-0 p-1 rounded border transition ${calcOpen ? 'bg-amber-500 text-white border-amber-500' : 'text-amber-600 border-amber-200 hover:bg-amber-50'}`}
+                >
+                    <Calculator size={11} />
+                </button>
+            </div>
+            {calcOpen && (
+                <div className="mt-1.5 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex-wrap">
+                    <input
+                        type="number" min="0" step="any" placeholder="Box rate ₹"
+                        value={boxRate}
+                        onChange={e => setBoxRate(e.target.value)}
+                        className="w-20 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400"
+                    />
+                    <span className="text-[10px] text-amber-500">÷</span>
+                    <input
+                        type="number" min="0" step="any" placeholder="Qty/box"
+                        value={qtyPerBox}
+                        onChange={e => setQtyPerBox(e.target.value)}
+                        className="w-20 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400"
+                    />
+                    <span className="text-[10px] font-bold text-amber-800 flex-1 text-right whitespace-nowrap">
+                        {computed != null ? `= ₹${formatPricePrecise(computed)}/${unitLabel}` : '—'}
+                    </span>
+                    <button
+                        type="button"
+                        disabled={computed == null}
+                        onClick={() => { onChange(formatPricePrecise(computed)); setCalcOpen(false); setBoxRate(''); setQtyPerBox(''); }}
+                        className="text-[10px] font-bold text-white bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed px-2 py-1 rounded-md transition"
+                    >
+                        Use
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
 
 /**
  * InwardCreateModal — focused only on creating a brand-new inward.
@@ -45,6 +119,7 @@ export default function InwardCreateModal({
     supplierName,
     allInwards = [],
     initialSnapshot = null,
+    inward = null,                   // existing inward being edited, or null when creating
     onReview,
     onBack,
     onClose,
@@ -53,6 +128,16 @@ export default function InwardCreateModal({
     const [err,  setErr]  = useState(null);
 
     const [boxModal, setBoxModal] = useState(null); // { title, uom, initialBoxes, onSave }
+
+    // Box-rate → unit-price mini calculator for custom-group cards. Only one
+    // card's calculator is open at a time; priceCalcKey holds that card's _k.
+    const [priceCalcKey,  setPriceCalcKey]  = useState(null);
+    const [priceCalcRate, setPriceCalcRate] = useState('');
+    const [priceCalcQty,  setPriceCalcQty]  = useState('');
+    const togglePriceCalc = (gk) => {
+        setPriceCalcKey(prev => prev === gk ? null : gk);
+        setPriceCalcRate(''); setPriceCalcQty('');
+    };
 
     // ── Header fields ───────────────────────────────────────────────────────
     const grnNumber = ''; // auto-generated server-side; field is display-only
@@ -67,8 +152,11 @@ export default function InwardCreateModal({
         [poItems]
     );
 
-    const pendingByReq    = useMemo(() => pendingByReqMap(allRequirements, allInwards, null, poItems), [allRequirements, allInwards, poItems]);
-    const pendingByPoItem = useMemo(() => pendingByPoItemMap(poItems, allInwards, null), [poItems, allInwards]);
+    // `inward` excludes its own already-recorded qty from the pending-qty math
+    // below — required when editing, so the "still outstanding" defaults don't
+    // double-count what this inward already received. No-op (null) on create.
+    const pendingByReq    = useMemo(() => pendingByReqMap(allRequirements, allInwards, inward, poItems), [allRequirements, allInwards, poItems, inward]);
+    const pendingByPoItem = useMemo(() => pendingByPoItemMap(poItems, allInwards, inward), [poItems, allInwards, inward]);
 
     const fabricReqIds = useMemo(
         () => new Set(allRequirements.filter(r => (r.item_type || r.type) === 'fabric').map(r => r.id)),
@@ -199,6 +287,14 @@ export default function InwardCreateModal({
     });
 
     const [removedVarGroupKeys, setRemovedVarGroupKeys] = useState(() => new Set(initialSnapshot?.removedVarGroupKeys || []));
+
+    // Unit price entered against a PO-linked line — one input per merged card,
+    // same as the quantity inputs above. Optional: falls back to the PO
+    // item's/requirement's own unit_price server-side (resolveInwardItemContext)
+    // when left blank, so this only needs filling in when the actual received
+    // rate differs from what was ordered.
+    const [unitPriceByGroup,    setUnitPriceByGroup]    = useState(() => initialSnapshot?.unitPriceByGroup    ?? {}); // keyed by group.id (requirement-linked)
+    const [unitPriceByVarGroup, setUnitPriceByVarGroup] = useState(() => initialSnapshot?.unitPriceByVarGroup ?? {}); // keyed by ffVarKey (free-form-by-variant)
 
     // ── Lookups (lazy fetch) ────────────────────────────────────────────────
     const [trimItems,      setTrimItems]      = useState([]);
@@ -404,11 +500,16 @@ export default function InwardCreateModal({
         // FCFS distribution: spread group-level totals into per-req entries
         const distTrimByReq = { ...trimTotalByReq };
         const distFabricByReq = { ...fabricRollsByReq };
+        // A group's unit price (if entered) rides along to every req that group
+        // distributed a nonzero allocation into, so buildItemsFromState can
+        // stamp it onto each resulting item — same price, split across reqs.
+        const distUnitPriceByReq = {};
 
         (poItems || []).forEach(group => {
             if (removedGroupIds.has(group.id)) return;
             const reqs = (group.requirements || []).filter(r => !removedReqIds.has(r.id));
             if (reqs.length === 0) return;
+            const groupPrice = unitPriceByGroup[group.id];
             if (group.item_type === 'fabric') {
                 // Spread the actual rolls (with their bale numbers) across the
                 // group's requirements — splitting a bale only when it straddles
@@ -416,8 +517,12 @@ export default function InwardCreateModal({
                 const rolls = fabricRollsByGroup[group.id] || [];
                 const dist = distributeRolls(rolls, reqs.map(r => ({ id: r.id, cap: pendingByReq[r.id] || 0 })));
                 reqs.forEach(r => {
-                    if (dist[r.id]) distFabricByReq[r.id] = dist[r.id];
-                    else delete distFabricByReq[r.id];
+                    if (dist[r.id]) {
+                        distFabricByReq[r.id] = dist[r.id];
+                        if (groupPrice) distUnitPriceByReq[r.id] = groupPrice;
+                    } else {
+                        delete distFabricByReq[r.id];
+                    }
                 });
             } else {
                 const total = parseFloat(trimTotalByGroup[group.id] || 0);
@@ -427,6 +532,7 @@ export default function InwardCreateModal({
                     const allocated = Math.min(remaining, cap);
                     if (allocated > 0) {
                         distTrimByReq[r.id] = String(allocated);
+                        if (groupPrice) distUnitPriceByReq[r.id] = groupPrice;
                     } else {
                         delete distTrimByReq[r.id];
                     }
@@ -435,6 +541,7 @@ export default function InwardCreateModal({
                 if (remaining > 0.001 && reqs.length > 0) {
                     const last = reqs[reqs.length - 1];
                     distTrimByReq[last.id] = String((parseFloat(distTrimByReq[last.id]) || 0) + remaining);
+                    if (groupPrice) distUnitPriceByReq[last.id] = groupPrice;
                 }
             }
         });
@@ -442,6 +549,7 @@ export default function InwardCreateModal({
         // FCFS distribution for free-form items grouped by variant
         const distFreeFormTrimTotals = { ...freeFormTrimTotals };
         const distFreeFormFabricRolls = { ...freeFormFabricRolls };
+        const distUnitPriceByPoItem = {};
         const ffVarGroupMap = {};
         (poItems || []).filter(g => (g.requirements || []).length === 0).forEach(g => {
             const key = ffVarKey(g);
@@ -452,14 +560,19 @@ export default function InwardCreateModal({
             if (removedVarGroupKeys.has(key)) return;
             const activeItems = items.filter(g => !removedPoItemIds.has(g.id));
             if (activeItems.length === 0) return;
+            const groupPrice = unitPriceByVarGroup[key];
             if (isFabric) {
                 // Same roll-preserving distribution for free-form fabric merged
                 // by variant across its PO-item lines.
                 const rolls = freeFormFabricRollsByVar[key] || [];
                 const dist = distributeRolls(rolls, activeItems.map(g => ({ id: g.id, cap: pendingByPoItem[g.id] || 0 })));
                 activeItems.forEach(g => {
-                    if (dist[g.id]) distFreeFormFabricRolls[g.id] = dist[g.id];
-                    else delete distFreeFormFabricRolls[g.id];
+                    if (dist[g.id]) {
+                        distFreeFormFabricRolls[g.id] = dist[g.id];
+                        if (groupPrice) distUnitPriceByPoItem[g.id] = groupPrice;
+                    } else {
+                        delete distFreeFormFabricRolls[g.id];
+                    }
                 });
             } else {
                 const total = parseFloat(freeFormTrimTotalsByVar[key] || 0);
@@ -469,6 +582,7 @@ export default function InwardCreateModal({
                     const allocated = Math.min(remaining, cap);
                     if (allocated > 0) {
                         distFreeFormTrimTotals[g.id] = String(allocated);
+                        if (groupPrice) distUnitPriceByPoItem[g.id] = groupPrice;
                     } else {
                         delete distFreeFormTrimTotals[g.id];
                     }
@@ -477,6 +591,7 @@ export default function InwardCreateModal({
                 if (remaining > 0.001 && activeItems.length > 0) {
                     const last = activeItems[activeItems.length - 1];
                     distFreeFormTrimTotals[last.id] = String((parseFloat(distFreeFormTrimTotals[last.id]) || 0) + remaining);
+                    if (groupPrice) distUnitPriceByPoItem[last.id] = groupPrice;
                 }
             }
         });
@@ -488,7 +603,9 @@ export default function InwardCreateModal({
             freeFormTrimTotals: distFreeFormTrimTotals,
             freeFormTrimBoxes,
             freeFormFabricRolls: distFreeFormFabricRolls,
-            customGroups
+            customGroups,
+            unitPriceByReq: distUnitPriceByReq,
+            unitPriceByPoItem: distUnitPriceByPoItem,
         };
         const { items: built, error } = buildItemsFromState(state);
         if (error) { setErr(error); return; }
@@ -501,6 +618,7 @@ export default function InwardCreateModal({
             trimTotalByGroup, fabricRollsByGroup,
             freeFormTrimTotals, freeFormTrimBoxes, freeFormFabricRolls, customGroups,
             freeFormTrimTotalsByVar, freeFormFabricRollsByVar,
+            unitPriceByGroup, unitPriceByVarGroup,
             removedReqIds: [...removedReqIds],
             removedPoItemIds: [...removedPoItemIds],
             removedGroupIds: [...removedGroupIds],
@@ -530,11 +648,16 @@ export default function InwardCreateModal({
                     <div>
                         <h2 className="text-base font-black text-slate-800 flex items-center gap-2">
                             <FileText size={16} className="text-emerald-500" />
-                            New Inward (GRN)
+                            {inward ? `Edit Inward · ${inward.grn_number || `GRN #${inward.id}`}` : 'New Inward (GRN)'}
                         </h2>
                         {(poCode || poId) && (
                             <p className="text-[11px] font-semibold text-emerald-700 mt-0.5">
                                 PO · {poCode || `#${poId}`}
+                            </p>
+                        )}
+                        {inward?.approval_status === 'APPROVED' && (
+                            <p className="text-[11px] font-semibold text-amber-600 mt-0.5">
+                                Already approved — saving will submit this change for re-approval.
                             </p>
                         )}
                         <p className="text-xs text-slate-500 mt-0.5">Fill in qty per requirement, rolls per fabric line, or add free-form items.</p>
@@ -698,6 +821,11 @@ export default function InwardCreateModal({
                                                     ))}
                                                 </div>
                                             </div>
+                                            <GroupUnitPriceField
+                                                value={unitPriceByGroup[group.id] || ''}
+                                                onChange={v => setUnitPriceByGroup(prev => ({ ...prev, [group.id]: v }))}
+                                                unitLabel={unit}
+                                            />
                                         </div>
                                     </div>
                                 );
@@ -767,6 +895,11 @@ export default function InwardCreateModal({
                                                 {over && <span className="text-[10px] font-bold text-red-600">Over by {(inThis - totalPending).toLocaleString()} {unit}</span>}
                                             </div>
                                         </div>
+                                        <GroupUnitPriceField
+                                            value={unitPriceByGroup[group.id] || ''}
+                                            onChange={v => setUnitPriceByGroup(prev => ({ ...prev, [group.id]: v }))}
+                                            unitLabel={unit}
+                                        />
                                     </div>
                                 </div>
                             );
@@ -867,6 +1000,11 @@ export default function InwardCreateModal({
                                                         ))}
                                                     </div>
                                                 </div>
+                                                <GroupUnitPriceField
+                                                    value={unitPriceByVarGroup[key] || ''}
+                                                    onChange={v => setUnitPriceByVarGroup(prev => ({ ...prev, [key]: v }))}
+                                                    unitLabel={groupUom}
+                                                />
                                             </div>
                                         </div>
                                     );
@@ -930,6 +1068,11 @@ export default function InwardCreateModal({
                                                     {over && <span className="text-[10px] font-bold text-red-600">Over by {(inThis - totalPending).toLocaleString()} {groupUom}</span>}
                                                 </div>
                                             </div>
+                                            <GroupUnitPriceField
+                                                value={unitPriceByVarGroup[key] || ''}
+                                                onChange={v => setUnitPriceByVarGroup(prev => ({ ...prev, [key]: v }))}
+                                                unitLabel={groupUom}
+                                            />
                                         </div>
                                     </div>
                                 );
@@ -1027,10 +1170,42 @@ export default function InwardCreateModal({
                                                 <input type="text" placeholder="UOM" value={g.uom}
                                                     onChange={e => setCustomGroupField(g._k, 'uom', e.target.value)}
                                                     className="text-[11px] border border-slate-200 rounded px-1.5 py-1" />
-                                                <input type="number" min="0" step="any" placeholder="Unit price" value={g.unit_price}
-                                                    onChange={e => setCustomGroupField(g._k, 'unit_price', e.target.value)}
-                                                    className="text-[11px] border border-slate-200 rounded px-1.5 py-1 text-right tabular-nums" />
+                                                <div className="relative">
+                                                    <input type="number" min="0" step="any" placeholder="Unit price" value={g.unit_price}
+                                                        onChange={e => setCustomGroupField(g._k, 'unit_price', e.target.value)}
+                                                        title="Unit price"
+                                                        className="w-full text-[11px] font-semibold text-slate-800 border border-amber-300 bg-amber-50/60 rounded px-1.5 py-1 pr-5 text-right tabular-nums focus:outline-none focus:border-amber-500" />
+                                                    <button type="button" onClick={() => togglePriceCalc(g._k)}
+                                                        title="Calculate from a box rate"
+                                                        className={`absolute right-0.5 top-1/2 -translate-y-1/2 p-0.5 rounded transition ${priceCalcKey === g._k ? 'text-amber-800' : 'text-amber-500 hover:text-amber-700'}`}>
+                                                        <Calculator size={11} />
+                                                    </button>
+                                                </div>
                                             </div>
+                                            {priceCalcKey === g._k && (() => {
+                                                const computed = (parseFloat(priceCalcRate) > 0 && parseFloat(priceCalcQty) > 0)
+                                                    ? parseFloat(priceCalcRate) / parseFloat(priceCalcQty)
+                                                    : null;
+                                                return (
+                                                    <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mb-2 flex-wrap">
+                                                        <input type="number" min="0" step="0.01" placeholder="Box rate ₹" value={priceCalcRate}
+                                                            onChange={e => setPriceCalcRate(e.target.value)}
+                                                            className="w-20 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400" />
+                                                        <span className="text-[10px] text-amber-500">÷</span>
+                                                        <input type="number" min="0" step="any" placeholder="Qty/box" value={priceCalcQty}
+                                                            onChange={e => setPriceCalcQty(e.target.value)}
+                                                            className="w-20 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400" />
+                                                        <span className="text-[10px] font-bold text-amber-800 flex-1 text-right whitespace-nowrap">
+                                                            {computed != null ? `= ₹${formatPricePrecise(computed)}/${g.uom || 'pcs'}` : '—'}
+                                                        </span>
+                                                        <button type="button" disabled={computed == null}
+                                                            onClick={() => { setCustomGroupField(g._k, 'unit_price', formatPricePrecise(computed)); setPriceCalcKey(null); }}
+                                                            className="text-[10px] font-bold text-white bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed px-2 py-1 rounded-md transition">
+                                                            Use
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })()}
                                             <input type="text" placeholder="Description (optional)" value={g.description}
                                                 onChange={e => setCustomGroupField(g._k, 'description', e.target.value)}
                                                 className="w-full mb-2 text-[11px] border border-slate-200 rounded px-1.5 py-1" />

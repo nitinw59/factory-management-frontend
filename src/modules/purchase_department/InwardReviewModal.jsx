@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X, Loader2, AlertTriangle, ArrowLeft, CheckCircle2, Link2, ChevronDown, ChevronUp, Zap, PartyPopper } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
-import { labelFromGroup } from './inwardShared';
+import { labelFromGroup, describeEditBlock } from './inwardShared';
 import SupplierCodePill from './SupplierCodePill';
 
 /**
@@ -144,9 +144,32 @@ export default function InwardReviewModal({
         return m;
     }, [poItems]);
 
+    // Requirement-linked and PO-item-linked rows default to whatever price was
+    // set on the PO line when it was raised — but InwardCreateModal lets the
+    // user override that per group with the rate actually received, which
+    // rides along on `it.unit_price`. Mirror the backend's own priority here
+    // (resolveInwardItemContext: raw.unit_price wins, PO/requirement price is
+    // only the fallback) so the review screen shows what will actually be
+    // charged instead of a stale PO rate.
+    const resolveUnitPrice = (it) => {
+        if (it.unit_price != null && it.unit_price !== '') return Number(it.unit_price);
+        if (it.requirement_id != null) {
+            const g = reqIdToPoGroup.get(it.requirement_id);
+            return g?.unit_price != null ? Number(g.unit_price) : null;
+        }
+        if (it.purchase_order_item_id != null) {
+            const p = (poItems || []).find(x => String(x.id) === String(it.purchase_order_item_id));
+            return p?.unit_price != null ? Number(p.unit_price) : null;
+        }
+        return null;
+    };
+
     const summary = useMemo(() => {
         const variantPool = Object.values(variantsByTrim).flat();
         return (payload?.items || []).map((it, idx) => {
+            const qty       = Number(it.qty_received || 0);
+            const unitPrice = resolveUnitPrice(it);
+            const amount    = unitPrice != null ? qty * unitPrice : null;
             // If the Create modal already stamped a label, prefer it — no lookup needed.
             if (it._label) {
                 return {
@@ -160,6 +183,7 @@ export default function InwardReviewModal({
                     boxes:    it.boxes || null,
                     isTrim:   it.item_type !== 'fabric',
                     variantId: it.trim_item_variant_id ?? null,
+                    unitPrice, amount,
                 };
             }
             if (it.requirement_id != null) {
@@ -177,6 +201,7 @@ export default function InwardReviewModal({
                     boxes:    it.boxes || null,
                     isTrim:   !isFabric,
                     variantId: g?.trim_item_variant_id ?? null,
+                    unitPrice, amount,
                 };
             }
             if (it.purchase_order_item_id != null) {
@@ -195,6 +220,7 @@ export default function InwardReviewModal({
                     boxes:    it.boxes || null,
                     isTrim:   !isFabric,
                     variantId: p?.trim_item_variant_id ?? null,
+                    unitPrice, amount,
                 };
             }
             const isFabric = it.item_type === 'fabric';
@@ -233,9 +259,18 @@ export default function InwardReviewModal({
                 boxes:    it.boxes || null,
                 isTrim:   !isFabric,
                 variantId: it.trim_item_variant_id ?? null,
+                unitPrice, amount,
             };
         });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [payload, reqIdToPoGroup, poItems, fabricTypes, fabricColors, variantsByTrim, trimItems]);
+
+    const invoiceTotal = useMemo(() => summary.reduce((s, r) => s + (r.amount || 0), 0), [summary]);
+    const missingPriceCount = useMemo(() => summary.filter(r => r.amount == null).length, [summary]);
+    // unit_price can carry up to 5 decimals (box-rate calculator) — cap this at
+    // 5dp too, not 2, or the amount display rounds away that precision. Floor
+    // of 2dp keeps a whole-rupee amount reading as currency.
+    const formatMoney = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 5 });
 
     // ── Consolidated received-breakdown views ───────────────────────────────
     // A GRN is a physical receipt, so alongside the per-line list we show two
@@ -410,7 +445,11 @@ export default function InwardReviewModal({
                 : await purchaseDeptApi.updateInward(inward.id, body, payload.scanFile);
             setSaved(res.data?.data ?? res.data ?? true);
         } catch (e) {
-            setErr(e?.response?.data?.error || e.message || 'Save failed.');
+            const blockedBy = e?.response?.data?.blocked_by;
+            const blocked = blockedBy ? describeEditBlock(blockedBy, inward?.items || []) : [];
+            setErr(blocked.length > 0
+                ? [e?.response?.data?.error, ...blocked].filter(Boolean).join(' ')
+                : (e?.response?.data?.error || e.message || 'Save failed.'));
         } finally {
             setBusy(false);
         }
@@ -426,6 +465,16 @@ export default function InwardReviewModal({
     const savedObj  = saved && typeof saved === 'object' ? saved : null;
     const savedGrn  = savedObj?.grn_number || payload?.grnNumber || null;
     const savedDate = savedObj?.received_date || payload?.receivedDate;
+    // Whether this edit landed as a staged re-approval — read off whatever the
+    // server actually returned, never guessed client-side (the backend spec
+    // has editing an APPROVED inward come back PENDING_UPDATE rather than
+    // applying immediately; see docs/purchase-department/edit-inward-backend-spec.md).
+    const wasStagedForApproval = !isCreate && savedObj?.approval_status === 'PENDING_UPDATE';
+    // Rate-only edits on an already-consumed/APPROVED inward apply immediately
+    // (no re-approval, no consumption guard — see edit-inward-backend-spec.md
+    // §"Rate-only edits") and come back tagged edit_outcome:'rate_corrected'
+    // rather than PENDING_UPDATE, so they need their own success copy.
+    const wasRateCorrection = !isCreate && savedObj?.edit_outcome === 'rate_corrected';
 
     // Resolve the PR allocations of a summary row for the success screen.
     const allocationsForRow = (idx) => Object.entries(allocations[idx] || {})
@@ -447,7 +496,7 @@ export default function InwardReviewModal({
                         <h2 className="text-base font-black text-slate-800 flex items-center gap-2">
                             {saved ? <PartyPopper size={16} className="text-emerald-600" /> : <CheckCircle2 size={16} className="text-emerald-500" />}
                             {saved
-                                ? `Inward ${isCreate ? 'recorded' : 'updated'} successfully`
+                                ? (wasStagedForApproval ? 'Edit submitted for approval' : wasRateCorrection ? 'Rate corrected' : `Inward ${isCreate ? 'recorded' : 'updated'} successfully`)
                                 : 'Review before saving'}
                         </h2>
                         {(poCode || poId) && (
@@ -457,11 +506,16 @@ export default function InwardReviewModal({
                         )}
                         {saved ? (
                             <p className="text-xs text-slate-600 mt-0.5">
-                                GRN {savedGrn || (savedObj?.id ? `#${savedObj.id}` : '(auto)')} · dated {savedDate} · {summary.length} line{summary.length !== 1 ? 's' : ''} posted.
+                                {wasStagedForApproval
+                                    ? `GRN ${savedGrn || (savedObj?.id ? `#${savedObj.id}` : '')} — the original approved record and its stock remain untouched until a purchase-manager reviews this change.`
+                                    : wasRateCorrection
+                                        ? `GRN ${savedGrn || (savedObj?.id ? `#${savedObj.id}` : '')} — the unit price was updated in place. No quantities or stock moved, so no re-approval was needed.`
+                                        : `GRN ${savedGrn || (savedObj?.id ? `#${savedObj.id}` : '(auto)')} · dated ${savedDate} · ${summary.length} line${summary.length !== 1 ? 's' : ''} posted.`}
                             </p>
                         ) : (
                             <p className="text-xs text-slate-500 mt-0.5">
                                 {summary.length} line{summary.length !== 1 ? 's' : ''} will be {isCreate ? 'recorded' : 'updated'} on GRN {payload?.grnNumber || '(auto)'} dated {payload?.receivedDate}.
+                                {!isCreate && inward?.approval_status === 'APPROVED' && ' This inward is already approved — saving will submit the change for re-approval.'}
                             </p>
                         )}
                     </div>
@@ -538,11 +592,24 @@ export default function InwardReviewModal({
                                             {row.rolls && row.rolls.length > 0 && (
                                                 <p className="text-[9px] text-slate-400">{row.rolls.length} roll{row.rolls.length !== 1 ? 's' : ''}</p>
                                             )}
+                                            <p className="text-xs font-bold text-slate-700 tabular-nums mt-0.5">
+                                                {row.amount != null ? `₹${formatMoney(row.amount)}` : <span className="font-normal text-slate-300">no price</span>}
+                                            </p>
                                         </div>
                                     </div>
                                 </div>
                             );
                         })}
+                    </div>
+
+                    <div className="flex items-center justify-between bg-slate-800 text-white rounded-xl px-4 py-2.5">
+                        <div>
+                            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-300">Total Invoice Value</p>
+                            {missingPriceCount > 0 && (
+                                <p className="text-[10px] text-amber-300 mt-0.5">{missingPriceCount} line{missingPriceCount === 1 ? '' : 's'} missing a price — total is incomplete</p>
+                            )}
+                        </div>
+                        <p className="text-lg font-black tabular-nums">₹{formatMoney(invoiceTotal)}</p>
                     </div>
 
                     {breakdownPanel}
@@ -610,6 +677,9 @@ export default function InwardReviewModal({
                                             {row.boxes && row.boxes.length > 0 && (
                                                 <p className="text-[9px] text-slate-400">{row.boxes.reduce((s, b) => s + (parseFloat(b.box_count) || 0), 0)} box{row.boxes.reduce((s, b) => s + (parseFloat(b.box_count) || 0), 0) !== 1 ? 'es' : ''}</p>
                                             )}
+                                            <p className="text-xs font-bold text-slate-700 tabular-nums mt-0.5">
+                                                {row.amount != null ? `₹${formatMoney(row.amount)}` : <span className="font-normal text-slate-300">no price</span>}
+                                            </p>
                                         </div>
                                     </div>
 
@@ -727,6 +797,16 @@ export default function InwardReviewModal({
                         })}
                     </div>
 
+                    <div className="flex items-center justify-between bg-slate-800 text-white rounded-xl px-4 py-2.5">
+                        <div>
+                            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-300">Total Invoice Value</p>
+                            {missingPriceCount > 0 && (
+                                <p className="text-[10px] text-amber-300 mt-0.5">{missingPriceCount} line{missingPriceCount === 1 ? '' : 's'} missing a price — total is incomplete</p>
+                            )}
+                        </div>
+                        <p className="text-lg font-black tabular-nums">₹{formatMoney(invoiceTotal)}</p>
+                    </div>
+
                     {breakdownPanel}
 
                     {payload?.notes && (
@@ -761,7 +841,7 @@ export default function InwardReviewModal({
                                 className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 px-4 py-1.5 rounded-lg transition shadow-sm"
                             >
                                 {busy && <Loader2 size={12} className="animate-spin" />}
-                                {isCreate ? 'Confirm & Save' : 'Confirm changes'}
+                                {isCreate ? 'Confirm & Save' : (inward?.approval_status === 'APPROVED' ? 'Submit for approval' : 'Confirm changes')}
                             </button>
                         </>
                     )}

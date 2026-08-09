@@ -3,28 +3,43 @@ import { useSearchParams } from 'react-router-dom';
 import {
     Loader2, Search, X, FileText, CheckCircle2, XCircle,
     Clock, Package, Scissors, Wrench, Tag, ExternalLink,
-    AlertTriangle, Inbox, Plus, User, ChevronDown,
+    AlertTriangle, Inbox, Plus, User, ChevronDown, Pencil, RefreshCw,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { useAuth } from '../../context/AuthContext';
 import { IMAGE_BASE_URL } from '../../utils/api';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import StandaloneInwardModal from './StandaloneInwardModal';
-import { uomLabel } from './inwardShared';
+import InwardCreateModal from './InwardCreateModal';
+import InwardReviewModal from './InwardReviewModal';
+import { uomLabel, describeEditBlock, seedSnapshotFromInward } from './inwardShared';
+
+// The staged re-approval backend described in
+// docs/purchase-department/edit-inward-backend-spec.md has shipped (verified
+// against factory-management-backend's updateInward/approveInward/rejectInward
+// — PENDING_UPDATE status, purchase_inward_pending_edits staging, consumption
+// guard) — editing an already-APPROVED inward is safe to enable.
+const EDIT_APPROVED_INWARD_ENABLED = true;
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const STATUS_CHIPS = [
     { key: 'ALL',              label: 'All' },
-    { key: 'PENDING_APPROVAL', label: 'Pending',  icon: Clock,         cls: 'text-amber-600' },
-    { key: 'APPROVED',         label: 'Approved', icon: CheckCircle2,  cls: 'text-emerald-600' },
-    { key: 'REJECTED',         label: 'Rejected', icon: XCircle,       cls: 'text-rose-600' },
+    { key: 'PENDING_APPROVAL', label: 'Pending',      icon: Clock,        cls: 'text-amber-600' },
+    { key: 'APPROVED',         label: 'Approved',     icon: CheckCircle2, cls: 'text-emerald-600' },
+    { key: 'REJECTED',         label: 'Rejected',     icon: XCircle,      cls: 'text-rose-600' },
+    // Not reachable until the backend spec ships (see EDIT_APPROVED_INWARD_ENABLED
+    // above) — kept here so the filter is ready, not to imply it's live today.
+    { key: 'PENDING_UPDATE',   label: 'Edit pending', icon: RefreshCw,    cls: 'text-blue-600' },
 ];
 
 const STATUS_CFG = {
     PENDING_APPROVAL: { pill: 'bg-amber-100 text-amber-700 border-amber-200',   label: 'Pending' },
     APPROVED:         { pill: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: 'Approved' },
     REJECTED:         { pill: 'bg-rose-100 text-rose-700 border-rose-200',      label: 'Rejected' },
+    // Distinct from PENDING_APPROVAL on purpose — this is an approved record
+    // with a staged edit awaiting re-approval, not a brand-new record.
+    PENDING_UPDATE:   { pill: 'bg-blue-100 text-blue-700 border-blue-200',      label: 'Edit pending' },
 };
 
 const ITEM_TYPE_ICONS = {
@@ -35,6 +50,10 @@ const ITEM_TYPE_ICONS = {
 };
 
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en', { dateStyle: 'medium' }) : '—';
+// unit_price can carry up to 5 decimals (box-rate calculator) — cap this at
+// 5dp too, not 2, or the amount display rounds away that precision. Floor of
+// 2dp keeps a whole-rupee amount reading as currency.
+const formatMoney = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 5 });
 
 // ── Reject Modal ──────────────────────────────────────────────────────────────
 
@@ -106,11 +125,29 @@ function RejectModal({ inward, onConfirm, onClose }) {
 
 // ── Inward Detail Modal ───────────────────────────────────────────────────────
 
-function InwardDetailModal({ inward, canApprove, onApprove, onReject, onClose }) {
-    const isPending  = inward.approval_status === 'PENDING_APPROVAL';
-    const isApproved = inward.approval_status === 'APPROVED';
-    const isRejected = inward.approval_status === 'REJECTED';
+function InwardDetailModal({ inward, canApprove, canEditRow, onApprove, onReject, onEdit, onClose }) {
+    const isPending      = inward.approval_status === 'PENDING_APPROVAL';
+    const isApproved     = inward.approval_status === 'APPROVED';
+    const isRejected     = inward.approval_status === 'REJECTED';
+    const isPendingUpdate = inward.approval_status === 'PENDING_UPDATE';
     const [busyApprove, setBusyApprove] = useState(false);
+
+    // Not reachable until the backend spec ships — see docs/purchase-department/
+    // edit-inward-backend-spec.md §4. Fetched lazily only while viewing a
+    // PENDING_UPDATE record so an approver isn't approving blind.
+    const [pendingEdit,      setPendingEdit]      = useState(null);
+    const [pendingEditErr,   setPendingEditErr]   = useState(null);
+    const [pendingEditLoading, setPendingEditLoading] = useState(false);
+    useEffect(() => {
+        if (!isPendingUpdate) return;
+        let cancelled = false;
+        setPendingEditLoading(true);
+        purchaseDeptApi.getPendingEdit(inward.id)
+            .then(r => { if (!cancelled) setPendingEdit(r.data?.data ?? r.data ?? null); })
+            .catch(e => { if (!cancelled) setPendingEditErr(e?.response?.data?.error || 'Could not load the proposed changes.'); })
+            .finally(() => { if (!cancelled) setPendingEditLoading(false); });
+        return () => { cancelled = true; };
+    }, [isPendingUpdate, inward.id]);
 
     const scanUrl = useMemo(() => {
         const url = inward.scan_url;
@@ -150,8 +187,25 @@ function InwardDetailModal({ inward, canApprove, onApprove, onReject, onClose })
             const rollUoms = [...new Set(rolls.map(r => r.uom || 'meter'))];
             unit = rollUoms.length === 0 ? 'm' : rollUoms.length === 1 ? uomLabel(rollUoms[0]) : 'mixed';
         }
-        return { key: `r${idx}`, type, name, details, qty: parseFloat(it.qty_received || 0), unit, rolls };
+        const qty = parseFloat(it.qty_received || 0);
+        const unitPrice = it.unit_price != null && it.unit_price !== '' ? Number(it.unit_price) : null;
+        // Prefer a server-computed line total if present (rounding may not exactly
+        // match qty × unit_price); fall back to computing it ourselves.
+        const amount = it.total_price != null ? Number(it.total_price)
+            : it.line_value != null ? Number(it.line_value)
+            : (unitPrice != null ? qty * unitPrice : null);
+        const boxes = it.boxes || [];
+        return { key: `r${idx}`, type, name, details, qty, unit, rolls, boxes, unitPrice, amount };
     }), [inward, isPending]);
+
+    const totalAmount = useMemo(
+        () => resolvedRows.reduce((s, r) => s + (r.amount || 0), 0),
+        [resolvedRows]
+    );
+    const missingPriceCount = resolvedRows.filter(r => r.amount == null).length;
+    const invoiceTotal = inward.total_value != null ? Number(inward.total_value)
+        : inward.invoice_value != null ? Number(inward.invoice_value)
+        : totalAmount;
 
     const handleApprove = async () => {
         setBusyApprove(true);
@@ -223,6 +277,50 @@ function InwardDetailModal({ inward, canApprove, onApprove, onReject, onClose })
                             )}
                         </div>
                     )}
+                    {isPendingUpdate && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 text-sm text-blue-700">
+                            <span className="font-bold flex items-center gap-1.5"><RefreshCw size={14} /> Edit awaiting approval</span>
+                            <p className="text-xs text-blue-600 mt-0.5">
+                                The items and stock shown below are the original approved data — still live and unaffected until this edit is approved or rejected.
+                            </p>
+                            {pendingEditLoading && (
+                                <p className="flex items-center gap-1.5 text-[11px] font-bold text-blue-500 mt-2"><Loader2 size={11} className="animate-spin" /> Loading proposed changes…</p>
+                            )}
+                            {pendingEditErr && <p className="text-[11px] text-blue-500 mt-2">{pendingEditErr}</p>}
+                            {pendingEdit?.proposed_items?.length > 0 && (
+                                <div className="mt-2 bg-white border border-blue-100 rounded-lg px-2.5 py-2 space-y-1">
+                                    <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">Proposed changes</p>
+                                    <ul className="space-y-0.5">
+                                        {pendingEdit.proposed_items.map((it, i) => (
+                                            <li key={i} className="text-[11px] text-slate-600 font-mono">
+                                                {it.item_type} · qty {it.qty_received}{it.unit_price ? ` · ₹${it.unit_price}` : ''}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* GRN meta — everything about this receipt in one glance */}
+                    <div className="flex flex-wrap gap-1.5">
+                        {inward.id != null && (
+                            <span className="text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 rounded-lg px-2 py-1">Inward #{inward.id}</span>
+                        )}
+                        <span className="text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 rounded-lg px-2 py-1">Received {fmtDate(inward.received_date)}</span>
+                        {inward.condition && (
+                            <span className="text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 rounded-lg px-2 py-1">Condition · {inward.condition}</span>
+                        )}
+                        {inward.supplier_name && (
+                            <span className="text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 rounded-lg px-2 py-1">Supplier · {inward.supplier_name}</span>
+                        )}
+                        {inward.created_by_name && (
+                            <span className="text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 rounded-lg px-2 py-1">Recorded by {inward.created_by_name}</span>
+                        )}
+                        {inward.po_code && (
+                            <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg px-2 py-1">PO · {inward.po_code}</span>
+                        )}
+                    </div>
 
                     {/* Items */}
                     <div className="space-y-1.5">
@@ -243,6 +341,14 @@ function InwardDetailModal({ inward, canApprove, onApprove, onReject, onClose })
                                                 ))}
                                             </ul>
                                         )}
+                                        {row.boxes.length > 0 && (
+                                            <p className="mt-1 text-[10px] text-slate-500 font-mono">
+                                                {row.boxes.map(b => `${b.box_count}×${b.qty_per_box}`).join(' + ')} boxes
+                                            </p>
+                                        )}
+                                        {row.unitPrice != null && (
+                                            <p className="text-[10px] text-slate-400 mt-0.5">₹{row.unitPrice.toLocaleString('en-IN', { maximumFractionDigits: 5 })} / {row.unit}</p>
+                                        )}
                                     </div>
                                     <div className="shrink-0 text-right">
                                         <p className="text-sm font-bold text-emerald-700 tabular-nums">
@@ -251,10 +357,24 @@ function InwardDetailModal({ inward, canApprove, onApprove, onReject, onClose })
                                         {row.rolls.length > 0 && (
                                             <p className="text-[9px] text-slate-400">{row.rolls.length} roll{row.rolls.length !== 1 ? 's' : ''}</p>
                                         )}
+                                        <p className="text-xs font-bold text-slate-700 tabular-nums mt-0.5">
+                                            {row.amount != null ? `₹${formatMoney(row.amount)}` : <span className="font-normal text-slate-300">no price</span>}
+                                        </p>
                                     </div>
                                 </div>
                             );
                         })}
+                    </div>
+
+                    {/* Total invoice value */}
+                    <div className="flex items-center justify-between bg-slate-800 text-white rounded-xl px-4 py-2.5">
+                        <div>
+                            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-300">Total Invoice Value</p>
+                            {missingPriceCount > 0 && (
+                                <p className="text-[10px] text-amber-300 mt-0.5">{missingPriceCount} line{missingPriceCount === 1 ? '' : 's'} missing a price — total is incomplete</p>
+                            )}
+                        </div>
+                        <p className="text-lg font-black tabular-nums">₹{formatMoney(invoiceTotal)}</p>
                     </div>
 
                     {inward.notes && (
@@ -272,7 +392,7 @@ function InwardDetailModal({ inward, canApprove, onApprove, onReject, onClose })
                     )}
                 </div>
 
-                {/* Footer — approve/reject or just close */}
+                {/* Footer — approve/reject, edit, or just close */}
                 <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-slate-100">
                     {isPending && canApprove ? (
                         <>
@@ -283,6 +403,11 @@ function InwardDetailModal({ inward, canApprove, onApprove, onReject, onClose })
                                 <XCircle size={12} /> Reject
                             </button>
                             <div className="flex items-center gap-2">
+                                {canEditRow && (
+                                    <button onClick={onEdit} className="flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-orange-600 border border-slate-200 hover:border-orange-200 px-3 py-1.5 rounded-lg transition">
+                                        <Pencil size={12} /> Edit
+                                    </button>
+                                )}
                                 <button onClick={onClose} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition">
                                     Close
                                 </button>
@@ -297,7 +422,12 @@ function InwardDetailModal({ inward, canApprove, onApprove, onReject, onClose })
                             </div>
                         </>
                     ) : (
-                        <div className="ml-auto">
+                        <div className="flex items-center justify-end gap-2 ml-auto">
+                            {canEditRow && !isPendingUpdate && (isApproved ? EDIT_APPROVED_INWARD_ENABLED : true) && (
+                                <button onClick={onEdit} className="flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-orange-600 border border-slate-200 hover:border-orange-200 px-3 py-1.5 rounded-lg transition">
+                                    <Pencil size={12} /> Edit
+                                </button>
+                            )}
                             <button onClick={onClose} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition">
                                 Close
                             </button>
@@ -348,6 +478,20 @@ function Toast({ msg, type }) {
 export default function InwardsPage() {
     const { user } = useAuth();
     const canApprove = user?.role === 'purchase_manager' || user?.role === 'factory_admin';
+    // Matches the backend's route guard on PATCH /inwards/:id — purchase_manager,
+    // factory_admin, and store_manager can all edit any inward, no ownership
+    // restriction (see docs/purchase-department/edit-inward-backend-spec.md §7).
+    // Not per-row today, but kept as a function in case a restriction returns.
+    const canEdit = useCallback(() => {
+        if (!user) return false;
+        return ['purchase_manager', 'factory_admin', 'store_manager'].includes(user.role);
+    }, [user]);
+    // Whether the Edit action is actually clickable for this row today — see
+    // EDIT_APPROVED_INWARD_ENABLED above.
+    const editIsLive = useCallback((row) =>
+        canEdit(row) && row.approval_status !== 'PENDING_UPDATE' &&
+        (row.approval_status !== 'APPROVED' || EDIT_APPROVED_INWARD_ENABLED),
+    [canEdit]);
 
     const [searchParams, setSearchParams] = useSearchParams();
 
@@ -372,6 +516,15 @@ export default function InwardsPage() {
     const [busyId,      setBusyId]      = useState(null);
     const [showCreate,  setShowCreate]  = useState(false);
     const [toast,       setToast]       = useState(null);
+
+    // Edit-inward state — standalone/CUSTOM rows edit in-place via
+    // StandaloneInwardModal; PO-linked rows route through the same
+    // InwardCreateModal → InwardReviewModal pair the "against a PO" create
+    // flow uses, prefilled from this row.
+    const [editTarget, setEditTarget] = useState(null); // standalone inward row being edited, or null
+    const [poEditCtx,  setPoEditCtx]  = useState(null); // { po, items, inwards, inward, snapshot, payload }
+    const [poEditStep, setPoEditStep] = useState(null); // null | 'create' | 'review'
+    const [poEditLoading, setPoEditLoading] = useState(false);
 
     const showToast = useCallback((msg, type = 'error') => {
         setToast({ msg, type });
@@ -418,15 +571,27 @@ export default function InwardsPage() {
     };
 
     const handleApprove = useCallback(async (inward) => {
-        if (!window.confirm(`Approve ${inward.grn_number || `GRN #${inward.id}`}? Stock will be applied immediately.`)) return;
+        const isEditApproval = inward.approval_status === 'PENDING_UPDATE';
+        if (!window.confirm(isEditApproval
+            ? `Approve the pending edit on ${inward.grn_number || `GRN #${inward.id}`}? The original stock will be reversed and the new items applied immediately.`
+            : `Approve ${inward.grn_number || `GRN #${inward.id}`}? Stock will be applied immediately.`)) return;
         setBusyId(inward.id);
         try {
-            await purchaseDeptApi.approveInward(inward.id);
-            showToast(`${inward.grn_number || 'Inward'} approved`, 'success');
+            const res = await purchaseDeptApi.approveInward(inward.id);
+            // edit_outcome is server-driven (see docs/purchase-department/
+            // edit-inward-backend-spec.md §4) — not live yet, so this falls
+            // back to the plain "approved" copy against the current backend.
+            const outcome = res?.data?.edit_outcome;
+            showToast(outcome === 'edit_applied'
+                ? `${inward.grn_number || 'Inward'} — edit approved, stock updated.`
+                : `${inward.grn_number || 'Inward'} approved`, 'success');
             setDetail(null);
             fetchInwards();
         } catch (e) {
-            if (e?.response?.status === 409) {
+            if (e?.response?.status === 409 && e?.response?.data?.blocked_by) {
+                const blocked = describeEditBlock(e.response.data.blocked_by, inward.items || []);
+                showToast([e?.response?.data?.error, ...blocked].filter(Boolean).join(' '));
+            } else if (e?.response?.status === 409) {
                 showToast('Already actioned by someone else — refreshing.');
                 setDetail(null);
                 fetchInwards();
@@ -440,8 +605,12 @@ export default function InwardsPage() {
 
     const handleRejectConfirm = useCallback(async (notes) => {
         if (!rejectTarget) return;
-        await purchaseDeptApi.rejectInward(rejectTarget.id, notes);
-        showToast(`${rejectTarget.grn_number || 'Inward'} rejected`, 'success');
+        const isEditRejection = rejectTarget.approval_status === 'PENDING_UPDATE';
+        const res = await purchaseDeptApi.rejectInward(rejectTarget.id, notes);
+        const outcome = res?.data?.edit_outcome;
+        showToast(outcome === 'edit_discarded' || isEditRejection
+            ? `${rejectTarget.grn_number || 'Inward'} — edit rejected, original record unchanged.`
+            : `${rejectTarget.grn_number || 'Inward'} rejected`, 'success');
         setRejectTarget(null);
         setDetail(null);
         fetchInwards();
@@ -455,6 +624,36 @@ export default function InwardsPage() {
             fetchInwards();
         }
     }, [fetchInwards, showToast]);
+
+    // Edit entry point — standalone/CUSTOM rows edit in-place; PO-linked rows
+    // need the PO's item catalogue + other inwards loaded first, same as
+    // StandaloneInwardModal.handleLoadPo does for the "against a PO" create flow.
+    const openEdit = useCallback(async (row) => {
+        if (row.po_code) {
+            setPoEditLoading(true);
+            try {
+                const [poRes, iwRes] = await Promise.all([
+                    purchaseDeptApi.getOrderById(row.purchase_order_id),
+                    purchaseDeptApi.getInwards(row.purchase_order_id).catch(() => ({ data: [] })),
+                ]);
+                const po = poRes.data?.data ?? poRes.data;
+                const otherInwards = iwRes.data?.data ?? iwRes.data ?? [];
+                if (!po) throw new Error('Could not load the PO for this inward.');
+                setPoEditCtx({
+                    po, items: po.items || [], inwards: otherInwards, inward: row,
+                    snapshot: seedSnapshotFromInward(row, po.items || []),
+                    payload: null,
+                });
+                setPoEditStep('create');
+            } catch (e) {
+                showToast(e?.response?.data?.error || e.message || 'Failed to load PO for edit.');
+            } finally {
+                setPoEditLoading(false);
+            }
+        } else {
+            setEditTarget(row);
+        }
+    }, [showToast]);
 
     return (
         <div className="p-4 sm:p-6 space-y-5">
@@ -602,7 +801,9 @@ export default function InwardsPage() {
                             <tbody className="divide-y divide-slate-100">
                                 {inwards.map(row => {
                                     const scfg = STATUS_CFG[row.approval_status] || STATUS_CFG.PENDING_APPROVAL;
-                                    const isPendingRow = row.approval_status === 'PENDING_APPROVAL';
+                                    // PENDING_UPDATE (edit awaiting re-approval) goes through the same
+                                    // approve/reject actions as a first-time PENDING_APPROVAL row.
+                                    const isPendingRow = row.approval_status === 'PENDING_APPROVAL' || row.approval_status === 'PENDING_UPDATE';
                                     const isRowBusy = busyId === row.id;
                                     return (
                                         <tr key={row.id} className="hover:bg-slate-50/60 transition-colors">
@@ -652,6 +853,22 @@ export default function InwardsPage() {
                                                     >
                                                         <FileText size={11} /> Details
                                                     </button>
+                                                    {canEdit(row) && (
+                                                        <button
+                                                            onClick={() => editIsLive(row) && openEdit(row)}
+                                                            disabled={!editIsLive(row) || poEditLoading}
+                                                            title={
+                                                                row.approval_status === 'PENDING_UPDATE'
+                                                                    ? 'An edit is already pending approval for this inward.'
+                                                                    : (row.approval_status === 'APPROVED' && !EDIT_APPROVED_INWARD_ENABLED)
+                                                                        ? "Editing an approved inward needs a backend update (staged re-approval) that hasn't shipped yet."
+                                                                        : 'Edit this inward'
+                                                            }
+                                                            className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-orange-600 border border-slate-200 hover:border-orange-200 px-2.5 py-1 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-slate-600 disabled:hover:border-slate-200"
+                                                        >
+                                                            <Pencil size={11} /> Edit
+                                                        </button>
+                                                    )}
                                                     {isPendingRow && canApprove && (
                                                         <>
                                                             <button
@@ -687,8 +904,10 @@ export default function InwardsPage() {
                 <InwardDetailModal
                     inward={detail}
                     canApprove={canApprove}
+                    canEditRow={editIsLive(detail)}
                     onApprove={() => handleApprove(detail)}
                     onReject={() => { setRejectTarget(detail); }}
+                    onEdit={() => { setDetail(null); openEdit(detail); }}
                     onClose={() => setDetail(null)}
                 />
             )}
@@ -705,6 +924,50 @@ export default function InwardsPage() {
                 <StandaloneInwardModal
                     onClose={() => setShowCreate(false)}
                     onCreated={() => { setShowCreate(false); fetchInwards(); }}
+                />
+            )}
+
+            {/* Edit — standalone/CUSTOM inward */}
+            {editTarget && (
+                <StandaloneInwardModal
+                    inward={editTarget}
+                    onClose={() => setEditTarget(null)}
+                    onCreated={() => { setEditTarget(null); fetchInwards(); }}
+                />
+            )}
+
+            {/* Edit — PO-linked inward: same InwardCreateModal → InwardReviewModal
+                pair the "against a PO" create flow uses, prefilled from the row. */}
+            {poEditStep === 'create' && poEditCtx && (
+                <InwardCreateModal
+                    poId={poEditCtx.po.id}
+                    poCode={poEditCtx.po.po_code}
+                    poItems={poEditCtx.items}
+                    supplierId={poEditCtx.po.supplier_id}
+                    supplierName={poEditCtx.po.supplier_name}
+                    allInwards={poEditCtx.inwards}
+                    inward={poEditCtx.inward}
+                    initialSnapshot={poEditCtx.snapshot}
+                    onClose={() => { setPoEditStep(null); setPoEditCtx(null); }}
+                    onBack={() => { setPoEditStep(null); setPoEditCtx(null); }}
+                    onReview={({ payload, snapshot }) => {
+                        setPoEditCtx(prev => ({ ...prev, payload, snapshot }));
+                        setPoEditStep('review');
+                    }}
+                />
+            )}
+            {poEditStep === 'review' && poEditCtx?.payload && (
+                <InwardReviewModal
+                    poId={poEditCtx.po.id}
+                    poCode={poEditCtx.po.po_code}
+                    payload={poEditCtx.payload}
+                    poItems={poEditCtx.items}
+                    supplierId={poEditCtx.po.supplier_id}
+                    supplierName={poEditCtx.po.supplier_name}
+                    inward={poEditCtx.inward}
+                    onClose={() => { setPoEditStep(null); setPoEditCtx(null); }}
+                    onBack={() => setPoEditStep('create')}
+                    onConfirmed={() => { setPoEditStep(null); setPoEditCtx(null); fetchInwards(); }}
                 />
             )}
         </div>

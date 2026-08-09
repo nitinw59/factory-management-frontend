@@ -46,6 +46,9 @@ export const purchaseDeptApi = {
             : api.post('/purchase-department/inwards', data),
     approveInward: (id) => api.patch(`/purchase-department/inwards/${id}/approve`),
     rejectInward: (id, notes) => api.patch(`/purchase-department/inwards/${id}/reject`, { notes }),
+    // Edit Inward — proposed changes on a PENDING_UPDATE inward (backend: see
+    // docs/purchase-department/edit-inward-backend-spec.md §4). Not live yet.
+    getPendingEdit: (id) => api.get(`/purchase-department/inwards/${id}/pending-edit`),
 
     // PO documents — generated PDFs (TODO backend):
     //   POST   /purchase-department/orders/:id/po-document   (multipart: file=<pdf>, version, generated_at)

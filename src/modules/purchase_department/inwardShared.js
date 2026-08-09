@@ -3,6 +3,31 @@ import { Package, Scissors, Tag, Wrench } from 'lucide-react';
 // ── Constants ────────────────────────────────────────────────────────────────
 export const TYPE_ICON = { fabric: Package, trim: Scissors, spare: Wrench, other: Tag };
 
+// Resolves an inward-edit 409's structured `blocked_by` payload (see
+// docs/purchase-department/edit-inward-backend-spec.md §5) into human-readable
+// lines, using the inward's own already-loaded items[] for labels — the
+// backend intentionally doesn't resolve friendly names itself.
+export const describeEditBlock = (blockedBy, items = []) => {
+    if (!blockedBy) return [];
+    const byItemId = new Map(items.map(it => [String(it.id), it]));
+    const lines = [];
+    (blockedBy.fabric_rolls || []).forEach(b => {
+        const it = byItemId.get(String(b.inward_item_id));
+        const label = it ? (it.fabric_type_name || 'Fabric') : 'Fabric roll';
+        lines.push(`${label} · bale ${b.bale_no || '—'} is already ${uomLikeStatus(b.status)} — not editable.`);
+    });
+    (blockedBy.consumption_floor || []).forEach(b => {
+        const it = byItemId.get(String(b.inward_item_id));
+        const label = it
+            ? (it.trim_item_name || it.spare_part_name || it.general_item_name || `${b.item_type} item`)
+            : `${b.item_type} item`;
+        lines.push(`${label} · current stock (${b.current_stock}) is below what this inward received (${b.original_qty}) — some has already been used.`);
+    });
+    return lines;
+};
+
+const uomLikeStatus = (status) => (status || 'unavailable').toString().toLowerCase().replace(/_/g, ' ');
+
 // ── Pure label/value helpers ────────────────────────────────────────────────
 export const reqTotal = (r) =>
     parseFloat(r.meters_required ?? r.quantity_required ?? 0);
@@ -197,7 +222,16 @@ export const buildItemsFromState = (state) => {
         freeFormTrimTotals, freeFormTrimBoxes,
         freeFormFabricRolls,
         customGroups,
+        // Optional — a PO-linked line's actual received rate, when it differs
+        // from what the PO/requirement itself already carries. Left blank
+        // (or entirely omitted), the backend falls back to the PO's own
+        // unit_price server-side (resolveInwardItemContext), so these maps
+        // only need entries for lines the user actually priced.
+        unitPriceByReq,
+        unitPriceByPoItem,
     } = state;
+    const priceForReq    = (reqId) => { const v = (unitPriceByReq    || {})[reqId]; return v === '' || v == null ? null : parseFloat(v); };
+    const priceForPoItem = (poItemId) => { const v = (unitPriceByPoItem || {})[poItemId]; return v === '' || v == null ? null : parseFloat(v); };
 
     // Trim req entries — box breakdown takes priority over total-only
     const reqIds = new Set([
@@ -212,10 +246,11 @@ export const buildItemsFromState = (state) => {
                 requirement_id: parseInt(reqId, 10),
                 qty_received:   boxes.reduce((s, b) => s + b.box_count * b.qty_per_box, 0),
                 boxes,
+                unit_price:     priceForReq(reqId),
             });
         } else {
             const q = parseFloat(((trimTotalByReq || {})[reqId]) ?? 0);
-            if (q > 0) reqEntries.push({ requirement_id: parseInt(reqId, 10), qty_received: q });
+            if (q > 0) reqEntries.push({ requirement_id: parseInt(reqId, 10), qty_received: q, unit_price: priceForReq(reqId) });
         }
     }
 
@@ -226,6 +261,7 @@ export const buildItemsFromState = (state) => {
             requirement_id: x.reqId,
             qty_received:   x.rolls.reduce((s, r) => s + r.meter, 0),
             rolls:          x.rolls,
+            unit_price:     priceForReq(x.reqId),
         }));
 
     // Free-form trim entries — same dual-mode
@@ -241,10 +277,11 @@ export const buildItemsFromState = (state) => {
                 purchase_order_item_id: parseInt(poItemId, 10),
                 qty_received:           boxes.reduce((s, b) => s + b.box_count * b.qty_per_box, 0),
                 boxes,
+                unit_price:             priceForPoItem(poItemId),
             });
         } else {
             const q = parseFloat(((freeFormTrimTotals || {})[poItemId]) ?? 0);
-            if (q > 0) freeEntries.push({ purchase_order_item_id: parseInt(poItemId, 10), qty_received: q });
+            if (q > 0) freeEntries.push({ purchase_order_item_id: parseInt(poItemId, 10), qty_received: q, unit_price: priceForPoItem(poItemId) });
         }
     }
 
@@ -255,6 +292,7 @@ export const buildItemsFromState = (state) => {
             purchase_order_item_id: x.poItemId,
             qty_received:           x.rolls.reduce((s, r) => s + r.meter, 0),
             rolls:                  x.rolls,
+            unit_price:             priceForPoItem(x.poItemId),
         }));
 
     const customEntries = [];
@@ -304,4 +342,203 @@ export const buildItemsFromState = (state) => {
     const itemsArr = [...reqEntries, ...fabricReqEntries, ...freeEntries, ...fabricFreeEntries, ...customEntries];
     if (itemsArr.length === 0) return { items: null, error: 'Add at least one item (rolls for fabric, qty for trim).' };
     return { items: itemsArr, error: null };
+};
+
+// ── Reverse mappers — inward.items[] → form state (Edit Inward) ─────────────
+// These invert buildItemsFromState/emptyLine so an existing inward's already
+// -received items can prefill the create forms for editing. Source data is
+// whatever the list endpoints (listAllInwards/listInwardsForPO) already embed
+// per item — see loadInwardItemsDetailed on the backend: raw FK ids
+// (fabric_type_id, fabric_color_id, trim_item_variant_id, spare_part_id,
+// general_item_id), qty_received, unit_price, description, uom, and a
+// `rolls[]` array (with live `status`) for fabric lines. Note: box-count
+// breakdowns are not persisted server-side — only the summed qty_received
+// comes back, so a re-opened box-breakdown line prefills as a plain total.
+
+// Same PO-item→variant merge key InwardCreateModal uses (`ffVarKey`), needed
+// here so a seeded snapshot survives that component's own group→req FCFS
+// distribution step unchanged instead of being overwritten by its "still
+// pending" defaults.
+const ffVarKeyOf = (g) => g.item_type === 'fabric'
+    ? `fabric_${g.fabric_type_id}_${g.fabric_color_id}`
+    : `trim_${g.trim_item_variant_id}`;
+
+// Builds an InwardCreateModal `initialSnapshot` (PO-linked edit path) from an
+// existing inward's items[] + the PO's joined items. `trimItems` (optional)
+// is used only to resolve a customGroups trim line's parent trim_item_id from
+// its (item_code|name) — the backend doesn't return that raw id for fully
+// unlinked/custom lines, only the joined name/code.
+export const seedSnapshotFromInward = (inward, poItems = [], { trimItems = [] } = {}) => {
+    const items = inward?.items || [];
+
+    const trimTotalByReq = {}, trimBoxesByReq = {}, fabricRollsByReq = {};
+    const freeFormTrimTotals = {}, freeFormTrimBoxes = {}, freeFormFabricRolls = {};
+    const trimTotalByGroup = {}, fabricRollsByGroup = {};
+    const freeFormTrimTotalsByVar = {}, freeFormFabricRollsByVar = {};
+    const unitPriceByGroup = {}, unitPriceByVarGroup = {};
+    const customGroups = [];
+
+    const reqToGroup = {};
+    (poItems || []).forEach(g => (g.requirements || []).forEach(r => { reqToGroup[r.id] = g; }));
+
+    items.forEach(it => {
+        const isFabric = it.item_type === 'fabric';
+        const rolls = (it.rolls || []).map(r => newRoll(r));
+
+        if (it.purchase_requirement_id != null) {
+            const rid = it.purchase_requirement_id;
+            const group = reqToGroup[rid];
+            if (isFabric) {
+                fabricRollsByReq[rid] = rolls.length ? rolls : [newRoll()];
+                if (group) fabricRollsByGroup[group.id] = [...(fabricRollsByGroup[group.id] || []), ...rolls];
+            } else {
+                if (it.boxes?.length) trimBoxesByReq[rid] = it.boxes.map(b => newTrimBox(b));
+                else trimTotalByReq[rid] = String(it.qty_received ?? '');
+                if (group) {
+                    trimTotalByGroup[group.id] = String(
+                        (parseFloat(trimTotalByGroup[group.id]) || 0) + (parseFloat(it.qty_received) || 0));
+                }
+            }
+            // Best-effort: seed the group's price input from whichever item in
+            // it has one set. Items within a group were priced together via one
+            // shared input, so the first non-null value found is representative.
+            if (group && it.unit_price != null && unitPriceByGroup[group.id] == null) {
+                unitPriceByGroup[group.id] = String(it.unit_price);
+            }
+        } else if (it.purchase_order_item_id != null) {
+            const pid = it.purchase_order_item_id;
+            const group = (poItems || []).find(g => String(g.id) === String(pid));
+            const key = group ? ffVarKeyOf(group) : null;
+            if (isFabric) {
+                freeFormFabricRolls[pid] = rolls.length ? rolls : [newRoll()];
+                if (key) freeFormFabricRollsByVar[key] = [...(freeFormFabricRollsByVar[key] || []), ...rolls];
+            } else {
+                if (it.boxes?.length) freeFormTrimBoxes[pid] = it.boxes.map(b => newTrimBox(b));
+                else freeFormTrimTotals[pid] = String(it.qty_received ?? '');
+                if (key) {
+                    freeFormTrimTotalsByVar[key] = String(
+                        (parseFloat(freeFormTrimTotalsByVar[key]) || 0) + (parseFloat(it.qty_received) || 0));
+                }
+            }
+            if (key && it.unit_price != null && unitPriceByVarGroup[key] == null) {
+                unitPriceByVarGroup[key] = String(it.unit_price);
+            }
+        } else if (isFabric) {
+            customGroups.push({
+                type: 'fabric',
+                fabric_type_id: it.fabric_type_id != null ? String(it.fabric_type_id) : '',
+                description: it.description || '',
+                unit_price: it.unit_price != null ? String(it.unit_price) : '',
+                lines: [{ fabric_color_id: it.fabric_color_id != null ? String(it.fabric_color_id) : '', rolls: rolls.length ? rolls : [newRoll()] }],
+            });
+        } else if (it.item_type === 'trim') {
+            const parent = trimItems.find(t =>
+                (it.trim_item_code && t.item_code === it.trim_item_code) ||
+                (!it.trim_item_code && it.trim_item_name && t.name === it.trim_item_name));
+            customGroups.push({
+                type: 'trim',
+                trim_item_id: parent ? String(parent.id) : '',
+                description: it.description || '',
+                unit_price: it.unit_price != null ? String(it.unit_price) : '',
+                lines: [{
+                    trim_item_variant_id: it.trim_item_variant_id != null ? String(it.trim_item_variant_id) : '',
+                    total: it.boxes?.length ? '' : String(it.qty_received ?? ''),
+                    boxes: (it.boxes || []).map(b => newTrimBox(b)),
+                }],
+            });
+        } else if (it.item_type === 'spare') {
+            customGroups.push({
+                type: 'spare',
+                description: it.description || '',
+                unit_price: it.unit_price != null ? String(it.unit_price) : '',
+                lines: [{
+                    spare_part_id: it.spare_part_id != null ? String(it.spare_part_id) : '',
+                    total: it.boxes?.length ? '' : String(it.qty_received ?? ''),
+                    boxes: (it.boxes || []).map(b => newTrimBox(b)),
+                }],
+            });
+        } else {
+            customGroups.push({
+                type: 'other',
+                description: it.description || '',
+                unit_price: it.unit_price != null ? String(it.unit_price) : '',
+                lines: [{
+                    general_item_id: it.general_item_id != null ? String(it.general_item_id) : '',
+                    description: it.description || '',
+                    uom: it.uom || it.general_item_uom || 'pcs',
+                    total: it.boxes?.length ? '' : String(it.qty_received ?? ''),
+                    boxes: (it.boxes || []).map(b => newTrimBox(b)),
+                }],
+            });
+        }
+    });
+
+    return {
+        receivedDate: inward?.received_date ? String(inward.received_date).slice(0, 10) : undefined,
+        condition:    inward?.condition || 'GOOD',
+        notes:        inward?.notes || '',
+        scanFile:     null,
+        trimTotalByReq, trimBoxesByReq, fabricRollsByReq,
+        freeFormTrimTotals, freeFormTrimBoxes, freeFormFabricRolls,
+        customGroups,
+        removedReqIds: [], removedPoItemIds: [],
+        trimTotalByGroup, fabricRollsByGroup,
+        freeFormTrimTotalsByVar, freeFormFabricRollsByVar,
+        unitPriceByGroup, unitPriceByVarGroup,
+        removedGroupIds: [], removedVarGroupKeys: [],
+    };
+};
+
+// Builds a StandaloneInwardModal `lines[]` array (free-form edit path) from an
+// existing standalone inward's items[]. Standalone inwards never carry a
+// purchase_requirement_id/purchase_order_item_id, so every item maps 1:1 to a
+// line — no group/distribution logic needed here, unlike seedSnapshotFromInward.
+export const seedLinesFromInward = (inward, { trimItems = [] } = {}) => {
+    const items = inward?.items || [];
+    if (items.length === 0) return null;
+    return items.map(it => {
+        const type = it.item_type || 'trim';
+        const base = {
+            _k: rk(), type,
+            fabric_type_id: '', fabric_color_id: '', rolls: [newRoll()],
+            trim_item_id: '', trim_item_variant_id: '', qty: '',
+            spare_part_id: '', spare_qty: '',
+            general_item_id: '', description: it.description || '', other_qty: '', uom: 'pcs',
+            unit_price: it.unit_price != null ? String(it.unit_price) : '',
+            boxes: (it.boxes || []).map(b => newTrimBox(b)),
+        };
+        if (type === 'fabric') {
+            return {
+                ...base,
+                fabric_type_id:  it.fabric_type_id  != null ? String(it.fabric_type_id)  : '',
+                fabric_color_id: it.fabric_color_id != null ? String(it.fabric_color_id) : '',
+                rolls: (it.rolls || []).length ? it.rolls.map(r => newRoll(r)) : [newRoll()],
+            };
+        }
+        if (type === 'trim') {
+            const parent = trimItems.find(t =>
+                (it.trim_item_code && t.item_code === it.trim_item_code) ||
+                (!it.trim_item_code && it.trim_item_name && t.name === it.trim_item_name));
+            return {
+                ...base,
+                trim_item_id: parent ? String(parent.id) : '',
+                trim_item_variant_id: it.trim_item_variant_id != null ? String(it.trim_item_variant_id) : '',
+                qty: it.boxes?.length ? '' : String(it.qty_received ?? ''),
+            };
+        }
+        if (type === 'spare') {
+            return {
+                ...base,
+                spare_part_id: it.spare_part_id != null ? String(it.spare_part_id) : '',
+                spare_qty: it.boxes?.length ? '' : String(it.qty_received ?? ''),
+            };
+        }
+        return {
+            ...base,
+            type: 'other',
+            general_item_id: it.general_item_id != null ? String(it.general_item_id) : '',
+            other_qty: it.boxes?.length ? '' : String(it.qty_received ?? ''),
+            uom: it.uom || it.general_item_uom || 'pcs',
+        };
+    });
 };

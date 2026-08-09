@@ -3,6 +3,7 @@ import {
     X, Loader2, Plus, Trash2, Package, Scissors, Wrench, Tag, Upload,
     FileText, AlertTriangle, CheckCircle2, Boxes,
     ClipboardList, ArrowRight, ArrowLeft, PackagePlus,
+    IndianRupee, Calculator,
 } from 'lucide-react';
 import BoxBreakdownModal from './BoxBreakdownModal';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
@@ -10,7 +11,7 @@ import { storeManagerApi } from '../../api/storeManagerApi';
 import { trimsApi } from '../../api/trimsApi';
 import { sparesApi } from '../../api/sparesApi';
 import { generalItemsApi } from '../../api/generalItemsApi';
-import { newRoll, sumRolls, mapRolls, rk, sumTrimBoxes, mapTrimBoxes, UOM_OPTIONS, uomLabel } from './inwardShared';
+import { newRoll, sumRolls, mapRolls, rk, sumTrimBoxes, mapTrimBoxes, UOM_OPTIONS, uomLabel, seedLinesFromInward, describeEditBlock } from './inwardShared';
 import InwardCreateModal from './InwardCreateModal';
 import InwardReviewModal from './InwardReviewModal';
 import SearchableSelect from '../../shared/SearchableSelect';
@@ -46,6 +47,15 @@ const STATUS_CFG = {
         pill:   'bg-rose-100 text-rose-700 border-rose-200',
         banner: 'bg-rose-50 border-rose-200 text-rose-800',
         note:   'Rejected — no stock was applied.',
+    },
+    // Not reachable against the current backend — see docs/purchase-department/
+    // edit-inward-backend-spec.md. Kept here so the success screen is ready
+    // once that ships instead of falling back to the PENDING_APPROVAL copy.
+    PENDING_UPDATE: {
+        label:  'Edit pending',
+        pill:   'bg-blue-100 text-blue-700 border-blue-200',
+        banner: 'bg-blue-50 border-blue-200 text-blue-800',
+        note:   'Edit submitted — the original approved record and its stock remain untouched until a purchase-manager reviews this change.',
     },
 };
 
@@ -125,6 +135,92 @@ function RollRow({ roll, onChange, onRemove, removable }) {
     );
 }
 
+// ── Unit price field ──────────────────────────────────────────────────────────
+
+// Box rate ÷ qty-per-box rarely divides evenly (e.g. ₹1000 / 300 pcs = ₹3.33333…) —
+// keep up to 5 decimal places so the rounding error doesn't compound across a
+// large quantity, but trim trailing zeros so simple divisions still read clean.
+const formatPricePrecise = (n) => {
+    if (n == null || Number.isNaN(n)) return null;
+    return n.toFixed(5).replace(/0+$/, '').replace(/\.$/, '');
+};
+
+// Line amount = qty × unit price. unit_price can carry up to 5 decimals (the
+// box-rate calculator), and multiplying that by a large qty means the total
+// itself is rarely a clean 2dp number — cap at 5dp like the rate, not 2, or
+// the display rounds away the very precision the calculator was for. Always
+// show at least 2dp so a whole-rupee amount still reads as a currency value.
+const formatMoney = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 5 });
+const lineAmount = (l) => {
+    const price = parseFloat(l.unit_price);
+    if (!Number.isFinite(price) || price <= 0) return null;
+    return (Number(l.qty) || 0) * price;
+};
+
+// Highlighted so it doesn't get skipped like a throwaway "optional" input, plus
+// a "Box rate" mini-calculator: type what a whole box costs and how many units
+// are in it, and it divides that down to a per-unit price for you.
+function UnitPriceField({ value, onChange, unitLabel = 'unit', wide }) {
+    const [calcOpen,   setCalcOpen]   = useState(false);
+    const [boxRate,    setBoxRate]    = useState('');
+    const [qtyPerBox,  setQtyPerBox]  = useState('');
+    const computed = (parseFloat(boxRate) > 0 && parseFloat(qtyPerBox) > 0)
+        ? parseFloat(boxRate) / parseFloat(qtyPerBox)
+        : null;
+
+    return (
+        <div className={wide ? 'w-40' : ''}>
+            <label className="text-[9px] font-bold text-amber-700 uppercase tracking-wide flex items-center gap-1 mb-1">
+                <IndianRupee size={10} /> Unit Price
+            </label>
+            <div className="flex items-center gap-1.5">
+                <input
+                    type="number" min="0" step="any" placeholder="0.00"
+                    value={value}
+                    onChange={e => onChange(e.target.value)}
+                    className="flex-1 min-w-0 text-xs font-semibold text-slate-800 border border-amber-300 bg-amber-50/60 rounded-lg px-2 py-1.5 focus:outline-none focus:border-amber-500 tabular-nums"
+                />
+                <button
+                    type="button"
+                    onClick={() => setCalcOpen(o => !o)}
+                    title="Calculate from a box rate"
+                    className={`shrink-0 p-1.5 rounded-lg border transition ${calcOpen ? 'bg-amber-500 text-white border-amber-500' : 'text-amber-600 border-amber-200 hover:bg-amber-50'}`}
+                >
+                    <Calculator size={12} />
+                </button>
+            </div>
+            {calcOpen && (
+                <div className="mt-1.5 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex-wrap">
+                    <input
+                        type="number" min="0" step="any" placeholder="Box rate ₹"
+                        value={boxRate}
+                        onChange={e => setBoxRate(e.target.value)}
+                        className="w-20 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400"
+                    />
+                    <span className="text-[10px] text-amber-500">÷</span>
+                    <input
+                        type="number" min="0" step="any" placeholder={`Qty/box`}
+                        value={qtyPerBox}
+                        onChange={e => setQtyPerBox(e.target.value)}
+                        className="w-20 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400"
+                    />
+                    <span className="text-[10px] font-bold text-amber-800 flex-1 text-right whitespace-nowrap">
+                        {computed != null ? `= ₹${formatPricePrecise(computed)}/${unitLabel}` : '—'}
+                    </span>
+                    <button
+                        type="button"
+                        disabled={computed == null}
+                        onClick={() => { onChange(formatPricePrecise(computed)); setCalcOpen(false); setBoxRate(''); setQtyPerBox(''); }}
+                        className="text-[10px] font-bold text-white bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed px-2 py-1 rounded-md transition"
+                    >
+                        Use
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ── Single line-item card ─────────────────────────────────────────────────────
 
 // onPatch(patch) shallow-merges into this line; patch may be an updater fn of the
@@ -163,7 +259,16 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
         storeManagerApi.getVariantsByTrimItem(trimItemId)
             .then(r => {
                 if (cancelled) return;
-                onPatch({ _variants: r.data?.data || r.data || [], trim_item_variant_id: '' });
+                const variants = r.data?.data || r.data || [];
+                // Preserve a variant id that was pre-selected (edit-mode prefill,
+                // or the user picked the same trim item again) if it's still
+                // valid among the freshly loaded variants; otherwise clear it.
+                onPatch(l => ({
+                    _variants: variants,
+                    trim_item_variant_id: variants.some(v => String(variantIdOf(v)) === String(l.trim_item_variant_id))
+                        ? l.trim_item_variant_id
+                        : '',
+                }));
             })
             .catch(() => { if (!cancelled) onPatch({ _variants: [] }); })
             .finally(() => { if (!cancelled) setVariantsLoading(false); });
@@ -288,11 +393,11 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
                             disabled={hasBoxes}
                             className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400 tabular-nums disabled:bg-slate-100 disabled:text-slate-500" />
                     </div>
-                    <div>
-                        <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Unit Price (optional)</label>
-                        <input type="number" min="0" step="0.01" placeholder="0.00" value={line.unit_price} onChange={e => set('unit_price', e.target.value)}
-                            className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400 tabular-nums" />
-                    </div>
+                    <UnitPriceField
+                        value={line.unit_price}
+                        onChange={v => set('unit_price', v)}
+                        unitLabel={selectedTrimItem?.unit_of_measure || 'pcs'}
+                    />
                 </div>
                 {boxControl}
                 </>
@@ -315,11 +420,11 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
                             disabled={hasBoxes}
                             className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400 tabular-nums disabled:bg-slate-100 disabled:text-slate-500" />
                     </div>
-                    <div>
-                        <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Unit Price (optional)</label>
-                        <input type="number" min="0" step="0.01" placeholder="0.00" value={line.unit_price} onChange={e => set('unit_price', e.target.value)}
-                            className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400 tabular-nums" />
-                    </div>
+                    <UnitPriceField
+                        value={line.unit_price}
+                        onChange={v => set('unit_price', v)}
+                        unitLabel="pcs"
+                    />
                 </div>
                 {boxControl}
                 </>
@@ -364,11 +469,11 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
                         <input type="text" placeholder="pcs, kg, m…" value={line.uom} onChange={e => set('uom', e.target.value)}
                             className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400" />
                     </div>
-                    <div>
-                        <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Unit Price (optional)</label>
-                        <input type="number" min="0" step="0.01" placeholder="0.00" value={line.unit_price} onChange={e => set('unit_price', e.target.value)}
-                            className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400 tabular-nums" />
-                    </div>
+                    <UnitPriceField
+                        value={line.unit_price}
+                        onChange={v => set('unit_price', v)}
+                        unitLabel={line.uom || 'pcs'}
+                    />
                     <div className="col-span-2">
                         <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Notes (optional)</label>
                         <input type="text" placeholder="Any notes…" value={line.description} onChange={e => set('description', e.target.value)}
@@ -381,11 +486,12 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
 
             {/* Unit price for fabric (shared row below rolls) */}
             {line.type === 'fabric' && (
-                <div>
-                    <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Unit Price / {rollUnitLabel} (optional)</label>
-                    <input type="number" min="0" step="0.01" placeholder="0.00" value={line.unit_price} onChange={e => set('unit_price', e.target.value)}
-                        className="w-32 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-violet-400 tabular-nums" />
-                </div>
+                <UnitPriceField
+                    value={line.unit_price}
+                    onChange={v => set('unit_price', v)}
+                    unitLabel={rollUnitLabel}
+                    wide
+                />
             )}
         </div>
     );
@@ -393,16 +499,18 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
 
 // ── Main Modal ────────────────────────────────────────────────────────────────
 
-export default function StandaloneInwardModal({ onClose, onCreated }) {
+export default function StandaloneInwardModal({ onClose, onCreated, inward = null }) {
     // First-screen choice: null = chooser, 'po' = PO search, 'standalone' = free-form.
-    const [entryMode, setEntryMode] = useState(null);
+    // Editing an existing standalone inward skips the chooser entirely.
+    const [entryMode, setEntryMode] = useState(inward ? 'standalone' : null);
+    const isEdit = !!inward;
 
-    // Header fields
-    const [receivedDate, setReceivedDate] = useState(new Date().toISOString().split('T')[0]);
-    const [condition,    setCondition]    = useState('GOOD');
-    const [notes,        setNotes]        = useState('');
+    // Header fields — prefilled from the inward being edited, if any.
+    const [receivedDate, setReceivedDate] = useState(inward?.received_date ? String(inward.received_date).slice(0, 10) : new Date().toISOString().split('T')[0]);
+    const [condition,    setCondition]    = useState(inward?.condition || 'GOOD');
+    const [notes,        setNotes]        = useState(inward?.notes || '');
     const [scanFile,     setScanFile]     = useState(null);
-    const [supplierId,   setSupplierId]   = useState('');
+    const [supplierId,   setSupplierId]   = useState(inward?.supplier_id != null ? String(inward.supplier_id) : '');
 
     // PO picker
     const [poSearch,     setPoSearch]     = useState('');
@@ -415,8 +523,12 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
     const [poStep,  setPoStep]  = useState(null);  // null | 'create' | 'review'
     const [poCtx,   setPoCtx]   = useState(null);  // { po, items, inwards, snapshot, payload }
 
-    // Free-form lines
-    const [lines, setLines] = useState([emptyLine('trim')]);
+    // Free-form lines — prefilled from the inward being edited, if any. Trim
+    // lines need `trimItems` (loaded async, below) to resolve their parent
+    // trim_item_id; re-seeded once that lookup arrives (see effect below).
+    const [lines, setLines] = useState(() =>
+        inward ? (seedLinesFromInward(inward, { trimItems: [] }) || [emptyLine('trim')]) : [emptyLine('trim')]);
+    const [linesReseeded, setLinesReseeded] = useState(!inward);
 
     // Lookup data
     const [suppliers,     setSuppliers]     = useState([]);
@@ -439,6 +551,9 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
     const [success, setSuccess] = useState(false);
     const [created, setCreated] = useState(null); // { id, grn, status, received_date, condition, supplier_name, scan_name, lines[] }
     const [boxModal, setBoxModal] = useState(null); // { idx, uom, initialBoxes }
+    // Review step — populated by handleReview, consumed by handleConfirmSubmit.
+    // Non-null means "show the review screen instead of the line-item form".
+    const [reviewData, setReviewData] = useState(null); // { items, summary } | null
 
     // Load lookup data on mount
     useEffect(() => {
@@ -461,6 +576,15 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
             .then(r => setGeneralItems(r.data?.data ?? r.data ?? []))
             .catch(() => {});
     }, []);
+
+    // Edit mode only: trim_item_id couldn't be resolved on first render (before
+    // trimItems loaded), so re-seed the lines once it's available. Runs at most
+    // once — after that the user owns the lines state.
+    useEffect(() => {
+        if (linesReseeded || trimItems.length === 0) return;
+        setLines(seedLinesFromInward(inward, { trimItems }) || [emptyLine('trim')]);
+        setLinesReseeded(true);
+    }, [trimItems, linesReseeded, inward]);
 
     // Load PO list once the user enters the "against a PO" screen
     useEffect(() => {
@@ -525,17 +649,19 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
         }
     }, [quickCreateName, quickCreateCode, quickCreate]);
 
-    const handleSubmit = async () => {
-        setErr(null);
-        if (lines.length === 0) { setErr('Add at least one item.'); return; }
-        if (!supplierId) { setErr('Supplier is required.'); return; }
+    // Validates the current lines and builds both the API payload and a
+    // human-readable summary (qty/unit price/amount) shared by the review and
+    // success screens. Pure — no side effects, no API call.
+    const buildSubmission = () => {
+        if (lines.length === 0) return { error: 'Add at least one item.' };
+        if (!supplierId) return { error: 'Supplier is required.' };
 
         const items = [];
         for (const l of lines) {
             if (l.type === 'fabric') {
                 const rolls = mapRolls(l.rolls);
-                if (!l.fabric_type_id) { setErr('Each fabric line needs a fabric type.'); return; }
-                if (!rolls.length)     { setErr('Each fabric line needs at least one roll with meters > 0.'); return; }
+                if (!l.fabric_type_id) return { error: 'Each fabric line needs a fabric type.' };
+                if (!rolls.length)     return { error: 'Each fabric line needs at least one roll with meters > 0.' };
                 items.push({
                     item_type:       'fabric',
                     fabric_type_id:  parseInt(l.fabric_type_id),
@@ -545,10 +671,10 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                     unit_price:      l.unit_price ? parseFloat(l.unit_price) : null,
                 });
             } else if (l.type === 'trim') {
-                if (!l.trim_item_variant_id) { setErr('Each trim line needs a variant.'); return; }
+                if (!l.trim_item_variant_id) return { error: 'Each trim line needs a variant.' };
                 const boxes = mapTrimBoxes(l.boxes);
                 const qty = boxes.length > 0 ? sumTrimBoxes(l.boxes) : parseFloat(l.qty);
-                if (!qty || qty <= 0) { setErr('Each trim line needs a quantity > 0.'); return; }
+                if (!qty || qty <= 0) return { error: 'Each trim line needs a quantity > 0.' };
                 const entry = {
                     item_type:            'trim',
                     trim_item_variant_id: parseInt(l.trim_item_variant_id),
@@ -558,10 +684,10 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                 if (boxes.length > 0) entry.boxes = boxes;
                 items.push(entry);
             } else if (l.type === 'spare') {
-                if (!l.spare_part_id) { setErr('Each spare line needs a spare part.'); return; }
+                if (!l.spare_part_id) return { error: 'Each spare line needs a spare part.' };
                 const boxes = mapTrimBoxes(l.boxes);
                 const qty = boxes.length > 0 ? sumTrimBoxes(l.boxes) : parseFloat(l.spare_qty);
-                if (!qty || qty <= 0) { setErr('Each spare line needs a quantity > 0.'); return; }
+                if (!qty || qty <= 0) return { error: 'Each spare line needs a quantity > 0.' };
                 const entry = {
                     item_type:     'spare',
                     spare_part_id: parseInt(l.spare_part_id),
@@ -571,10 +697,10 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                 if (boxes.length > 0) entry.boxes = boxes;
                 items.push(entry);
             } else {
-                if (!l.general_item_id) { setErr('Each "other" line needs a general item selected.'); return; }
+                if (!l.general_item_id) return { error: 'Each "other" line needs a general item selected.' };
                 const boxes = mapTrimBoxes(l.boxes);
                 const qty = boxes.length > 0 ? sumTrimBoxes(l.boxes) : parseFloat(l.other_qty);
-                if (!qty || qty <= 0) { setErr('Each "other" line needs a quantity > 0.'); return; }
+                if (!qty || qty <= 0) return { error: 'Each "other" line needs a quantity > 0.' };
                 const entry = {
                     item_type:       'other',
                     general_item_id: parseInt(l.general_item_id),
@@ -597,7 +723,8 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
             items,
         };
 
-        // Human-readable snapshot of the submitted lines, for the success screen.
+        // Human-readable snapshot of the lines — drives both the review screen
+        // (before submit) and the success screen (after), including amounts.
         const summary = lines.map(l => {
             if (l.type === 'fabric') {
                 const ft = fabricTypes.find(t => String(t.id) === String(l.fabric_type_id));
@@ -619,23 +746,47 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
             return { type: 'other', name: gi?.name || 'Item', detail: l.description || '', qty, unit: l.uom || 'pcs', unit_price: l.unit_price, boxes: l.boxes?.length ? l.boxes : null };
         });
 
-        setSaving(true);
+        return { data, summary, error: null };
+    };
+
+    // "Review" button — validate + snapshot, then show the review screen.
+    // No API call yet.
+    const handleReview = () => {
+        setErr(null);
+        const built = buildSubmission();
+        if (built.error) { setErr(built.error); return; }
+        setReviewData(built);
+    };
+
+    // "Confirm & Submit" on the review screen — the only place that actually
+    // calls the API.
+    const handleConfirmSubmit = async () => {
+        if (!reviewData) return;
+        setSaving(true); setErr(null);
         try {
-            const res = await purchaseDeptApi.createStandaloneInward(data, scanFile || null);
-            const inward = res?.data?.data ?? res?.data ?? null;
+            const res = isEdit
+                ? await purchaseDeptApi.updateInward(inward.id, reviewData.data, scanFile || null)
+                : await purchaseDeptApi.createStandaloneInward(reviewData.data, scanFile || null);
+            const saved = res?.data?.data ?? res?.data ?? null;
             setCreated({
-                id:            inward?.id ?? null,
-                grn:           inward?.grn_number ?? null,
-                status:        inward?.approval_status ?? 'PENDING_APPROVAL',
+                id:            saved?.id ?? inward?.id ?? null,
+                grn:           saved?.grn_number ?? inward?.grn_number ?? null,
+                // Server drives the status shown — an edit to an APPROVED inward
+                // may come back PENDING_UPDATE rather than a flat "updated".
+                status:        saved?.approval_status ?? (isEdit ? inward?.approval_status : 'PENDING_APPROVAL'),
                 received_date: receivedDate,
                 condition,
                 supplier_name: suppliers.find(s => String(s.id) === String(supplierId))?.name || null,
                 scan_name:     scanFile?.name || null,
-                lines:         summary,
+                lines:         reviewData.summary,
             });
             setSuccess(true);
         } catch (e) {
-            setErr(e?.response?.data?.error || 'Failed to create inward.');
+            const blockedBy = e?.response?.data?.blocked_by;
+            const blocked = blockedBy ? describeEditBlock(blockedBy, inward?.items || []) : [];
+            setErr(blocked.length > 0
+                ? [e?.response?.data?.error, ...blocked].filter(Boolean).join(' ')
+                : (e?.response?.data?.error || `Failed to ${isEdit ? 'update' : 'create'} inward.`));
         } finally {
             setSaving(false);
         }
@@ -699,6 +850,8 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
         // The server assigns the GRN; fall back to the inward id, and if neither
         // came back there is no number to shout about yet.
         const grnText = created.grn || (created.id ? `#${created.id}` : null);
+        const invoiceTotal = created.lines.reduce((s, l) => s + (lineAmount(l) || 0), 0);
+        const missingPriceCount = created.lines.filter(l => lineAmount(l) == null).length;
         return (
             <div className="fixed inset-0 z-50 bg-white flex flex-col">
                 {/* Header */}
@@ -708,8 +861,8 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                             <CheckCircle2 size={22} className="text-emerald-600" />
                         </div>
                         <div>
-                            <h2 className="font-extrabold text-slate-800 text-lg">Inward Recorded</h2>
-                            <p className="text-sm text-slate-500">Goods receipt saved</p>
+                            <h2 className="font-extrabold text-slate-800 text-lg">{isEdit ? 'Inward Updated' : 'Inward Recorded'}</h2>
+                            <p className="text-sm text-slate-500">{isEdit ? 'Changes saved' : 'Goods receipt saved'}</p>
                         </div>
                     </div>
                     <button onClick={() => { onCreated?.(); onClose(); }} className="p-2 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition"><X size={18} /></button>
@@ -754,10 +907,13 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                                         <th className="px-4 py-2 text-left">Item</th>
                                         <th className="px-4 py-2 text-right">Qty</th>
                                         <th className="px-4 py-2 text-right">Unit price</th>
+                                        <th className="px-4 py-2 text-right">Amount</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {created.lines.map((l, i) => (
+                                    {created.lines.map((l, i) => {
+                                        const amt = lineAmount(l);
+                                        return (
                                         <tr key={i}>
                                             <td className="px-4 py-2"><span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5">{l.type}</span></td>
                                             <td className="px-4 py-2 text-slate-700">
@@ -765,18 +921,138 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                                                 {l.boxes && <span className="block text-[11px] text-slate-400">{l.boxes.map(b => `${b.box_count}×${b.qty_per_box}`).join(', ')} boxes</span>}
                                             </td>
                                             <td className="px-4 py-2 text-right font-mono">{Number(l.qty).toLocaleString('en-IN')} {l.unit}</td>
-                                            <td className="px-4 py-2 text-right font-mono text-slate-500">{l.unit_price ? `₹${parseFloat(l.unit_price).toFixed(2)}` : '—'}</td>
+                                            <td className="px-4 py-2 text-right font-mono text-slate-500">{l.unit_price ? `₹${formatPricePrecise(parseFloat(l.unit_price))}` : '—'}</td>
+                                            <td className="px-4 py-2 text-right font-mono font-bold text-slate-800">{amt != null ? `₹${formatMoney(amt)}` : <span className="font-normal text-slate-300">—</span>}</td>
                                         </tr>
-                                    ))}
+                                        );
+                                    })}
                                 </tbody>
+                                <tfoot>
+                                    <tr className="bg-slate-800 text-white">
+                                        <td colSpan={4} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wider">Total Invoice Value</td>
+                                        <td className="px-4 py-2.5 text-right font-mono font-black text-base">₹{formatMoney(invoiceTotal)}</td>
+                                    </tr>
+                                </tfoot>
                             </table>
                         </div>
+                        {missingPriceCount > 0 && (
+                            <p className="text-[11px] text-amber-600 mt-1.5">{missingPriceCount} line{missingPriceCount === 1 ? '' : 's'} had no unit price — total above is incomplete.</p>
+                        )}
                     </div>
                 </div>
 
                 {/* Footer */}
                 <div className="shrink-0 px-6 py-4 border-t border-slate-100 flex justify-end">
                     <button onClick={() => { onCreated?.(); onClose(); }} className="text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 px-6 py-2.5 rounded-xl transition">Done</button>
+                </div>
+            </div>
+        );
+    }
+
+    // ── Review screen (standalone flow) — confirm before the API call ─────────
+
+    if (reviewData) {
+        const invoiceTotal = reviewData.summary.reduce((s, l) => s + (lineAmount(l) || 0), 0);
+        const missingPriceCount = reviewData.summary.filter(l => lineAmount(l) == null).length;
+        const supplierName = suppliers.find(s => String(s.id) === String(supplierId))?.name;
+        return (
+            <div className="fixed inset-0 z-50 bg-white flex flex-col">
+                <div className="shrink-0 px-5 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        {!saving && (
+                            <button onClick={() => setReviewData(null)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition">
+                                <ArrowLeft size={18} />
+                            </button>
+                        )}
+                        <div>
+                            <h3 className="font-black text-slate-800 text-base">Review before saving</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                                {reviewData.summary.length} line{reviewData.summary.length !== 1 ? 's' : ''} will be {isEdit ? 'updated' : 'recorded'} — nothing is saved yet.
+                                {isEdit && inward.approval_status === 'APPROVED' && ' This inward is already approved — saving will submit the change for re-approval.'}
+                            </p>
+                        </div>
+                    </div>
+                    {!saving && (
+                        <button onClick={onClose} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition">
+                            <X size={18} />
+                        </button>
+                    )}
+                </div>
+
+                <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 max-w-3xl w-full mx-auto space-y-5">
+                    {err && (
+                        <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2 text-sm text-red-600">
+                            <AlertTriangle size={13} /> {err}
+                        </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-2">
+                        <span className="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded-lg px-3 py-1.5">Received {receivedDate}</span>
+                        <span className="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded-lg px-3 py-1.5">Condition {condition}</span>
+                        {supplierName && <span className="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded-lg px-3 py-1.5">Supplier {supplierName}</span>}
+                        {scanFile && <span className="text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded-lg px-3 py-1.5">Scan attached</span>}
+                    </div>
+
+                    <div>
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                            <table className="w-full text-sm">
+                                <thead className="bg-slate-50 text-[10px] uppercase text-slate-400 font-bold">
+                                    <tr>
+                                        <th className="px-4 py-2 text-left">Type</th>
+                                        <th className="px-4 py-2 text-left">Item</th>
+                                        <th className="px-4 py-2 text-right">Qty</th>
+                                        <th className="px-4 py-2 text-right">Unit price</th>
+                                        <th className="px-4 py-2 text-right">Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {reviewData.summary.map((l, i) => {
+                                        const amt = lineAmount(l);
+                                        return (
+                                        <tr key={i}>
+                                            <td className="px-4 py-2"><span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5">{l.type}</span></td>
+                                            <td className="px-4 py-2 text-slate-700">
+                                                <span className="font-semibold">{l.name}</span>{l.detail ? ` — ${l.detail}` : ''}
+                                                {l.boxes && <span className="block text-[11px] text-slate-400">{l.boxes.map(b => `${b.box_count}×${b.qty_per_box}`).join(', ')} boxes</span>}
+                                            </td>
+                                            <td className="px-4 py-2 text-right font-mono">{Number(l.qty).toLocaleString('en-IN')} {l.unit}</td>
+                                            <td className="px-4 py-2 text-right font-mono text-slate-500">{l.unit_price ? `₹${formatPricePrecise(parseFloat(l.unit_price))}` : '—'}</td>
+                                            <td className="px-4 py-2 text-right font-mono font-bold text-slate-800">{amt != null ? `₹${formatMoney(amt)}` : <span className="font-normal text-slate-300">—</span>}</td>
+                                        </tr>
+                                        );
+                                    })}
+                                </tbody>
+                                <tfoot>
+                                    <tr className="bg-slate-800 text-white">
+                                        <td colSpan={4} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wider">Total Invoice Value</td>
+                                        <td className="px-4 py-2.5 text-right font-mono font-black text-base">₹{formatMoney(invoiceTotal)}</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                        {missingPriceCount > 0 && (
+                            <p className="text-[11px] text-amber-600 mt-1.5">{missingPriceCount} line{missingPriceCount === 1 ? '' : 's'} have no unit price — total above is incomplete. Go back to add one, or continue if that's expected.</p>
+                        )}
+                    </div>
+
+                    {notes && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Notes</p>
+                            <p className="text-xs text-slate-700 mt-0.5 whitespace-pre-wrap">{notes}</p>
+                        </div>
+                    )}
+                </div>
+
+                <div className="shrink-0 flex items-center justify-between px-5 py-4 border-t border-slate-100 bg-slate-50">
+                    <button onClick={() => setReviewData(null)} disabled={saving}
+                        className="flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg hover:bg-slate-200 transition disabled:opacity-50">
+                        <ArrowLeft size={14} /> Back to edit
+                    </button>
+                    <button onClick={handleConfirmSubmit} disabled={saving}
+                        className="flex items-center gap-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 px-5 py-2 rounded-xl transition">
+                        {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                        {saving ? 'Submitting…' : 'Confirm & Submit'}
+                    </button>
                 </div>
             </div>
         );
@@ -931,14 +1207,18 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50 rounded-t-2xl shrink-0">
                     <div className="flex items-center gap-3">
-                        {!saving && (
+                        {!saving && !isEdit && (
                             <button onClick={() => setEntryMode(null)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition">
                                 <ArrowLeft size={18} />
                             </button>
                         )}
                         <div>
-                            <h3 className="font-black text-slate-800 text-base">Record Inward</h3>
-                            <p className="text-xs text-slate-500 mt-0.5">Standalone goods receipt — no PO required</p>
+                            <h3 className="font-black text-slate-800 text-base">{isEdit ? 'Edit Inward' : 'Record Inward'}</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                                {isEdit
+                                    ? (inward.grn_number || `GRN #${inward.id}`)
+                                    : 'Standalone goods receipt — no PO required'}
+                            </p>
                         </div>
                     </div>
                     {!saving && (
@@ -1052,10 +1332,10 @@ export default function StandaloneInwardModal({ onClose, onCreated }) {
                         className="text-sm font-medium text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg hover:bg-slate-200 transition disabled:opacity-50">
                         Cancel
                     </button>
-                    <button onClick={handleSubmit} disabled={saving || lines.length === 0 || !supplierId}
+                    <button onClick={handleReview} disabled={lines.length === 0 || !supplierId}
                         className="flex items-center gap-2 text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 px-5 py-2 rounded-xl transition">
-                        {saving ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
-                        {saving ? 'Submitting…' : `Submit Inward (${lines.length} line${lines.length !== 1 ? 's' : ''})`}
+                        <FileText size={14} />
+                        {`Review ${isEdit ? 'Changes' : 'Inward'} (${lines.length} line${lines.length !== 1 ? 's' : ''})`}
                     </button>
                 </div>
             </div>
