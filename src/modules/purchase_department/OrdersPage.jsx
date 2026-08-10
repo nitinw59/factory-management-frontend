@@ -764,6 +764,8 @@ const OrdersPage = () => {
             {inwardStep === 'create' && inwardCtx && (
                 <InwardCreateModal
                     poId={inwardCtx.po.id}
+                    poCode={inwardCtx.po.po_code}
+                    poIndex={inwardCtx.po.po_index}
                     poItems={inwardCtx.items}
                     allInwards={inwardCtx.inwards}
                     initialSnapshot={inwardCtx.snapshot}
@@ -778,6 +780,8 @@ const OrdersPage = () => {
             {inwardStep === 'review' && inwardCtx?.payload && (
                 <InwardReviewModal
                     poId={inwardCtx.po.id}
+                    poCode={inwardCtx.po.po_code}
+                    poIndex={inwardCtx.po.po_index}
                     payload={inwardCtx.payload}
                     poItems={inwardCtx.items}
                     onClose={closeInward}

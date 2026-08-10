@@ -942,6 +942,7 @@ export default function InwardsPage() {
                 <InwardCreateModal
                     poId={poEditCtx.po.id}
                     poCode={poEditCtx.po.po_code}
+                    poIndex={poEditCtx.po.po_index}
                     poItems={poEditCtx.items}
                     supplierId={poEditCtx.po.supplier_id}
                     supplierName={poEditCtx.po.supplier_name}
@@ -960,6 +961,7 @@ export default function InwardsPage() {
                 <InwardReviewModal
                     poId={poEditCtx.po.id}
                     poCode={poEditCtx.po.po_code}
+                    poIndex={poEditCtx.po.po_index}
                     payload={poEditCtx.payload}
                     poItems={poEditCtx.items}
                     supplierId={poEditCtx.po.supplier_id}

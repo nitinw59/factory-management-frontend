@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
     X, Loader2, AlertTriangle, Package, Scissors, Wrench, Tag, Trash2, Upload, FileText, Plus, Boxes, ArrowLeft,
-    Calculator,
+    Calculator, ChevronDown, ChevronUp, CheckCircle2, History,
 } from 'lucide-react';
 import { trimsApi } from '../../api/trimsApi';
 import { sparesApi } from '../../api/sparesApi';
@@ -27,6 +27,70 @@ const formatPricePrecise = (n) => {
     if (n == null || Number.isNaN(n)) return null;
     return n.toFixed(5).replace(/0+$/, '').replace(/\.$/, '');
 };
+const formatMoney = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 5 });
+
+// qty × the entered rate, shown next to Unit Price so the cost of a line is
+// visible while filling it in rather than only on the review screen. A blank
+// rate here isn't "no price" — it means "use the PO's own price" (resolved
+// server-side, not known client-side — see GroupUnitPriceField above), so
+// there's nothing to multiply and that's called out rather than showing ₹0.
+function LineTotal({ qty, price }) {
+    const p = parseFloat(price);
+    if (!(qty > 0) || !Number.isFinite(p) || p <= 0) {
+        return <span className="text-[10px] text-slate-400 italic shrink-0">rate not set — uses PO price</span>;
+    }
+    return <span className="text-[10px] font-bold text-slate-700 tabular-nums shrink-0">Total ₹{formatMoney(qty * p)}</span>;
+}
+
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en', { dateStyle: 'medium' }) : '—';
+
+// A group whose pending qty has already hit 0 (from prior GRNs on this PO)
+// renders this instead of an open qty/price input — nothing is left to
+// receive against it, so there's nothing to fill in, only what already
+// happened to show. `history` is this group's matching lines from every
+// earlier inward (see receiptHistoryFor below).
+function FulfilledSummary({ history, unit }) {
+    return (
+        <div className="rounded-lg p-2 border border-emerald-200 bg-emerald-50">
+            <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 uppercase tracking-wide">
+                <CheckCircle2 size={12} /> Fully received
+            </div>
+            <div className="mt-1 space-y-0.5">
+                {history.map((h, i) => (
+                    <div key={i} className="flex items-center justify-between text-[10px] text-emerald-800">
+                        <span className="truncate">{h.grn_number || `Inward #${h.inward_id}`} · {fmtDate(h.received_date)}</span>
+                        <span className="tabular-nums font-bold shrink-0 ml-2">
+                            {h.qty_received.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
+                            {h.unit_price != null ? ` @ ₹${h.unit_price.toFixed(2)}` : ''}
+                        </span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// Compact one-liner for a still-open (partially received) item — unlike
+// FulfilledSummary this doesn't replace the input, it sits above it as
+// context: "some of this was already received, here's what and when."
+function PriorReceiptNote({ history, unit }) {
+    if (!history.length) return null;
+    const totalPrior = history.reduce((s, h) => s + h.qty_received, 0);
+    return (
+        <div className="flex items-start gap-1 text-[10px] text-slate-500">
+            <History size={11} className="text-slate-400 shrink-0 mt-0.5" />
+            <span>
+                Previously received {totalPrior.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
+                {' — '}
+                {history.map((h, i) => (
+                    <span key={i}>
+                        {h.grn_number || `Inward #${h.inward_id}`} ({fmtDate(h.received_date)}){i < history.length - 1 ? ', ' : ''}
+                    </span>
+                ))}
+            </span>
+        </div>
+    );
+}
 
 // Compact "Unit Price" input + box-rate calculator for a PO-linked group card.
 // Optional — leaving it blank means the PO's/requirement's own unit_price is
@@ -34,13 +98,27 @@ const formatPricePrecise = (n) => {
 // received differs from what was ordered. Self-contained (its own calcOpen
 // state) and expands in normal flow, never absolutely positioned, so it's
 // safe to drop into any card regardless of that card's overflow handling.
-function GroupUnitPriceField({ value, onChange, unitLabel = 'unit' }) {
+//
+// packSize/packUom (the trim item master's default_pack_size/pack_uom) pre-
+// fill the qty-per-box side and relabel the calculator around the item's
+// actual pack (e.g. "Rate/cone ₹" ÷ "Qty/cone") — same enhancement as
+// StandaloneInwardModal's UnitPriceField, ported here because this is the
+// component every new inward actually goes through (the free-form editor
+// only renders when editing an existing one).
+function GroupUnitPriceField({ value, onChange, unitLabel = 'unit', packSize, packUom }) {
     const [calcOpen,  setCalcOpen]  = useState(false);
     const [boxRate,   setBoxRate]   = useState('');
     const [qtyPerBox, setQtyPerBox] = useState('');
     const computed = (parseFloat(boxRate) > 0 && parseFloat(qtyPerBox) > 0)
         ? parseFloat(boxRate) / parseFloat(qtyPerBox)
         : null;
+    const packWord = packUom || 'box';
+
+    const toggleCalc = () => setCalcOpen(o => {
+        const opening = !o;
+        if (opening && !qtyPerBox && packSize) setQtyPerBox(String(packSize));
+        return opening;
+    });
 
     return (
         <div>
@@ -54,8 +132,8 @@ function GroupUnitPriceField({ value, onChange, unitLabel = 'unit' }) {
                 />
                 <button
                     type="button"
-                    onClick={() => setCalcOpen(o => !o)}
-                    title="Calculate from a box rate"
+                    onClick={toggleCalc}
+                    title={`Calculate from a per-${packWord} rate`}
                     className={`shrink-0 p-1 rounded border transition ${calcOpen ? 'bg-amber-500 text-white border-amber-500' : 'text-amber-600 border-amber-200 hover:bg-amber-50'}`}
                 >
                     <Calculator size={11} />
@@ -64,14 +142,14 @@ function GroupUnitPriceField({ value, onChange, unitLabel = 'unit' }) {
             {calcOpen && (
                 <div className="mt-1.5 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex-wrap">
                     <input
-                        type="number" min="0" step="any" placeholder="Box rate ₹"
+                        type="number" min="0" step="any" placeholder={`Rate/${packWord} ₹`}
                         value={boxRate}
                         onChange={e => setBoxRate(e.target.value)}
                         className="w-20 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400"
                     />
                     <span className="text-[10px] text-amber-500">÷</span>
                     <input
-                        type="number" min="0" step="any" placeholder="Qty/box"
+                        type="number" min="0" step="any" placeholder={`Qty/${packWord}`}
                         value={qtyPerBox}
                         onChange={e => setQtyPerBox(e.target.value)}
                         className="w-20 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400"
@@ -114,6 +192,7 @@ function GroupUnitPriceField({ value, onChange, unitLabel = 'unit' }) {
 export default function InwardCreateModal({
     poId,                            // eslint-disable-line no-unused-vars
     poCode,
+    poIndex,                         // fallback label when poCode isn't set — prefer over raw poId
     poItems = [],
     supplierId,
     supplierName,
@@ -157,6 +236,48 @@ export default function InwardCreateModal({
     // double-count what this inward already received. No-op (null) on create.
     const pendingByReq    = useMemo(() => pendingByReqMap(allRequirements, allInwards, inward, poItems), [allRequirements, allInwards, poItems, inward]);
     const pendingByPoItem = useMemo(() => pendingByPoItemMap(poItems, allInwards, inward), [poItems, allInwards, inward]);
+
+    // Debug: what this modal actually received for "already received" math —
+    // pendingByReq/pendingByPoItem and the FulfilledSummary history below are
+    // both derived from allInwards, so if a group isn't showing as fully
+    // received (or is showing stale history) this is the first thing to check.
+    useEffect(() => {
+        console.log(`[InwardCreateModal] poId=${poId} allInwards fetched:`, allInwards);
+        console.log(`[InwardCreateModal] poItems fetched:`, poItems);
+    }, [poId, allInwards, poItems]);
+
+    // Every line from every earlier inward on this PO that matches a set of
+    // requirement ids and/or PO item ids — feeds FulfilledSummary so a group
+    // that's already fully received (pending === 0) shows what actually
+    // happened instead of an open input inviting more. poItemIds is an array
+    // (not a single id) because a free-form group can merge several PO items
+    // that share one variant into a single card. Excludes the inward being
+    // edited itself, same as the pending-qty maps above, so editing doesn't
+    // show an item's own not-yet-saved receipt as "history".
+    const receiptHistoryFor = (reqIds = [], poItemIds = []) => {
+        const reqSet = new Set(reqIds);
+        const poItemSet = new Set(poItemIds);
+        const out = [];
+        (allInwards || []).forEach(iw => {
+            if (inward && iw.id === inward.id) return;
+            (iw.items || []).forEach(it => {
+                const hits = (it.purchase_requirement_id != null && reqSet.has(it.purchase_requirement_id))
+                    || (it.purchase_order_item_id != null && poItemSet.has(it.purchase_order_item_id));
+                if (!hits) return;
+                out.push({
+                    inward_id:     iw.id,
+                    grn_number:    iw.grn_number,
+                    received_date: iw.received_date,
+                    qty_received:  parseFloat(it.qty_received) || 0,
+                    unit_price:    it.unit_price != null ? parseFloat(it.unit_price) : null,
+                });
+            });
+        });
+        if (out.length > 0) {
+            console.log(`[InwardCreateModal] receiptHistoryFor reqIds=[${reqIds}] poItemIds=[${poItemIds}] matched:`, out);
+        }
+        return out;
+    };
 
     const fabricReqIds = useMemo(
         () => new Set(allRequirements.filter(r => (r.item_type || r.type) === 'fabric').map(r => r.id)),
@@ -229,17 +350,14 @@ export default function InwardCreateModal({
     const [removedReqIds, setRemovedReqIds] = useState(() => new Set(initialSnapshot?.removedReqIds || []));
     const [removedPoItemIds, setRemovedPoItemIds] = useState(() => new Set(initialSnapshot?.removedPoItemIds || []));
 
-    // Merged group-level inputs (one per PO item group; FCFS distribution to per-req entries at review time)
-    const [trimTotalByGroup, setTrimTotalByGroup] = useState(() => {
-        if (initialSnapshot?.trimTotalByGroup) return initialSnapshot.trimTotalByGroup;
-        const m = {};
-        (poItems || []).forEach(g => {
-            if ((g.requirements || []).length === 0 || g.item_type === 'fabric') return;
-            const tot = (g.requirements || []).reduce((s, r) => s + (pendingByReq[r.id] || 0), 0);
-            if (tot > 0) m[g.id] = String(tot);
-        });
-        return m;
-    });
+    // Merged group-level inputs (one per PO item group; FCFS distribution to per-req entries at review time).
+    // Starts empty for every group — NOT pre-filled with the pending qty. A
+    // pre-filled default silently over-reports on a partial receipt: with 2+
+    // trim lines on a PO, only filling in the one you actually received left
+    // the other(s) pre-filled with their full ordered qty and still showing
+    // up on review/submission unless explicitly skipped. Fabric already
+    // starts blank the same way (newRoll()'s meter is ''); this matches it.
+    const [trimTotalByGroup, setTrimTotalByGroup] = useState(() => initialSnapshot?.trimTotalByGroup || {});
 
     const [fabricRollsByGroup, setFabricRollsByGroup] = useState(() => {
         if (initialSnapshot?.fabricRollsByGroup) return initialSnapshot.fabricRollsByGroup;
@@ -253,25 +371,23 @@ export default function InwardCreateModal({
 
     const [removedGroupIds, setRemovedGroupIds] = useState(() => new Set(initialSnapshot?.removedGroupIds || []));
 
+    // Per-group requirement breakdown is collapsed by default (it's detail, not
+    // something needed to fill in qty) — click the "N reqs" badge to expand it.
+    const [expandedReqGroups, setExpandedReqGroups] = useState(() => new Set());
+    const toggleReqGroup = (groupId) => setExpandedReqGroups(prev => {
+        const next = new Set(prev);
+        next.has(groupId) ? next.delete(groupId) : next.add(groupId);
+        return next;
+    });
+
     // Free-form items merged by variant — one input per unique variant, FCFS distribution at review time
     const ffVarKey = (g) => g.item_type === 'fabric'
         ? `fabric_${g.fabric_type_id}_${g.fabric_color_id}`
         : `trim_${g.trim_item_variant_id}`;
 
-    const [freeFormTrimTotalsByVar, setFreeFormTrimTotalsByVar] = useState(() => {
-        if (initialSnapshot?.freeFormTrimTotalsByVar) return initialSnapshot.freeFormTrimTotalsByVar;
-        const m = {};
-        const ffItems = (poItems || []).filter(g => (g.requirements || []).length === 0 && g.item_type !== 'fabric');
-        const seen = new Set();
-        ffItems.forEach(g => {
-            const key = ffVarKey(g);
-            if (seen.has(key)) return;
-            seen.add(key);
-            const tot = ffItems.filter(x => ffVarKey(x) === key).reduce((s, x) => s + (pendingByPoItem[x.id] || 0), 0);
-            if (tot > 0) m[key] = String(tot);
-        });
-        return m;
-    });
+    // Same "starts empty, not pre-filled with pending qty" fix as
+    // trimTotalByGroup above, for the free-form-by-variant trim cards.
+    const [freeFormTrimTotalsByVar, setFreeFormTrimTotalsByVar] = useState(() => initialSnapshot?.freeFormTrimTotalsByVar || {});
 
     const [freeFormFabricRollsByVar, setFreeFormFabricRollsByVar] = useState(() => {
         if (initialSnapshot?.freeFormFabricRollsByVar) return initialSnapshot.freeFormFabricRollsByVar;
@@ -505,6 +621,27 @@ export default function InwardCreateModal({
         // stamp it onto each resulting item — same price, split across reqs.
         const distUnitPriceByReq = {};
 
+        // trimTotalByReq/fabricRollsByReq both start pre-filled with each
+        // requirement's own pending qty (see their useState initializers) —
+        // nothing else clears that prefill for a requirement the user
+        // explicitly removed rather than just left blank. The main loop below
+        // only ever visits *active* requirements, so skip a whole group (the
+        // trash icon), remove a requirement individually, or remove every
+        // requirement in a group one at a time — any of those leaves the
+        // removed requirement's stale prefill sitting untouched in
+        // distTrimByReq/distFabricByReq and it silently survives into the
+        // submission. Clear all of them up front instead of relying on the
+        // per-group loop's early-returns to do it.
+        (poItems || []).forEach(group => {
+            const groupRemoved = removedGroupIds.has(group.id);
+            (group.requirements || []).forEach(r => {
+                if (groupRemoved || removedReqIds.has(r.id)) {
+                    delete distTrimByReq[r.id];
+                    delete distFabricByReq[r.id];
+                }
+            });
+        });
+
         (poItems || []).forEach(group => {
             if (removedGroupIds.has(group.id)) return;
             const reqs = (group.requirements || []).filter(r => !removedReqIds.has(r.id));
@@ -556,6 +693,23 @@ export default function InwardCreateModal({
             if (!ffVarGroupMap[key]) ffVarGroupMap[key] = { key, items: [], isFabric: g.item_type === 'fabric' };
             ffVarGroupMap[key].items.push(g);
         });
+
+        // Same stale-prefill cleanup as the linked-requirement pass above —
+        // freeFormTrimTotals/freeFormFabricRolls also start pre-filled per PO
+        // item, and the merge-by-variant loop below only ever visits active
+        // items, so a removed card (whole key) or an individually-removed
+        // item within an otherwise-active card would otherwise keep its
+        // stale pending-qty prefill.
+        Object.values(ffVarGroupMap).forEach(({ key, items }) => {
+            const groupRemoved = removedVarGroupKeys.has(key);
+            items.forEach(g => {
+                if (groupRemoved || removedPoItemIds.has(g.id)) {
+                    delete distFreeFormTrimTotals[g.id];
+                    delete distFreeFormFabricRolls[g.id];
+                }
+            });
+        });
+
         Object.values(ffVarGroupMap).forEach(({ key, items, isFabric }) => {
             if (removedVarGroupKeys.has(key)) return;
             const activeItems = items.filter(g => !removedPoItemIds.has(g.id));
@@ -650,9 +804,9 @@ export default function InwardCreateModal({
                             <FileText size={16} className="text-emerald-500" />
                             {inward ? `Edit Inward · ${inward.grn_number || `GRN #${inward.id}`}` : 'New Inward (GRN)'}
                         </h2>
-                        {(poCode || poId) && (
+                        {(poCode || poIndex != null || poId) && (
                             <p className="text-[11px] font-semibold text-emerald-700 mt-0.5">
-                                PO · {poCode || `#${poId}`}
+                                PO · {poCode || `#${poIndex ?? poId}`}
                             </p>
                         )}
                         {inward?.approval_status === 'APPROVED' && (
@@ -667,7 +821,7 @@ export default function InwardCreateModal({
                     </button>
                 </div>
 
-                <div className="overflow-auto flex-1 px-5 py-4 space-y-4">
+                <div className="overflow-auto flex-1 min-h-0 px-5 py-4 space-y-4 max-w-4xl w-full mx-auto">
                     {err && (
                         <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2 text-sm text-red-600">
                             <AlertTriangle size={14} /> {err}
@@ -737,8 +891,21 @@ export default function InwardCreateModal({
                                 ? `${group.fabric_type_name || 'Fabric'}${group.fabric_color_number ? ` · ${group.fabric_color_number}` : ''}${group.fabric_color_name ? ` · ${group.fabric_color_name}` : ''}`
                                 : `${group.trim_item_name || 'Trim'}${group.variant_color_number ? ` · ${group.variant_color_number}` : ''}${group.variant_color_name ? ` · ${group.variant_color_name}` : ''}${group.variant_size ? ` · Sz ${group.variant_size}` : ''}`;
                             const activeReqs = (group.requirements || []).filter(r => !removedReqIds.has(r.id));
-                            const totalPending = activeReqs.reduce((s, r) => s + (pendingByReq[r.id] || 0), 0);
                             const unit = activeReqs[0] ? reqUnit(activeReqs[0]) : (isFabricGroup ? 'm' : 'pcs');
+                            // pendingByReqMap's baseline is the *shared* PO item quantity, repeated
+                            // for every requirement linked to it (by design — see its own comment) —
+                            // so summing pendingByReq across activeReqs multiplies that baseline by
+                            // the requirement count instead of sharing it. A PO item ordered for
+                            // 100,000 with 2 linked requirements would show "200,000 pending" instead
+                            // of the true 100,000. Compute the group's pending directly off the PO
+                            // item's own quantity minus everything received against ANY of its
+                            // requirements (all of them, not just currently-active ones, so removing
+                            // a requirement from view doesn't resurrect qty someone already received
+                            // against it) — one number per PO item, not summed per requirement.
+                            const history = receiptHistoryFor((group.requirements || []).map(r => r.id));
+                            const receivedForPoItem = history.reduce((s, h) => s + h.qty_received, 0);
+                            const totalPending = Math.max(0, (parseFloat(group.quantity) || 0) - receivedForPoItem);
+                            const isFulfilled = totalPending <= 0 && history.length > 0;
 
                             if (isFabricGroup) {
                                 const rolls = fabricRollsByGroup[group.id] || [];
@@ -756,14 +923,27 @@ export default function InwardCreateModal({
                                         <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
                                             <Icon size={13} className="text-slate-500 shrink-0" />
                                             <p className="text-xs font-bold text-slate-700 truncate flex-1">{groupLabel}</p>
-                                            <span className="text-[9px] text-slate-400 shrink-0">{activeReqs.length} req{activeReqs.length !== 1 ? 's' : ''}</span>
-                                            <button type="button" onClick={() => setRemovedGroupIds(prev => new Set(prev).add(group.id))}
-                                                title="Skip this item" className="p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0">
-                                                <Trash2 size={12} />
-                                            </button>
+                                            {activeReqs.length > 1 ? (
+                                                <button type="button" onClick={() => toggleReqGroup(group.id)}
+                                                    className="flex items-center gap-0.5 text-[9px] text-slate-400 hover:text-slate-600 shrink-0 transition-colors">
+                                                    {activeReqs.length} reqs
+                                                    {expandedReqGroups.has(group.id) ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                                                </button>
+                                            ) : (
+                                                <span className="text-[9px] text-slate-400 shrink-0">{activeReqs.length} req</span>
+                                            )}
+                                            {!isFulfilled && (
+                                                <button type="button" onClick={() => setRemovedGroupIds(prev => new Set(prev).add(group.id))}
+                                                    title="Skip this item" className="p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0">
+                                                    <Trash2 size={12} />
+                                                </button>
+                                            )}
                                         </div>
                                         <div className="p-2 space-y-1.5">
-                                            {activeReqs.length > 1 && (
+                                            {isFulfilled ? <FulfilledSummary history={history} unit={unit} /> : (
+                                            <>
+                                            <PriorReceiptNote history={history} unit={unit} />
+                                            {activeReqs.length > 1 && expandedReqGroups.has(group.id) && (
                                                 <div className="space-y-0.5 px-1 pb-0.5">
                                                     {distribution.map(({ r, allocated }, i) => (
                                                         <div key={r.id} className="flex items-center justify-between text-[10px] text-slate-500">
@@ -821,11 +1001,16 @@ export default function InwardCreateModal({
                                                     ))}
                                                 </div>
                                             </div>
-                                            <GroupUnitPriceField
-                                                value={unitPriceByGroup[group.id] || ''}
-                                                onChange={v => setUnitPriceByGroup(prev => ({ ...prev, [group.id]: v }))}
-                                                unitLabel={unit}
-                                            />
+                                            <div className="flex items-center justify-between gap-2">
+                                                <GroupUnitPriceField
+                                                    value={unitPriceByGroup[group.id] || ''}
+                                                    onChange={v => setUnitPriceByGroup(prev => ({ ...prev, [group.id]: v }))}
+                                                    unitLabel={unit}
+                                                />
+                                                <LineTotal qty={sum} price={unitPriceByGroup[group.id]} />
+                                            </div>
+                                            </>
+                                            )}
                                         </div>
                                     </div>
                                 );
@@ -842,6 +1027,9 @@ export default function InwardCreateModal({
                                 distRem = Math.max(0, distRem - allocated);
                                 return { r, allocated };
                             });
+                            // variant_trim_item_id is resolved server-side (getPurchaseOrderById
+                            // joins trim_item_variants → trim_items) — no local variant lookup needed.
+                            const trimItemMaster = trimItems.find(t => String(t.id) === String(group.variant_trim_item_id));
                             return (
                                 <div key={group.id} className="border border-slate-200 rounded-xl overflow-hidden">
                                     <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
@@ -850,14 +1038,27 @@ export default function InwardCreateModal({
                                         {!isFabricGroup && group.trim_item_variant_id && (
                                             <SupplierCodePill supplierId={supplierId} supplierName={supplierName} variantId={group.trim_item_variant_id} className="shrink-0" />
                                         )}
-                                        <span className="text-[9px] text-slate-400 shrink-0">{activeReqs.length} req{activeReqs.length !== 1 ? 's' : ''}</span>
-                                        <button type="button" onClick={() => setRemovedGroupIds(prev => new Set(prev).add(group.id))}
-                                            title="Skip this item" className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
-                                            <Trash2 size={12} />
-                                        </button>
+                                        {activeReqs.length > 1 ? (
+                                            <button type="button" onClick={() => toggleReqGroup(group.id)}
+                                                className="flex items-center gap-0.5 text-[9px] text-slate-400 hover:text-slate-600 shrink-0 transition-colors">
+                                                {activeReqs.length} reqs
+                                                {expandedReqGroups.has(group.id) ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                                            </button>
+                                        ) : (
+                                            <span className="text-[9px] text-slate-400 shrink-0">{activeReqs.length} req</span>
+                                        )}
+                                        {!isFulfilled && (
+                                            <button type="button" onClick={() => setRemovedGroupIds(prev => new Set(prev).add(group.id))}
+                                                title="Skip this item" className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
+                                                <Trash2 size={12} />
+                                            </button>
+                                        )}
                                     </div>
                                     <div className="p-2 space-y-1.5">
-                                        {activeReqs.length > 1 && (
+                                        {isFulfilled ? <FulfilledSummary history={history} unit={unit} /> : (
+                                        <>
+                                        <PriorReceiptNote history={history} unit={unit} />
+                                        {activeReqs.length > 1 && expandedReqGroups.has(group.id) && (
                                             <div className="space-y-0.5 px-1 pb-0.5">
                                                 {distribution.map(({ r, allocated }, i) => (
                                                     <div key={r.id} className="flex items-center justify-between text-[10px] text-slate-500">
@@ -895,11 +1096,18 @@ export default function InwardCreateModal({
                                                 {over && <span className="text-[10px] font-bold text-red-600">Over by {(inThis - totalPending).toLocaleString()} {unit}</span>}
                                             </div>
                                         </div>
-                                        <GroupUnitPriceField
-                                            value={unitPriceByGroup[group.id] || ''}
-                                            onChange={v => setUnitPriceByGroup(prev => ({ ...prev, [group.id]: v }))}
-                                            unitLabel={unit}
-                                        />
+                                        <div className="flex items-center justify-between gap-2">
+                                            <GroupUnitPriceField
+                                                value={unitPriceByGroup[group.id] || ''}
+                                                onChange={v => setUnitPriceByGroup(prev => ({ ...prev, [group.id]: v }))}
+                                                unitLabel={unit}
+                                                packSize={trimItemMaster?.default_pack_size}
+                                                packUom={trimItemMaster?.pack_uom}
+                                            />
+                                            <LineTotal qty={inThis} price={unitPriceByGroup[group.id]} />
+                                        </div>
+                                        </>
+                                        )}
                                     </div>
                                 </div>
                             );
@@ -924,6 +1132,10 @@ export default function InwardCreateModal({
                                 const groupUom = ref.uom || (isFabric ? 'm' : 'pcs');
                                 const activeItems = items.filter(g => !removedPoItemIds.has(g.id));
                                 const totalPending = activeItems.reduce((s, g) => s + (pendingByPoItem[g.id] || 0), 0);
+                                // Unconditional (not just when fulfilled) — PriorReceiptNote shows this
+                                // for a still-open, partially-received item too, not just a done one.
+                                const history = receiptHistoryFor([], activeItems.map(g => g.id));
+                                const isFulfilled = totalPending <= 0 && history.length > 0;
 
                                 if (isFabric) {
                                     const rolls = freeFormFabricRollsByVar[key] || [];
@@ -942,12 +1154,17 @@ export default function InwardCreateModal({
                                                 <Icon size={13} className="text-slate-500 shrink-0" />
                                                 <p className="text-xs font-bold text-slate-700 truncate flex-1">{itemLabel}</p>
                                                 <span className="text-[9px] text-slate-400 shrink-0">{activeItems.length} line{activeItems.length !== 1 ? 's' : ''}</span>
-                                                <button type="button" onClick={() => setRemovedVarGroupKeys(prev => new Set(prev).add(key))}
-                                                    title="Skip this item" className="p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0">
-                                                    <Trash2 size={12} />
-                                                </button>
+                                                {!isFulfilled && (
+                                                    <button type="button" onClick={() => setRemovedVarGroupKeys(prev => new Set(prev).add(key))}
+                                                        title="Skip this item" className="p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0">
+                                                        <Trash2 size={12} />
+                                                    </button>
+                                                )}
                                             </div>
                                             <div className="p-2 space-y-1.5">
+                                                {isFulfilled ? <FulfilledSummary history={history} unit={groupUom} /> : (
+                                                <>
+                                                <PriorReceiptNote history={history} unit={groupUom} />
                                                 {activeItems.length > 1 && (
                                                     <div className="space-y-0.5 px-1 pb-0.5">
                                                         {distribution.map(({ g, allocated }, i) => (
@@ -1000,11 +1217,16 @@ export default function InwardCreateModal({
                                                         ))}
                                                     </div>
                                                 </div>
-                                                <GroupUnitPriceField
-                                                    value={unitPriceByVarGroup[key] || ''}
-                                                    onChange={v => setUnitPriceByVarGroup(prev => ({ ...prev, [key]: v }))}
-                                                    unitLabel={groupUom}
-                                                />
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <GroupUnitPriceField
+                                                        value={unitPriceByVarGroup[key] || ''}
+                                                        onChange={v => setUnitPriceByVarGroup(prev => ({ ...prev, [key]: v }))}
+                                                        unitLabel={groupUom}
+                                                    />
+                                                    <LineTotal qty={sum} price={unitPriceByVarGroup[key]} />
+                                                </div>
+                                                </>
+                                                )}
                                             </div>
                                         </div>
                                     );
@@ -1021,6 +1243,7 @@ export default function InwardCreateModal({
                                     distRem = Math.max(0, distRem - allocated);
                                     return { g, allocated };
                                 });
+                                const trimItemMaster = trimItems.find(t => String(t.id) === String(ref.variant_trim_item_id));
                                 return (
                                     <div key={`varfree-${key}`} className="border border-slate-200 rounded-xl overflow-hidden">
                                         <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
@@ -1030,12 +1253,17 @@ export default function InwardCreateModal({
                                                 <SupplierCodePill supplierId={supplierId} supplierName={supplierName} variantId={ref.trim_item_variant_id} className="shrink-0" />
                                             )}
                                             <span className="text-[9px] text-slate-400 shrink-0">{activeItems.length} line{activeItems.length !== 1 ? 's' : ''}</span>
-                                            <button type="button" onClick={() => setRemovedVarGroupKeys(prev => new Set(prev).add(key))}
-                                                title="Skip this item" className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
-                                                <Trash2 size={12} />
-                                            </button>
+                                            {!isFulfilled && (
+                                                <button type="button" onClick={() => setRemovedVarGroupKeys(prev => new Set(prev).add(key))}
+                                                    title="Skip this item" className="shrink-0 p-1.5 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">
+                                                    <Trash2 size={12} />
+                                                </button>
+                                            )}
                                         </div>
                                         <div className="p-2 space-y-1.5">
+                                            {isFulfilled ? <FulfilledSummary history={history} unit={groupUom} /> : (
+                                            <>
+                                            <PriorReceiptNote history={history} unit={groupUom} />
                                             {activeItems.length > 1 && (
                                                 <div className="space-y-0.5 px-1 pb-0.5">
                                                     {distribution.map(({ g, allocated }, i) => (
@@ -1068,11 +1296,18 @@ export default function InwardCreateModal({
                                                     {over && <span className="text-[10px] font-bold text-red-600">Over by {(inThis - totalPending).toLocaleString()} {groupUom}</span>}
                                                 </div>
                                             </div>
-                                            <GroupUnitPriceField
-                                                value={unitPriceByVarGroup[key] || ''}
-                                                onChange={v => setUnitPriceByVarGroup(prev => ({ ...prev, [key]: v }))}
-                                                unitLabel={groupUom}
-                                            />
+                                            <div className="flex items-center justify-between gap-2">
+                                                <GroupUnitPriceField
+                                                    value={unitPriceByVarGroup[key] || ''}
+                                                    onChange={v => setUnitPriceByVarGroup(prev => ({ ...prev, [key]: v }))}
+                                                    unitLabel={groupUom}
+                                                    packSize={trimItemMaster?.default_pack_size}
+                                                    packUom={trimItemMaster?.pack_uom}
+                                                />
+                                                <LineTotal qty={inThis} price={unitPriceByVarGroup[key]} />
+                                            </div>
+                                            </>
+                                            )}
                                         </div>
                                     </div>
                                 );
@@ -1137,6 +1372,11 @@ export default function InwardCreateModal({
                                                     {groupSum > 0 && (
                                                         <span className={`text-[10px] font-bold ${S.sum}`}>
                                                             · {groupSum.toLocaleString(undefined, { maximumFractionDigits: 2 })} {isFabric ? 'm' : (g.uom || 'pcs')} total
+                                                        </span>
+                                                    )}
+                                                    {groupSum > 0 && parseFloat(g.unit_price) > 0 && (
+                                                        <span className="text-[10px] font-bold text-slate-500">
+                                                            · ₹{formatMoney(groupSum * parseFloat(g.unit_price))}
                                                         </span>
                                                     )}
                                                 </div>

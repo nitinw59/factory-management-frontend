@@ -1,17 +1,30 @@
 import { useState, useEffect } from 'react';
 import {
-    X, Loader2, AlertTriangle, Plus, Trash2, Package, Scissors, ShoppingCart,
+    X, Loader2, AlertTriangle, Plus, Trash2, Package, Scissors, ShoppingCart, Calculator,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { trimsApi } from '../../api/trimsApi';
 import api from '../../utils/api';
 import SupplierCodePill from './SupplierCodePill';
 import SearchableSelect from '../../shared/SearchableSelect';
+import UomSelect from '../../shared/UomSelect';
 
 const rk = () => Math.random().toString(36).slice(2);
 
+// Box/pack rate ÷ qty-per-pack rarely divides evenly (e.g. ₹72.5 / 5000m =
+// ₹0.0145) — keep up to 5 decimal places so the rounding error doesn't
+// compound across a large quantity, but trim trailing zeros so simple
+// divisions still read clean.
+const formatPricePrecise = (n) => {
+    if (n == null || Number.isNaN(n)) return null;
+    return n.toFixed(5).replace(/0+$/, '').replace(/\.$/, '');
+};
+
 const blankFabricLine = () => ({ _key: rk(), fabric_color_id: '', quantity: '' });
-const blankTrimLine   = () => ({ _key: rk(), trim_item_variant_id: '', quantity: '' });
+// packs is a scratch value for the "packs × default_pack_size" helper shown
+// under Qty for pack-sized trim items — not sent to the backend, only used
+// to compute quantity.
+const blankTrimLine   = () => ({ _key: rk(), trim_item_variant_id: '', quantity: '', packs: '' });
 
 const blankFabricGroup = () => ({
     _key:           rk(),
@@ -44,6 +57,24 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
     const [variantsByTrim, setVariantsByTrim] = useState({});  // { [trim_item_id]: [{ id, color_name, color_number, variant_size, ... }] }
     const [busy,           setBusy]           = useState(false);
     const [err,            setErr]            = useState(null);
+
+    // Pack-rate → unit-price mini calculator, one card's open at a time
+    // (priceCalcKey holds that card's _key). For trim cards, opening it
+    // pre-fills "Qty/pack" from the trim item's own default_pack_size/
+    // pack_uom master data (set on the trims admin page) so a cone's price
+    // doesn't need re-deriving by hand every time a PO is raised — the same
+    // divide-by-pack-size math the GRN screens already do.
+    const [priceCalcKey,  setPriceCalcKey]  = useState(null);
+    const [priceCalcRate, setPriceCalcRate] = useState('');
+    const [priceCalcQty,  setPriceCalcQty]  = useState('');
+    const togglePriceCalc = (gk, prefillQty) => {
+        setPriceCalcKey(prev => {
+            if (prev === gk) return null;
+            setPriceCalcRate('');
+            setPriceCalcQty(prefillQty ? String(prefillQty) : '');
+            return gk;
+        });
+    };
 
     useEffect(() => {
         api.get('/shared/supplier')
@@ -279,6 +310,8 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                                 const isFabric = g.type === 'fabric';
                                 const Icon     = isFabric ? Package : Scissors;
                                 const variants = !isFabric ? (variantsByTrim[g.trim_item_id] || []) : [];
+                                const trimItemMaster = !isFabric ? trimItems.find(t => String(t.id) === String(g.trim_item_id)) : null;
+                                const packWord = trimItemMaster?.pack_uom || 'pack';
 
                                 return (
                                     <div key={g._key} className={`border rounded-xl p-3 space-y-3 ${isFabric ? 'border-violet-100 bg-violet-50/40' : 'border-amber-100 bg-amber-50/40'}`}>
@@ -324,25 +357,61 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                                             </div>
                                             <div>
                                                 <label className="text-[9px] font-bold text-slate-400 uppercase">UOM</label>
-                                                <input
-                                                    type="text"
+                                                <UomSelect
                                                     value={g.uom}
-                                                    onChange={e => setGroupField(gi, 'uom', e.target.value)}
-                                                    className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400"
+                                                    onChange={v => setGroupField(gi, 'uom', v)}
+                                                    className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-orange-400"
                                                 />
                                             </div>
                                             <div>
                                                 <label className="text-[9px] font-bold text-slate-400 uppercase">Unit Price *</label>
-                                                <input
-                                                    type="number"
-                                                    min="0"
-                                                    step="any"
-                                                    value={g.unit_price}
-                                                    onChange={e => setGroupField(gi, 'unit_price', e.target.value)}
-                                                    className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400 text-right tabular-nums"
-                                                />
+                                                <div className="relative">
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        step="any"
+                                                        value={g.unit_price}
+                                                        onChange={e => setGroupField(gi, 'unit_price', e.target.value)}
+                                                        className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 pr-5 focus:outline-none focus:border-orange-400 text-right tabular-nums"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => togglePriceCalc(g._key, trimItemMaster?.default_pack_size)}
+                                                        title={`Calculate from a per-${packWord} rate`}
+                                                        className={`absolute right-0.5 top-1/2 -translate-y-1/2 p-0.5 rounded transition ${priceCalcKey === g._key ? 'text-amber-800' : 'text-amber-500 hover:text-amber-700'}`}
+                                                    >
+                                                        <Calculator size={11} />
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
+
+                                        {priceCalcKey === g._key && (() => {
+                                            const computed = (parseFloat(priceCalcRate) > 0 && parseFloat(priceCalcQty) > 0)
+                                                ? parseFloat(priceCalcRate) / parseFloat(priceCalcQty)
+                                                : null;
+                                            return (
+                                                <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex-wrap">
+                                                    <input type="number" min="0" step="any" placeholder={`Rate/${packWord} ₹`}
+                                                        value={priceCalcRate}
+                                                        onChange={e => setPriceCalcRate(e.target.value)}
+                                                        className="w-24 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400" />
+                                                    <span className="text-[10px] text-amber-500">÷</span>
+                                                    <input type="number" min="0" step="any" placeholder={`Qty/${packWord}`}
+                                                        value={priceCalcQty}
+                                                        onChange={e => setPriceCalcQty(e.target.value)}
+                                                        className="w-24 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400" />
+                                                    <span className="text-[10px] font-bold text-amber-800 flex-1 text-right whitespace-nowrap">
+                                                        {computed != null ? `= ₹${formatPricePrecise(computed)}/${g.uom || 'unit'}` : '—'}
+                                                    </span>
+                                                    <button type="button" disabled={computed == null}
+                                                        onClick={() => { setGroupField(gi, 'unit_price', formatPricePrecise(computed)); setPriceCalcKey(null); }}
+                                                        className="text-[10px] font-bold text-white bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed px-2 py-1 rounded-md transition">
+                                                        Use
+                                                    </button>
+                                                </div>
+                                            );
+                                        })()}
 
                                         {/* Lines */}
                                         <div className="space-y-1.5">
@@ -414,6 +483,30 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                                                             <Trash2 size={12} />
                                                         </button>
                                                     </div>
+                                                    {!isFabric && trimItemMaster?.default_pack_size && (() => {
+                                                        const packs = parseFloat(ln.packs);
+                                                        const computed = packs > 0 ? packs * trimItemMaster.default_pack_size : null;
+                                                        return (
+                                                            <div className="mt-1.5 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex-wrap">
+                                                                <input type="number" min="0" step="any" placeholder="Packs"
+                                                                    value={ln.packs}
+                                                                    onChange={e => setLineField(gi, li, 'packs', e.target.value)}
+                                                                    className="w-16 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400" />
+                                                                <span className="text-[10px] text-amber-500">×</span>
+                                                                <span className="text-[11px] font-bold text-amber-700 whitespace-nowrap">
+                                                                    {trimItemMaster.default_pack_size}{trimItemMaster.pack_uom ? `/${trimItemMaster.pack_uom}` : ''}
+                                                                </span>
+                                                                <span className="text-[10px] font-bold text-amber-800 flex-1 text-right whitespace-nowrap">
+                                                                    {computed != null ? `= ${computed.toLocaleString()} ${g.uom || 'unit'}` : '—'}
+                                                                </span>
+                                                                <button type="button" disabled={computed == null}
+                                                                    onClick={() => setLineField(gi, li, 'quantity', String(computed))}
+                                                                    className="text-[10px] font-bold text-white bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed px-2 py-1 rounded-md transition">
+                                                                    Use
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })()}
                                                     {!isFabric && supplierId && ln.trim_item_variant_id && (
                                                         <div className="mt-1 pl-1">
                                                             <SupplierCodePill

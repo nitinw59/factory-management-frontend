@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     X, Loader2, Plus, Trash2, Package, Scissors, Wrench, Tag, Upload,
     FileText, AlertTriangle, CheckCircle2, Boxes,
-    ClipboardList, ArrowRight, ArrowLeft, PackagePlus,
+    ArrowRight, ArrowLeft,
     IndianRupee, Calculator,
 } from 'lucide-react';
 import BoxBreakdownModal from './BoxBreakdownModal';
@@ -160,13 +160,29 @@ const lineAmount = (l) => {
 // Highlighted so it doesn't get skipped like a throwaway "optional" input, plus
 // a "Box rate" mini-calculator: type what a whole box costs and how many units
 // are in it, and it divides that down to a per-unit price for you.
-function UnitPriceField({ value, onChange, unitLabel = 'unit', wide }) {
+//
+// packSize/packUom (from the trim item master's default_pack_size/pack_uom)
+// pre-fill the qty-per-box side and relabel the calculator around the item's
+// actual pack (e.g. "Rate/cone ₹" ÷ "Qty/cone" instead of generic "Box rate")
+// so a thread cone's price doesn't need re-deriving by hand every time — the
+// same divide-by-pack-size math the standalone Inventory Intake page did,
+// folded into this field instead of a separate page.
+function UnitPriceField({ value, onChange, unitLabel = 'unit', wide, packSize, packUom }) {
     const [calcOpen,   setCalcOpen]   = useState(false);
     const [boxRate,    setBoxRate]    = useState('');
     const [qtyPerBox,  setQtyPerBox]  = useState('');
     const computed = (parseFloat(boxRate) > 0 && parseFloat(qtyPerBox) > 0)
         ? parseFloat(boxRate) / parseFloat(qtyPerBox)
         : null;
+    const packWord = packUom || 'box';
+
+    const toggleCalc = () => setCalcOpen(o => {
+        const opening = !o;
+        // Pre-fill only on open, only if the user hasn't already typed something —
+        // avoids clobbering an in-progress manual entry.
+        if (opening && !qtyPerBox && packSize) setQtyPerBox(String(packSize));
+        return opening;
+    });
 
     return (
         <div className={wide ? 'w-40' : ''}>
@@ -182,8 +198,8 @@ function UnitPriceField({ value, onChange, unitLabel = 'unit', wide }) {
                 />
                 <button
                     type="button"
-                    onClick={() => setCalcOpen(o => !o)}
-                    title="Calculate from a box rate"
+                    onClick={toggleCalc}
+                    title={`Calculate from a per-${packWord} rate`}
                     className={`shrink-0 p-1.5 rounded-lg border transition ${calcOpen ? 'bg-amber-500 text-white border-amber-500' : 'text-amber-600 border-amber-200 hover:bg-amber-50'}`}
                 >
                     <Calculator size={12} />
@@ -192,14 +208,14 @@ function UnitPriceField({ value, onChange, unitLabel = 'unit', wide }) {
             {calcOpen && (
                 <div className="mt-1.5 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex-wrap">
                     <input
-                        type="number" min="0" step="any" placeholder="Box rate ₹"
+                        type="number" min="0" step="any" placeholder={`Rate/${packWord} ₹`}
                         value={boxRate}
                         onChange={e => setBoxRate(e.target.value)}
                         className="w-20 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400"
                     />
                     <span className="text-[10px] text-amber-500">÷</span>
                     <input
-                        type="number" min="0" step="any" placeholder={`Qty/box`}
+                        type="number" min="0" step="any" placeholder={`Qty/${packWord}`}
                         value={qtyPerBox}
                         onChange={e => setQtyPerBox(e.target.value)}
                         className="w-20 text-[11px] border border-amber-200 rounded px-1.5 py-1 tabular-nums focus:outline-none focus:border-amber-400"
@@ -397,6 +413,8 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
                         value={line.unit_price}
                         onChange={v => set('unit_price', v)}
                         unitLabel={selectedTrimItem?.unit_of_measure || 'pcs'}
+                        packSize={selectedTrimItem?.default_pack_size}
+                        packUom={selectedTrimItem?.pack_uom}
                     />
                 </div>
                 {boxControl}
@@ -500,9 +518,11 @@ function LineCard({ line, fabricTypes, fabricColors, trimItems, spareParts, gene
 // ── Main Modal ────────────────────────────────────────────────────────────────
 
 export default function StandaloneInwardModal({ onClose, onCreated, inward = null }) {
-    // First-screen choice: null = chooser, 'po' = PO search, 'standalone' = free-form.
-    // Editing an existing standalone inward skips the chooser entirely.
-    const [entryMode, setEntryMode] = useState(inward ? 'standalone' : null);
+    // Every new inward must be tied to a PO — 'standalone' (free-form, no PO) is
+    // only ever reached when editing an existing inward's line items, never for
+    // a brand-new one. New inwards go straight to the PO search screen. Fixed
+    // for the modal's lifetime — nothing ever transitions between the two.
+    const entryMode = inward ? 'standalone' : 'po';
     const isEdit = !!inward;
 
     // Header fields — prefilled from the inward being edited, if any.
@@ -811,6 +831,7 @@ export default function StandaloneInwardModal({ onClose, onCreated, inward = nul
             <InwardCreateModal
                 poId={poCtx.po.id}
                 poCode={poCtx.po.po_code}
+                poIndex={poCtx.po.po_index}
                 poItems={poCtx.items}
                 supplierId={poCtx.po.supplier_id}
                 supplierName={poCtx.po.supplier_name}
@@ -831,6 +852,7 @@ export default function StandaloneInwardModal({ onClose, onCreated, inward = nul
             <InwardReviewModal
                 poId={poCtx.po.id}
                 poCode={poCtx.po.po_code}
+                poIndex={poCtx.po.po_index}
                 payload={poCtx.payload}
                 poItems={poCtx.items}
                 supplierId={poCtx.po.supplier_id}
@@ -1058,79 +1080,16 @@ export default function StandaloneInwardModal({ onClose, onCreated, inward = nul
         );
     }
 
-    // ── Entry chooser — first thing the user sees ─────────────────────────────
-
-    if (entryMode === null) {
-        return (
-            <div className="fixed inset-0 z-50 bg-white flex flex-col">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
-                    <div>
-                        <h3 className="font-black text-slate-800 text-base">Record Inward</h3>
-                        <p className="text-xs text-slate-500 mt-0.5">How was this stock received?</p>
-                    </div>
-                    <button onClick={onClose} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition">
-                        <X size={18} />
-                    </button>
-                </div>
-
-                <div className="flex-1 flex items-center justify-center p-6">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 w-full max-w-2xl">
-                        <button
-                            type="button"
-                            onClick={() => setEntryMode('po')}
-                            className="group flex flex-col items-center text-center gap-4 border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50/50 rounded-2xl px-8 py-10 transition"
-                        >
-                            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-orange-100 text-orange-600 group-hover:bg-orange-500 group-hover:text-white transition">
-                                <ClipboardList size={28} />
-                            </div>
-                            <div>
-                                <p className="font-extrabold text-slate-800 text-base">Against a PO</p>
-                                <p className="text-xs text-slate-500 mt-1">Receiving goods against an existing Purchase Order</p>
-                            </div>
-                            <span className="flex items-center gap-1 text-xs font-bold text-orange-600 opacity-0 group-hover:opacity-100 transition">
-                                Continue <ArrowRight size={12} />
-                            </span>
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={() => setEntryMode('standalone')}
-                            className="group flex flex-col items-center text-center gap-4 border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50/50 rounded-2xl px-8 py-10 transition"
-                        >
-                            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-orange-100 text-orange-600 group-hover:bg-orange-500 group-hover:text-white transition">
-                                <PackagePlus size={28} />
-                            </div>
-                            <div>
-                                <p className="font-extrabold text-slate-800 text-base">Without a PO</p>
-                                <p className="text-xs text-slate-500 mt-1">Standalone receipt — walk-in stock, samples, etc.</p>
-                            </div>
-                            <span className="flex items-center gap-1 text-xs font-bold text-orange-600 opacity-0 group-hover:opacity-100 transition">
-                                Continue <ArrowRight size={12} />
-                            </span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    // ── PO search screen ───────────────────────────────────────────────────────
+    // ── PO search screen — first thing the user sees for a new inward ─────────
+    // (every inward must be tied to a PO now, so there's no chooser before this)
 
     if (entryMode === 'po') {
         return (
             <div className="fixed inset-0 z-50 bg-white flex flex-col">
                 <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
-                    <div className="flex items-center gap-3">
-                        <button
-                            onClick={() => { setEntryMode(null); setSelectedPo(null); setPoSearch(''); setErr(null); }}
-                            className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition"
-                        >
-                            <ArrowLeft size={18} />
-                        </button>
-                        <div>
-                            <h3 className="font-black text-slate-800 text-base">Select Purchase Order</h3>
-                            <p className="text-xs text-slate-500 mt-0.5">Pick the PO you're receiving goods against</p>
-                        </div>
+                    <div>
+                        <h3 className="font-black text-slate-800 text-base">Select Purchase Order</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">Pick the PO you're receiving goods against</p>
                     </div>
                     <button onClick={onClose} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition">
                         <X size={18} />
@@ -1207,11 +1166,6 @@ export default function StandaloneInwardModal({ onClose, onCreated, inward = nul
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50 rounded-t-2xl shrink-0">
                     <div className="flex items-center gap-3">
-                        {!saving && !isEdit && (
-                            <button onClick={() => setEntryMode(null)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition">
-                                <ArrowLeft size={18} />
-                            </button>
-                        )}
                         <div>
                             <h3 className="font-black text-slate-800 text-base">{isEdit ? 'Edit Inward' : 'Record Inward'}</h3>
                             <p className="text-xs text-slate-500 mt-0.5">

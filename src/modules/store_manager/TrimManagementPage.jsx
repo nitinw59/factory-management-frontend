@@ -101,9 +101,10 @@ const Modal = ({ title, children, onClose }) => (
 
 // --- ITEM FORM ---
 const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
-    const [formData, setFormData] = useState({ 
-        name: '', brand: '', description: '', item_code: '', unit_of_measure: 'pieces', is_color_agnostic: false, 
-        ...initialData 
+    const [formData, setFormData] = useState({
+        name: '', brand: '', description: '', item_code: '', unit_of_measure: 'pieces', is_color_agnostic: false,
+        default_pack_size: '', pack_uom: '',
+        ...initialData
     });
 
     const isEditing = !!initialData.id;
@@ -125,7 +126,13 @@ const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSave(formData);
+        // default_pack_size is an INT column server-side — '' would fail the
+        // UPDATE (it writes itemData[field] raw), so send null instead of ''.
+        onSave({
+            ...formData,
+            default_pack_size: formData.default_pack_size === '' ? null : formData.default_pack_size,
+            pack_uom:          formData.pack_uom === '' ? null : formData.pack_uom,
+        });
     };
 
     return (
@@ -154,6 +161,28 @@ const ItemFormModal = ({ onSave, onClose, initialData = {} }) => {
                 <option value="spools">spools</option>
                 <option value="packets">packets</option>
             </select>
+
+            <div className="grid grid-cols-2 gap-4">
+                <div>
+                    <label className="text-xs font-medium text-gray-500">Default Pack Size <span className="text-gray-400 font-normal">(optional)</span></label>
+                    <input
+                        type="number" min="0" step="any" name="default_pack_size"
+                        value={formData.default_pack_size} onChange={handleChange}
+                        placeholder={`e.g. 1000 ${formData.unit_of_measure || ''}`}
+                        className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-0.5">How many {formData.unit_of_measure || 'units'} come in one pack — pre-fills Intake so cost per pack can be split into cost per {formData.unit_of_measure || 'unit'}.</p>
+                </div>
+                <div>
+                    <label className="text-xs font-medium text-gray-500">Pack Unit <span className="text-gray-400 font-normal">(optional)</span></label>
+                    <input
+                        type="text" name="pack_uom"
+                        value={formData.pack_uom} onChange={handleChange}
+                        placeholder="e.g. cone, tube, roll"
+                        className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                </div>
+            </div>
 
             <label className="flex items-center space-x-2 bg-gray-50 p-3 rounded-lg border border-gray-200 cursor-pointer">
                 <input type="checkbox" name="is_color_agnostic" checked={formData.is_color_agnostic} onChange={handleChange} className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />

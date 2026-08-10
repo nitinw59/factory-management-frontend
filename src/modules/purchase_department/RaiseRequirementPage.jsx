@@ -7,6 +7,7 @@ import { trimsApi } from '../../api/trimsApi';
 import { sparesApi } from '../../api/sparesApi';
 import { generalItemsApi } from '../../api/generalItemsApi';
 import SearchableSelect from '../../shared/SearchableSelect';
+import UomSelect from '../../shared/UomSelect';
 
 const TYPES = [
     { key: 'fabric', label: 'Fabric',     cls: 'bg-violet-100 text-violet-700 border-violet-200' },
@@ -14,21 +15,6 @@ const TYPES = [
     { key: 'spare',  label: 'Spare Part', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
     { key: 'other',  label: 'Other',      cls: 'bg-slate-100 text-slate-700 border-slate-200' },
 ];
-
-const COMMON_UOMS = ['pcs', 'm', 'yd', 'kg', 'g', 'dozen', 'gross', 'roll', 'cone', 'box', 'pkt', 'pair', 'set', 'liter'];
-
-const UomSelect = ({ value, onChange }) => (
-    <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:border-orange-400"
-    >
-        <option value="">— Unit —</option>
-        {/* keep a previously entered free-text value selectable */}
-        {value && !COMMON_UOMS.includes(value) && <option value={value}>{value}</option>}
-        {COMMON_UOMS.map(u => <option key={u} value={u}>{u}</option>)}
-    </select>
-);
 
 const URGENCIES = [
     { key: 'LOW',    label: 'Low',    cls: 'bg-slate-100 text-slate-600 border-slate-200' },

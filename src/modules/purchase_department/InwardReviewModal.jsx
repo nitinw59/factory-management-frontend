@@ -20,6 +20,7 @@ import SupplierCodePill from './SupplierCodePill';
 export default function InwardReviewModal({
     poId,
     poCode,
+    poIndex,                          // fallback label when poCode isn't set — prefer over raw poId
     inward = null,
     payload,
     poItems = [],
@@ -499,9 +500,9 @@ export default function InwardReviewModal({
                                 ? (wasStagedForApproval ? 'Edit submitted for approval' : wasRateCorrection ? 'Rate corrected' : `Inward ${isCreate ? 'recorded' : 'updated'} successfully`)
                                 : 'Review before saving'}
                         </h2>
-                        {(poCode || poId) && (
+                        {(poCode || poIndex != null || poId) && (
                             <p className="text-[11px] font-semibold text-emerald-700 mt-0.5">
-                                PO · {poCode || `#${poId}`}
+                                PO · {poCode || `#${poIndex ?? poId}`}
                             </p>
                         )}
                         {saved ? (
@@ -525,7 +526,7 @@ export default function InwardReviewModal({
                 </div>
 
                 {saved ? (
-                <div className="overflow-auto flex-1 px-5 py-4 space-y-3">
+                <div className="overflow-auto flex-1 min-h-0 px-5 py-4 space-y-3 max-w-3xl w-full mx-auto">
                     <div className="flex flex-wrap gap-2">
                         {savedObj?.id && (
                             <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-full">Inward #{savedObj.id}</span>
@@ -622,7 +623,7 @@ export default function InwardReviewModal({
                     )}
                 </div>
                 ) : (
-                <div className="overflow-auto flex-1 px-5 py-4 space-y-3">
+                <div className="overflow-auto flex-1 min-h-0 px-5 py-4 space-y-3 max-w-3xl w-full mx-auto">
                     {err && (
                         <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2 text-sm text-red-600">
                             <AlertTriangle size={14} /> {err}
