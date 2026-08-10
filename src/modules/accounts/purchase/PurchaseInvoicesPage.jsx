@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Loader2, AlertTriangle, Receipt, Check } from 'lucide-react';
+import { Loader2, AlertTriangle, Receipt, Check, Search } from 'lucide-react';
 import { accountingApi } from '../../../api/accountingApi';
 import { purchaseDeptApi } from '../../../api/purchaseDeptApi';
 import InvoiceModal, { PaymentPill, MatchPill } from '../../purchase_department/InvoiceModal';
@@ -39,6 +39,7 @@ export default function PurchaseInvoicesPage() {
     const [err,          setErr]          = useState(null);
     const [tab,          setTab]          = useState('pending');
     const [statusFilter, setStatusFilter] = useState('ALL');
+    const [search,       setSearch]       = useState('');
     const [selected,     setSelected]     = useState(new Set()); // Set<inwardId>
     const [selectedPoId, setSelectedPoId] = useState(null);
     const [openInvoice,  setOpenInvoice]  = useState(null); // { invoice|null, inwards[], defaultSelectedIds, poItems[] }
@@ -50,6 +51,7 @@ export default function PurchaseInvoicesPage() {
         try {
             const posRes = await accountingApi.getPurchaseOrders();
             const pos = posRes.data?.data || posRes.data || [];
+            console.log('[PurchaseInvoicesPage] purchase orders fetched:', pos);
             const groups = await Promise.all(
                 pos.map(async (po) => {
                     const [iwRes, invRes] = await Promise.all([
@@ -63,6 +65,7 @@ export default function PurchaseInvoicesPage() {
                     };
                 })
             );
+            console.log('[PurchaseInvoicesPage] poGroups (po + inwards + invoices) fetched:', groups);
             setPoGroups(groups);
         } catch (e) {
             setErr(e?.response?.data?.error || 'Failed to load data.');
@@ -81,13 +84,36 @@ export default function PurchaseInvoicesPage() {
         [poGroups]
     );
 
-    // Flat invoice list, filtered by status
+    // Flat invoice list, filtered by status + search (PO code, supplier, invoice number)
     const allInvoices = useMemo(() => {
         const flat = poGroups.flatMap(g =>
             g.invoices.map(inv => ({ ...inv, _po: g.po, _allInwards: g.inwards }))
         );
-        return statusFilter === 'ALL' ? flat : flat.filter(inv => inv.payment_status === statusFilter);
-    }, [poGroups, statusFilter]);
+        const byStatus = statusFilter === 'ALL' ? flat : flat.filter(inv => inv.payment_status === statusFilter);
+        const q = search.trim().toLowerCase();
+        if (!q) return byStatus;
+        return byStatus.filter(inv => [
+            inv.invoice_number, inv._po?.po_code, inv._po?.supplier_name, String(inv._po?.id ?? ''),
+        ].some(v => (v || '').toString().toLowerCase().includes(q)));
+    }, [poGroups, statusFilter, search]);
+
+    // Same invoices, grouped back under their PO — same shape/order as
+    // pendingGroups so the two tabs read consistently, one card per PO
+    // instead of every invoice from every supplier interleaved in one list.
+    const invoicesByPo = useMemo(() => {
+        const byPoId = new Map();
+        allInvoices.forEach(inv => {
+            const poId = inv._po.id;
+            if (!byPoId.has(poId)) byPoId.set(poId, { po: inv._po, invoices: [] });
+            byPoId.get(poId).invoices.push(inv);
+        });
+        // Preserve poGroups' order (created_at DESC from the backend) rather
+        // than Map insertion order, which would just be "PO of the first
+        // matching invoice encountered."
+        return poGroups
+            .map(g => byPoId.get(g.po.id))
+            .filter(Boolean);
+    }, [allInvoices, poGroups]);
 
     // Header stats
     const pendingGrnCount = pendingGroups.reduce((s, g) => s + g.pending.length, 0);
@@ -391,6 +417,26 @@ export default function PurchaseInvoicesPage() {
                 {/* ── INVOICES TAB ── */}
                 {tab === 'invoices' && (
                     <div className="space-y-4">
+                        {/* Search */}
+                        <div className="relative">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Search PO code, supplier, invoice number…"
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
+                                className="w-full text-sm border border-slate-200 rounded-xl pl-9 pr-3 py-2 focus:outline-none focus:border-indigo-400"
+                            />
+                            {search && (
+                                <button
+                                    onClick={() => setSearch('')}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-wider"
+                                >
+                                    Clear
+                                </button>
+                            )}
+                        </div>
+
                         {/* Status filter chips */}
                         <div className="flex items-center gap-2 flex-wrap">
                             {STATUS_FILTERS.map(f => (
@@ -413,57 +459,78 @@ export default function PurchaseInvoicesPage() {
                             <div className="text-center py-20 text-slate-400">
                                 <Receipt size={36} className="mx-auto mb-3 opacity-20" />
                                 <p className="text-sm font-semibold">
-                                    {statusFilter === 'ALL' ? 'No invoices yet' : `No ${statusFilter.replace('_', ' ').toLowerCase()} invoices`}
+                                    {search
+                                        ? 'No invoices match your search'
+                                        : statusFilter === 'ALL' ? 'No invoices yet' : `No ${statusFilter.replace('_', ' ').toLowerCase()} invoices`}
                                 </p>
                             </div>
                         ) : (
                             <>
-                                <div className="space-y-2">
-                                    {allInvoices.map(inv => {
-                                        const linkedCount = (inv.inwards || []).length || inv.inward_count || 0;
-                                        return (
-                                            <div
-                                                key={inv.id}
-                                                onClick={() => handleViewInvoice(inv)}
-                                                className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-start gap-4 shadow-sm hover:shadow-md hover:border-slate-300 transition cursor-pointer"
-                                            >
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                        <p className="text-sm font-black text-slate-800">
-                                                            {inv.invoice_number || `Invoice #${inv.id}`}
-                                                        </p>
-                                                        <PaymentPill status={inv.payment_status} />
-                                                        <MatchPill status={inv.match_status} />
-                                                    </div>
+                                {/* One card per PO, invoices grouped underneath — same layout
+                                    convention as the Pending tab, so invoices from different
+                                    suppliers/POs aren't interleaved in one flat list. */}
+                                <div className="space-y-4">
+                                    {invoicesByPo.map(group => (
+                                        <div key={group.po.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                                            <div className="flex items-center justify-between gap-3 px-4 py-3 bg-slate-50 border-b border-slate-200 flex-wrap">
+                                                <div>
+                                                    <p className="text-sm font-black text-slate-800">
+                                                        {group.po.po_code || `PO #${group.po.id}`}
+                                                        <span className="mx-2 text-slate-300">·</span>
+                                                        <span className="text-slate-600 font-semibold">{group.po.supplier_name || 'Unknown Supplier'}</span>
+                                                    </p>
                                                     <p className="text-[11px] text-slate-500 mt-0.5">
-                                                        {inv._po.po_code || `PO #${inv._po.id}`}
-                                                        {inv._po.supplier_name ? ` · ${inv._po.supplier_name}` : ''}
-                                                        {inv.invoice_date
-                                                            ? ` · ${new Date(inv.invoice_date).toLocaleDateString('en', { dateStyle: 'medium' })}`
-                                                            : ''}
+                                                        {group.invoices.length} invoice{group.invoices.length !== 1 ? 's' : ''}
                                                     </p>
-                                                    <p className="text-[11px] text-slate-400 mt-0.5">
-                                                        Covers {linkedCount} GRN{linkedCount !== 1 ? 's' : ''}
-                                                        {inv.scan_url ? ' · scan attached' : ''}
-                                                        {inv.notes ? ' · has notes' : ''}
-                                                    </p>
-                                                </div>
-                                                <div className="text-right shrink-0">
-                                                    <p className="text-base font-black text-slate-800 tabular-nums">
-                                                        {fmt(parseFloat(inv.amount || 0))}
-                                                    </p>
-                                                    <p className="text-[11px] text-indigo-500 font-semibold mt-0.5">View / Edit →</p>
                                                 </div>
                                             </div>
-                                        );
-                                    })}
+                                            <div className="divide-y divide-slate-100">
+                                                {group.invoices.map(inv => {
+                                                    const linkedCount = (inv.inwards || []).length || inv.inward_count || 0;
+                                                    return (
+                                                        <div
+                                                            key={inv.id}
+                                                            onClick={() => handleViewInvoice(inv)}
+                                                            className="flex items-start gap-4 px-4 py-3 hover:bg-slate-50/60 transition cursor-pointer"
+                                                        >
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center gap-2 flex-wrap">
+                                                                    <p className="text-sm font-black text-slate-800">
+                                                                        {inv.invoice_number || `Invoice #${inv.id}`}
+                                                                    </p>
+                                                                    <PaymentPill status={inv.payment_status} />
+                                                                    <MatchPill status={inv.match_status} />
+                                                                </div>
+                                                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                                                    {inv.invoice_date
+                                                                        ? new Date(inv.invoice_date).toLocaleDateString('en', { dateStyle: 'medium' })
+                                                                        : '—'}
+                                                                </p>
+                                                                <p className="text-[11px] text-slate-400 mt-0.5">
+                                                                    Covers {linkedCount} GRN{linkedCount !== 1 ? 's' : ''}
+                                                                    {inv.scan_url ? ' · scan attached' : ''}
+                                                                    {inv.notes ? ' · has notes' : ''}
+                                                                </p>
+                                                            </div>
+                                                            <div className="text-right shrink-0">
+                                                                <p className="text-base font-black text-slate-800 tabular-nums">
+                                                                    {fmt(parseFloat(inv.amount || 0))}
+                                                                </p>
+                                                                <p className="text-[11px] text-indigo-500 font-semibold mt-0.5">View / Edit →</p>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
 
                                 {/* Footer totals */}
                                 <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between flex-wrap gap-3">
                                     <p className="text-xs text-slate-500">
-                                        {allInvoices.length} invoice{allInvoices.length !== 1 ? 's' : ''}
-                                        {statusFilter !== 'ALL' ? ' matching filter' : ''}
+                                        {allInvoices.length} invoice{allInvoices.length !== 1 ? 's' : ''} across {invoicesByPo.length} PO{invoicesByPo.length !== 1 ? 's' : ''}
+                                        {(statusFilter !== 'ALL' || search) ? ' matching filter' : ''}
                                     </p>
                                     <div className="flex items-center gap-4 text-xs">
                                         <span className="text-slate-600">

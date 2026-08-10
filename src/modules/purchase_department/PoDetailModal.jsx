@@ -1007,7 +1007,7 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                                                     {it.quantity.toLocaleString()} {it.uom}
                                                 </p>
                                                 <p className="text-[10px] text-slate-400 tabular-nums">
-                                                    @ {it.unit_price.toFixed(2)} = ₹{it.total_price.toFixed(2)}
+                                                    @ {it.unit_price.toLocaleString('en-IN', { maximumFractionDigits: 5 })} = ₹{it.total_price.toFixed(2)}
                                                 </p>
                                             </div>
                                             {isDraft && (

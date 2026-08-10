@@ -110,10 +110,10 @@ export function MatchReportPanel({ report, tolerance }) {
                                         {l.qty_variance_pct != null ? `${num(l.qty_variance_pct)}%` : '—'}
                                     </td>
                                     <td className={`px-2 py-1.5 text-right tabular-nums ${l.rate_ok === false ? 'text-red-600 font-bold' : 'text-slate-700'}`}>
-                                        {num(l.inv_rate)} <OkIcon ok={l.rate_ok} />
+                                        {num(l.inv_rate, 5)} <OkIcon ok={l.rate_ok} />
                                     </td>
-                                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{num(l.grn_rate)}</td>
-                                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{num(l.po_rate)}</td>
+                                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{num(l.grn_rate, 5)}</td>
+                                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{num(l.po_rate, 5)}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -722,9 +722,9 @@ export default function InvoiceModal({
                                                         </td>
                                                         <td className="px-2 py-1.5 text-right tabular-nums text-slate-700 font-medium">{num(it.qty)}</td>
                                                         <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{num(it.grn_qty)}</td>
-                                                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-700 font-medium">{num(it.rate)}</td>
-                                                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{num(it.grn_rate)}</td>
-                                                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{num(it.po_rate)}</td>
+                                                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-700 font-medium">{num(it.rate, 5)}</td>
+                                                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{num(it.grn_rate, 5)}</td>
+                                                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{num(it.po_rate, 5)}</td>
                                                         <td className="px-2 py-1.5 text-right tabular-nums font-bold text-slate-700">
                                                             {num(it.line_value ?? (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0))}
                                                         </td>
@@ -867,7 +867,7 @@ export default function InvoiceModal({
                                                                                 </span>
                                                                                 {price != null && (
                                                                                     <span className="shrink-0 text-[10px] text-slate-400 tabular-nums">
-                                                                                        @ {price.toFixed(2)}
+                                                                                        @ {num(price, 5)}
                                                                                     </span>
                                                                                 )}
                                                                             </div>

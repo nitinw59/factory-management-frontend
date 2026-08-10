@@ -504,7 +504,7 @@ const OrdersPage = () => {
                                                                 {inwards == null ? '…' : rec.toLocaleString()}
                                                             </td>
                                                             <td className="px-3 py-1.5 text-right font-mono text-slate-600 tabular-nums">
-                                                                {Number(it.unit_price ?? 0).toFixed(2)}
+                                                                {Number(it.unit_price ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 5 })}
                                                             </td>
                                                             <td className="px-3 py-1.5 text-right font-mono font-bold text-slate-800 tabular-nums">
                                                                 ₹{total.toFixed(2)}

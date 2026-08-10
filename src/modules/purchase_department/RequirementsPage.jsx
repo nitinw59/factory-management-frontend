@@ -1594,7 +1594,7 @@ const RequirementsPage = () => {
                                                             {req.unit_price != null && (
                                                                 <div>
                                                                     <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Unit Price (PO)</p>
-                                                                    <p className="font-medium text-slate-700">{parseFloat(req.unit_price).toFixed(2)}</p>
+                                                                    <p className="font-medium text-slate-700">{parseFloat(req.unit_price).toLocaleString('en-IN', { maximumFractionDigits: 5 })}</p>
                                                                 </div>
                                                             )}
                                                             {req.buyer_po_number && (

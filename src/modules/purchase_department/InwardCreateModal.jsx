@@ -61,7 +61,7 @@ function FulfilledSummary({ history, unit }) {
                         <span className="truncate">{h.grn_number || `Inward #${h.inward_id}`} · {fmtDate(h.received_date)}</span>
                         <span className="tabular-nums font-bold shrink-0 ml-2">
                             {h.qty_received.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
-                            {h.unit_price != null ? ` @ ₹${h.unit_price.toFixed(2)}` : ''}
+                            {h.unit_price != null ? ` @ ₹${h.unit_price.toLocaleString('en-IN', { maximumFractionDigits: 5 })}` : ''}
                         </span>
                     </div>
                 ))}
