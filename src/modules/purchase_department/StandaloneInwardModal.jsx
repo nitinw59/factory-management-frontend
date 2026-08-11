@@ -794,6 +794,7 @@ export default function StandaloneInwardModal({ onClose, onCreated, inward = nul
                 // Server drives the status shown — an edit to an APPROVED inward
                 // may come back PENDING_UPDATE rather than a flat "updated".
                 status:        saved?.approval_status ?? (isEdit ? inward?.approval_status : 'PENDING_APPROVAL'),
+                mismatchReasons: Array.isArray(saved?.mismatch_reasons) ? saved.mismatch_reasons : [],
                 received_date: receivedDate,
                 condition,
                 supplier_name: suppliers.find(s => String(s.id) === String(supplierId))?.name || null,
@@ -906,6 +907,13 @@ export default function StandaloneInwardModal({ onClose, onCreated, inward = nul
 
                     <div className={`border rounded-xl px-4 py-3 text-sm font-medium ${scfg.banner}`}>
                         {scfg.note}
+                        {created.mismatchReasons?.length > 0 && (
+                            <ul className="text-xs mt-2 font-semibold bg-white/60 rounded-lg px-2 py-1.5 space-y-0.5">
+                                {created.mismatchReasons.map((reason, i) => (
+                                    <li key={i}>• {reason}</li>
+                                ))}
+                            </ul>
+                        )}
                     </div>
 
                     {/* Meta pills */}

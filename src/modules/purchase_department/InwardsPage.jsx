@@ -246,8 +246,15 @@ function InwardDetailModal({ inward, canApprove, canEditRow, onApprove, onReject
                 <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
                     {/* Status banner */}
                     {isPending && (
-                        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-sm text-amber-700 font-medium">
-                            <Clock size={14} /> Pending purchase-manager approval
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-sm text-amber-700">
+                            <span className="font-bold flex items-center gap-1.5"><Clock size={14} /> Pending purchase-manager approval</span>
+                            {Array.isArray(inward.mismatch_reasons) && inward.mismatch_reasons.length > 0 && (
+                                <ul className="text-xs mt-1.5 font-medium text-amber-800 bg-amber-100 rounded-lg px-2 py-1.5 space-y-0.5">
+                                    {inward.mismatch_reasons.map((reason, i) => (
+                                        <li key={i}>• {reason}</li>
+                                    ))}
+                                </ul>
+                            )}
                         </div>
                     )}
                     {isApproved && (

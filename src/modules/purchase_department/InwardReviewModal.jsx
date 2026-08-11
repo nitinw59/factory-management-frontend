@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, Loader2, AlertTriangle, ArrowLeft, CheckCircle2, Link2, ChevronDown, ChevronUp, Zap, PartyPopper } from 'lucide-react';
+import { X, Loader2, AlertTriangle, ArrowLeft, CheckCircle2, Link2, ChevronDown, ChevronUp, Zap, PartyPopper, Clock } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { labelFromGroup, describeEditBlock } from './inwardShared';
 import SupplierCodePill from './SupplierCodePill';
@@ -476,6 +476,12 @@ export default function InwardReviewModal({
     // §"Rate-only edits") and come back tagged edit_outcome:'rate_corrected'
     // rather than PENDING_UPDATE, so they need their own success copy.
     const wasRateCorrection = !isCreate && savedObj?.edit_outcome === 'rate_corrected';
+    // GRN/PO mismatch (price variance, over-receipt, or an unlinked line) —
+    // routed to PENDING_APPROVAL instead of auto-applying stock. Read the
+    // reasons straight off the server response so the person submitting sees
+    // exactly why, instead of a generic "pending" message.
+    const mismatchReasons = Array.isArray(savedObj?.mismatch_reasons) ? savedObj.mismatch_reasons : [];
+    const wasMismatchPending = savedObj?.approval_status === 'PENDING_APPROVAL' && mismatchReasons.length > 0;
 
     // Resolve the PR allocations of a summary row for the success screen.
     const allocationsForRow = (idx) => Object.entries(allocations[idx] || {})
@@ -497,7 +503,7 @@ export default function InwardReviewModal({
                         <h2 className="text-base font-black text-slate-800 flex items-center gap-2">
                             {saved ? <PartyPopper size={16} className="text-emerald-600" /> : <CheckCircle2 size={16} className="text-emerald-500" />}
                             {saved
-                                ? (wasStagedForApproval ? 'Edit submitted for approval' : wasRateCorrection ? 'Rate corrected' : `Inward ${isCreate ? 'recorded' : 'updated'} successfully`)
+                                ? (wasStagedForApproval ? 'Edit submitted for approval' : wasRateCorrection ? 'Rate corrected' : wasMismatchPending ? 'Pending purchase-manager approval' : `Inward ${isCreate ? 'recorded' : 'updated'} successfully`)
                                 : 'Review before saving'}
                         </h2>
                         {(poCode || poIndex != null || poId) && (
@@ -511,7 +517,9 @@ export default function InwardReviewModal({
                                     ? `GRN ${savedGrn || (savedObj?.id ? `#${savedObj.id}` : '')} — the original approved record and its stock remain untouched until a purchase-manager reviews this change.`
                                     : wasRateCorrection
                                         ? `GRN ${savedGrn || (savedObj?.id ? `#${savedObj.id}` : '')} — the unit price was updated in place. No quantities or stock moved, so no re-approval was needed.`
-                                        : `GRN ${savedGrn || (savedObj?.id ? `#${savedObj.id}` : '(auto)')} · dated ${savedDate} · ${summary.length} line${summary.length !== 1 ? 's' : ''} posted.`}
+                                        : wasMismatchPending
+                                            ? `GRN ${savedGrn || (savedObj?.id ? `#${savedObj.id}` : '')} doesn't match its PO — stock won't be applied until a purchase-manager approves it.`
+                                            : `GRN ${savedGrn || (savedObj?.id ? `#${savedObj.id}` : '(auto)')} · dated ${savedDate} · ${summary.length} line${summary.length !== 1 ? 's' : ''} posted.`}
                             </p>
                         ) : (
                             <p className="text-xs text-slate-500 mt-0.5">
@@ -544,6 +552,17 @@ export default function InwardReviewModal({
                             <span className="text-[10px] font-bold bg-blue-50 text-blue-700 px-2 py-1 rounded-full">Scan attached</span>
                         )}
                     </div>
+
+                    {wasMismatchPending && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-sm text-amber-700">
+                            <span className="font-bold flex items-center gap-1.5"><Clock size={14} /> Why it's pending</span>
+                            <ul className="text-xs mt-1.5 font-medium text-amber-800 bg-amber-100 rounded-lg px-2 py-1.5 space-y-0.5">
+                                {mismatchReasons.map((reason, i) => (
+                                    <li key={i}>• {reason}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
 
                     <div className="space-y-1.5">
                         {summary.map(row => {
