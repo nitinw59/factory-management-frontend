@@ -37,11 +37,18 @@ api.interceptors.request.use(
 );
 
 // 4. ✅ Global Response Interceptor — session expiry handling.
-// The backend returns 401/403 when the JWT is expired or the Google session
-// has been revoked. When that happens we broadcast ONE session-expired event;
-// AuthContext owns the actual logout + redirect so React state stays in sync
-// (no hard window.location redirects that bypass the router).
+// The backend returns 401 when there's no/expired token, and 403 for TWO very
+// different reasons that share a status code: an invalid token (authMiddleware's
+// jwt.verify failure — a real dead session), or a valid token whose role just
+// isn't allowed on this one endpoint (checkRole's "Access denied. Requires one
+// of these roles: ..." — the user is fine, this specific resource isn't for them).
+// Only the former should nuke the whole session; a mis-scoped/stale role list on
+// one endpoint (this has happened more than once — see /api/product,
+// /api/shared/product_piece_parts) must not force-logout every page that happens
+// to call it. AuthContext owns the actual logout + redirect so React state stays
+// in sync (no hard window.location redirects that bypass the router).
 let sessionExpiryNotified = false;
+const ROLE_DENIED_PREFIX = 'Access denied. Requires one of these roles';
 
 api.interceptors.response.use(
   (response) => response,
@@ -49,8 +56,10 @@ api.interceptors.response.use(
     const status = error.response?.status;
     const requestUrl = error.config?.url || '';
     const hasToken = !!localStorage.getItem('factory_token');
+    const message = error.response?.data?.message || '';
 
-    const isAuthFailure = status === 401 || status === 403;
+    const isRoleDenied  = status === 403 && message.startsWith(ROLE_DENIED_PREFIX);
+    const isAuthFailure = (status === 401 || status === 403) && !isRoleDenied;
     // Only treat it as an expired session if we thought we were logged in,
     // never for the auth endpoints themselves (avoids redirect loops), and never
     // for a request explicitly opted out (role-gated lookups a lower-privileged

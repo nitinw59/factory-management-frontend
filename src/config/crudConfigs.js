@@ -374,11 +374,15 @@ export const workstationConfig = {
 // };
 
 // For: product_piece_parts table
+// Both resources live under /api/product/* (checkRole: factory_admin, merchandiser —
+// see routes/productRoutes.js), not /api/admin/* (factory_admin only, and
+// admin/product_piece_parts isn't even a route there) — that mismatch made this
+// page 403 for every merchandiser-portal visitor and force-logout the session.
 export const piecePartConfig = {
-    resource: 'admin/product_piece_parts',
+    resource: 'product/product_piece_parts',
     title: 'Product Piece Parts',
     fields: [
-        { name: 'product_id', label: 'Product', type: 'select', required: true, resource: 'admin/products'},
+        { name: 'product_id', label: 'Product', type: 'select', required: true, resource: 'product/products'},
         { name: 'part_name', label: 'Part Name', type: 'text', required: true, placeholder: 'e.g., Front Panel, Pocket' },
         { name: 'part_type', label: 'Part Type', type: 'select', required: true, options: ['PRIMARY', 'SUPPORTING'] },
     ],
