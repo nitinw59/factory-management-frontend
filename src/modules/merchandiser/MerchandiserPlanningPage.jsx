@@ -654,8 +654,21 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                                                     </span>
                                                     <span className="font-mono font-bold text-xs text-indigo-600">R-{roll.roll_id}</span>
                                                     <div className="flex-1 min-w-0">
-                                                        {roll.challan_number && <span className="text-[10px] text-slate-400">{roll.challan_number}</span>}
-                                                        {roll.supplier_name  && <span className="text-[10px] text-slate-400 ml-1">· {roll.supplier_name}</span>}
+                                                        <div className="truncate">
+                                                            {roll.challan_number && <span className="text-[10px] text-slate-400">{roll.challan_number}</span>}
+                                                            {roll.supplier_name  && <span className="text-[10px] text-slate-400 ml-1">· {roll.supplier_name}</span>}
+                                                        </div>
+                                                        {roll.split_from_roll_id && (
+                                                            <div
+                                                                className="flex items-center gap-1 mt-0.5"
+                                                                title={`Split from R-${roll.split_from_roll_id} (bale ${roll.split_from_bale_no ?? '—'}): ${parseFloat(roll.split_meters_before ?? 0).toFixed(2)} m before → ${parseFloat(roll.split_meters_committed ?? 0).toFixed(2)} m kept there, ${parseFloat(roll.split_meters_leftover ?? 0).toFixed(2)} m came here${roll.split_at ? ` on ${new Date(roll.split_at).toLocaleDateString()}` : ''}.`}
+                                                            >
+                                                                <Link2 size={9} className="text-violet-400 shrink-0" />
+                                                                <span className="text-[9px] text-violet-500 font-semibold truncate">
+                                                                    Split from R-{roll.split_from_roll_id}
+                                                                </span>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     <div className="text-right shrink-0">
                                                         <p className="text-[10px] font-bold text-slate-500">

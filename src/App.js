@@ -292,10 +292,6 @@ function App() {
           <Route path="factory-layout-planner" element={<FactoryLayoutPlannerPage />} />
           <Route path="production-line-types" element={<ProductionLineTypesPage />} />
           <Route path="workstation-management" element={<WorkstationManagement />} />
-          <Route path="products" element={<ProductManagementPage />} />
-          <Route path="product-brands" element={<ProductBrandsPage />} />
-          <Route path="product-types" element={<ProductTypesPage />} />
-          <Route path="product-piece-parts" element={<PiecePartsPage />} />
           <Route path="batches/new" element={<CreateProductionBatchForm />} />
           <Route path="batches/edit/:batchId" element={<CreateProductionBatchForm />} />
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
@@ -501,6 +497,10 @@ function App() {
         <Route path="trims" element={<TrimManagementPage />} />
         <Route path="sales-orders" element={<SalesOrderListPage />} />
         <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
+        <Route path="products" element={<ProductManagementPage />} />
+        <Route path="product-brands" element={<ProductBrandsPage />} />
+        <Route path="product-types" element={<ProductTypesPage />} />
+        <Route path="product-piece-parts" element={<PiecePartsPage />} />
     </Route>
 
     {/* Purchase Department Portal */}

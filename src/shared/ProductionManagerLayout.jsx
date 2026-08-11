@@ -63,12 +63,13 @@ const ProductionManagerLayout = () => {
                   <NavLink to="/production-manager/job-work" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Job Work</NavLink>
                 </NavDropdown>
 
-                <NavDropdown title="Products">
-                  <NavLink to="/production-manager/products" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Products</NavLink>
-                  <NavLink to="/production-manager/product-brands" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Brands</NavLink>
-                  <NavLink to="/production-manager/product-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Style</NavLink>
-                  <NavLink to="/production-manager/bom-approvals" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">BOM Approvals</NavLink>
-                </NavDropdown>
+                {/* Product/Brand/Style management moved to the Merchandiser portal
+                    (Products dropdown → /merchandiser/products, product-brands,
+                    product-types, product-piece-parts) — Production Manager keeps
+                    only its BOM approval authority. */}
+                <NavLink to="/production-manager/bom-approvals" className={({ isActive }) => `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                  BOM Approvals
+                </NavLink>
 
                 <NavDropdown title="Floor">
                   {/* <NavLink to="/production-manager/production-lines" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Lines</NavLink> */}
