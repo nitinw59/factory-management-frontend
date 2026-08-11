@@ -545,6 +545,11 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
     const next    = NEXT_STATUSES[po.status] || [];
     const isDraft = po.status === 'DRAFT';
     const canGenerate = !isDraft && po.status !== 'CANCELLED';   // ISSUED, PARTIAL_RECEIPT, COMPLETED
+    // Line items are editable through ISSUED too now, not just DRAFT — must
+    // stay in sync with the backend's own status check (updatePOItem/
+    // deletePOItem in purchaseDepartmentController.js), which is the actual
+    // enforcement point; this only controls whether the UI offers the option.
+    const canEditItems = po.status === 'DRAFT' || po.status === 'ISSUED';
 
     // Pull existing PO documents from the backend whenever the modal is opened on
     // a PO that's eligible for generation.
@@ -915,7 +920,7 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                                 Items · {items.length}
                             </p>
-                            {isDraft && !adding && editingItemId == null && (
+                            {canEditItems && !adding && editingItemId == null && (
                                 <button
                                     onClick={() => setAdding(true)}
                                     className="flex items-center gap-1 text-[10px] font-bold text-orange-600 hover:bg-orange-50 border border-orange-200 px-2 py-1 rounded-md transition"
@@ -923,7 +928,7 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                                     <Plus size={11} /> Add Item
                                 </button>
                             )}
-                            {!isDraft && (
+                            {!canEditItems && (
                                 <span className="text-[9px] text-slate-400 italic">Editing locked — PO is {cfg.label}</span>
                             )}
                         </div>
@@ -1010,7 +1015,7 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                                                     @ {it.unit_price.toLocaleString('en-IN', { maximumFractionDigits: 5 })} = ₹{it.total_price.toFixed(2)}
                                                 </p>
                                             </div>
-                                            {isDraft && (
+                                            {canEditItems && (
                                                 <div className="flex flex-col gap-1 shrink-0">
                                                     <button onClick={() => setEditingItemId(it.itemId)} disabled={busy}
                                                         className="p-1 text-slate-400 hover:text-orange-600 hover:bg-white rounded transition disabled:opacity-40"

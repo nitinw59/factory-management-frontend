@@ -12,8 +12,15 @@ const buildFormData = (data, fileField, file) => {
 
 export const sparesApi = {
     // --- GLOBAL STORE METHODS ---
+    // skipSessionExpiry: every caller treats a failed fetch as "show an empty
+    // list" (they already .catch() to []) — a role that isn't authorized for
+    // this specific lookup (e.g. purchase_manager, added to the read role but
+    // kept here as a safety net for any future gap) shouldn't have their
+    // whole session killed by the global 401/403 interceptor over one
+    // auxiliary dropdown's worth of data. Same reasoning as
+    // adminApi.getCompanyProfile.
     getAllSpares: async () => {
-        const response = await api.get('/spares/');
+        const response = await api.get('/spares/', { skipSessionExpiry: true });
         return response.data;
     },
     getCategories: async () => {
