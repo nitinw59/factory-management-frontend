@@ -2,11 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import {
     X, Loader2, AlertTriangle, Trash2, Upload, Receipt, Edit3, CheckSquare, Square,
     ChevronDown, ChevronRight, FileText, Package, Scissors, Tag, Scale, RefreshCw,
-    ShieldCheck, CheckCircle2, XCircle,
+    ShieldCheck, CheckCircle2, XCircle, Download,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
+import { adminApi } from '../../api/adminApi';
 import { IMAGE_BASE_URL } from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
+import { generateInvoicePdf } from './invoicePdfGenerator';
 
 const PAYMENT_OPTS = ['UNPAID', 'PARTIALLY_PAID', 'PAID', 'OVERDUE'];
 
@@ -27,9 +29,10 @@ export const PaymentPill = ({ status }) => {
 };
 
 const MATCH_CFG = {
-    MATCHED:             { cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: '3-Way Matched' },
-    UNMATCHED:           { cls: 'bg-red-100 text-red-700 border-red-200',             label: 'Unmatched'     },
-    MISMATCH_OVERRIDDEN: { cls: 'bg-amber-100 text-amber-700 border-amber-200',       label: 'Overridden'    },
+    MATCHED:              { cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: '3-Way Matched' },
+    MATCHED_WITH_WARNING: { cls: 'bg-amber-100 text-amber-700 border-amber-200',       label: 'Matched · Review' },
+    UNMATCHED:            { cls: 'bg-red-100 text-red-700 border-red-200',             label: 'Unmatched'     },
+    MISMATCH_OVERRIDDEN:  { cls: 'bg-amber-100 text-amber-700 border-amber-200',       label: 'Overridden'    },
 };
 
 export const MatchPill = ({ status }) => {
@@ -58,18 +61,23 @@ const num = (v, dp = 2) => {
     return Number.isFinite(n) ? n.toLocaleString('en-IN', { maximumFractionDigits: dp }) : '—';
 };
 
-const OkIcon = ({ ok }) => ok === false
+const OkIcon = ({ ok, warn }) => ok === false
     ? <XCircle size={12} className="text-red-500 inline shrink-0" />
-    : ok === true
-        ? <CheckCircle2 size={12} className="text-emerald-500 inline shrink-0" />
-        : null;
+    : warn
+        ? <AlertTriangle size={12} className="text-amber-500 inline shrink-0" />
+        : ok === true
+            ? <CheckCircle2 size={12} className="text-emerald-500 inline shrink-0" />
+            : null;
 
-// Renders a match_report / match_snapshot: { reasons[], lines[], totals{} }
+// Renders a match_report / match_snapshot: { reasons[], warnings[], lines[], totals{} }
+// reasons block the invoice; warnings are variance within tolerance that still booked —
+// informational only, never a reason booking was refused.
 export function MatchReportPanel({ report, tolerance }) {
     if (!report) return null;
-    const reasons = report.reasons || [];
-    const lines   = report.lines || [];
-    const totals  = report.totals || null;
+    const reasons  = report.reasons  || [];
+    const warnings = report.warnings || [];
+    const lines    = report.lines    || [];
+    const totals   = report.totals   || null;
     return (
         <div className="space-y-2">
             {reasons.length > 0 && (
@@ -78,6 +86,16 @@ export function MatchReportPanel({ report, tolerance }) {
                         <li key={i} className="flex items-start gap-1.5 text-[11px] text-red-700">
                             <AlertTriangle size={11} className="mt-0.5 shrink-0" />
                             <span className="break-words">{String(r)}</span>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            {warnings.length > 0 && (
+                <ul className="space-y-1 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                    {warnings.map((w, i) => (
+                        <li key={i} className="flex items-start gap-1.5 text-[11px] text-amber-700">
+                            <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+                            <span className="break-words">{String(w)}</span>
                         </li>
                     ))}
                 </ul>
@@ -98,19 +116,22 @@ export function MatchReportPanel({ report, tolerance }) {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {lines.map((l, i) => (
-                                <tr key={i} className={(l.qty_ok === false || l.rate_ok === false) ? 'bg-red-50/50' : ''}>
+                                <tr key={i} className={
+                                    (l.qty_ok === false || l.rate_ok === false) ? 'bg-red-50/50'
+                                        : l.warn ? 'bg-amber-50/50' : ''
+                                }>
                                     <td className="px-2 py-1.5 text-slate-600 max-w-[140px] truncate">
                                         {l.label || l.item_name || l.description || `Line ${i + 1}`}
                                     </td>
-                                    <td className={`px-2 py-1.5 text-right tabular-nums ${l.qty_ok === false ? 'text-red-600 font-bold' : 'text-slate-700'}`}>
-                                        {num(l.inv_qty)} <OkIcon ok={l.qty_ok} />
+                                    <td className={`px-2 py-1.5 text-right tabular-nums ${l.qty_ok === false ? 'text-red-600 font-bold' : l.qty_warn ? 'text-amber-700 font-bold' : 'text-slate-700'}`}>
+                                        {num(l.inv_qty)} <OkIcon ok={l.qty_ok} warn={l.qty_warn} />
                                     </td>
                                     <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{num(l.grn_qty)}</td>
-                                    <td className={`px-2 py-1.5 text-right tabular-nums ${l.qty_ok === false ? 'text-red-600 font-bold' : 'text-slate-500'}`}>
+                                    <td className={`px-2 py-1.5 text-right tabular-nums ${l.qty_ok === false ? 'text-red-600 font-bold' : l.qty_warn ? 'text-amber-700 font-bold' : 'text-slate-500'}`}>
                                         {l.qty_variance_pct != null ? `${num(l.qty_variance_pct)}%` : '—'}
                                     </td>
-                                    <td className={`px-2 py-1.5 text-right tabular-nums ${l.rate_ok === false ? 'text-red-600 font-bold' : 'text-slate-700'}`}>
-                                        {num(l.inv_rate, 5)} <OkIcon ok={l.rate_ok} />
+                                    <td className={`px-2 py-1.5 text-right tabular-nums ${l.rate_ok === false ? 'text-red-600 font-bold' : l.rate_warn ? 'text-amber-700 font-bold' : 'text-slate-700'}`}>
+                                        {num(l.inv_rate, 5)} <OkIcon ok={l.rate_ok} warn={l.rate_warn} />
                                     </td>
                                     <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{num(l.grn_rate, 5)}</td>
                                     <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{num(l.po_rate, 5)}</td>
@@ -131,7 +152,7 @@ export function MatchReportPanel({ report, tolerance }) {
                 </div>
             )}
             {tolerance != null && (
-                <p className="text-[10px] text-slate-400">Approved tolerance: ±{tolerance}%</p>
+                <p className="text-[10px] text-slate-400">Block threshold: variance up to ±{tolerance}% books with a warning; beyond it is blocked.</p>
             )}
         </div>
     );
@@ -141,6 +162,7 @@ export default function InvoiceModal({
     inwards = [],            // all inwards on this PO
     poItems = [],            // PO line items for ordered-qty context
     invoice = null,
+    po = null,                // { po_code, supplier_name, supplier_gstin, ... } — for the PDF header, optional
     initialMode = 'view',
     defaultSelectedIds = new Set(),
     onClose,
@@ -154,6 +176,10 @@ export default function InvoiceModal({
     const [mode, setMode] = useState(isCreate ? 'create' : initialMode);
     const [busy, setBusy] = useState(false);
     const [err,  setErr]  = useState(null);
+    const [confirmOpen, setConfirmOpen] = useState(false); // review-all-details step before Create Invoice actually saves
+    const [createdResult, setCreatedResult] = useState(null); // POST /invoices response — set on success, swaps the overlay to a success/PDF screen
+    const [pdfBusy,  setPdfBusy]  = useState(false);
+    const [pdfError, setPdfError] = useState(null);
 
     const [invNumber,   setInvNumber]   = useState(invoice?.invoice_number || '');
     const [invDate,     setInvDate]     = useState(invoice?.invoice_date || new Date().toISOString().split('T')[0]);
@@ -295,18 +321,42 @@ export default function InvoiceModal({
     const isSelectable = (iw) =>
         iw.invoice_id == null || (invoice && iw.invoice_id === invoice.id);
 
-    const handleSave = async (withOverride = false) => {
-        setErr(null);
-        if (!invNumber.trim()) { setErr('Invoice number is required.'); return; }
-        if (!invDate)          { setErr('Invoice date is required.'); return; }
-        if (amount === '' || isNaN(parseFloat(amount))) { setErr('Amount is required.'); return; }
-        const inward_ids = [...selectedIds];
-        if (inward_ids.length === 0) { setErr('Link at least one inward.'); return; }
-        if (lines.length === 0) { setErr('No billable GRN lines on the selected inwards.'); return; }
+    // Shared by the Create-Invoice button (gates opening the confirmation
+    // review) and handleSave itself (defends against the confirmation being
+    // bypassed / stale state if something changed underneath it).
+    const getValidationError = (withOverride) => {
+        if (!invNumber.trim()) return 'Invoice number is required.';
+        if (!invDate)          return 'Invoice date is required.';
+        if (amount === '' || isNaN(parseFloat(amount))) return 'Amount is required.';
+        if (selectedIds.size === 0) return 'Link at least one inward.';
+        if (lines.length === 0) return 'No billable GRN lines on the selected inwards.';
         const badLine = lines.findIndex(l =>
             l.qty === '' || isNaN(parseFloat(l.qty)) || l.rate === '' || isNaN(parseFloat(l.rate)));
-        if (badLine !== -1) { setErr(`Line ${badLine + 1}: qty and rate are required.`); return; }
-        if (withOverride && !overrideNotes.trim()) { setErr('Override notes are mandatory to book with a mismatch.'); return; }
+        if (badLine !== -1) return `Line ${badLine + 1}: qty and rate are required.`;
+        if (withOverride && !overrideNotes.trim()) return 'Override notes are mandatory to book with a mismatch.';
+        return null;
+    };
+
+    // "Create Invoice" doesn't save directly — it opens the confirmation
+    // review first (handleConfirmCreate below does the actual save).
+    const handleReviewClick = () => {
+        setErr(null);
+        const validationError = getValidationError(false);
+        if (validationError) { setErr(validationError); return; }
+        setConfirmOpen(true);
+    };
+
+    // The confirm overlay's "Confirm & Create Invoice" button — handleSave
+    // itself decides what happens next (stays in the overlay to show the
+    // success/PDF screen on create-mode success, or drops confirmOpen back
+    // to the form on failure so the error/override UI is visible there).
+    const handleConfirmCreate = () => handleSave(false);
+
+    const handleSave = async (withOverride = false) => {
+        setErr(null);
+        const validationError = getValidationError(withOverride);
+        if (validationError) { setErr(validationError); return; }
+        const inward_ids = [...selectedIds];
 
         setBusy(true);
         try {
@@ -329,9 +379,16 @@ export default function InvoiceModal({
                 ? await purchaseDeptApi.createInvoice(payload, scanFile)
                 : await purchaseDeptApi.updateInvoice(invoice.id, payload, scanFile);
             setMatchFail(null);
-            onSaved?.(res.data);
+            if (mode === 'create') {
+                // Stay in the (still-open) confirm overlay, now showing the
+                // success screen + PDF download instead of closing the modal.
+                setCreatedResult(res.data);
+            } else {
+                onSaved?.(res.data);
+            }
         } catch (e) {
             const data = e?.response?.data;
+            setConfirmOpen(false); // drop back to the form so the error is visible there (no-op if not open)
             if (e?.response?.status === 422 && data?.match_report) {
                 setMatchFail(data.match_report);
                 setErr(data.error || 'Three-way match failed — not booked.');
@@ -341,6 +398,61 @@ export default function InvoiceModal({
             }
         } finally {
             setBusy(false);
+        }
+    };
+
+    const triggerBrowserDownload = (blob, filename) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+
+    // Builds the PDF from exactly what was just submitted (form state +
+    // the match report returned alongside creation) — no extra fetch needed.
+    const handleDownloadInvoicePdf = async () => {
+        setPdfBusy(true); setPdfError(null);
+        try {
+            let company = null;
+            try {
+                const cr = await adminApi.getCompanyProfile();
+                company = cr.data ?? null;
+            } catch { company = null; }
+
+            const pdfLines = mergedLines.map(group => {
+                const totalQty = group.items.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
+                const rate = parseFloat(group.rate) || 0;
+                const grns = [...new Set(group.items.map(l => l._grn))].join(', ');
+                return { label: group.label, uom: group.uom, qty: totalQty, rate, value: totalQty * rate, grn: grns };
+            });
+            const linkedInwards = inwards.filter(iw => selectedIds.has(iw.id));
+
+            const pdfBlob = await generateInvoicePdf({
+                invoice: {
+                    invoice_number: invNumber.trim(),
+                    invoice_date:   invDate,
+                    amount:         parseFloat(amount) || 0,
+                    payment_status: paymentStat,
+                    notes,
+                },
+                po,
+                company,
+                inwards: linkedInwards,
+                lines: pdfLines,
+                matchReport: createdResult?.match_report || null,
+            });
+
+            const datestamp = new Date().toISOString().slice(0, 10);
+            const safeNum   = invNumber.trim().replace(/[^A-Za-z0-9._-]/g, '_');
+            triggerBrowserDownload(pdfBlob, `Invoice-${safeNum}-${datestamp}.pdf`);
+        } catch (e) {
+            setPdfError(e?.message || 'Failed to generate PDF.');
+        } finally {
+            setPdfBusy(false);
         }
     };
 
@@ -401,6 +513,7 @@ export default function InvoiceModal({
     })();
 
     return (
+        <>
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
@@ -939,7 +1052,7 @@ export default function InvoiceModal({
                                     Cancel
                                 </button>
                                 <button
-                                    onClick={() => handleSave(false)}
+                                    onClick={mode === 'create' ? handleReviewClick : () => handleSave(false)}
                                     disabled={busy}
                                     className="flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 px-4 py-1.5 rounded-lg transition shadow-sm"
                                 >
@@ -952,5 +1065,216 @@ export default function InvoiceModal({
                 </div>
             </div>
         </div>
+
+        {/* Confirmation review (pre-save) → success + PDF screen (post-save), same overlay. */}
+        {confirmOpen && (
+            <div
+                className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+                onClick={() => createdResult ? onSaved?.(createdResult) : setConfirmOpen(false)}
+            >
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+                        <h2 className="text-base font-black text-slate-800 flex items-center gap-2">
+                            {createdResult
+                                ? <CheckCircle2 size={16} className="text-emerald-500" />
+                                : <ShieldCheck size={16} className="text-indigo-500" />}
+                            {createdResult ? 'Invoice Created' : 'Confirm Invoice Details'}
+                        </h2>
+                        <button
+                            onClick={() => createdResult ? onSaved?.(createdResult) : setConfirmOpen(false)}
+                            className="p-1.5 hover:bg-slate-100 rounded-full transition shrink-0"
+                        >
+                            <X size={16} className="text-slate-500" />
+                        </button>
+                    </div>
+
+                    {createdResult ? (
+                    <>
+                    <div className="overflow-auto flex-1 px-5 py-4 space-y-4">
+                        <div className="flex items-center gap-2.5 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+                            <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+                            <div>
+                                <p className="text-sm font-bold text-emerald-800">
+                                    {invNumber.trim()} booked — ₹{num(parseFloat(amount) || 0)}
+                                </p>
+                                <p className="text-xs text-emerald-700 mt-0.5">
+                                    {createdResult.message || 'Invoice created.'}
+                                </p>
+                            </div>
+                            <span className="ml-auto shrink-0"><MatchPill status={createdResult.match_status} /></span>
+                        </div>
+
+                        {createdResult.match_report && (createdResult.match_report.warnings?.length > 0 || createdResult.match_report.reasons?.length > 0) && (
+                            <div className="border border-slate-200 rounded-xl px-3 py-3">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                                    <Scale size={11} /> Three-Way Match Report
+                                </p>
+                                <MatchReportPanel report={createdResult.match_report} tolerance={tolerance} />
+                            </div>
+                        )}
+
+                        {pdfError && (
+                            <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2 text-xs text-red-600">
+                                <AlertTriangle size={13} /> {pdfError}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100">
+                        <button
+                            onClick={handleDownloadInvoicePdf}
+                            disabled={pdfBusy}
+                            className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-white hover:bg-indigo-600 border border-indigo-300 disabled:opacity-40 px-3 py-1.5 rounded-lg transition"
+                        >
+                            {pdfBusy ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                            Generate &amp; Download PDF
+                        </button>
+                        <button
+                            onClick={() => onSaved?.(createdResult)}
+                            className="flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-1.5 rounded-lg transition shadow-sm"
+                        >
+                            Done
+                        </button>
+                    </div>
+                    </>
+                    ) : (
+                    <>
+                    <div className="overflow-auto flex-1 px-5 py-4 space-y-4">
+                        <p className="text-xs text-slate-500">
+                            Review everything below — creating an invoice runs the three-way match against these exact lines.
+                        </p>
+
+                        {/* Header fields */}
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+                            <div>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Invoice Number</p>
+                                <p className="text-sm font-bold text-slate-800">{invNumber.trim()}</p>
+                            </div>
+                            <div>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Invoice Date</p>
+                                <p className="text-sm font-bold text-slate-800">{new Date(invDate).toLocaleDateString('en', { dateStyle: 'medium' })}</p>
+                            </div>
+                            <div>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Amount</p>
+                                <p className="text-sm font-bold text-slate-800 tabular-nums">₹{num(parseFloat(amount) || 0)}</p>
+                            </div>
+                            <div>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Payment Status</p>
+                                <p className="text-sm font-bold text-slate-800">{PAYMENT_CFG[paymentStat]?.label || paymentStat}</p>
+                            </div>
+                            {scanFile && (
+                                <div className="col-span-2">
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Scan</p>
+                                    <p className="text-sm text-slate-700 flex items-center gap-1.5"><Upload size={12} className="text-slate-400" /> {scanFile.name}</p>
+                                </div>
+                            )}
+                            {notes.trim() && (
+                                <div className="col-span-2">
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Notes</p>
+                                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{notes.trim()}</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Linked inwards */}
+                        <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                                Linked Inwards ({selectedIds.size})
+                            </p>
+                            <div className="space-y-1">
+                                {inwards.filter(iw => selectedIds.has(iw.id)).map(iw => (
+                                    <div key={iw.id} className="flex items-center justify-between gap-2 text-xs bg-white border border-slate-200 rounded-lg px-3 py-1.5">
+                                        <span className="font-bold text-indigo-600">{iw.grn_number || `Inward #${iw.id}`}</span>
+                                        <span className="text-slate-400">
+                                            {iw.received_date && new Date(iw.received_date).toLocaleDateString('en', { dateStyle: 'medium' })}
+                                            {' · '}{(iw.items || []).length} item{(iw.items || []).length === 1 ? '' : 's'}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Line items */}
+                        <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                                <Scale size={11} /> Invoice Lines ({mergedLines.length})
+                            </p>
+                            <div className="border border-slate-200 rounded-xl overflow-hidden">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-[11px]">
+                                        <thead>
+                                            <tr className="bg-slate-50 text-slate-400 uppercase tracking-wider text-[9px]">
+                                                <th className="text-left  font-bold px-2.5 py-1.5">Item</th>
+                                                <th className="text-right font-bold px-2.5 py-1.5 w-24">Qty</th>
+                                                <th className="text-right font-bold px-2.5 py-1.5 w-24">Rate</th>
+                                                <th className="text-right font-bold px-2.5 py-1.5 w-24">Value</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {mergedLines.map(group => {
+                                                const totalQty = group.items.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
+                                                const rate     = parseFloat(group.rate) || 0;
+                                                const value    = totalQty * rate;
+                                                const ctx      = poContextMap[group.key];
+                                                return (
+                                                    <tr key={group.key}>
+                                                        <td className="px-2.5 py-2">
+                                                            <p className="font-medium text-slate-700 truncate max-w-[220px]">{group.label}</p>
+                                                            {ctx && (
+                                                                <p className="text-[9px] text-slate-400 mt-0.5">
+                                                                    PO ordered {ctx.ordered.toLocaleString()} {ctx.uom}
+                                                                    {ctx.otherReceived > 0 && ` · other GRNs ${ctx.otherReceived.toLocaleString()} ${ctx.uom}`}
+                                                                </p>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-2.5 py-2 text-right tabular-nums font-bold text-slate-700 align-top">
+                                                            {totalQty.toLocaleString(undefined, { maximumFractionDigits: 3 })}
+                                                            {group.uom ? <span className="text-[9px] text-slate-400 ml-1">{group.uom}</span> : null}
+                                                        </td>
+                                                        <td className="px-2.5 py-2 text-right tabular-nums text-slate-700 align-top">{num(rate, 5)}</td>
+                                                        <td className="px-2.5 py-2 text-right tabular-nums font-bold text-slate-800 align-top">₹{num(value)}</td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 px-3 py-2 bg-slate-50 border-t border-slate-100 text-[11px]">
+                                    <span className="text-slate-500">Lines total</span>
+                                    <span className="font-bold text-slate-800 tabular-nums">₹{num(linesTotal)}</span>
+                                </div>
+                            </div>
+                            {Math.abs((parseFloat(amount) || 0) - linesTotal) > 0.01 && (
+                                <p className="mt-1.5 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                                    <AlertTriangle size={11} className="shrink-0" />
+                                    Invoice amount (₹{num(parseFloat(amount) || 0)}) differs from the line total (₹{num(linesTotal)}) — this alone can trigger a header-amount warning or block.
+                                </p>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100">
+                        <button
+                            onClick={() => setConfirmOpen(false)}
+                            disabled={busy}
+                            className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition disabled:opacity-40"
+                        >
+                            Back
+                        </button>
+                        <button
+                            onClick={handleConfirmCreate}
+                            disabled={busy}
+                            className="flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 px-4 py-1.5 rounded-lg transition shadow-sm"
+                        >
+                            {busy && <Loader2 size={12} className="animate-spin" />}
+                            Confirm & Create Invoice
+                        </button>
+                    </div>
+                    </>
+                    )}
+                </div>
+            </div>
+        )}
+        </>
     );
 }

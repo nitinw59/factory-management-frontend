@@ -181,6 +181,7 @@ export default function PurchaseInvoicesPage() {
             inwards: group.inwards,
             defaultSelectedIds: new Set(preselectIds),
             poItems,
+            po: group.po,
         });
     };
 
@@ -191,6 +192,7 @@ export default function PurchaseInvoicesPage() {
             inwards: inv._allInwards,
             defaultSelectedIds: new Set(),
             poItems,
+            po: inv._po,
         });
     };
 
@@ -235,6 +237,7 @@ export default function PurchaseInvoicesPage() {
                     inwards={openInvoice.inwards}
                     poItems={openInvoice.poItems || []}
                     invoice={openInvoice.invoice}
+                    po={openInvoice.po || null}
                     initialMode={openInvoice.invoice ? 'view' : 'create'}
                     defaultSelectedIds={openInvoice.defaultSelectedIds}
                     onClose={() => setOpenInvoice(null)}
