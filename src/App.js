@@ -468,6 +468,9 @@ function App() {
         <Route path="dashboard" element={<DispatchDashboardPage />} />
         <Route path="receipts" element={<DispatchReceiptsPage />} />
         <Route path="job-work" element={<DispatchJobWorkPage />} />
+        <Route path="scorecard" element={<ScoreboardPage />} />
+        <Route path="scorecard-detailed" element={<ScorecardDetailedPage />} />
+        <Route path="attendance" element={<DailyAttendancePage />} />
     </Route>
 
 
