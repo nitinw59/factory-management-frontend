@@ -22,7 +22,7 @@ export const fmt2 = (n) => (Math.round(n * 100) / 100).toFixed(2);
 
 // ── Collapse same-named parts (different part_ids across products) ─────────────
 
-function collapseByName(parts) {
+export function collapseByName(parts) {
     const byName = new Map();
     for (const part of parts) {
         const key = (part.part_name || '').trim().toLowerCase();

@@ -47,7 +47,6 @@ import AuthCallbackPage from './login/AuthCallbackPage';
 import UnauthorizedPage from './login/UnauthorizedPage';
 
 // --- MODULE PAGES ---
-import AdminDashboardPage from './modules/admin/AdminDashboardPage';
 import CompanyProfilePage from './modules/admin/CompanyProfilePage';
 import TrimClustersPage from './modules/admin/TrimClustersPage';
 import DefectCodeLineTypePage from './modules/admin/DefectCodeLineTypePage';
@@ -219,8 +218,8 @@ function App() {
         
         {/* Admin Portal */}
         <Route path="/admin" element={<AdminProtectedRoute><AdminLayout /></AdminProtectedRoute>}>
-          {/* <Route index element={<AdminDashboardPage />} /> */}
-          <Route path="dashboard" element={<AdminDashboardPage />} />
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<ScorecardDetailedPage />} />
           <Route path="users" element={<UserManagementPage />} />
           <Route path="suppliers" element={<SupplierManagementPage />} />
           <Route path="customers" element={<CustomerManagementPage />} />

@@ -32,11 +32,11 @@ const formatPricePrecise = (n) => {
     return n.toFixed(5).replace(/0+$/, '').replace(/\.$/, '');
 };
 
-const blankFabricLine = () => ({ _key: rk(), fabric_color_id: '', quantity: '' });
+const blankFabricLine = () => ({ _key: rk(), fabric_color_id: '', quantity: '', description: '' });
 // packs is a scratch value for the "packs × default_pack_size" helper shown
 // under Qty for pack-sized trim items — not sent to the backend, only used
 // to compute quantity.
-const blankTrimLine   = () => ({ _key: rk(), trim_item_variant_id: '', quantity: '', packs: '' });
+const blankTrimLine   = () => ({ _key: rk(), trim_item_variant_id: '', quantity: '', packs: '', description: '' });
 
 const blankFabricGroup = () => ({
     _key:           rk(),
@@ -60,6 +60,7 @@ const blankSpareGroup = () => ({
     _key:          rk(),
     type:          'spare',
     spare_part_id: '',
+    description:   '',
     quantity:      '',
     uom:           'pcs',
     unit_price:    '',
@@ -243,7 +244,11 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
 
                 const base = { type: g.type, quantity: qty, uom, unit_price: unitPrice, requirement_ids: [] };
                 if (g.type === 'spare') {
-                    flat.push({ ...base, spare_part_id: parseInt(g.spare_part_id, 10) });
+                    flat.push({
+                        ...base,
+                        spare_part_id: parseInt(g.spare_part_id, 10),
+                        ...(g.description?.trim() ? { description: g.description.trim() } : {}),
+                    });
                 } else {
                     flat.push({
                         ...base,
@@ -273,6 +278,7 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                     uom,
                     unit_price:      unitPrice,
                     requirement_ids: [],
+                    ...(ln.description?.trim() ? { description: ln.description.trim() } : {}),
                 };
                 if (g.type === 'fabric') {
                     flat.push({
@@ -495,18 +501,16 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                                                 </div>
                                             </div>
 
-                                            {g.type === 'other' && (
-                                                <div>
-                                                    <label className="text-[9px] font-bold text-slate-400 uppercase">Description (optional)</label>
-                                                    <input
-                                                        type="text"
-                                                        value={g.description}
-                                                        onChange={e => setGroupField(gi, 'description', e.target.value)}
-                                                        placeholder="Notes for this line…"
-                                                        className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400"
-                                                    />
-                                                </div>
-                                            )}
+                                            <div>
+                                                <label className="text-[9px] font-bold text-slate-400 uppercase">Description (optional)</label>
+                                                <input
+                                                    type="text"
+                                                    value={g.description}
+                                                    onChange={e => setGroupField(gi, 'description', e.target.value)}
+                                                    placeholder="Notes for this line…"
+                                                    className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400"
+                                                />
+                                            </div>
 
                                             <div className="flex items-end gap-2">
                                                 <div className="w-28 shrink-0">
@@ -707,6 +711,13 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                                                             <Trash2 size={12} />
                                                         </button>
                                                     </div>
+                                                    <input
+                                                        type="text"
+                                                        value={ln.description}
+                                                        onChange={e => setLineField(gi, li, 'description', e.target.value)}
+                                                        placeholder="Description / notes for this line (optional)"
+                                                        className="mt-1.5 w-full text-[11px] border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400"
+                                                    />
                                                     {!isFabric && trimItemMaster?.default_pack_size && (() => {
                                                         const packs = parseFloat(ln.packs);
                                                         const computed = packs > 0 ? packs * trimItemMaster.default_pack_size : null;

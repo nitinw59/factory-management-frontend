@@ -24,9 +24,16 @@ export const hrApi = {
     getDailyAttendanceDashboard: (date) => 
         api.get(`hr/attendance-dashboard?date=${date}`),
 
-    resolveAnomaly: (resolutionData) => 
+    resolveAnomaly: (resolutionData) =>
         // resolutionData expects: { attendance_id, employee_id, punch_out_time }
         api.post('hr/attendance/resolve', resolutionData),
+
+    // ================================
+    // EXPENSE / PAYROLL DRILLDOWN
+    // ================================
+
+    getExpenseDrilldown: (date) =>
+        api.get(`hr/expense-drilldown?date=${date}`),
 
     // ================================
     // EMPLOYEES (Future-proofing)

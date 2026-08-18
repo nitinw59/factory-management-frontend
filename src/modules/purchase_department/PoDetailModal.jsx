@@ -77,6 +77,7 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
         quantity:             item?.quantity != null ? String(item.quantity) : '',
         uom:                  item?.uom || 'meter',
         unit_price:           item?.unit_price != null ? String(item.unit_price) : '',
+        description:          item?.description || '',
     }));
     const [busy, setBusy] = useState(false);
     const [err,  setErr]  = useState(null);
@@ -138,10 +139,11 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
         setBusy(true);
         try {
             const body = {
-                type:       form.type,
-                quantity:   q,
-                uom:        form.uom || (form.type === 'fabric' ? 'meter' : 'pcs'),
-                unit_price: p,
+                type:        form.type,
+                quantity:    q,
+                uom:         form.uom || (form.type === 'fabric' ? 'meter' : 'pcs'),
+                unit_price:  p,
+                description: form.description?.trim() || null,
             };
             if (form.type === 'fabric') {
                 body.fabric_type_id       = form.fabric_type_id  ? parseInt(form.fabric_type_id,  10) : null;
@@ -289,6 +291,14 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
                         onChange={e => set('unit_price', e.target.value)}
                         className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400 text-right tabular-nums" />
                 </div>
+            </div>
+
+            <div>
+                <label className="text-[9px] font-bold text-slate-400 uppercase">Description (optional)</label>
+                <input type="text" value={form.description}
+                    onChange={e => set('description', e.target.value)}
+                    placeholder="Notes for this line…"
+                    className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400" />
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-1">
@@ -1003,6 +1013,11 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                                                         <span className="ml-1">· last @ {parseFloat(it.variant_last_purchase_price).toFixed(2)}</span>
                                                     )}
                                                 </p>
+                                                {it.description && !(it.type === 'other' && !it.general_item_name) && (
+                                                    <p className="text-[10px] text-slate-400 italic truncate mt-0.5" title={it.description}>
+                                                        {it.description}
+                                                    </p>
+                                                )}
                                                 {it.type === 'trim' && it.trim_item_variant_id && (
                                                     <SupplierCodePill supplierId={po.supplier_id} supplierName={po.supplier_name} variantId={it.trim_item_variant_id} className="mt-1" />
                                                 )}

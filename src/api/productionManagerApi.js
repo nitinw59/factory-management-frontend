@@ -82,6 +82,13 @@ export const productionManagerApi = {
     saveTargets: (data) => api.post('/production-manager/production-targets', data),
     getTargetSummary: (params) => api.get('/production-manager/production-targets/summary', { params }),
 
+    // Range summary (merged by line type, month-to-date) — for ScorecardDetailedPage
+    getRangeSummary: (params) => api.get('/production-manager/production-targets/range-summary', { params }),
+
+    // Monthly line-type target — admin-set figure, separate from the Production Manager's daily targets
+    getMonthlyTarget: (params) => api.get('/production-manager/production-targets/monthly-target', { params }),
+    setMonthlyTarget: (data)   => api.put('/production-manager/production-targets/monthly-target', data),
+
     // Line output (hourly breakdown + defects per line)
     getLineOutput: (params) => api.get('/production-manager/line-output', { params }),
 };
