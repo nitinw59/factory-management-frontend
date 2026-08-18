@@ -6,6 +6,8 @@ const ACCENT = {
     orange: { selected: 'font-bold text-orange-600 bg-orange-50', focus: 'focus:border-orange-400' },
     violet: { selected: 'font-bold text-violet-600 bg-violet-50', focus: 'focus:border-violet-400' },
     amber:  { selected: 'font-bold text-amber-600 bg-amber-50',   focus: 'focus:border-amber-400'  },
+    blue:   { selected: 'font-bold text-blue-600 bg-blue-50',     focus: 'focus:border-blue-400'   },
+    slate:  { selected: 'font-bold text-slate-600 bg-slate-100',  focus: 'focus:border-slate-400'  },
 };
 
 const SIZE = {

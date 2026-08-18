@@ -76,7 +76,7 @@ const InitialRedirect = () => {
             return <Navigate to="/merchandiser/bom" replace />;
 
         case 'purchase_manager':
-            return <Navigate to="/purchase-department/requirements" replace />;
+            return <Navigate to="/purchase-department/orders" replace />;
 
         case 'job_work_receiver':
             return <Navigate to="/receiver/dashboard" replace />;

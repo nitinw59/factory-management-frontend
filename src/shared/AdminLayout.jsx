@@ -146,9 +146,10 @@ const AdminLayout = () => {
                   <NavLink to="/admin/spares-analytics" className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"><LuChartLine size={14} /> Spares Analytics</NavLink>
                 </DesktopNavDropdown>
 
-                <DesktopNavDropdown title="Quality" matchPaths={['/admin/qc-analytics', '/admin/defect-code-line-types']}>
+                <DesktopNavDropdown title="Quality" matchPaths={['/admin/qc-analytics', '/admin/defect-code-line-types', '/admin/scorecard-detailed']}>
                   <NavLink to="/admin/qc-analytics"           className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">QC Analytics</NavLink>
                   <NavLink to="/admin/defect-code-line-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Defect Code Config</NavLink>
+                  <NavLink to="/admin/scorecard-detailed"     className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Detailed Scorecard</NavLink>
                 </DesktopNavDropdown>
 
                 {/* Cross-portal link — arrow icon signals it leaves this portal */}
@@ -259,6 +260,7 @@ const AdminLayout = () => {
               <MobileNavDropdown title="Quality">
                 <NavLink to="/admin/qc-analytics"           onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">QC Analytics</NavLink>
                 <NavLink to="/admin/defect-code-line-types" onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Defect Code Config</NavLink>
+                <NavLink to="/admin/scorecard-detailed"     onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Detailed Scorecard</NavLink>
               </MobileNavDropdown>
 
               <NavLink to="/merchandiser/planning" onClick={closeMenu} className={({ isActive }) =>

@@ -230,6 +230,7 @@ function App() {
           <Route path="trim-item-variants" element={<TrimItemVariantsPage />} />
           <Route path="production-lines" element={<ProductionLinesPage />} />
           <Route path="production-line-types" element={<ProductionLineTypesPage />} />
+          <Route path="scorecard-detailed" element={<ScorecardDetailedPage />} />
           <Route path="fabric-colors" element={<FabricColorsPage />} />
           <Route path="fabric-types" element={<FabricTypesPage />} />
           <Route path ="asset-management" element={<AssetManagementPage />} />  

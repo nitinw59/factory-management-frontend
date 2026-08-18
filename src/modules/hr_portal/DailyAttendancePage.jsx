@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { 
-    Users, Clock, AlertTriangle, Calendar, X, CheckCircle2, 
-    Loader2, Save, Filter, DollarSign, ChevronRight, Download
+import {
+    Users, Clock, AlertTriangle, Calendar, X, CheckCircle2,
+    Loader2, Save, Filter, DollarSign, ChevronRight, Download, FileSpreadsheet
 } from 'lucide-react';
-import { hrApi } from '../../api/hrApi'; 
+import * as XLSX from 'xlsx';
+import { hrApi } from '../../api/hrApi';
 
 // --- TIMEZONE UTILITIES (Enterprise Rigid) ---
 
@@ -29,6 +30,14 @@ const getIndiaHour = () => {
         hour12: false
     }).format(new Date()));
 };
+
+/**
+ * A MISSED_OUT_PUNCH while the shift is still plausibly active (today, before 7 PM IST)
+ * is treated as PRESENT rather than flagged as an anomaly. Centralized here so the KPI
+ * tiles, the roster table filter, and the exported reports never drift out of sync.
+ */
+const getEffectiveStatus = (log, isToday, currentHourIST) =>
+    (log.status === 'MISSED_OUT_PUNCH' && isToday && currentHourIST < 19) ? 'PRESENT' : log.status;
 
 // --- SUBCOMPONENTS ---
 
@@ -134,6 +143,7 @@ export default function DailyAttendancePage() {
     const [activeFilter, setActiveFilter] = useState('ALL'); 
     const [deptFilter, setDeptFilter] = useState('ALL');
     const [showExpenseModal, setShowExpenseModal] = useState(false);
+    const [expenseDeptFilter, setExpenseDeptFilter] = useState('ALL');
 
     const fetchDashboardData = useCallback(async (selectedDate) => {
         setIsLoading(true);
@@ -166,18 +176,12 @@ export default function DailyAttendancePage() {
         const isToday = date === getIndiaDate();
 
         logs.forEach(log => {
-            // Logic: If it's today and before 7 PM (19:00), don't flag missing punch as anomaly yet.
-            if (log.status === 'PRESENT') present++;
-            else if (log.status === 'HALF_DAY') halfDay++;
-            else if (log.status === 'MISSED_OUT_PUNCH') {
-                if (isToday && currentHourIST < 19) {
-                    present++; // Treat as present while shift is active
-                } else {
-                    anomalies++;
-                }
-            }
-            else if (log.status === 'ABSENT') absent++;
-            
+            const eff = getEffectiveStatus(log, isToday, currentHourIST);
+            if (eff === 'PRESENT') present++;
+            else if (eff === 'HALF_DAY') halfDay++;
+            else if (eff === 'MISSED_OUT_PUNCH') anomalies++;
+            else if (eff === 'ABSENT') absent++;
+
             dailyExpense += log.expense || 0;
         });
         return { present, absent, halfDay, anomalies, dailyExpense };
@@ -190,11 +194,9 @@ export default function DailyAttendancePage() {
         return logs.filter(log => {
             const matchDept = deptFilter === 'ALL' || log.dept === deptFilter;
             let matchStatus = true;
-            
+
             // Adjust filtering logic to match KPI counts (Active workers vs true anomalies)
-            const effectiveStatus = (log.status === 'MISSED_OUT_PUNCH' && isToday && currentHourIST < 19) 
-                ? 'PRESENT' 
-                : log.status;
+            const effectiveStatus = getEffectiveStatus(log, isToday, currentHourIST);
 
             if (activeFilter === 'PRESENT') matchStatus = effectiveStatus === 'PRESENT';
             if (activeFilter === 'HALF_DAY') matchStatus = effectiveStatus === 'HALF_DAY';
@@ -206,19 +208,36 @@ export default function DailyAttendancePage() {
     }, [logs, activeFilter, deptFilter, date]);
 
     const departmentSummary = useMemo(() => {
+        const currentHourIST = getIndiaHour();
+        const isToday = date === getIndiaDate();
         const summary = {};
         logs.forEach(log => {
-            if (!summary[log.dept]) summary[log.dept] = { count: 0, expense: 0 };
-            if (log.expense > 0) {
-                summary[log.dept].count++;
-                summary[log.dept].expense += log.expense;
-            }
+            if (!summary[log.dept]) summary[log.dept] = { dept: log.dept, present: 0, halfDay: 0, absent: 0, expense: 0 };
+            const eff = getEffectiveStatus(log, isToday, currentHourIST);
+            if (eff === 'PRESENT') summary[log.dept].present++;
+            else if (eff === 'HALF_DAY') summary[log.dept].halfDay++;
+            else if (eff === 'ABSENT') summary[log.dept].absent++;
+            summary[log.dept].expense += log.expense || 0;
         });
-        return Object.entries(summary)
-            .map(([dept, data]) => ({ dept, ...data }))
-            .filter(d => d.expense > 0)
+        const totalExpense = Object.values(summary).reduce((s, d) => s + d.expense, 0);
+        return Object.values(summary)
+            .map(d => ({
+                ...d,
+                count: d.present + d.halfDay,
+                avgPerHead: (d.present + d.halfDay) > 0 ? d.expense / (d.present + d.halfDay) : 0,
+                pctOfTotal: totalExpense > 0 ? d.expense / totalExpense : 0,
+            }))
             .sort((a, b) => b.expense - a.expense);
-    }, [logs]);
+    }, [logs, date]);
+
+    // Employee rows shown in the drilldown modal — narrows to whichever department was clicked.
+    const expenseDrilldownLogs = useMemo(() => (
+        logs.filter(e => e.expense > 0 && (expenseDeptFilter === 'ALL' || e.dept === expenseDeptFilter))
+    ), [logs, expenseDeptFilter]);
+
+    const expenseDrilldownTotal = expenseDeptFilter === 'ALL'
+        ? kpis.dailyExpense
+        : (departmentSummary.find(d => d.dept === expenseDeptFilter)?.expense || 0);
 
     const formatCurrency = (amount) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
 
@@ -248,6 +267,64 @@ export default function DailyAttendancePage() {
         document.body.removeChild(link);
     };
 
+    // Excel payroll export: always the full day, regardless of any on-screen dept/status filter.
+    const handleExportExcel = () => {
+        const currentHourIST = getIndiaHour();
+        const isToday = date === getIndiaDate();
+
+        // Sheet 1: Department Summary
+        const summaryRows = departmentSummary.map(d => ({
+            'Department': d.dept,
+            'Present': d.present,
+            'Half Day': d.halfDay,
+            'Absent': d.absent,
+            'Total Staff Paid': d.count,
+            'Avg Cost/Head': Math.round(d.avgPerHead),
+            'Total Cost': Math.round(d.expense),
+            '% of Total': `${(d.pctOfTotal * 100).toFixed(1)}%`,
+        }));
+        summaryRows.push({
+            'Department': 'GRAND TOTAL',
+            'Present': kpis.present,
+            'Half Day': kpis.halfDay,
+            'Absent': kpis.absent,
+            'Total Staff Paid': departmentSummary.reduce((s, d) => s + d.count, 0),
+            'Avg Cost/Head': '',
+            'Total Cost': Math.round(kpis.dailyExpense),
+            '% of Total': '100%',
+        });
+
+        // Sheet 2: Detailed Salary Report — every log for the day, ignoring on-screen filters
+        const detailRows = logs.map(log => {
+            const eff = getEffectiveStatus(log, isToday, currentHourIST);
+            const isHalfDay = eff === 'HALF_DAY';
+            return {
+                'Emp ID': log.emp_id,
+                'Name': log.name,
+                'Department': log.dept,
+                'Status': eff.replace('_', ' '),
+                'Punch In': log.punch_in || '-',
+                'Punch Out': log.punch_out || '-',
+                'Base Salary/Mo': log.base_salary,
+                'Working Days': log.working_days,
+                'Pay Basis': eff === 'ABSENT' ? '-' : isHalfDay ? 'Base / (Working Days x 2)' : 'Base / Working Days',
+                'Est. Daily Wage': Math.round(log.expense || 0),
+            };
+        });
+
+        const wb = XLSX.utils.book_new();
+
+        const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+        wsSummary['!cols'] = [{ wch: 22 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 12 }];
+        XLSX.utils.book_append_sheet(wb, wsSummary, 'Department Summary');
+
+        const wsDetail = XLSX.utils.json_to_sheet(detailRows);
+        wsDetail['!cols'] = [{ wch: 10 }, { wch: 22 }, { wch: 18 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 26 }, { wch: 14 }];
+        XLSX.utils.book_append_sheet(wb, wsDetail, 'Detailed Salary Report');
+
+        XLSX.writeFile(wb, `Attendance-Salary-Report-${date}.xlsx`);
+    };
+
     return (
         <div className="p-6 sm:p-8 max-w-7xl mx-auto min-h-screen bg-slate-50 font-inter">
             
@@ -274,11 +351,17 @@ export default function DailyAttendancePage() {
                             className="bg-transparent border-none focus:ring-0 text-sm font-bold text-slate-700 cursor-pointer pr-2 outline-none"
                         />
                     </div>
-                    <button 
+                    <button
                         onClick={handleExportCSV}
                         className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-sm text-sm h-full"
                     >
                         <Download size={16} className="mr-2" /> Export
+                    </button>
+                    <button
+                        onClick={handleExportExcel}
+                        className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-sm text-sm h-full"
+                    >
+                        <FileSpreadsheet size={16} className="mr-2" /> Export Excel
                     </button>
                 </div>
             </div>
@@ -291,7 +374,7 @@ export default function DailyAttendancePage() {
                 <KpiCard title="Absent" value={kpis.absent} icon={X} colorClass="text-rose-600" bgColorClass="bg-rose-50" isLoading={isLoading} isActive={activeFilter === 'ABSENT'} onClick={() => setActiveFilter('ABSENT')} />
                 
                 <div 
-                    onClick={() => setShowExpenseModal(true)}
+                    onClick={() => { setExpenseDeptFilter('ALL'); setShowExpenseModal(true); }}
                     className="bg-gradient-to-br from-indigo-700 to-indigo-900 p-5 rounded-2xl shadow-md cursor-pointer hover:shadow-lg transition-all hover:-translate-y-0.5 text-white flex flex-col justify-between"
                 >
                     <p className="text-[10px] font-bold text-indigo-200 uppercase tracking-wider mb-1">Est. Expense</p>
@@ -380,24 +463,72 @@ export default function DailyAttendancePage() {
                         
                         <div className="flex-1 overflow-y-auto bg-slate-50/30">
                             <div className="p-6 border-b border-slate-200 bg-white">
-                                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Department Summary</h4>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                    {departmentSummary.map((dept) => (
-                                        <div key={dept.dept} className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                                            <p className="text-sm font-bold text-slate-700 truncate">{dept.dept}</p>
-                                            <div className="flex justify-between items-end mt-2">
-                                                <div>
-                                                    <p className="text-[10px] text-slate-400 font-bold uppercase">Staff</p>
-                                                    <p className="text-sm font-black text-slate-600">{dept.count}</p>
-                                                </div>
-                                                <div className="text-right">
-                                                    <p className="text-[10px] text-slate-400 font-bold uppercase">Cost</p>
-                                                    <p className="text-sm font-black text-indigo-600">{formatCurrency(dept.expense)}</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
+                                <div className="flex items-center justify-between mb-4">
+                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Department Summary</h4>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Click a row to filter employees below</span>
                                 </div>
+                                <div className="overflow-x-auto rounded-xl border border-slate-100">
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-50 sticky top-0 text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                                            <tr>
+                                                <th className="px-4 py-3">Department</th>
+                                                <th className="px-4 py-3 text-right">Staff</th>
+                                                <th className="px-4 py-3 text-right">Avg/Head</th>
+                                                <th className="px-4 py-3 text-right">Cost</th>
+                                                <th className="px-4 py-3 text-right w-40">% of Total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {departmentSummary.map((dept) => {
+                                                const isActive = expenseDeptFilter === dept.dept;
+                                                return (
+                                                    <tr
+                                                        key={dept.dept}
+                                                        onClick={() => setExpenseDeptFilter(isActive ? 'ALL' : dept.dept)}
+                                                        className={`cursor-pointer transition-colors ${isActive ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
+                                                    >
+                                                        <td className={`px-4 py-3 font-bold border-l-2 ${isActive ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-700'}`}>{dept.dept}</td>
+                                                        <td className="px-4 py-3 text-right font-bold text-slate-600">{dept.count}</td>
+                                                        <td className="px-4 py-3 text-right font-mono text-slate-500">{formatCurrency(dept.avgPerHead)}</td>
+                                                        <td className="px-4 py-3 text-right font-black text-indigo-600">{formatCurrency(dept.expense)}</td>
+                                                        <td className="px-4 py-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                                    <div className={`h-full rounded-full ${isActive ? 'bg-indigo-700' : 'bg-indigo-500'}`} style={{ width: `${(dept.pctOfTotal * 100).toFixed(1)}%` }} />
+                                                                </div>
+                                                                <span className="text-[10px] font-bold text-slate-400 w-9 text-right">{(dept.pctOfTotal * 100).toFixed(0)}%</span>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                        <tfoot>
+                                            <tr className="bg-slate-50 border-t-2 border-slate-200">
+                                                <td className="px-4 py-3 font-black text-slate-700 uppercase text-xs">Total</td>
+                                                <td className="px-4 py-3 text-right font-black text-slate-700">{departmentSummary.reduce((s, d) => s + d.count, 0)}</td>
+                                                <td className="px-4 py-3"></td>
+                                                <td className="px-4 py-3 text-right font-black text-indigo-700">{formatCurrency(kpis.dailyExpense)}</td>
+                                                <td className="px-4 py-3 text-right font-black text-slate-400 text-[10px]">100%</td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div className="px-6 pt-5 pb-2 flex items-center justify-between bg-white/60">
+                                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                    {expenseDeptFilter === 'ALL' ? 'All Employees' : `${expenseDeptFilter} Employees`}
+                                    <span className="ml-2 text-slate-300 normal-case">({expenseDrilldownLogs.length})</span>
+                                </h4>
+                                {expenseDeptFilter !== 'ALL' && (
+                                    <button
+                                        onClick={() => setExpenseDeptFilter('ALL')}
+                                        className="flex items-center gap-1 text-[11px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200 transition-colors"
+                                    >
+                                        {expenseDeptFilter} <X size={12} />
+                                    </button>
+                                )}
                             </div>
 
                             <table className="w-full text-left text-sm bg-white">
@@ -411,7 +542,11 @@ export default function DailyAttendancePage() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {logs.filter(e => e.expense > 0).map((emp, i) => (
+                                    {expenseDrilldownLogs.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={5} className="px-6 py-10 text-center text-slate-400 font-medium text-sm">No paid employees in this department for {date}.</td>
+                                        </tr>
+                                    ) : expenseDrilldownLogs.map((emp, i) => (
                                         <tr key={i} className="hover:bg-slate-50">
                                             <td className="px-6 py-3 font-bold text-slate-800">{emp.name}</td>
                                             <td className="px-6 py-3 font-bold text-slate-500 text-xs">{emp.dept}</td>
@@ -433,8 +568,10 @@ export default function DailyAttendancePage() {
                             </table>
                         </div>
                         <div className="p-5 border-t border-slate-200 bg-slate-50 flex justify-between items-center shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] relative z-10">
-                            <span className="font-bold text-slate-500 uppercase text-xs tracking-wider">Total Est. Expense</span>
-                            <span className="text-2xl font-black text-indigo-700">{formatCurrency(kpis.dailyExpense)}</span>
+                            <span className="font-bold text-slate-500 uppercase text-xs tracking-wider">
+                                {expenseDeptFilter === 'ALL' ? 'Total Est. Expense' : `Total Est. Expense — ${expenseDeptFilter}`}
+                            </span>
+                            <span className="text-2xl font-black text-indigo-700">{formatCurrency(expenseDrilldownTotal)}</span>
                         </div>
                     </div>
                 </div>

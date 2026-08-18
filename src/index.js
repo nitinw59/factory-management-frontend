@@ -6,6 +6,9 @@ import reportWebVitals from './reportWebVitals';
 // 1. Import BrowserRouter
 import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { disableNumberInputScrollGlobally } from './utils/disableNumberInputScroll';
+
+disableNumberInputScrollGlobally();
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
