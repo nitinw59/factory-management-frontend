@@ -648,6 +648,7 @@ const TrimOrderDetailPage = () => {
 
     // Per-trim recompute — backend rejects (409) these states; disable the button to match.
     const [recomputingId, setRecomputingId] = useState(null);
+    const [recomputingAll, setRecomputingAll] = useState(false);
     const recomputeBlocked = ['CLOSED', 'READY_FOR_PICKUP', 'ISSUED', 'PARTIALLY_ISSUED'].includes(orderInfo?.status);
 
     // Toast
@@ -1212,7 +1213,14 @@ const TrimOrderDetailPage = () => {
             if (agg.deleted)  parts.push(`${agg.deleted} removed`);
             if (agg.kept)     parts.push(`${agg.kept} kept (already fulfilled)`);
             const missing = (agg.mAdded || agg.mRemoved) ? ` · missing +${agg.mAdded}/-${agg.mRemoved}` : '';
-            showToast('success', `Recomputed ${group.name}: ${parts.join(', ') || 'no changes'}${missing}. Status: ${lastStatus}.`);
+            if (agg.kept > 0) {
+                // Kept lines are no longer required at all (or would be required below
+                // what's already fulfilled) — call the trim out by name so it doesn't
+                // get lost inside the aggregate count above.
+                showToast('error', `⚠ ${group.name}: ${agg.kept} variant(s) kept for manual review (no longer required at the fulfilled quantity).`);
+            } else {
+                showToast('success', `Recomputed ${group.name}: ${parts.join(', ') || 'no changes'}${missing}. Status: ${lastStatus}.`);
+            }
             await fetchDetails();
         } catch (err) {
             showToast('error', `Recompute failed: ${err.response?.data?.error || 'Server error'}`);
@@ -1220,6 +1228,47 @@ const TrimOrderDetailPage = () => {
         } finally {
             setIsFulfillingAll(false);
             setRecomputingId(null);
+        }
+    };
+
+    // Full-order recompute — reconciles the union of (trims already on the order,
+    // trims sitting in the missing-items table, and whatever the batch's current
+    // BOM/recipe now requires). Picks up trims that were never on the order at all,
+    // e.g. a BOM line that only exists after the BOM got approved post-order-creation.
+    const handleRecomputeAll = async () => {
+        if (recomputeBlocked) return;   // defensive; the button is also disabled
+        if (!window.confirm("Re-verify this entire order against the batch's current BOM/recipe? This can add newly-required trims and update quantities on existing lines.")) return;
+        setRecomputingAll(true);
+        setIsFulfillingAll(true);       // overlay spinner; preserves scroll position
+        try {
+            const { data } = await storeManagerApi.recomputeAllTrims(orderId);
+            const t = data.totals || {};
+
+            // Kept-with-fulfillment lines take priority — resolve trim_item_id → name
+            // so a store manager knows exactly which trim to go review, not just a count.
+            const nameByTrimId = new Map(items.map(it => [String(it.trim_item_id), it.item_name?.split(' - ')[0]?.trim() || `#${it.trim_item_id}`]));
+            const keptNames = (data.results || [])
+                .filter(r => r.kept_with_fulfillment > 0)
+                .map(r => nameByTrimId.get(String(r.trim_item_id)) || `Trim #${r.trim_item_id}`);
+
+            if (keptNames.length > 0) {
+                showToast('error', `Needs manual review — no longer required at the fulfilled quantity: ${[...new Set(keptNames)].join(', ')}.`);
+            } else {
+                const parts = [];
+                if (t.inserted) parts.push(`${t.inserted} added`);
+                if (t.updated)  parts.push(`${t.updated} updated`);
+                if (t.deleted)  parts.push(`${t.deleted} removed`);
+                const missing = (t.missing_added || t.missing_removed) ? ` · missing +${t.missing_added || 0}/-${t.missing_removed || 0}` : '';
+                showToast('success', `Recomputed ${data.trims_recomputed} trim item(s): ${parts.join(', ') || 'no changes'}${missing}. Status: ${data.order_status}.`);
+            }
+
+            await Promise.all([fetchDetails(), fetchRefData()]);
+        } catch (err) {
+            showToast('error', `Recompute-all failed: ${err.response?.data?.error || 'Server error'}`);
+            if (err.response?.status === 409) fetchDetails();   // re-sync status on conflict (order-state 409s)
+        } finally {
+            setIsFulfillingAll(false);
+            setRecomputingAll(false);
         }
     };
 
@@ -1436,8 +1485,19 @@ const TrimOrderDetailPage = () => {
                                     <LuSend className="mr-2 h-5 w-5" /> Mark Kit Ready
                                 </button>
                             ))}
+                            <button
+                                onClick={handleRecomputeAll}
+                                disabled={recomputeBlocked || isFulfillingAll || isReverting}
+                                title={recomputeBlocked
+                                    ? `Recompute is locked while the order is ${orderInfo?.status}`
+                                    : "Re-run the BOM × cut-pieces calculation for every trim item on this order — picks up newly-required trims too (e.g. after a BOM gets approved)"}
+                                className="px-5 py-2.5 bg-white text-violet-700 hover:bg-violet-600 hover:text-white border border-violet-200 hover:border-violet-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {recomputingAll ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LuRefreshCw className="mr-2 h-5 w-5" />}
+                                Recompute All
+                            </button>
                             {/* ✅ NEW BUTTON: Opens Reference Modal */}
-                            <button 
+                            <button
                                 onClick={() => setRefModalOpen(true)}
                                 className="px-5 py-2.5 bg-white text-gray-700 hover:bg-gray-100 border border-gray-300 hover:border-gray-400 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center"
                             >

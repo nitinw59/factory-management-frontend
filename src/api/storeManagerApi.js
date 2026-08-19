@@ -40,6 +40,9 @@ export const storeManagerApi = {
     recheckMissingItems: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/recheck`),
     recomputeTrimItem: (orderId, trimItemId) =>
         api.post(`/store-manager/trim-orders/${orderId}/trim-items/${trimItemId}/recompute`),
+    // Full-order recompute — reconciles the union of (on-order trims, missing-item trims,
+    // and whatever the batch's current BOM/recipe requires), one trim at a time.
+    recomputeAllTrims: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/recompute-all`),
 
     autoFulfillOrder: (orderId) => api.post(`/store-manager/trim-orders/${orderId}/auto-fulfill`),
 
