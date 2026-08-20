@@ -2,6 +2,7 @@ import api from '../utils/api';
 
 export const planningApi = {
     getFormData:              ()                 => api.get('/planning/form-data'),
+    getFabricTypes:           ()                 => api.get('/shared/fabric_type'),
     getOrderDetail:           (orderId)          => api.get(`/planning/sales-orders/${orderId}`),
     linkBom:                  (sopId, body)      => api.post(`/planning/sales-order-products/${sopId}/link-bom`, body),
     unlinkBom:                (sopId)            => api.delete(`/planning/sales-order-products/${sopId}/bom`),

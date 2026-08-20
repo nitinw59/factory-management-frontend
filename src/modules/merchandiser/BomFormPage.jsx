@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     Plus, FileText, Loader2, X, ChevronDown, ChevronRight,
     AlertCircle, AlertTriangle, Scissors, ArrowLeft, Check, XCircle, Ruler, Copy,
@@ -20,7 +20,18 @@ const makeSizeValidator = (sizes) => {
     };
 };
 
-const freshFabric = () => ({ _key: genKey(), fabric_type_id: '', consumption_inches: '' });
+const freshFabric = () => ({ _key: genKey(), fabric_type_id: '', fabric_role: '', consumption_inches: '' });
+
+// A fabric line is either a specific fabric_type_id OR a generic fabric_role
+// (PRIMARY/SECONDARY — "whatever fabric this order uses for that role", resolved
+// per Sales Order Product at requirement-calculation time instead of being pinned
+// on the BOM). The <select> below encodes that choice as a single value:
+// "role:PRIMARY" / "role:SECONDARY" for generic, or the raw fabric_type_id for specific.
+const ROLE_PREFIX = 'role:';
+const fabricLineValue = (fc) => fc.fabric_role ? `${ROLE_PREFIX}${fc.fabric_role}` : (fc.fabric_type_id || '');
+const applyFabricLineValue = (fc, value) => value.startsWith(ROLE_PREFIX)
+    ? { ...fc, fabric_role: value.slice(ROLE_PREFIX.length), fabric_type_id: '' }
+    : { ...fc, fabric_role: '', fabric_type_id: value };
 
 const freshRatioGroup = () => ({
     _key: genKey(), ratio_group_name: '', marker_length_inches: '',
@@ -73,7 +84,7 @@ const AddBtn = ({ onClick, label }) => (
 
 // ─── Ratio Group Accordion ────────────────────────────────────────────────────
 
-const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, canRemove, fabricTypes, sizes }) => {
+const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, canRemove, fabricTypes, sizes, genericFabricOnly }) => {
     const totalPieces = group.items.reduce((s, it) => s + (parseInt(it.number_of_pieces) || 0), 0);
     const sizeSummary = group.items.filter(it => it.size).map(it => `${it.size}×${it.number_of_pieces}`).join(' · ');
     const isBadSize = useMemo(() => makeSizeValidator(sizes), [sizes]);
@@ -95,6 +106,11 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
     const updateFab = (fIdx, field, val) => {
         const fabs = [...fabrics];
         fabs[fIdx] = { ...fabs[fIdx], [field]: val };
+        updFabs(fabs);
+    };
+    const replaceFab = (fIdx, nextFc) => {
+        const fabs = [...fabrics];
+        fabs[fIdx] = nextFc;
         updFabs(fabs);
     };
 
@@ -236,15 +252,37 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                         {fabrics.length === 0 && (
                             <p className="text-xs text-slate-500 italic text-center py-2">No fabrics. Add fabric consumption for this ratio group.</p>
                         )}
+                        {genericFabricOnly && (
+                            <p className="text-[10px] text-violet-500 mb-1.5">
+                                Only Primary/Secondary generic fabric — the actual fabric is picked per Sales Order when this BOM is linked, so one BOM works for every fabric type.
+                            </p>
+                        )}
                         {fabrics.map((fc, fIdx) => {
-                            const ftName = fabricTypes.find(ft => String(ft.id) === String(fc.fabric_type_id))?.name;
+                            // A ratio group can only have one PRIMARY and one SECONDARY generic
+                            // line (mirrors the backend's unique index) — hide roles already
+                            // taken by another fabric line here so the picker can't offer a
+                            // combination the save call would reject.
+                            const rolesUsedElsewhere = new Set(
+                                fabrics.filter((_, i) => i !== fIdx).map(f => f.fabric_role).filter(Boolean)
+                            );
                             return (
                                 <div key={fc._key} className="flex items-center gap-2 mb-1.5">
-                                    <select value={fc.fabric_type_id}
-                                        onChange={e => updateFab(fIdx, 'fabric_type_id', e.target.value)}
+                                    <select value={fabricLineValue(fc)}
+                                        onChange={e => replaceFab(fIdx, applyFabricLineValue(fc, e.target.value))}
                                         className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 bg-white">
                                         <option value="">— Fabric type —</option>
-                                        {fabricTypes.map(ft => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                                        <optgroup label="Generic — any fabric (set per order)">
+                                            {!rolesUsedElsewhere.has('PRIMARY') && <option value={`${ROLE_PREFIX}PRIMARY`}>Primary Fabric</option>}
+                                            {!rolesUsedElsewhere.has('SECONDARY') && <option value={`${ROLE_PREFIX}SECONDARY`}>Secondary Fabric</option>}
+                                        </optgroup>
+                                        {/* New BOMs are generic-only — pinning a concrete fabric type is what forced a
+                                            new BOM per fabric at volume. Only offered when editing an older BOM that
+                                            still has (or needs) a concrete line. */}
+                                        {!genericFabricOnly && (
+                                            <optgroup label="Specific fabric type">
+                                                {fabricTypes.map(ft => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                                            </optgroup>
+                                        )}
                                     </select>
                                     <input type="number" min="0" step="0.01" value={fc.consumption_inches}
                                         onChange={e => updateFab(fIdx, 'consumption_inches', e.target.value)}
@@ -756,7 +794,11 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
 export default function BomFormPage() {
     const { bomId } = useParams();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const isEdit = Boolean(bomId);
+    // ?duplicateFrom=<id> — spin up a new DRAFT BOM pre-filled from an existing one.
+    // Only honored on the "new BOM" route, never alongside an actual edit.
+    const duplicateFromId = !isEdit ? searchParams.get('duplicateFrom') : null;
 
     const [initialData] = useState(() => {
         const rg = freshRatioGroup();
@@ -772,12 +814,13 @@ export default function BomFormPage() {
 
     const [form, setForm] = useState(initialData.form);
     const [formMeta, setFormMeta] = useState({ products: [], fabricTypes: [], trimItems: [], sizes: [] });
-    const [loading, setLoading] = useState(isEdit);
+    const [loading, setLoading] = useState(isEdit || !!duplicateFromId);
     const [saving, setSaving] = useState(false);
     const [err, setErr] = useState(null);
     const [toast, setToast] = useState(null);
     const [bomStatus, setBomStatus] = useState(null);
     const [rejectionNotes, setRejectionNotes] = useState(null);
+    const [duplicateSourceName, setDuplicateSourceName] = useState(null);
 
     const [expandedRatios, setExpandedRatios] = useState(
         isEdit ? new Set() : new Set([initialData.rgKey])
@@ -822,7 +865,8 @@ export default function BomFormPage() {
                         marker_length_inches: rg.marker_length_inches || '',
                         fabrics: (rg.fabric_consumptions || []).map(fc => ({
                             _key: genKey(),
-                            fabric_type_id: String(fc.fabric_type?.id || fc.fabric_type_id || ''),
+                            fabric_type_id: fc.fabric_role ? '' : String(fc.fabric_type?.id || fc.fabric_type_id || ''),
+                            fabric_role: fc.fabric_role || '',
                             consumption_inches: fc.consumption_inches || '',
                         })),
                         items: (rg.items || []).map(it => ({ _key: genKey(), size: it.size, number_of_pieces: it.number_of_pieces })),
@@ -841,6 +885,49 @@ export default function BomFormPage() {
             .catch(e => setErr(e?.response?.data?.error || e.message || 'Failed to load BOM.'))
             .finally(() => setLoading(false));
     }, [bomId, isEdit]);
+
+    // Duplicate an existing BOM into a fresh DRAFT. Same ratio groups, sizes,
+    // trims and consumption values carry over as a starting point. A concrete
+    // fabric_type_id line gets cleared — picking the new fabric is the whole
+    // reason to duplicate that kind of line. A generic PRIMARY/SECONDARY role
+    // line carries over as-is — it isn't pinned to a fabric in the first place,
+    // so there's nothing to clear (and normally you wouldn't need to duplicate
+    // a fully-generic BOM at all, but this keeps it consistent if you do).
+    useEffect(() => {
+        if (!duplicateFromId) return;
+        bomApi.getById(duplicateFromId)
+            .then(res => {
+                const bom = res.data?.data ?? res.data;
+                setDuplicateSourceName(bom.bom_name || `BOM #${duplicateFromId}`);
+                setForm({
+                    product_id: String(bom.product?.id || bom.product_id || ''),
+                    bom_name: bom.bom_name ? `${bom.bom_name} (Copy)` : '',
+                    ratio_groups: (bom.ratio_groups || []).map(rg => ({
+                        _key: genKey(),
+                        ratio_group_name: rg.ratio_group_name || '',
+                        marker_length_inches: rg.marker_length_inches || '',
+                        fabrics: (rg.fabric_consumptions || []).map(fc => ({
+                            _key: genKey(),
+                            fabric_type_id: '',
+                            fabric_role: fc.fabric_role || '',
+                            consumption_inches: fc.consumption_inches || '',
+                        })),
+                        items: (rg.items || []).map(it => ({ _key: genKey(), size: it.size, number_of_pieces: it.number_of_pieces })),
+                    })),
+                    material_consumptions: (bom.material_consumptions || []).map(mc => ({
+                        _key: genKey(),
+                        trim_item_id: String(mc.trim_item?.id || mc.trim_item_id || ''),
+                        calculation_type: mc.calculation_type || 'FIXED',
+                        fixed_quantity: mc.fixed_quantity || '',
+                        placement_description: mc.placement_description || '',
+                        wastage_percentage: mc.wastage_percentage || '',
+                        size_consumptions: (mc.size_consumptions || []).map(sc => ({ _key: genKey(), size: sc.size, quantity: sc.quantity || '', target_variant_size: sc.target_variant_size || '' })),
+                    })),
+                });
+            })
+            .catch(e => setErr(e?.response?.data?.error || e.message || 'Failed to load source BOM for duplication.'))
+            .finally(() => setLoading(false));
+    }, [duplicateFromId]);
 
     // ── Ratio group handlers ──
     const addRatioGroup = () => {
@@ -903,7 +990,8 @@ export default function BomFormPage() {
             marker_length_inches: rg.marker_length_inches ? parseFloat(rg.marker_length_inches) : null,
             items: rg.items.map(it => ({ size: it.size, number_of_pieces: parseInt(it.number_of_pieces) || 1 })),
             fabric_consumptions: (rg.fabrics || []).map(fc => ({
-                fabric_type_id: parseInt(fc.fabric_type_id),
+                fabric_type_id: fc.fabric_role ? null : parseInt(fc.fabric_type_id),
+                fabric_role: fc.fabric_role || null,
                 consumption_inches: parseFloat(fc.consumption_inches) || null,
             })),
         })),
@@ -1022,7 +1110,7 @@ export default function BomFormPage() {
                     </button>
                     <div className="flex-1 min-w-0">
                         <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                            {isEdit ? 'Editing BOM' : 'New BOM'}
+                            {isEdit ? 'Editing BOM' : duplicateSourceName ? 'Duplicating BOM' : 'New BOM'}
                         </p>
                         <p className="font-extrabold text-slate-800 text-sm truncate">
                             {form.bom_name || (isEdit ? '…' : 'Create BOM')}
@@ -1062,6 +1150,22 @@ export default function BomFormPage() {
                 {err && (
                     <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-600 text-sm font-medium">
                         <AlertCircle size={15} /> {err}
+                    </div>
+                )}
+
+                {duplicateSourceName && (
+                    <div className="flex items-start gap-2 bg-violet-50 border border-violet-200 rounded-xl px-4 py-3">
+                        <Copy size={14} className="text-violet-500 shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-sm font-bold text-violet-700">
+                                Duplicated from "{duplicateSourceName}"
+                            </p>
+                            <p className="text-xs text-violet-700 mt-0.5">
+                                This is a new draft — ratio groups, sizes and trims carried over. Specific fabric type lines
+                                were cleared, pick a fabric before saving; generic Primary/Secondary lines carried over as-is
+                                (consider using a generic role instead of duplicating, so future fabrics don't need a new BOM at all).
+                            </p>
+                        </div>
                     </div>
                 )}
 
@@ -1125,6 +1229,7 @@ export default function BomFormPage() {
                                 canRemove={form.ratio_groups.length > 1}
                                 fabricTypes={formMeta.fabricTypes}
                                 sizes={formMeta.sizes}
+                                genericFabricOnly={!isEdit}
                             />
                         ))}
                     </div>

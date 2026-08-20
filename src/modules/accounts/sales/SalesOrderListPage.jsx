@@ -3,14 +3,16 @@ import { Link } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { storeManagerApi } from '../../../api/storeManagerApi';
 import { accountingApi } from '../../../api/accountingApi';
+import { adminApi } from '../../../api/adminApi';
 import {
     Search, Loader2, X, Paperclip, Package, Plus,
     Layers, Edit3, FileText, Truck, ExternalLink,
-    Pencil, AlertCircle, ChevronDown
+    Pencil, AlertCircle, ChevronDown, Download
 } from 'lucide-react';
 import Modal from '../../../shared/Modal';
 import FabricIntakeForm from '../purchase/FabricIntakeForm';
 import EditFabricRollModal from '../purchase/EditFabricRollModal';
+import { generateSalesOrderPdf } from './salesOrderPdfGenerator';
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
@@ -160,11 +162,14 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
 
     const [details, setDetails]         = useState(null);
     const [sizeMap, setSizeMap]         = useState({});
+    const [sizeOrder, setSizeOrder]     = useState([]);   // size ids, master display_order
     const [loading, setLoading]         = useState(true);
     const [error, setError]             = useState(null);
     const [expandedPOs, setExpandedPOs] = useState({});
     const [intakeModalOpen, setIntakeModalOpen] = useState(false);
     const [selectedPO, setSelectedPO]   = useState(null);
+    const [downloading, setDownloading] = useState(false);
+    const [downloadError, setDownloadError] = useState(null);
 
     useEffect(() => {
         Promise.all([
@@ -175,12 +180,45 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
                 setDetails(detailsRes.data);
                 const sizes = sizesRes.data?.data ?? sizesRes.data ?? [];
                 setSizeMap(Object.fromEntries(sizes.map(s => [String(s.id), s.name])));
+                setSizeOrder(sizes.map(s => String(s.id)));   // already ORDER BY display_order from the backend
             })
             .catch(() => setError('Failed to load order details.'))
             .finally(() => setLoading(false));
     }, [soId]);
 
     const togglePO = (id) => setExpandedPOs(prev => ({ ...prev, [id]: !prev[id] }));
+
+    const handleDownload = async () => {
+        if (!details) return;
+        setDownloading(true);
+        setDownloadError(null);
+        try {
+            let company = null;
+            try {
+                const cr = await adminApi.getCompanyProfile();
+                company = cr.data ?? null;
+            } catch { company = null; }
+
+            const pdfBlob = await generateSalesOrderPdf({ so, details, sizeMap, sizeOrder, company });
+
+            const datestamp = new Date().toISOString().slice(0, 10);
+            const safeNumber = (so.order_number || `SO-${soId}`).replace(/[^A-Za-z0-9._-]/g, '_');
+            const filename = `${safeNumber}-${datestamp}.pdf`;
+
+            const url = URL.createObjectURL(pdfBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (err) {
+            setDownloadError('Failed to generate PDF.');
+        } finally {
+            setDownloading(false);
+        }
+    };
 
     // Merge: use fetched details for products+attachments, list data for purchase_orders
     const purchaseOrders = so.purchase_orders || [];
@@ -197,6 +235,14 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
                         <StatusBadge status={so.status}/>
                     </div>
                     <div className="flex items-center gap-2">
+                        <button
+                            onClick={handleDownload}
+                            disabled={!details || downloading}
+                            title="Download a detailed PDF of this sales order"
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-slate-600 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {downloading ? <Loader2 size={13} className="animate-spin"/> : <Download size={13}/>} Download
+                        </button>
                         <Link
                             to={`/accounts/sales/${soId}/edit`}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-indigo-600 hover:bg-indigo-50 border border-indigo-100 rounded-lg transition-colors"
@@ -208,6 +254,12 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
                         </button>
                     </div>
                 </div>
+
+                {downloadError && (
+                    <div className="flex items-center gap-2 bg-red-50 text-red-700 px-4 py-2 text-xs font-medium border-b border-red-100 shrink-0">
+                        <AlertCircle size={13} className="shrink-0"/> {downloadError}
+                    </div>
+                )}
 
                 {/* ── Scrollable body ── */}
                 <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
@@ -457,7 +509,8 @@ const SalesOrderListPage = () => {
         return (
             so.order_number?.toLowerCase().includes(q) ||
             so.customer_name?.toLowerCase().includes(q) ||
-            so.buyer_po_number?.toLowerCase().includes(q)
+            so.buyer_po_number?.toLowerCase().includes(q) ||
+            so.product_names?.toLowerCase().includes(q)
         );
     });
 
@@ -480,7 +533,7 @@ const SalesOrderListPage = () => {
                             <Search className="absolute left-3 top-2.5 text-slate-400 w-4 h-4"/>
                             <input
                                 type="text"
-                                placeholder="Search order, customer, buyer PO…"
+                                placeholder="Search order, customer, buyer PO, product…"
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
                                 className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none w-64"
@@ -556,9 +609,11 @@ const SalesOrderListPage = () => {
                                 <tr className="border-b border-slate-100 bg-slate-50/80">
                                     <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Order #</th>
                                     <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Customer</th>
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden sm:table-cell">Product / Fabric</th>
                                     <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden md:table-cell">Buyer PO</th>
                                     <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden lg:table-cell">Order Date</th>
                                     <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden lg:table-cell">Delivery</th>
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right hidden md:table-cell">Qty</th>
                                     <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right hidden md:table-cell">POs</th>
                                     <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
                                     <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Actions</th>
@@ -577,6 +632,16 @@ const SalesOrderListPage = () => {
                                         <td className="px-4 py-4">
                                             <p className="font-medium text-slate-800">{so.customer_name}</p>
                                         </td>
+                                        <td className="px-4 py-4 hidden sm:table-cell max-w-[14rem]">
+                                            {so.product_names ? (
+                                                <>
+                                                    <p className="text-sm text-slate-700 truncate" title={so.product_names}>{so.product_names}</p>
+                                                    {so.fabric_types && (
+                                                        <p className="text-[11px] text-slate-400 truncate" title={so.fabric_types}>{so.fabric_types}</p>
+                                                    )}
+                                                </>
+                                            ) : <span className="text-slate-300">—</span>}
+                                        </td>
                                         <td className="px-4 py-4 text-slate-500 font-mono text-xs hidden md:table-cell">
                                             {so.buyer_po_number || <span className="text-slate-300">—</span>}
                                         </td>
@@ -587,6 +652,11 @@ const SalesOrderListPage = () => {
                                                     {fmt(so.delivery_date)}
                                                 </span>
                                             ) : <span className="text-slate-300">—</span>}
+                                        </td>
+                                        <td className="px-4 py-4 text-right hidden md:table-cell">
+                                            <span className="text-sm font-semibold text-slate-600 tabular-nums">
+                                                {Number(so.total_quantity ?? 0).toLocaleString('en-IN')}
+                                            </span>
                                         </td>
                                         <td className="px-4 py-4 text-right hidden md:table-cell">
                                             <span className="text-sm font-semibold text-slate-600 tabular-nums">

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
     Plus, FileText, Edit2, Trash2, Send, Eye, Package,
     AlertCircle, Loader2, X, RefreshCw, Search, ChevronDown,
-    ChevronUp, Check, AlertTriangle, XCircle,
+    ChevronUp, Check, AlertTriangle, XCircle, Copy,
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
 import { accountingApi } from '../../api/accountingApi';
@@ -39,7 +39,7 @@ const StatusBadge = ({ status }) => {
 
 const normSize = (s) => String(s ?? '').trim().toUpperCase();
 
-const BomDetailModal = ({ bomId, onClose, onEdit }) => {
+const BomDetailModal = ({ bomId, onClose, onEdit, onDuplicate }) => {
     const [bom, setBom] = useState(null);
     const [sizes, setSizes] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -356,7 +356,12 @@ const BomDetailModal = ({ bomId, onClose, onEdit }) => {
                         </div>
                     )}
                 </div>
-                <div className="border-t border-slate-100 px-6 py-4 flex justify-end bg-slate-50 rounded-b-2xl">
+                <div className="border-t border-slate-100 px-6 py-4 flex justify-end gap-2 bg-slate-50 rounded-b-2xl">
+                    {bom && onDuplicate && (
+                        <button onClick={() => onDuplicate(bom.id)} className="flex items-center gap-1.5 px-4 py-2 bg-violet-100 hover:bg-violet-200 text-violet-700 rounded-lg font-bold text-sm transition-colors">
+                            <Copy size={14} /> Duplicate
+                        </button>
+                    )}
                     <button onClick={onClose} className="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-bold text-sm transition-colors">Close</button>
                 </div>
             </div>
@@ -366,7 +371,7 @@ const BomDetailModal = ({ bomId, onClose, onEdit }) => {
 
 // ─── BOM CARD ─────────────────────────────────────────────────────────────────
 
-const BomCard = ({ bom, onEdit, onView, onSubmit, onDelete }) => {
+const BomCard = ({ bom, onEdit, onView, onSubmit, onDelete, onDuplicate }) => {
     const { border } = STATUS_CFG[bom.status] || {};
     const isRejected = bom.status === 'REJECTED';
     return (
@@ -403,6 +408,9 @@ const BomCard = ({ bom, onEdit, onView, onSubmit, onDelete }) => {
                 <button onClick={() => onView(bom.id)} className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded hover:bg-slate-200 transition-colors">
                     <Eye size={10} /> View
                 </button>
+                <button onClick={() => onDuplicate(bom)} title="Create a new draft BOM from this one — e.g. same style, different fabric" className="flex items-center gap-1 text-[11px] font-bold text-violet-500 hover:text-violet-700 px-2 py-1 rounded hover:bg-violet-50 transition-colors">
+                    <Copy size={10} /> Duplicate
+                </button>
                 {(bom.status === 'DRAFT' || bom.status === 'APPROVED' || bom.status === 'REJECTED') && (
                     <button onClick={() => onEdit(bom)} className={`flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded transition-colors ${bom.status === 'APPROVED' ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50' : bom.status === 'REJECTED' ? 'text-red-600 hover:text-red-700 hover:bg-red-50' : 'text-violet-600 hover:text-violet-700 hover:bg-violet-50'}`}>
                         <Edit2 size={10} /> Edit
@@ -427,7 +435,7 @@ const BomCard = ({ bom, onEdit, onView, onSubmit, onDelete }) => {
 
 // ─── STATUS GROUP ─────────────────────────────────────────────────────────────
 
-const BomGroup = ({ title, boms, defaultOpen, onEdit, onView, onSubmit, onDelete }) => {
+const BomGroup = ({ title, boms, defaultOpen, onEdit, onView, onSubmit, onDelete, onDuplicate }) => {
     const [open, setOpen] = useState(defaultOpen);
     if (!boms.length) return null;
     return (
@@ -446,7 +454,7 @@ const BomGroup = ({ title, boms, defaultOpen, onEdit, onView, onSubmit, onDelete
                 <div className="p-5 bg-slate-50/50">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {boms.map(b => (
-                            <BomCard key={b.id} bom={b} onEdit={onEdit} onView={onView} onSubmit={onSubmit} onDelete={onDelete} />
+                            <BomCard key={b.id} bom={b} onEdit={onEdit} onView={onView} onSubmit={onSubmit} onDelete={onDelete} onDuplicate={onDuplicate} />
                         ))}
                     </div>
                 </div>
@@ -534,11 +542,14 @@ export default function BomDashboardPage() {
         approved: boms.filter(b => b.status === 'APPROVED').length,
     }), [boms]);
 
-    const handleCreate = () => navigate('/merchandiser/bom/new');
-    const handleEdit   = (bom) => navigate(`/merchandiser/bom/${bom.id}/edit`);
-    const handleView   = (id)  => setViewBomId(id);
-    const handleSubmit = (bom) => setConfirmAction({ type: 'submit', bom });
-    const handleDelete = (bom) => setConfirmAction({ type: 'delete', bom });
+    const handleCreate    = () => navigate('/merchandiser/bom/new');
+    const handleEdit      = (bom) => navigate(`/merchandiser/bom/${bom.id}/edit`);
+    const handleView      = (id)  => setViewBomId(id);
+    const handleSubmit    = (bom) => setConfirmAction({ type: 'submit', bom });
+    const handleDelete    = (bom) => setConfirmAction({ type: 'delete', bom });
+    // Same style, different fabric (or any other variant) — spin up a new DRAFT
+    // pre-filled from this BOM instead of re-entering ratio groups/trims by hand.
+    const handleDuplicate = (bomOrId) => navigate(`/merchandiser/bom/new?duplicateFrom=${bomOrId?.id ?? bomOrId}`);
 
     const runAction = async () => {
         if (!confirmAction) return;
@@ -632,11 +643,11 @@ export default function BomDashboardPage() {
                     </div>
                 ) : (
                     <>
-                        <BomGroup title="Rejected — Needs Revision"  boms={grouped.rejected} defaultOpen  onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} />
-                        <BomGroup title="Draft — Work in Progress"   boms={grouped.draft}    defaultOpen  onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} />
-                        <BomGroup title="Pending Approval"           boms={grouped.pending}  defaultOpen  onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} />
-                        <BomGroup title="Approved"                   boms={grouped.approved} defaultOpen  onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} />
-                        <BomGroup title="Archived"                   boms={grouped.archived} defaultOpen={false} onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} />
+                        <BomGroup title="Rejected — Needs Revision"  boms={grouped.rejected} defaultOpen  onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} onDuplicate={handleDuplicate} />
+                        <BomGroup title="Draft — Work in Progress"   boms={grouped.draft}    defaultOpen  onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} onDuplicate={handleDuplicate} />
+                        <BomGroup title="Pending Approval"           boms={grouped.pending}  defaultOpen  onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} onDuplicate={handleDuplicate} />
+                        <BomGroup title="Approved"                   boms={grouped.approved} defaultOpen  onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} onDuplicate={handleDuplicate} />
+                        <BomGroup title="Archived"                   boms={grouped.archived} defaultOpen={false} onEdit={handleEdit} onView={handleView} onSubmit={handleSubmit} onDelete={handleDelete} onDuplicate={handleDuplicate} />
                     </>
                 )}
             </div>
@@ -646,6 +657,7 @@ export default function BomDashboardPage() {
                     bomId={viewBomId}
                     onClose={() => setViewBomId(null)}
                     onEdit={(id) => { setViewBomId(null); navigate(`/merchandiser/bom/${id}/edit`); }}
+                    onDuplicate={(id) => { setViewBomId(null); handleDuplicate(id); }}
                 />
             )}
             {confirmAction && (

@@ -4226,11 +4226,17 @@ const suggestOptimalRuns = (colorSizes, selectedRgIds, markerMap) => {
 // Two-step flow: Step 1 = select BOM, Step 2 = assign marker per color.
 // On confirm: links the BOM, finalizes quantities, calculates requirements.
 
-const LinkAndAllocateModal = ({ sop, bomOptions, onClose, onDone, onLink, onPreview }) => {
+const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, onLink, onPreview }) => {
     const [step,            setStep]            = useState(1);
     const [pickedBomId,     setPickedBomId]     = useState('');
     const [pickedBomDetail, setPickedBomDetail] = useState(null);
     const [loadingDetail,   setLoadingDetail]   = useState(false);
+    // Only used when the picked BOM has a generic SECONDARY fabric line (e.g. a lining/
+    // contrast fabric that isn't pinned to a specific type on the BOM itself) — the
+    // concrete fabric for that role is chosen here, per order, instead.
+    const [pickedSecondaryFabricTypeId, setPickedSecondaryFabricTypeId] = useState(
+        sop.secondary_fabric_type_id ? String(sop.secondary_fabric_type_id) : ''
+    );
     // { [colorId]: { [rgId]: boolean } } — multiple markers per color
     const [markerChoices,   setMarkerChoices]   = useState({});
     const [submitting,      setSubmitting]      = useState(false);
@@ -4258,6 +4264,12 @@ const LinkAndAllocateModal = ({ sop, bomOptions, onClose, onDone, onLink, onPrev
     const ratioGroups = pickedBomDetail?.ratio_groups
         || bomOptions.find(b => String(b.id) === pickedBomId)?.ratio_groups
         || [];
+
+    // True once the fully-detailed BOM (with fabric_consumptions per ratio group) has
+    // loaded and at least one line is a generic SECONDARY fabric — requires the picker below.
+    const needsSecondaryFabric = !!pickedBomDetail?.ratio_groups?.some(
+        rg => (rg.fabric_consumptions || []).some(fc => fc.fabric_role === 'SECONDARY')
+    );
 
     const markerMap = useMemo(() => {
         const map = {};
@@ -4373,7 +4385,8 @@ const LinkAndAllocateModal = ({ sop, bomOptions, onClose, onDone, onLink, onPrev
             // captured right next to the calculate result (the two must be read together).
             logBomBrief('LINK-CONFIRM', pickedBomDetail);
 
-            const linkRes = await onLink(sop.id, parseInt(pickedBomId), usedRgIds);
+            const linkRes = await onLink(sop.id, parseInt(pickedBomId), usedRgIds,
+                pickedSecondaryFabricTypeId ? parseInt(pickedSecondaryFabricTypeId) : null);
             console.log('[LINK] linkBom done →', linkRes);
 
             const finRes = await planningApi.finalizeQuantities(sop.id, { quantities });
@@ -4502,6 +4515,26 @@ const LinkAndAllocateModal = ({ sop, bomOptions, onClose, onDone, onLink, onPrev
                                         </div>
                                     );
                                 })}
+                            </div>
+                        )}
+
+                        {/* Secondary fabric — only when the picked BOM has a generic SECONDARY line */}
+                        {needsSecondaryFabric && (
+                            <div className="p-3 bg-violet-50 border border-violet-200 rounded-xl">
+                                <p className="text-[10px] font-bold text-violet-700 uppercase tracking-wider mb-1.5">
+                                    Secondary Fabric — required
+                                </p>
+                                <p className="text-[11px] text-violet-600 mb-2">
+                                    This BOM's marker has a generic secondary fabric line (e.g. lining/contrast). Pick the actual fabric this order uses for it.
+                                </p>
+                                <select
+                                    value={pickedSecondaryFabricTypeId}
+                                    onChange={e => setPickedSecondaryFabricTypeId(e.target.value)}
+                                    className="w-full border border-violet-300 rounded-lg px-2.5 py-2 text-xs outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+                                >
+                                    <option value="">— Select secondary fabric —</option>
+                                    {fabricTypes.map(ft => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                                </select>
                             </div>
                         )}
                     </>)}
@@ -4698,7 +4731,7 @@ const LinkAndAllocateModal = ({ sop, bomOptions, onClose, onDone, onLink, onPrev
                             </button>
                             <button
                                 onClick={() => setStep(2)}
-                                disabled={!pickedBomId || loadingDetail}
+                                disabled={!pickedBomId || loadingDetail || (needsSecondaryFabric && !pickedSecondaryFabricTypeId)}
                                 className="flex items-center gap-1.5 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-2.5 rounded-xl transition-colors"
                             >
                                 {loadingDetail ? <Loader2 size={14} className="animate-spin" /> : <ChevronRight size={14} />}
@@ -4729,7 +4762,7 @@ const LinkAndAllocateModal = ({ sop, bomOptions, onClose, onDone, onLink, onPrev
     );
 };
 
-const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isLinking, onReadinessChange, onTAChange }) => {
+const SopCard = ({ sop, salesOrder, bomOptions, fabricTypes, onLink, onUnlink, onPreview, isLinking, onReadinessChange, onTAChange }) => {
     const { user } = useAuth();
     const [showLinkModal,    setShowLinkModal]    = useState(false);
     const [expandedColorId,  setExpandedColorId]  = useState(null);
@@ -5186,6 +5219,7 @@ const SopCard = ({ sop, salesOrder, bomOptions, onLink, onUnlink, onPreview, isL
                 <LinkAndAllocateModal
                     sop={sop}
                     bomOptions={bomOptions}
+                    fabricTypes={fabricTypes}
                     onClose={() => setShowLinkModal(false)}
                     onLink={onLink}
                     onPreview={onPreview}
@@ -5242,6 +5276,9 @@ const ProductionPlanningPage = () => {
     const [searchQ,           setSearchQ]           = useState('');
     const [previewBomId,      setPreviewBomId]      = useState(null);
     const [sidebarOpen,       setSidebarOpen]       = useState(true);
+    // For the Secondary Fabric picker in LinkAndAllocateModal — only needed when a BOM has
+    // a generic SECONDARY fabric line, but cheap enough to load once up front.
+    const [fabricTypes,       setFabricTypes]       = useState([]);
 
     // Load sales orders + approved BOMs on mount
     useEffect(() => {
@@ -5253,6 +5290,9 @@ const ProductionPlanningPage = () => {
             })
             .catch(e  => setFormErr(e?.response?.data?.error || 'Failed to load planning data'))
             .finally(() => setLoadingForm(false));
+        planningApi.getFabricTypes()
+            .then(res => setFabricTypes(res.data?.data ?? res.data ?? []))
+            .catch(e  => console.error('Failed to load fabric types', e));
     }, []);
 
     const refreshOrder = useCallback(async (orderId) => {
@@ -5282,14 +5322,15 @@ const ProductionPlanningPage = () => {
 
     
 
-    const handleLink = useCallback(async (sopId, bomId, ratioGroupIds) => {
+    const handleLink = useCallback(async (sopId, bomId, ratioGroupIds, secondaryFabricTypeId = null) => {
         setLinking(l => ({ ...l, [sopId]: true }));
         try {
             console.log(`[LINK] POST /planning/sales-order-products/${sopId}/link-bom — payload:`,
-                { bom_id: bomId, ratio_group_ids: ratioGroupIds });
+                { bom_id: bomId, ratio_group_ids: ratioGroupIds, secondary_fabric_type_id: secondaryFabricTypeId });
             const res = await planningApi.linkBom(sopId, {
                 bom_id: bomId,
                 ratio_group_ids: ratioGroupIds,
+                secondary_fabric_type_id: secondaryFabricTypeId,
             });
             console.log('[LINK] link-bom response →', res?.data);
             await refreshOrder(selectedOrderId);
@@ -5512,6 +5553,7 @@ const ProductionPlanningPage = () => {
                                                 sop={sop}
                                                 salesOrder={orderDetail}
                                                 bomOptions={bomsByProduct[String(sop.product_id)] || bomsByProduct[sop.product_id] || []}
+                                                fabricTypes={fabricTypes}
                                                 onLink={handleLink}
                                                 onUnlink={handleUnlink}
                                                 onPreview={setPreviewBomId}

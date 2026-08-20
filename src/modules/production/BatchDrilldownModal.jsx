@@ -314,6 +314,50 @@ const CycleStagesTab = ({ stages, partsPerGarment = 1, primaryPartsPerGarment = 
 
 // ─── TAB: ROLLS ───────────────────────────────────────────────────────────────
 
+const RollsSummary = ({ rolls }) => {
+    const stats = rolls.reduce((acc, r) => {
+        acc.meters   += parseFloat(r.meters ?? r.meter ?? 0) || 0;
+        acc.lays     += Number(r.lays ?? 0) || 0;
+        acc.endBits  += parseFloat(r.end_bits ?? 0) || 0;
+        acc.pieces   += Number(r.primary_pieces_cut ?? 0) || 0;
+        if (r.shortage) {
+            acc.shortageCount += 1;
+            acc.shortageMeters += parseFloat(r.shortage.meter ?? 0) || 0;
+        }
+        return acc;
+    }, { meters: 0, lays: 0, endBits: 0, pieces: 0, shortageCount: 0, shortageMeters: 0 });
+
+    const tiles = [
+        { label: 'Rolls',              value: rolls.length },
+        { label: 'Total Meters',       value: `${stats.meters.toLocaleString(undefined, { maximumFractionDigits: 2 })}m` },
+        { label: 'Total Lays',         value: stats.lays.toLocaleString() },
+        { label: 'End Bits',           value: `${stats.endBits.toLocaleString(undefined, { maximumFractionDigits: 2 })}m` },
+        { label: 'Primary Pieces Cut', value: stats.pieces.toLocaleString() },
+    ];
+
+    return (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                {tiles.map(({ label, value }) => (
+                    <div key={label}>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{label}</p>
+                        <p className="text-base font-black text-slate-800 leading-tight">{value}</p>
+                    </div>
+                ))}
+                {stats.shortageCount > 0 && (
+                    <div>
+                        <p className="text-[9px] font-bold text-red-400 uppercase tracking-wider">Shortages</p>
+                        <p className="text-base font-black text-red-600 leading-tight flex items-center gap-1">
+                            <AlertTriangle size={13} />
+                            {stats.shortageCount} roll{stats.shortageCount !== 1 ? 's' : ''} · {stats.shortageMeters.toLocaleString(undefined, { maximumFractionDigits: 2 })}m
+                        </p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
 const RollsTab = ({ rolls }) => {
     const [open, setOpen] = useState(new Set());
     const toggle = (id) => setOpen(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
@@ -322,6 +366,7 @@ const RollsTab = ({ rolls }) => {
 
     return (
         <div className="space-y-2">
+            <RollsSummary rolls={rolls} />
             {rolls.map((roll) => {
                 const rollId  = roll.roll_id ?? roll.id;
                 const isOpen  = open.has(rollId);
@@ -338,16 +383,16 @@ const RollsTab = ({ rolls }) => {
                                     Roll #{roll.roll_code ?? rollId}
                                 </span>
                                 <span className="text-[10px] text-slate-500">
-                                    {roll.fabric_type} · {roll.fabric_color}
+                                    {roll.fabric_type} · {roll.color ?? roll.fabric_color}
                                 </span>
-                                {shortage?.has_shortage && (
+                                {shortage && (
                                     <span className="flex items-center gap-0.5 text-[9px] font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
                                         <AlertTriangle size={9} /> Shortage
                                     </span>
                                 )}
                             </div>
                             <div className="flex items-center gap-3">
-                                <span className="text-[10px] text-slate-400">{roll.meters ?? roll.meter ?? '—'}m · {roll.lays_count ?? 0} lays</span>
+                                <span className="text-[10px] text-slate-400">{roll.meters ?? roll.meter ?? '—'}m · {roll.lays ?? 0} lays</span>
                                 {isOpen ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
                             </div>
                         </button>
@@ -355,12 +400,12 @@ const RollsTab = ({ rolls }) => {
                             <div className="px-4 py-3 bg-white grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                                 {[
                                     { label: 'Meters',       value: `${roll.meters ?? roll.meter ?? '—'}m` },
-                                    { label: 'Lays',         value: roll.lays_count ?? '—' },
+                                    { label: 'Lays',         value: roll.lays ?? '—' },
                                     { label: 'End Bits',     value: roll.end_bits   ?? '—' },
-                                    { label: 'Cut Pieces',   value: roll.cut_pieces_count ?? '—' },
+                                    { label: 'Primary Pieces Cut', value: roll.primary_pieces_cut ?? '—' },
                                     { label: 'Fabric Type',  value: roll.fabric_type  ?? '—' },
-                                    { label: 'Fabric Color', value: roll.fabric_color ?? '—' },
-                                    shortage?.has_shortage && { label: 'Shortage', value: `${shortage.shortage_meters}m` },
+                                    { label: 'Fabric Color', value: roll.color ?? roll.fabric_color ?? '—' },
+                                    shortage && { label: 'Shortage', value: `${shortage.meter}m (${shortage.status})` },
                                 ].filter(Boolean).map(({ label, value }) => (
                                     <div key={label}>
                                         <p className="text-[10px] font-bold text-slate-400 uppercase">{label}</p>
@@ -379,6 +424,10 @@ const RollsTab = ({ rolls }) => {
 // ─── TAB: CUT PIECES ──────────────────────────────────────────────────────────
 
 const LIFECYCLE_COLS = ['total_cut', 'at_cut', 'numbered', 'prepared', 'sewn', 'assembled', 'finished', 'packed', 'shipped'];
+// 'packed' is sourced from garment_production_completion (the true end-of-line
+// marker — no per-garment "PACKED" status is ever written), so it's labeled
+// for what it actually is: full completion, not a literal packing scan.
+const LIFECYCLE_LABELS = { packed: 'completed' };
 
 const CutPiecesTab = ({ summary }) => {
     const allRollIds = (summary || []).map(r => r.roll_id);
@@ -471,7 +520,7 @@ const CutPiecesTab = ({ summary }) => {
                                     <th className="text-left py-2 px-3 font-bold sticky left-0 bg-slate-50 z-10">Size</th>
                                     {LIFECYCLE_COLS.map(col => (
                                         <th key={col} className="text-center py-2 px-2 font-bold uppercase whitespace-nowrap">
-                                            {col.replace(/_/g, ' ')}
+                                            {(LIFECYCLE_LABELS[col] || col).replace(/_/g, ' ')}
                                         </th>
                                     ))}
                                 </tr>
@@ -548,7 +597,7 @@ const CutPiecesTab = ({ summary }) => {
                                             <tr className="text-slate-400 border-b border-slate-100">
                                                 <th className="text-left py-1 pr-3 font-bold">Size</th>
                                                 {LIFECYCLE_COLS.map(c => (
-                                                    <th key={c} className="text-center py-1 px-2 font-bold uppercase">{c.replace(/_/g, ' ')}</th>
+                                                    <th key={c} className="text-center py-1 px-2 font-bold uppercase">{(LIFECYCLE_LABELS[c] || c).replace(/_/g, ' ')}</th>
                                                 ))}
                                             </tr>
                                         </thead>

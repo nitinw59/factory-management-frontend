@@ -1,15 +1,18 @@
 // src/modules/production/ProductionWorkflowDashboard.jsx
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
-    Search, Plus, Box, FileText, ShoppingCart,
+    Search, Plus, FileText, ShoppingCart,
     Scissors, ChevronDown, Loader2, X,
     ChevronUp, DollarSign, Palette,
     Package, Truck, Layers, Trash2, Printer, Warehouse,
-    Edit2, AlertTriangle,
+    Edit2, AlertTriangle, Paperclip, ExternalLink, AlertCircle,
+    Pencil, Download,
 } from 'lucide-react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { accountingApi } from '../../api/accountingApi';
 import { storeManagerApi } from '../../api/storeManagerApi';
+import { adminApi } from '../../api/adminApi';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import jsPDF from 'jspdf';
@@ -18,6 +21,7 @@ import FabricIntakeForm from '../accounts/purchase/FabricIntakeForm';
 import BatchDrilldownModal from './BatchDrilldownModal';
 import BatchDispatchModal from '../depatch_portal/BatchDispatchModal';
 import EndBitBatchModal from '../initialisation_portal/EndBitBatchModal';
+import { generateSalesOrderPdf } from '../accounts/sales/salesOrderPdfGenerator';
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
 
@@ -153,8 +157,8 @@ const SalesOrderNode = ({ data, x, y, poCount, sopCount, batchCount, onAddPO, on
     <div
         role={onShowDetails ? 'button' : undefined}
         tabIndex={onShowDetails ? 0 : undefined}
-        onClick={onShowDetails ? () => onShowDetails(data.sales_order_id) : undefined}
-        onKeyDown={onShowDetails ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onShowDetails(data.sales_order_id); } } : undefined}
+        onClick={onShowDetails ? () => onShowDetails(data) : undefined}
+        onKeyDown={onShowDetails ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onShowDetails(data); } } : undefined}
         title={onShowDetails ? 'Click for sales order details' : undefined}
         className={`absolute bg-white rounded-lg shadow-sm border border-l-4 border-l-blue-500 border-slate-200 p-2.5 flex flex-col ${onShowDetails ? 'cursor-pointer hover:shadow-md hover:border-blue-300 hover:bg-blue-50/30 transition-all' : ''}`}
         style={{ width: NODE_W_SO, height: NODE_H_SO, left: x, top: y }}
@@ -710,6 +714,13 @@ const SalesOrderTableRow = ({ so, onSODetails, onSopDetails, onStageClick, onAdd
     const stagesDone  = allBatches.reduce((s, b) => s + (b.stage_progress?.completed || 0), 0);
     const stagesTotal = allBatches.reduce((s, b) => s + (b.stage_progress?.total     || 0), 0);
 
+    const sops         = sopsOf(so);
+    const productNames = sops.map(p => p.product_name).filter(Boolean);
+    const fabricTypes  = [...new Set(sops.map(p => p.fabric_type).filter(Boolean))];
+    const totalQty     = sops.reduce((s, p) => s + Number(
+        p.total_quantity ?? (p.colors || []).reduce((cs, c) => cs + Number(c.quantity || c.total_quantity || 0), 0)
+    ), 0);
+
     return (
         <React.Fragment>
             <tr
@@ -729,6 +740,28 @@ const SalesOrderTableRow = ({ so, onSODetails, onSopDetails, onStageClick, onAdd
                 <td className="px-6 py-4 text-sm text-slate-700 font-medium">
                     {so.customer_name || <span className="text-slate-400 italic">—</span>}
                 </td>
+                <td className="px-6 py-4 text-xs text-slate-600 max-w-[220px]">
+                    {productNames.length === 0 ? (
+                        <span className="text-slate-400 italic">—</span>
+                    ) : (
+                        <>
+                            <div className="font-semibold text-slate-700 truncate" title={productNames.join(', ')}>
+                                {productNames[0]}
+                                {productNames.length > 1 && (
+                                    <span className="text-slate-400 font-normal"> +{productNames.length - 1} more</span>
+                                )}
+                            </div>
+                            {fabricTypes.length > 0 && (
+                                <div className="text-slate-400 truncate mt-0.5" title={fabricTypes.join(', ')}>
+                                    {fabricTypes.join(', ')}
+                                </div>
+                            )}
+                        </>
+                    )}
+                </td>
+                <td className="px-6 py-4 text-xs text-slate-700 font-semibold text-right">
+                    {totalQty > 0 ? `${totalQty.toLocaleString()} pcs` : <span className="text-slate-400 italic font-normal">—</span>}
+                </td>
                 <td className="px-6 py-4"><StatusBadge status={so.so_status} /></td>
                 <td className="px-6 py-4 text-xs text-slate-500">
                     <div className="flex gap-3 items-center flex-wrap">
@@ -742,7 +775,7 @@ const SalesOrderTableRow = ({ so, onSODetails, onSopDetails, onStageClick, onAdd
                 <td className="px-6 py-4 text-right">
                     {so.sales_order_id && (
                         <button
-                            onClick={(e) => { e.stopPropagation(); onSODetails(so.sales_order_id); }}
+                            onClick={(e) => { e.stopPropagation(); onSODetails(so); }}
                             className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-md transition-colors"
                             title="View Sales Order Details"
                         >
@@ -753,7 +786,7 @@ const SalesOrderTableRow = ({ so, onSODetails, onSopDetails, onStageClick, onAdd
             </tr>
             {expanded && (
                 <tr>
-                    <td colSpan="6" className="p-4 bg-slate-50 border-b border-slate-200">
+                    <td colSpan="8" className="p-4 bg-slate-50 border-b border-slate-200">
                         <div className="overflow-x-auto">
                             <WorkflowGraph
                                 so={so}
@@ -781,129 +814,291 @@ const SalesOrderTableRow = ({ so, onSODetails, onSopDetails, onStageClick, onAdd
 };
 
 // ─── SALES ORDER DETAILS MODAL ────────────────────────────────────────────────
+// Mirrors the accounting portal's Sales Order detail view (see
+// src/modules/accounts/sales/SalesOrderListPage.jsx → SalesOrderDetailModal):
+// per-color, per-size quantity breakdown (never merged across colors) plus a
+// PDF download of the same document.
 
-const SalesOrderDetailsModal = ({ orderId, onClose }) => {
-    const [order, setOrder]     = useState(null);
-    const [loading, setLoading] = useState(true);
+const SalesOrderDetailsModal = ({ so, onClose, onViewPO }) => {
+    const navigate  = useNavigate();
+    const soId      = so.sales_order_id;
+    const soStatus  = so.so_status || so.status;
+
+    const [details, setDetails]             = useState(null);
+    const [sizeMap, setSizeMap]             = useState({});
+    const [loading, setLoading]             = useState(true);
+    const [error, setError]                 = useState(null);
+    const [downloading, setDownloading]     = useState(false);
+    const [downloadError, setDownloadError] = useState(null);
 
     useEffect(() => {
-        accountingApi.getSalesOrderDetails(orderId)
-            .then(res => setOrder(res.data))
-            .catch(console.error)
+        Promise.all([
+            accountingApi.getSalesOrderDetails(soId),
+            accountingApi.getSizes(),
+        ])
+            .then(([detailsRes, sizesRes]) => {
+                setDetails(detailsRes.data);
+                const sizes = sizesRes.data?.data ?? sizesRes.data ?? [];
+                setSizeMap(Object.fromEntries(sizes.map(s => [String(s.id), s.name])));
+            })
+            .catch(() => setError('Failed to load order details.'))
             .finally(() => setLoading(false));
-    }, [orderId]);
+    }, [soId]);
 
-    if (loading) return <Modal title="Loading…" onClose={onClose}><Spinner /></Modal>;
-    if (!order)  return null;
+    // Flattened across SO-level legacy POs and SOP-nested POs (allPosOf), so the
+    // list here matches what the workflow graph/table already show for this SO.
+    const purchaseOrders = allPosOf(so);
 
-    return (
-        <Modal title={`Sales Order: ${order.order_number}`} onClose={onClose} size="max-w-4xl">
-            <div className="space-y-6">
-                <div className="bg-blue-50/50 p-5 rounded-xl border border-blue-100 grid grid-cols-2 md:grid-cols-4 gap-6 text-sm">
-                    <div>
-                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Customer</span>
-                        <p className="font-semibold text-gray-800 text-base">{order.customer_name}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">{order.customer_email || 'No email'}</p>
+    const handleDownload = async () => {
+        if (!details) return;
+        setDownloading(true);
+        setDownloadError(null);
+        try {
+            let company = null;
+            try {
+                const cr = await adminApi.getCompanyProfile();
+                company = cr.data ?? null;
+            } catch { company = null; }
+
+            const pdfBlob = await generateSalesOrderPdf({
+                so: { ...so, purchase_orders: purchaseOrders },
+                details,
+                sizeMap,
+                company,
+            });
+
+            const datestamp = new Date().toISOString().slice(0, 10);
+            const safeNumber = (so.order_number || `SO-${soId}`).replace(/[^A-Za-z0-9._-]/g, '_');
+            const filename = `${safeNumber}-${datestamp}.pdf`;
+
+            const url = URL.createObjectURL(pdfBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch {
+            setDownloadError('Failed to generate PDF.');
+        } finally {
+            setDownloading(false);
+        }
+    };
+
+    return createPortal(
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0 bg-white">
+                    <div className="flex items-center gap-3">
+                        <FileText className="w-5 h-5 text-indigo-500 shrink-0" />
+                        <h2 className="text-lg font-bold text-slate-900 tracking-tight">{so.order_number}</h2>
+                        <StatusBadge status={soStatus} />
                     </div>
-                    <div>
-                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Order Refs</span>
-                        <p className="text-gray-700 flex items-center">
-                            <span className="text-gray-400 text-xs mr-2">Buyer PO:</span>
-                            <span className="font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">{order.buyer_po_number || 'N/A'}</span>
-                        </p>
-                        <p className="text-gray-700 mt-1.5 flex items-center gap-2">
-                            <span className="text-gray-400 text-xs">Status:</span>
-                            <StatusBadge status={order.status} />
-                        </p>
-                    </div>
-                    <div>
-                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Key Dates</span>
-                        <p className="text-gray-700"><span className="text-gray-400 text-xs mr-1">Ordered:</span>{order.order_date ? new Date(order.order_date).toLocaleDateString() : 'N/A'}</p>
-                        <p className="text-gray-700 mt-1"><span className="text-gray-400 text-xs mr-1">Delivery:</span>{order.delivery_date ? new Date(order.delivery_date).toLocaleDateString() : 'TBD'}</p>
-                    </div>
-                    <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-100 text-center flex flex-col justify-center">
-                        <span className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Total Amount</span>
-                        <p className="font-extrabold text-emerald-600 text-xl flex items-center justify-center">
-                            <DollarSign size={20} className="mr-0.5" />{order.total_amount || '0.00'}
-                        </p>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={handleDownload}
+                            disabled={!details || downloading}
+                            title="Download a detailed PDF of this sales order"
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-slate-600 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download
+                        </button>
+                        <button
+                            onClick={() => navigate(`/accounts/sales/${soId}/edit`)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-indigo-600 hover:bg-indigo-50 border border-indigo-100 rounded-lg transition-colors"
+                        >
+                            <Pencil size={13} /> Edit
+                        </button>
+                        <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-full transition-colors">
+                            <X size={18} className="text-slate-500" />
+                        </button>
                     </div>
                 </div>
 
-                {order.notes && (
-                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                        <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Notes</span>
-                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{order.notes}</p>
+                {downloadError && (
+                    <div className="flex items-center gap-2 bg-red-50 text-red-700 px-4 py-2 text-xs font-medium border-b border-red-100 shrink-0">
+                        <AlertCircle size={13} className="shrink-0" /> {downloadError}
                     </div>
                 )}
 
-                <div>
-                    <h3 className="text-base font-bold text-gray-800 mb-3 flex items-center">
-                        <Box size={18} className="mr-2 text-indigo-500" /> Order Items
-                    </h3>
-                    <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-gray-100 text-gray-600 border-b border-gray-200">
-                                <tr>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Product</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Fabric</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Sizes</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider">Colors & Qty</th>
-                                    <th className="px-4 py-3 font-semibold uppercase text-xs tracking-wider text-right w-20">Total</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100 bg-white">
-                                {(order.products || []).map((prod, idx) => {
-                                    const total = prod.colors?.reduce((s, c) => s + Number(c.quantity || 0), 0) || 0;
-                                    // Aggregate per-size quantities across all colors for this product
-                                    const aggSizes = {};
-                                    (prod.colors || []).forEach(c => {
-                                        (c.sizes || []).forEach(sz => {
-                                            aggSizes[sz.size_name] = (aggSizes[sz.size_name] || 0) + (Number(sz.quantity) || 0);
-                                        });
-                                    });
-                                    const sizeEntries = Object.entries(aggSizes);
-                                    return (
-                                        <tr key={idx} className="align-top hover:bg-gray-50/50">
-                                            <td className="px-4 py-4 font-bold text-gray-900">{prod.product_name}</td>
-                                            <td className="px-4 py-4 text-gray-600">{prod.fabric_type || '—'}</td>
-                                            <td className="px-4 py-4">
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {sizeEntries.length > 0 ? sizeEntries.map(([name, qty]) => (
-                                                        <span key={name} className="flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-md min-w-[2.5rem] overflow-hidden">
-                                                            <span className="w-full text-center bg-indigo-100 text-indigo-800 text-[9px] font-bold uppercase py-0.5">{name}</span>
-                                                            <span className="text-indigo-900 font-extrabold text-xs py-1">{qty}</span>
-                                                        </span>
-                                                    )) : (
-                                                        <span className="text-xs text-gray-400 italic">—</span>
-                                                    )}
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+                    {loading && (
+                        <div className="flex justify-center py-16">
+                            <Loader2 className="w-7 h-7 animate-spin text-indigo-400" />
+                        </div>
+                    )}
+
+                    {error && (
+                        <div className="flex items-center gap-2 bg-red-50 text-red-700 px-4 py-3 rounded-xl border border-red-200">
+                            <AlertCircle size={15} className="shrink-0" /> <span className="text-sm">{error}</span>
+                        </div>
+                    )}
+
+                    {details && (
+                        <>
+                            {/* Order header info */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                {[
+                                    { label: 'Customer',   value: details.customer_name    || so.customer_name },
+                                    { label: 'Buyer PO',   value: details.buyer_po_number   || so.buyer_po_number || '—' },
+                                    { label: 'Order Date', value: fmtDate(details.order_date   || so.order_date) },
+                                    { label: 'Delivery',   value: fmtDate(details.delivery_date || so.delivery_date) },
+                                ].map(({ label, value }) => (
+                                    <div key={label} className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</p>
+                                        <p className="text-sm font-semibold text-slate-800 mt-1 truncate">{value}</p>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {details.notes && (
+                                <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
+                                    <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wider mb-1">Notes</p>
+                                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{details.notes}</p>
+                                </div>
+                            )}
+
+                            {/* Product lines — per-color, per-size breakdown (never merged) */}
+                            <div>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+                                    Product Lines · {details.products?.length ?? 0}
+                                </p>
+                                <div className="space-y-3">
+                                    {(details.products || []).map((prod, pIdx) => {
+                                        const colors = prod.colors || [];
+                                        const prodTotal = colors.reduce((sum, c) => {
+                                            const fromSizes = (c.sizes || []).reduce((s, sz) => s + (Number(sz.quantity) || 0), 0);
+                                            return sum + (fromSizes || Number(c.quantity) || 0);
+                                        }, 0);
+
+                                        return (
+                                            <div key={pIdx} className="border border-slate-200 rounded-xl overflow-hidden">
+                                                <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-100">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-bold text-slate-800">{prod.product_name}</span>
+                                                        <span className="text-slate-300">·</span>
+                                                        <span className="text-sm text-slate-500">{prod.fabric_type}</span>
+                                                    </div>
+                                                    <span className="text-sm font-bold text-slate-600 tabular-nums">
+                                                        {prodTotal.toLocaleString()} pcs
+                                                    </span>
                                                 </div>
-                                            </td>
-                                            <td className="px-4 py-4">
-                                                <div className="flex flex-col gap-2">
-                                                    {prod.colors?.map((c, ci) => (
-                                                        <div key={ci} className="flex justify-between items-center bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm">
-                                                            <span className="text-gray-700 font-medium flex items-center text-xs">
-                                                                <Palette size={12} className="text-gray-400 mr-1.5" />
-                                                                {c.color_name} <span className="text-gray-400 ml-1">({c.color_number})</span>
-                                                            </span>
-                                                            <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs">{Number(c.quantity || 0).toLocaleString()} pcs</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-4 text-right font-extrabold text-gray-800 text-lg">{total.toLocaleString()}</td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+
+                                                {colors.length === 0 ? (
+                                                    <p className="px-4 py-3 text-sm text-slate-400 italic">No colors defined</p>
+                                                ) : (
+                                                    <div className="divide-y divide-slate-100">
+                                                        {colors.map((color, cIdx) => {
+                                                            const sizes   = color.sizes || [];
+                                                            const cTotal  = sizes.length > 0
+                                                                ? sizes.reduce((s, sz) => s + (Number(sz.quantity) || 0), 0)
+                                                                : Number(color.quantity) || 0;
+                                                            const price   = parseFloat(color.unit_price) || 0;
+                                                            const lineVal = cTotal * price;
+
+                                                            return (
+                                                                <div key={cIdx} className="px-4 py-3 flex flex-wrap items-center gap-4">
+                                                                    <div className="w-28 shrink-0">
+                                                                        <p className="text-sm font-semibold text-slate-700">{color.color_name}</p>
+                                                                        <p className="text-[11px] text-slate-400 font-mono">{color.color_number}</p>
+                                                                    </div>
+
+                                                                    <div className="flex flex-wrap gap-1.5 flex-1">
+                                                                        {sizes.length > 0 ? sizes.map(sz => (
+                                                                            <div key={sz.size_id} className="flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1 min-w-[2.75rem]">
+                                                                                <span className="text-[9px] font-bold text-indigo-400 uppercase leading-none">{sizeMap[String(sz.size_id)] || sz.size_name || `#${sz.size_id}`}</span>
+                                                                                <span className="text-sm font-bold text-indigo-800 leading-tight mt-0.5">{sz.quantity}</span>
+                                                                            </div>
+                                                                        )) : (
+                                                                            <span className="text-xs text-slate-400 italic self-center">No size breakdown</span>
+                                                                        )}
+                                                                    </div>
+
+                                                                    <div className="text-right shrink-0 ml-auto min-w-[6rem]">
+                                                                        <p className="text-sm font-bold text-slate-800 tabular-nums">{cTotal.toLocaleString()} pcs</p>
+                                                                        {price > 0 && (
+                                                                            <p className="text-[11px] text-slate-400 tabular-nums">₹{price}/pc · ₹{lineVal.toLocaleString('en-IN', { minimumFractionDigits: 0 })}</p>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Attachments */}
+                            <div>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                                    <Paperclip size={12} /> Documents & Attachments
+                                </p>
+                                {(details.attachments || []).length > 0 ? (
+                                    <div className="space-y-2">
+                                        {details.attachments.map(att => (
+                                            <a
+                                                key={att.id}
+                                                href={att.file_url || att.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex items-center gap-3 px-4 py-3 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-xl transition-colors group"
+                                            >
+                                                <FileText className="w-4 h-4 text-slate-400 group-hover:text-blue-500 shrink-0" />
+                                                <span className="text-sm text-slate-700 group-hover:text-blue-700 flex-1 truncate">
+                                                    {att.original_filename || att.filename || att.name || 'File'}
+                                                </span>
+                                                <ExternalLink size={13} className="text-slate-300 group-hover:text-blue-400 shrink-0" />
+                                            </a>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="px-4 py-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl text-sm text-slate-400 text-center">
+                                        No documents attached
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    )}
+
+                    {/* Linked Purchase Orders — includes SOP-nested POs, unlike the accounting portal's SO-level-only list */}
+                    <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                            <Truck size={12} /> Linked Purchase Orders
+                        </p>
+                        {purchaseOrders.length > 0 ? (
+                            <div className="space-y-2">
+                                {purchaseOrders.map(po => (
+                                    <button
+                                        key={po.po_id}
+                                        type="button"
+                                        onClick={() => { onViewPO && onViewPO(po.po_id); onClose(); }}
+                                        className="w-full text-left flex flex-wrap items-center justify-between gap-3 px-4 py-3 border border-slate-200 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-colors"
+                                    >
+                                        <div>
+                                            <p className="text-sm font-bold text-slate-700">{po.po_code}</p>
+                                            <p className="text-[11px] text-slate-500 mt-0.5">{po.supplier_name}</p>
+                                        </div>
+                                        <StatusBadge status={po.po_status} />
+                                    </button>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="px-4 py-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl text-sm text-slate-400 text-center">
+                                No purchase orders linked to this sales order
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
-            <div className="flex justify-end pt-5 border-t border-gray-100 mt-6">
-                <button onClick={onClose} className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-bold">Close</button>
-            </div>
-        </Modal>
+        </div>,
+        document.body
     );
 };
 
@@ -1184,11 +1379,11 @@ const SopDetailsModal = ({ sop, onClose, onViewPO, onViewBatch }) => {
                                 >
                                     <div className="flex items-center justify-between gap-2">
                                         <span className="font-bold text-slate-700 text-sm truncate">Batch #{b.batch_id}</span>
-                                        <StatusBadge status={b.batch_status} />
+                                        <StatusBadge status={b.overall_status} />
                                     </div>
                                     <p className="text-xs text-slate-500 mt-1 truncate">
                                         {b.batch_code || '—'}
-                                        {b.total_quantity != null && <span className="ml-1.5 text-slate-400">· {Number(b.total_quantity).toLocaleString()} pcs</span>}
+                                        {b.total_primary_pieces != null && <span className="ml-1.5 text-slate-400">· {Number(b.total_primary_pieces).toLocaleString()} pcs</span>}
                                     </p>
                                 </button>
                             ))}
@@ -1236,7 +1431,7 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
         autoTable(doc, {
             startY: 90,
             head: [['Fabric Type', 'Color', 'Qty', 'UOM', 'Unit Price', 'Total']],
-            body: (po.items || []).map(i => [i.fabric_type, `${i.fabric_color} (${i.color_number || ''})`, i.quantity, i.uom, `₹${i.unit_price}`, `₹${i.total_price}`]),
+            body: (po.items || []).map(i => [i.fabric_type, `${i.fabric_color} (${i.fabric_color_number || ''})`, i.quantity, i.uom, `₹${i.unit_price}`, `₹${i.total_price}`]),
             theme: 'grid',
             headStyles: { fillColor: [40, 40, 40], textColor: [255, 255, 255] },
             styles: { fontSize: 9, cellPadding: 3 },
@@ -1254,7 +1449,7 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
                         <div>
                             <p className="text-xs text-amber-700 font-bold uppercase tracking-wider mb-1">Supplier</p>
                             <p className="font-extrabold text-gray-900 text-lg">{po.supplier_name}</p>
-                            <p className="text-sm text-gray-600">{po.supplier_email || '—'} • {po.supplier_phone || '—'}</p>
+                            <p className="text-sm text-gray-600">{po.supplier_phone || '—'}</p>
                         </div>
                     </div>
                     <div className="bg-white p-4 rounded-lg border border-amber-100 flex flex-col justify-center gap-2">
@@ -1283,7 +1478,7 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
                                 {(po.items || []).map((item, idx) => (
                                     <tr key={idx} className="hover:bg-gray-50/50">
                                         <td className="px-4 py-3 font-bold text-gray-800">{item.fabric_type}</td>
-                                        <td className="px-4 py-3 text-gray-600 text-xs">{item.fabric_color} ({item.color_number})</td>
+                                        <td className="px-4 py-3 text-gray-600 text-xs">{item.fabric_color} ({item.fabric_color_number})</td>
                                         <td className="px-4 py-3 text-right font-extrabold text-blue-700">{item.quantity} <span className="text-xs text-gray-400">{item.uom}</span></td>
                                         <td className="px-4 py-3 text-right text-gray-600">₹{item.unit_price}</td>
                                         <td className="px-4 py-3 text-right font-bold text-emerald-700">₹{item.total_price}</td>
@@ -1471,7 +1666,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
                                 <div><span className="block text-xs font-bold text-gray-400 uppercase mb-1">Customer</span><p className="font-semibold">{soDetails.customer_name}</p></div>
                                 <div><span className="block text-xs font-bold text-gray-400 uppercase mb-1">Buyer PO</span><p className="font-bold text-indigo-700">{soDetails.buyer_po_number || 'N/A'}</p></div>
                                 <div><span className="block text-xs font-bold text-gray-400 uppercase mb-1">Date</span><p>{new Date(soDetails.order_date).toLocaleDateString()}</p></div>
-                                <div><span className="block text-xs font-bold text-gray-400 uppercase mb-1">Total Pcs</span><p className="font-bold text-emerald-700">{soDetails.total_quantity || 0}</p></div>
+                                <div><span className="block text-xs font-bold text-gray-400 uppercase mb-1">Total Pcs</span><p className="font-bold text-emerald-700">{(soDetails.products || []).reduce((s, p) => s + (p.colors || []).reduce((cs, c) => cs + Number(c.quantity || 0), 0), 0)}</p></div>
                             </div>
                             {soDetails.products?.map((prod, idx) => (
                                 <div key={idx} className="border border-gray-200 rounded-lg overflow-hidden">
@@ -2213,7 +2408,7 @@ const GlobalSearch = ({ data, onDispatch, onBatchDrilldown, onSOClick, onPOClick
                                         <div className="pb-2">
                                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1.5">Sales Orders</p>
                                             {results.sos.map(so => (
-                                                <button key={so.sales_order_id} onClick={() => { onSOClick && onSOClick(so.sales_order_id); close(); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-left">
+                                                <button key={so.sales_order_id} onClick={() => { onSOClick && onSOClick(so); close(); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-left">
                                                     <FileText size={13} className="text-blue-500 shrink-0" />
                                                     <div className="flex-1 min-w-0">
                                                         <p className="font-mono font-bold text-slate-800 text-sm">{so.order_number}</p>
@@ -2300,7 +2495,7 @@ const ProductionWorkflowDashboard = () => {
     const [loading, setLoading]                 = useState(true);
     const [filterStatus, setFilterStatus]       = useState('ALL');
     const [topBarOpen, setTopBarOpen]           = useState(false);
-    const [selectedSOId, setSelectedSOId]       = useState(null);
+    const [selectedSO, setSelectedSO]           = useState(null);
     const [selectedPOId, setSelectedPOId]       = useState(null);
     const [poModalSOId, setPoModalSOId]         = useState(null);
     const [drilldownTarget, setDrilldownTarget] = useState(null);
@@ -2407,7 +2602,7 @@ const ProductionWorkflowDashboard = () => {
                             data={data}
                             onDispatch={handleDispatch}
                             onBatchDrilldown={handleBatchDrilldown}
-                            onSOClick={setSelectedSOId}
+                            onSOClick={setSelectedSO}
                             onPOClick={setSelectedPOId}
                         />
 
@@ -2460,6 +2655,8 @@ const ProductionWorkflowDashboard = () => {
                                     <th className="px-6 py-4 w-12"></th>
                                     <th className="px-6 py-4">Sales Order</th>
                                     <th className="px-6 py-4">Customer</th>
+                                    <th className="px-6 py-4">Product / Fabric</th>
+                                    <th className="px-6 py-4 text-right">Total Qty</th>
                                     <th className="px-6 py-4">Status</th>
                                     <th className="px-6 py-4">Metrics</th>
                                     <th className="px-6 py-4 text-right">Details</th>
@@ -2470,7 +2667,7 @@ const ProductionWorkflowDashboard = () => {
                                     <SalesOrderTableRow
                                         key={so.sales_order_id ?? `unlinked-${idx}`}
                                         so={so}
-                                        onSODetails={setSelectedSOId}
+                                        onSODetails={setSelectedSO}
                                         onStageClick={handleStageClick}
                                         onAddPO={canManage ? handleAddPO : null}
                                         onAddSopPO={canManage ? (sop) => console.log('Add PO for SOP:', sop) : null}
@@ -2487,7 +2684,7 @@ const ProductionWorkflowDashboard = () => {
                                     />
                                 )) : (
                                     <tr>
-                                        <td colSpan="6" className="px-6 py-16 text-center text-slate-400 italic">
+                                        <td colSpan="8" className="px-6 py-16 text-center text-slate-400 italic">
                                             No orders found.
                                         </td>
                                     </tr>
@@ -2498,7 +2695,8 @@ const ProductionWorkflowDashboard = () => {
                 )}
             </div>
 
-            {selectedSOId    && <SalesOrderDetailsModal   orderId={selectedSOId}                    onClose={() => setSelectedSOId(null)}    />}
+            {selectedSO      && <SalesOrderDetailsModal   so={selectedSO}                           onClose={() => setSelectedSO(null)}
+                                                           onViewPO={setSelectedPOId} />}
             {selectedPOId    && <PurchaseOrderDetailsModal poId={selectedPOId}                      onClose={() => setSelectedPOId(null)}    />}
             {poModalSOId     && <CreatePOModal             salesOrderId={poModalSOId}               onClose={() => setPoModalSOId(null)}     onSave={handleCreatePOSave} />}
             {drilldownTarget && <BatchStageDrilldownModal  batchId={drilldownTarget.batchId}        flowId={drilldownTarget.flowId}         stageName={drilldownTarget.stageName} onClose={() => setDrilldownTarget(null)} />}
