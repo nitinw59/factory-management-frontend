@@ -43,6 +43,11 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
             .finally(() => setIsLoading(false));
     }, [batchId, rollId]);
 
+    // The roll this form is editing — pulled from the batch payload for its color number.
+    const currentRoll = useMemo(() => {
+        return batchDetails?.rolls?.find(r => String(r.id) === String(rollId));
+    }, [batchDetails, rollId]);
+
     // --- Calculation Logic ---
     const calculatedTable = useMemo(() => {
         if (!batchDetails || !batchDetails.ratios) return [];
@@ -107,10 +112,14 @@ const CuttingForm = ({ batchId, rollId, meter, onSaveSuccess, onClose }) => {
             <div className="flex-1 overflow-y-auto px-1 pb-2">
                 {/* Context Header */}
                 <div className="mb-6 bg-blue-50 p-4 rounded-lg border border-blue-200">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-4 text-sm text-gray-700">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 text-sm text-gray-700">
                         <div>
                             <span className="block text-gray-500 text-xs uppercase font-bold">Product</span>
                             <span className="font-semibold">{batchDetails?.product_name}</span>
+                        </div>
+                        <div>
+                            <span className="block text-gray-500 text-xs uppercase font-bold">Color Number</span>
+                            <span className="font-mono font-bold">{currentRoll?.color_number || '—'}</span>
                         </div>
                         <div className="sm:text-right">
                              <span className="block text-gray-500 text-xs uppercase font-bold">Total Roll Length</span>

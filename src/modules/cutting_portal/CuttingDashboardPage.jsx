@@ -103,8 +103,7 @@ const BatchCard = ({ batch, onOpenCutForm }) => {
                                     <CircleDashed size={14} className="text-slate-300 shrink-0"/>
                                 )}
                                 <span className={`font-semibold text-sm truncate ${roll.is_cut ? 'text-slate-600' : 'text-slate-800'}`}>
-                                    {roll.color || roll.roll_identifier || `#${roll.id}`}
-                                    {roll.color_number && <span className="text-slate-500 font-normal ml-1">({roll.color_number})</span>}
+                                    {roll.color_number ? `Color #${roll.color_number}` : (roll.roll_identifier || `#${roll.id}`)}
                                 </span>
                                 {roll.type && (
                                     <span className="shrink-0 text-[9px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200">

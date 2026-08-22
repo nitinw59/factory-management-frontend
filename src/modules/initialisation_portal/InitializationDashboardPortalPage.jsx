@@ -325,7 +325,7 @@ const StartBatchModal = ({ batchId, cycleFlow, currentLineId, onClose, onSave })
                                     }
                                     <div className="flex flex-col">
                                         <span className="font-semibold text-slate-700 text-sm">Roll #{Number(rollId) % 1000}</span>
-                                        <span className="text-xs text-slate-500">{roll.fabric_type} • {roll.color_name || roll.color}</span>
+                                        <span className="text-xs text-slate-500">{roll.fabric_type} • Color #{roll.color_number || '—'}</span>
                                     </div>
                                     <span className="ml-auto text-xs font-mono font-medium text-slate-500 bg-white px-2 py-1 rounded-lg border border-slate-100">
                                         {roll.meter}m
@@ -499,7 +499,7 @@ const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll, onFinalizeC
                                             <span className="text-[10px] text-slate-400 px-1.5 rounded bg-slate-50 border border-slate-100">{roll.meter}m</span>
                                         </div>
                                         <span className="text-[10px] text-slate-500 truncate mt-0.5">
-                                            {roll.type} • {roll.color || 'Generic'}
+                                            {roll.type} • Color #{roll.color_number || '—'}
                                         </span>
                                         {roll.is_cut ? (
                                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 mt-0.5 w-fit">

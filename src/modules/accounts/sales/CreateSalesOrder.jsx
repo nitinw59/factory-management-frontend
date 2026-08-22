@@ -339,6 +339,25 @@ const CreateSalesOrder = () => {
   const handleOpenReview = (e) => {
     e.preventDefault();
     setError(null); setSuccess(null); setSkippedRemovals([]);
+
+    // Guard against the same color being picked twice within one product group —
+    // the color dropdown already hides used colors, but re-check here in case of
+    // stale state; a duplicate crashes production plan recalculation downstream.
+    for (const group of productGroups) {
+      const seen = new Set();
+      for (const color of group.colors) {
+        if (!color.colorId) continue;
+        if (seen.has(String(color.colorId))) {
+          const productName = options.products.find(p => String(p.id) === String(group.productId))?.name
+            || (group.productId ? `Product #${group.productId}` : 'a product');
+          const colorName = options.fabricColors.find(c => String(c.id) === String(color.colorId))?.name || 'that color';
+          setError(`${colorName} is selected twice for ${productName}. Combine the quantities into a single color row before saving.`);
+          return;
+        }
+        seen.add(String(color.colorId));
+      }
+    }
+
     setShowReview(true);
   };
 
@@ -779,6 +798,16 @@ const CreateSalesOrder = () => {
                       {group.colors.map((color, cIndex) => {
                         const cTotal = colorTotal(color);
                         const availableSizes = options.sizes.filter(s => !(String(s.id) in color.sizes));
+                        // Hide colors already picked by other rows in this product group —
+                        // picking the same color twice creates duplicate sales_order_product_colors
+                        // rows, which later crashes production plan recalculation.
+                        const usedColorIds = new Set(
+                          group.colors
+                            .filter((_, i) => i !== cIndex)
+                            .map(c => String(c.colorId))
+                            .filter(Boolean)
+                        );
+                        const availableColors = options.fabricColors.filter(c => !usedColorIds.has(String(c.id)));
                         return (
                           <div key={cIndex} className="border border-gray-200 rounded-xl p-3 space-y-2.5 bg-slate-50/50">
                             {/* Color row */}
@@ -790,7 +819,7 @@ const CreateSalesOrder = () => {
                                 required
                               >
                                 <option value="" disabled>Color…</option>
-                                {options.fabricColors.map(c => (
+                                {availableColors.map(c => (
                                   <option key={c.id} value={c.id}>{c.color_number} — {c.name}</option>
                                 ))}
                               </select>
