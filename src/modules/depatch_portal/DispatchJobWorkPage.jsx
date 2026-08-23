@@ -3,8 +3,9 @@ import { lineLoaderApi } from '../../api/lineLoaderApi';
 import { jobWorkApi } from '../../api/jobWorkApi';
 import {
     Loader, Package, AlertCircle, Send, FileText,
-    ChevronDown, ChevronUp, RefreshCw, CheckCircle2, Truck,
+    ChevronDown, ChevronUp, RefreshCw, CheckCircle2, Truck, Search, X,
 } from 'lucide-react';
+import { BatchIdentifier, matchesJobWorkSearch } from './shared';
 
 const CHALLAN_STATUS = {
     DRAFT:    { label: 'Draft',    cls: 'bg-slate-100 text-slate-600' },
@@ -74,10 +75,15 @@ const BatchChallanGroup = ({ batch, challans, onSend, sendingChallanId }) => {
                 <div className="flex items-center gap-3">
                     <Package size={15} className="text-slate-400 shrink-0" />
                     <div>
-                        <span className="text-sm font-black text-slate-800">
-                            #{batch.batch_id} · <span className="font-mono">{batch.batch_code}</span>
-                        </span>
+                        <BatchIdentifier batchId={batch.batch_id} batchCode={batch.batch_code} />
                         <span className="text-xs text-slate-400 block mt-0.5">{batch.product_name}</span>
+                        {(batch.customer_name || batch.order_number) && (
+                            <span className="text-[11px] text-slate-400 block mt-0.5">
+                                {batch.customer_name}
+                                {batch.customer_name && batch.order_number && ' · '}
+                                {batch.order_number}
+                            </span>
+                        )}
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -115,6 +121,7 @@ const DispatchJobWorkPage = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
     const [sendingChallanId, setSendingChallanId] = useState(null);
+    const [search, setSearch] = useState('');
 
     const loadData = useCallback(async () => {
         setIsLoading(true);
@@ -168,6 +175,9 @@ const DispatchJobWorkPage = () => {
         (sum, b) => sum + (challansMap[b.batch_id] || []).filter(c => c.status === 'DRAFT').length,
         0
     );
+    const searched = search.trim()
+        ? batchesWithChallans.filter(b => matchesJobWorkSearch(b, challansMap[b.batch_id], search))
+        : batchesWithChallans;
 
     return (
         <div className="max-w-4xl mx-auto space-y-6">
@@ -193,6 +203,21 @@ const DispatchJobWorkPage = () => {
                 </div>
             </div>
 
+            {/* Search */}
+            <div className="relative w-full sm:w-80">
+                <Search className="absolute left-3 top-2.5 text-slate-400 w-4 h-4" />
+                <input
+                    type="text" placeholder="Search batch, code, SO, PO, buyer PO, customer, vendor, status…"
+                    value={search} onChange={e => setSearch(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400 outline-none"
+                />
+                {search && (
+                    <button onClick={() => setSearch('')} className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600">
+                        <X size={14} />
+                    </button>
+                )}
+            </div>
+
             {/* States */}
             {isLoading && (
                 <div className="flex items-center justify-center py-16 text-slate-400">
@@ -214,7 +239,15 @@ const DispatchJobWorkPage = () => {
                 </div>
             )}
 
-            {!isLoading && !error && batchesWithChallans.map(batch => (
+            {!isLoading && !error && batchesWithChallans.length > 0 && searched.length === 0 && (
+                <div className="text-center py-16 text-slate-400 bg-white rounded-2xl border-2 border-dashed border-slate-200">
+                    <Search size={32} className="mx-auto mb-2 opacity-40" />
+                    <p className="text-sm font-bold">No results for "{search}".</p>
+                    <p className="text-xs mt-1">Try a batch number, code, SO, PO, buyer PO, customer, vendor, or status.</p>
+                </div>
+            )}
+
+            {!isLoading && !error && searched.map(batch => (
                 <BatchChallanGroup
                     key={batch.batch_id}
                     batch={batch}

@@ -3,6 +3,7 @@ import {
     Search, FileText, Loader2, AlertCircle, Archive, Printer, Eye, ShoppingBag, Box
 } from 'lucide-react';
 import { dispatchManagerApi } from '../../api/dispatchManagerApi';
+import { BatchIdentifier, humanizeStatus } from './shared';
 
 // IMPORT THE SHARED COMPONENT
 import DispatchReceiptDocument from './DispatchReceiptDocument';
@@ -35,6 +36,9 @@ export default function DispatchReceiptsPage() {
             console.log("Fetched receipts:", fetchedReceipts);
 
             // API returns snake_case; normalize to the camelCase shape the UI expects.
+            // batchId is now the TRUE numeric batch id (primary), batchCode the
+            // human code (secondary) — previously `batchId` held batch_code and
+            // `po_code` was actually the sales-order number, both mislabeled.
             const normalized = (Array.isArray(fetchedReceipts) ? fetchedReceipts : []).map(r => ({
                 receiptId: r.receipt_number,                         // display "Receipt Number"
                 receiptNumber: r.receipt_number,
@@ -42,10 +46,14 @@ export default function DispatchReceiptsPage() {
                 dispatchDate: r.dispatch_date
                     ? new Date(r.dispatch_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
                     : '—',
-                batchId: r.batch_code || (r.batch_id ? `Batch ${r.batch_id}` : '—'),
+                batchId: r.batch_id ?? null,
+                batchCode: r.batch_code || null,
                 style: r.product_name || '—',
                 client: r.customer_name || '—',
-                po_code: r.order_number || null,
+                orderNumber: r.order_number || null,
+                poCode: r.po_code || null,
+                buyerPoNumber: r.buyer_po_number || null,
+                soStatus: r.so_status || null,
                 totalDispatched: r.total_dispatched ?? 0,
                 notes: r.notes || null,
                 dispatchedBy: r.dispatched_by || null,
@@ -83,20 +91,20 @@ export default function DispatchReceiptsPage() {
         }
     };
 
-    // Filter logic
+    // Filter logic — scans every header field a receipt carries (both the
+    // real batch id and its code, SO number, real PO code, buyer PO, and
+    // status, plus the raw enum so e.g. typing "confirmed" still matches).
     const filteredReceipts = useMemo(() => {
         const safeReceipts = Array.isArray(receipts) ? receipts : [];
-        if (!searchQuery) return safeReceipts;
-        
-        const lower = searchQuery.toLowerCase();
-        return safeReceipts.filter(r =>
-            r.receiptId?.toLowerCase().includes(lower) ||
-            r.batchId?.toLowerCase().includes(lower) ||
-            r.client?.toLowerCase().includes(lower) ||
-            r.style?.toLowerCase().includes(lower) ||
-            r.po_code?.toLowerCase().includes(lower) ||
-            r.dispatchedBy?.toLowerCase().includes(lower)
-        );
+        if (!searchQuery.trim()) return safeReceipts;
+
+        const lower = searchQuery.trim().toLowerCase();
+        return safeReceipts.filter(r => [
+            r.receiptId, r.batchId, r.batchCode, r.client, r.style,
+            r.orderNumber, r.poCode, r.buyerPoNumber,
+            r.soStatus, humanizeStatus(r.soStatus),
+            r.dispatchedBy,
+        ].filter(v => v != null).some(v => String(v).toLowerCase().includes(lower)));
     }, [receipts, searchQuery]);
 
     // ==========================================
@@ -130,7 +138,7 @@ export default function DispatchReceiptsPage() {
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                         <input 
                             type="text" 
-                            placeholder="Search by Receipt #, Batch, Client..." 
+                            placeholder="Search receipt, batch, code, SO, PO, buyer PO, client, status..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="w-full pl-9 pr-4 py-2.5 sm:py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-shadow placeholder:text-slate-400"
@@ -156,16 +164,16 @@ export default function DispatchReceiptsPage() {
                                     </div>
                                     
                                     <div className="mb-3">
-                                        {receipt.po_code && (
+                                        {receipt.poCode && (
                                             <div className="mb-2">
                                                 <span className="inline-flex items-center text-[9px] font-bold tracking-wide uppercase text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
-                                                    <ShoppingBag size={10} className="mr-1 shrink-0"/> <span className="truncate">PO: {receipt.po_code}</span>
+                                                    <ShoppingBag size={10} className="mr-1 shrink-0"/> <span className="truncate">PO: {receipt.poCode}</span>
                                                 </span>
                                             </div>
                                         )}
                                         <div className="flex items-center gap-2 mb-1">
                                             <Box size={14} className="text-slate-400" />
-                                            <h2 className="font-bold text-sm text-slate-800 truncate">{receipt.batchId}</h2>
+                                            <BatchIdentifier batchId={receipt.batchId} batchCode={receipt.batchCode} />
                                         </div>
                                         <p className="text-xs font-medium text-slate-600 truncate">{receipt.style} • {receipt.client}</p>
                                     </div>
@@ -225,16 +233,14 @@ export default function DispatchReceiptsPage() {
                                             </td>
                                             <td className="p-4">
                                                 <div className="flex flex-col">
-                                                    <span className="text-xs font-bold font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded w-fit mb-1 border border-slate-200">
-                                                        {receipt.batchId}
-                                                    </span>
+                                                    <BatchIdentifier batchId={receipt.batchId} batchCode={receipt.batchCode} className="mb-1" />
                                                     <span className="text-sm font-medium text-slate-800">{receipt.style}</span>
                                                 </div>
                                             </td>
                                             <td className="p-4">
                                                 <div className="flex flex-col">
                                                     <span className="text-sm font-medium text-slate-700">{receipt.client}</span>
-                                                    {receipt.po_code && <span className="text-xs text-slate-400 mt-0.5">PO: {receipt.po_code}</span>}
+                                                    {receipt.poCode && <span className="text-xs text-slate-400 mt-0.5">PO: {receipt.poCode}</span>}
                                                 </div>
                                             </td>
                                             <td className="p-4 text-right">

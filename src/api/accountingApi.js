@@ -48,6 +48,12 @@ export const accountingApi = {
 
   getPurchaseOrders: () => {return api.get('/accounting/purchase-orders');},
 
+  /**
+   * Paginated, tab-aware feed for the Purchase Invoices page.
+   * params: { tab: 'pending'|'invoices', page, pageSize, status?, search? }
+   */
+  getPurchaseOrdersInvoicingOverview: (params) => {return api.get('/accounting/purchase-orders/invoicing-overview', { params });},
+
   updatePurchaseOrder: (id, data) => {return api.put(`/accounting/purchase-orders/${id}`, data);},  
   getPurchaseOrderDetails: (id) => api.get(`/accounting/purchase-orders/${id}`),
   deletePurchaseOrder: (id) => api.delete(`/accounting/purchase-orders/${id}`),

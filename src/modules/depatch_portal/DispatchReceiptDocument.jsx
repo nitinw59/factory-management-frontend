@@ -2,6 +2,7 @@ import React from 'react';
 import { ArrowLeft, Printer, Building2, Calendar } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { BatchIdentifier } from './shared';
 
 export default function DispatchReceiptDocument({ receipt, onBack }) {
     if (!receipt) return null;
@@ -49,26 +50,35 @@ export default function DispatchReceiptDocument({ receipt, onBack }) {
         doc.setFont("helvetica", "bold");
         doc.text("Batch ID:", 14, 79);
         doc.setFont("helvetica", "normal");
-        doc.text(`${receipt.id || receipt.batchId}`, 40, 79);
+        doc.text(`${receipt.batchId ?? '—'}`, 40, 79);
+
+        if (receipt.batchCode) {
+            doc.setFont("helvetica", "bold");
+            doc.text("Batch Code:", 14, 86);
+            doc.setFont("helvetica", "normal");
+            doc.text(`${receipt.batchCode}`, 40, 86);
+        }
 
         doc.setFont("helvetica", "bold");
         doc.text("Client:", 120, 65);
         doc.setFont("helvetica", "normal");
         doc.text(`${receipt.client}`, 135, 65);
-        
+
         doc.setFont("helvetica", "bold");
         doc.text("Style:", 120, 72);
         doc.setFont("helvetica", "normal");
         doc.text(`${receipt.style}`, 135, 72);
 
-        if (receipt.po_code) {
+        if (receipt.poCode) {
             doc.setFont("helvetica", "bold");
             doc.text("PO Ref:", 120, 79);
             doc.setFont("helvetica", "normal");
-            doc.text(`${receipt.po_code}`, 135, 79);
+            doc.text(`${receipt.poCode}`, 135, 79);
         }
 
-        let currentY = 88;
+        // Shifted down 7pt from the original 88 to make room for the new
+        // "Batch Code:" line above.
+        let currentY = 95;
 
         if (receipt.sizeRatio && Object.keys(receipt.sizeRatio).length > 0) {
             doc.setFont("helvetica", "bold");
@@ -156,16 +166,15 @@ export default function DispatchReceiptDocument({ receipt, onBack }) {
                     <div className="grid grid-cols-2 gap-8 mb-6 bg-slate-50 p-6 rounded-lg border border-slate-100 print:bg-transparent print:border-none print:p-0">
                         <div>
                             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 print:text-slate-600">Batch Information</h3>
-                            <p className="font-semibold text-slate-800 text-lg print:text-black">{receipt.id || receipt.batchId}</p>
+                            <BatchIdentifier batchId={receipt.batchId} batchCode={receipt.batchCode} size="md" className="print:text-black" />
                             <p className="text-slate-600 mt-1 print:text-black">{receipt.style}</p>
                         </div>
                         <div>
                             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 print:text-slate-600">Client</h3>
                             <p className="font-semibold text-slate-800 text-lg print:text-black">{receipt.client}</p>
-                            {receipt.po_code && <p className="text-slate-500 text-sm mt-1 print:text-black">PO: {receipt.po_code}</p>}
+                            {receipt.poCode && <p className="text-slate-500 text-sm mt-1 print:text-black">PO: {receipt.poCode}</p>}
                         </div>
                     </div>
-                {console.log(receipt.sizeRatio)}
                      {receipt.sizeRatio && (
                         <div className="mb-6 bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex flex-col md:flex-row md:items-center gap-4 print:bg-transparent print:border-none print:p-0">
                             <h3 className="text-xs font-bold text-indigo-800 uppercase tracking-wider shrink-0 print:text-slate-600">Size Ratio:</h3>

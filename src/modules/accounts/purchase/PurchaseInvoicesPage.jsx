@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Loader2, AlertTriangle, Receipt, Check, Search } from 'lucide-react';
+import { Loader2, AlertTriangle, Receipt, Check, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { accountingApi } from '../../../api/accountingApi';
 import { purchaseDeptApi } from '../../../api/purchaseDeptApi';
 import InvoiceModal, { PaymentPill, MatchPill } from '../../purchase_department/InvoiceModal';
@@ -33,8 +33,39 @@ function itemSummary(items) {
 
 const fmt = (n) => '₹' + Math.round(n).toLocaleString('en-IN');
 
+const PAGE_SIZE = 15;
+
+// Shared prev/next control for both tabs — `total` is the server's count of
+// qualifying POs for the current tab+filter, not what's currently loaded.
+function PaginationBar({ page, totalPages, total, loading, onPrev, onNext }) {
+    if (total === 0) return null;
+    return (
+        <div className="flex items-center justify-between px-1 pt-1">
+            <p className="text-xs text-slate-400">
+                Page {page} of {totalPages} · {total} PO{total !== 1 ? 's' : ''}
+            </p>
+            <div className="flex items-center gap-2">
+                <button
+                    onClick={onPrev}
+                    disabled={loading || page <= 1}
+                    className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed border border-slate-200 rounded-lg px-2.5 py-1.5 transition"
+                >
+                    <ChevronLeft size={13} /> Prev
+                </button>
+                <button
+                    onClick={onNext}
+                    disabled={loading || page >= totalPages}
+                    className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed border border-slate-200 rounded-lg px-2.5 py-1.5 transition"
+                >
+                    Next <ChevronRight size={13} />
+                </button>
+            </div>
+        </div>
+    );
+}
+
 export default function PurchaseInvoicesPage() {
-    const [poGroups,     setPoGroups]     = useState([]);   // [{ po, inwards[], invoices[] }]
+    const [poGroups,     setPoGroups]     = useState([]);   // current PAGE only: [{ po, inwards[], invoices[] }]
     const [loading,      setLoading]      = useState(true);
     const [err,          setErr]          = useState(null);
     const [tab,          setTab]          = useState('pending');
@@ -46,12 +77,26 @@ export default function PurchaseInvoicesPage() {
     const poItemsCache = useRef({});
     const [openGrn,      setOpenGrn]      = useState(null); // { inward, po }
 
-    const load = async () => {
+    // Server-side pagination — page/total describe the current tab+filter's
+    // qualifying PO count, not what's loaded client-side. `stats` carries the
+    // global (unpaginated) aggregates the header badges/chips/footer need.
+    const [page,  setPage]  = useState(1);
+    const [total, setTotal] = useState(0);
+    const [stats, setStats] = useState({});
+
+    // Fetches one page of qualifying POs for the current tab/filter, then their
+    // inwards+invoices (bounded to `pageSize` POs, not every PO in the system).
+    const load = async (pageArg = 1) => {
         setLoading(true); setErr(null);
         try {
-            const posRes = await accountingApi.getPurchaseOrders();
-            const pos = posRes.data?.data || posRes.data || [];
-            console.log('[PurchaseInvoicesPage] purchase orders fetched:', pos);
+            const params = { tab, page: pageArg, pageSize: PAGE_SIZE };
+            if (tab === 'invoices') {
+                if (statusFilter !== 'ALL') params.status = statusFilter;
+                if (search.trim()) params.search = search.trim();
+            }
+            const overviewRes = await accountingApi.getPurchaseOrdersInvoicingOverview(params);
+            const body = overviewRes.data || {};
+            const pos = body.data || [];
             const groups = await Promise.all(
                 pos.map(async (po) => {
                     const [iwRes, invRes] = await Promise.all([
@@ -65,8 +110,14 @@ export default function PurchaseInvoicesPage() {
                     };
                 })
             );
-            console.log('[PurchaseInvoicesPage] poGroups (po + inwards + invoices) fetched:', groups);
             setPoGroups(groups);
+            setTotal(body.total || 0);
+            setStats(body.stats || {});
+            setPage(pageArg);
+            // A fresh page load shows a different set of POs — any prior GRN
+            // selection (and its cross-PO lock) no longer refers to anything visible.
+            setSelected(new Set());
+            setSelectedPoId(null);
         } catch (e) {
             setErr(e?.response?.data?.error || 'Failed to load data.');
         } finally {
@@ -74,7 +125,45 @@ export default function PurchaseInvoicesPage() {
         }
     };
 
-    useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // Re-fetches just the one PO touched by a save/delete (inwards + invoices)
+    // and splices it into poGroups in place, plus a stats refresh — instead of
+    // reloading the whole page. If that PO drops to zero pending GRNs, the
+    // existing pendingGroups filter below naturally drops its card; `total`
+    // (the pagination count) goes stale by one until the next page load/nav,
+    // which is an acceptable, self-correcting tradeoff for not refetching.
+    const refreshAfterInvoiceChange = async (poId) => {
+        if (!poId) { load(page); return; }
+        try {
+            const [iwRes, invRes, overviewRes] = await Promise.all([
+                purchaseDeptApi.getInwards(poId).catch(() => ({ data: [] })),
+                purchaseDeptApi.getInvoices(poId).catch(() => ({ data: [] })),
+                accountingApi.getPurchaseOrdersInvoicingOverview({
+                    tab, page, pageSize: PAGE_SIZE,
+                    ...(tab === 'invoices' && statusFilter !== 'ALL' ? { status: statusFilter } : {}),
+                    ...(tab === 'invoices' && search.trim() ? { search: search.trim() } : {}),
+                }).catch(() => null),
+            ]);
+            const inwards  = iwRes.data?.data  || iwRes.data  || [];
+            const invoices = invRes.data?.data || invRes.data || [];
+            setPoGroups(prev => prev.map(g => g.po.id === poId ? { ...g, inwards, invoices } : g));
+            if (overviewRes) setStats(overviewRes.data?.stats || {});
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Failed to refresh.');
+        }
+    };
+
+    // Initial load.
+    useEffect(() => { load(1); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Tab/status/search changes reset to page 1 and refetch — debounced only for
+    // free-text search so we're not firing a request per keystroke. Skips the
+    // very first render since the effect above already handles it.
+    const firstRun = useRef(true);
+    useEffect(() => {
+        if (firstRun.current) { firstRun.current = false; return; }
+        const t = setTimeout(() => load(1), search ? 350 : 0);
+        return () => clearTimeout(t);
+    }, [tab, statusFilter, search]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Groups that have at least one uninvoiced GRN
     const pendingGroups = useMemo(() =>
@@ -115,25 +204,21 @@ export default function PurchaseInvoicesPage() {
             .filter(Boolean);
     }, [allInvoices, poGroups]);
 
-    // Header stats
-    const pendingGrnCount = pendingGroups.reduce((s, g) => s + g.pending.length, 0);
-    const unpaidTotal = poGroups
-        .flatMap(g => g.invoices)
-        .filter(inv => ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE'].includes(inv.payment_status))
-        .reduce((s, inv) => s + (parseFloat(inv.amount) || 0), 0);
+    // Header stats — global aggregates from the server, not derived from the
+    // current page's poGroups (which is now just one page of POs).
+    const pendingGrnCount = stats.pending_grn_count || 0;
+    const unpaidTotal     = stats.unpaid_total || 0;
 
-    // Invoice footer totals
-    const totalAmt   = allInvoices.reduce((s, inv) => s + (parseFloat(inv.amount) || 0), 0);
-    const paidAmt    = allInvoices.filter(i => i.payment_status === 'PAID').reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+    // Invoice footer totals — summed server-side over every invoice matching
+    // the current status+search filter (all pages), not just the loaded page.
+    const totalAmt = stats.filtered_total_amt || 0;
+    const paidAmt  = stats.filtered_paid_amt  || 0;
 
-    // Status chip counts (unfiltered)
-    const statusCounts = useMemo(() => {
-        const all = poGroups.flatMap(g => g.invoices);
-        return STATUS_FILTERS.reduce((acc, f) => {
-            acc[f.key] = f.key === 'ALL' ? all.length : all.filter(i => i.payment_status === f.key).length;
-            return acc;
-        }, {});
-    }, [poGroups]);
+    // Status chip counts (unfiltered, global — from server stats)
+    const statusCounts = stats.status_counts || {};
+
+    // Pagination
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
     // Selection helpers
     const toggleSelect = (iwId, poId) => {
@@ -197,15 +282,17 @@ export default function PurchaseInvoicesPage() {
     };
 
     const handleSaved = () => {
+        const poId = openInvoice?.po?.id;
         setOpenInvoice(null);
         setSelected(new Set());
         setSelectedPoId(null);
-        load();
+        refreshAfterInvoiceChange(poId);
     };
 
     const handleDeleted = () => {
+        const poId = openInvoice?.po?.id;
         setOpenInvoice(null);
-        load();
+        refreshAfterInvoiceChange(poId);
     };
 
     if (loading) return (
@@ -229,7 +316,7 @@ export default function PurchaseInvoicesPage() {
                     poCode={openGrn.po.po_code}
                     poId={openGrn.po.id}
                     onClose={() => setOpenGrn(null)}
-                    onDeleted={() => { setOpenGrn(null); load(); }}
+                    onDeleted={() => { const poId = openGrn.po.id; setOpenGrn(null); refreshAfterInvoiceChange(poId); }}
                 />
             )}
             {openInvoice && (
@@ -414,6 +501,7 @@ export default function PurchaseInvoicesPage() {
                                 );
                             })
                         )}
+                        <PaginationBar page={page} totalPages={totalPages} total={total} loading={loading} onPrev={() => load(page - 1)} onNext={() => load(page + 1)} />
                     </div>
                 )}
 
@@ -529,10 +617,11 @@ export default function PurchaseInvoicesPage() {
                                     ))}
                                 </div>
 
-                                {/* Footer totals */}
+                                {/* Footer totals — counts/sums span every matching invoice
+                                    across all pages (server stats), not just this page. */}
                                 <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between flex-wrap gap-3">
                                     <p className="text-xs text-slate-500">
-                                        {allInvoices.length} invoice{allInvoices.length !== 1 ? 's' : ''} across {invoicesByPo.length} PO{invoicesByPo.length !== 1 ? 's' : ''}
+                                        {stats.filtered_count ?? allInvoices.length} invoice{(stats.filtered_count ?? allInvoices.length) !== 1 ? 's' : ''} across {total} PO{total !== 1 ? 's' : ''}
                                         {(statusFilter !== 'ALL' || search) ? ' matching filter' : ''}
                                     </p>
                                     <div className="flex items-center gap-4 text-xs">
@@ -547,6 +636,8 @@ export default function PurchaseInvoicesPage() {
                                         </span>
                                     </div>
                                 </div>
+
+                                <PaginationBar page={page} totalPages={totalPages} total={total} loading={loading} onPrev={() => load(page - 1)} onNext={() => load(page + 1)} />
                             </>
                         )}
                     </div>

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import MatrixBrand from './MatrixBrand';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LuLogOut, LuClipboardCheck, LuTruck, LuMenu, LuX, LuArchive, LuFactory, LuChartBar, LuUsers } from 'react-icons/lu';
+import { LuLogOut, LuClipboardCheck, LuTruck, LuMenu, LuX, LuArchive, LuFactory, LuChartBar, LuUsers, LuLayoutDashboard } from 'react-icons/lu';
 import ReportBugButton from './ReportBugButton';
 
 export const DispatchLayout = () => {
@@ -49,6 +49,13 @@ export const DispatchLayout = () => {
                             >
                                 <LuFactory className="mr-1.5" size={18} />
                                 Job Work
+                            </NavLink>
+                            <NavLink
+                                to="/dispatch-portal/production-workflow"
+                                className={({ isActive }) => `flex items-center text-sm font-medium transition-colors ${isActive ? 'text-blue-600' : 'text-slate-600 hover:text-blue-600'}`}
+                            >
+                                <LuLayoutDashboard className="mr-1.5" size={18} />
+                                Production Workflow
                             </NavLink>
                             <NavLink
                                 to="/dispatch-portal/scorecard"
@@ -115,6 +122,14 @@ export const DispatchLayout = () => {
                             >
                                 <LuFactory className="mr-3" size={18} />
                                 Job Work
+                            </NavLink>
+                            <NavLink
+                                to="/dispatch-portal/production-workflow"
+                                onClick={closeMobileMenu}
+                                className={({ isActive }) => `flex items-center px-4 py-3 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-blue-50 text-blue-600' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'}`}
+                            >
+                                <LuLayoutDashboard className="mr-3" size={18} />
+                                Production Workflow
                             </NavLink>
                             <NavLink
                                 to="/dispatch-portal/scorecard"

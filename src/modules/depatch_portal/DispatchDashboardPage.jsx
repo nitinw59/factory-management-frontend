@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { dispatchManagerApi } from '../../api/dispatchManagerApi';
 import BatchDispatchModal from './BatchDispatchModal';
+import { StatusBadge, BatchIdentifier, matchesBatchSearch } from './shared';
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -20,25 +21,6 @@ const STAGE_LABELS = {
     sewing:          'Sew',
     sewing_assembly: 'Assmbly',
     'POST ASSEMBLY': 'Post',
-};
-
-// ─── STATUS BADGE ─────────────────────────────────────────────────────────────
-
-const StatusBadge = ({ status }) => {
-    const map = {
-        OPEN:        'bg-blue-100    text-blue-700    border-blue-200',
-        PARTIAL:     'bg-amber-100   text-amber-700   border-amber-200',
-        CLOSED:      'bg-emerald-100 text-emerald-700 border-emerald-200',
-        SHIPPED:     'bg-indigo-100  text-indigo-700  border-indigo-200',
-        IN_PROGRESS: 'bg-indigo-100  text-indigo-700  border-indigo-200',
-        NOT_STARTED: 'bg-gray-100    text-gray-500    border-gray-200',
-        PENDING:     'bg-yellow-50   text-yellow-700  border-yellow-200',
-    };
-    return (
-        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${map[status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
-            {status?.replace(/_/g, ' ') ?? 'N/A'}
-        </span>
-    );
 };
 
 // ─── STAGE PIPELINE ───────────────────────────────────────────────────────────
@@ -142,7 +124,7 @@ const BatchCard = ({ batch, onOpenDispatch }) => {
             <div className={`${accent.hdr} px-4 py-3 flex items-start justify-between gap-3`}>
                 <div className="min-w-0">
                     <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                        <span className="font-mono font-black text-slate-800 text-xs">{batch.batch_code}</span>
+                        <BatchIdentifier batchId={batch.id} batchCode={batch.batch_code} />
                         <StatusBadge status={ds.status} />
                     </div>
                     <p className="text-xs font-semibold text-slate-700 truncate">{batch.product?.name || '—'}</p>
@@ -378,15 +360,7 @@ export default function DispatchDashboardPage() {
             result = result.filter(b => b.dispatch_summary?.status === statusFilter);
         }
         if (search.trim()) {
-            const q = search.toLowerCase();
-            result = result.filter(b =>
-                String(b.id || '').includes(q) ||
-                (b.batch_code                || '').toLowerCase().includes(q) ||
-                (b.product?.name             || '').toLowerCase().includes(q) ||
-                (b.sales_order?.order_number || '').toLowerCase().includes(q) ||
-                (b.sales_order?.customer     || '').toLowerCase().includes(q) ||
-                (b.purchase_order?.po_code   || '').toLowerCase().includes(q)
-            );
+            result = result.filter(b => matchesBatchSearch(b, search));
         }
         return result;
     }, [periodBatches, search, statusFilter]);
@@ -489,7 +463,7 @@ export default function DispatchDashboardPage() {
                     <div className="relative">
                         <Search className="absolute left-3 top-2.5 text-slate-400 w-4 h-4" />
                         <input
-                            type="text" placeholder="Search batch, SO, product, customer…"
+                            type="text" placeholder="Search batch, code, SO, PO, buyer PO, customer, status…"
                             value={search} onChange={e => setSearch(e.target.value)}
                             className="pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400 outline-none w-72"
                         />

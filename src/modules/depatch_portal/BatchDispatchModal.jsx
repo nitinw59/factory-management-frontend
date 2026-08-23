@@ -7,6 +7,7 @@ import {
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { dispatchManagerApi } from '../../api/dispatchManagerApi';
+import { StatusBadge, formatBatchIdentifier } from './shared';
 
 // ─── SHARED ───────────────────────────────────────────────────────────────────
 
@@ -15,23 +16,6 @@ const Spinner = () => (
         <Loader2 className="animate-spin h-8 w-8 text-indigo-500" />
     </div>
 );
-
-const StatusBadge = ({ status }) => {
-    const map = {
-        COMPLETED:   'bg-emerald-100 text-emerald-700 border-emerald-200',
-        IN_PROGRESS: 'bg-indigo-100  text-indigo-700  border-indigo-200',
-        NOT_STARTED: 'bg-gray-100    text-gray-500     border-gray-200',
-        OPEN:        'bg-blue-100    text-blue-700     border-blue-200',
-        PARTIAL:     'bg-amber-100   text-amber-700    border-amber-200',
-        CLOSED:      'bg-emerald-100 text-emerald-700  border-emerald-200',
-        PENDING:     'bg-yellow-50   text-yellow-700   border-yellow-200',
-    };
-    return (
-        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${map[status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
-            {status?.replace(/_/g, ' ') ?? 'N/A'}
-        </span>
-    );
-};
 
 const TabBtn = ({ label, icon: Icon, active, onClick }) => (
     <button
@@ -459,14 +443,13 @@ const BatchDispatchModal = ({ batchId, batchCode, onClose, canCreateDispatch = f
             setConfirmClose(false);
         }
     };
-    console.log('Batch data:', data);
     const batch    = data?.batch;
     const rolls    = (data?.rolls || []).filter(r => (r.available_to_dispatch ?? 0) > 0 || r.total_cut > 0);
     const pipeline = data?.stage_pipeline || [];
     const receipts = data?.existing_receipts || [];
     const totals   = data?.totals || {};
 
-    const title = batchCode ? `Dispatch: ${batchCode}` : `Dispatch Batch #${batchId}`;
+    const title = `Dispatch: ${formatBatchIdentifier(batchId, batchCode)}`;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
