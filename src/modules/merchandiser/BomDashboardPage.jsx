@@ -51,14 +51,14 @@ const BomDetailModal = ({ bomId, onClose, onEdit, onDuplicate }) => {
             .then(([bomRes, sizesRes]) => {
                 const detail = bomRes.data?.data ?? bomRes.data;
                 console.log(`[BOM raw · Dashboard detail] GET /boms/${bomId} — raw:`, detail);
-                const fabConsumptions = (detail?.ratio_groups || []).flatMap(rg =>
-                    (rg.fabric_consumptions || []).map(fc => ({
-                        ratio_group:        rg.ratio_group_name || rg.ratio_group_id || rg.id,
-                        fabric_type_id:     fc.fabric_type_id,
-                        fabric_type_name:   fc.fabric_type_name,
-                        consumption_inches: fc.consumption_inches,
-                    }))
-                );
+                // BOM-level now — one average per-piece consumption per fabric/role,
+                // independent of ratio group/marker.
+                const fabConsumptions = (detail?.fabric_consumptions || []).map(fc => ({
+                    fabric_type_id:     fc.fabric_type_id,
+                    fabric_type_name:   fc.fabric_type_name,
+                    fabric_role:        fc.fabric_role,
+                    consumption_inches: fc.consumption_inches,
+                }));
                 console.log(`[BOM · Dashboard detail] #${detail?.id} — ratio_groups: ${(detail?.ratio_groups || []).length}`,
                     `| fabric_consumptions: ${fabConsumptions.length}`,
                     `| material_consumptions (trims): ${(detail?.material_consumptions || []).length}`);
@@ -246,22 +246,24 @@ const BomDetailModal = ({ bomId, onClose, onEdit, onDuplicate }) => {
                                                         );
                                                     })}
                                                 </div>
-                                                {(rg.fabric_consumptions || []).length > 0 && (
-                                                    <div className="border-t border-slate-100 px-3 py-2">
-                                                        <p className="text-[9px] font-bold text-slate-400 uppercase mb-1.5">Fabric Consumptions</p>
-                                                        <div className="flex flex-wrap gap-1.5">
-                                                            {rg.fabric_consumptions.map((fc, j) => (
-                                                                <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold">
-                                                                    {fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`}: {fc.consumption_inches}"
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
                                                 {rg.notes && (
                                                     <p className="px-4 pb-3 text-[10px] text-slate-400">{rg.notes}</p>
                                                 )}
                                             </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Fabric Consumptions — BOM-level, not per marker/ratio group */}
+                            {(bom.fabric_consumptions || []).length > 0 && (
+                                <div>
+                                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Fabric Consumptions</p>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {bom.fabric_consumptions.map((fc, j) => (
+                                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold">
+                                                {fc.fabric_role ? `${fc.fabric_role} (generic)` : (fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`)}: {fc.consumption_inches}" / pc
+                                            </span>
                                         ))}
                                     </div>
                                 </div>

@@ -57,24 +57,22 @@ const PRIORITY = {
 };
 
 // ─── BOM DEBUG SUMMARY ────────────────────────────────────────────────────────
-// Fabric requirements are generated from ratio_groups[].fabric_consumptions[].
-// If a linked BOM has NO fabric_consumptions, calculate-requirements yields zero
-// fabric rows — which is exactly the "fabric_requirements: []" symptom. This
-// summary makes that visible at link time.
+// Fabric requirements are generated from finalized_quantity × fabric_consumptions
+// (BOM-level, one average per fabric/role — no marker involved). If a linked BOM
+// has NO fabric_consumptions, calculate-requirements yields zero fabric rows —
+// which is exactly the "fabric_requirements: []" symptom. This summary makes
+// that visible at link time.
 const summarizeBom = (bom) => {
-    const rgs = bom?.ratio_groups || [];
-    const fabricConsumptions = rgs.flatMap(rg =>
-        (rg.fabric_consumptions || []).map(fc => ({
-            ratio_group:        rg.ratio_group_name || rg.ratio_group_id || rg.id,
-            fabric_type_id:     fc.fabric_type_id,
-            fabric_type_name:   fc.fabric_type_name,
-            consumption_inches: fc.consumption_inches,
-        }))
-    );
+    const fabricConsumptions = (bom?.fabric_consumptions || []).map(fc => ({
+        fabric_type_id:     fc.fabric_type_id,
+        fabric_type_name:   fc.fabric_type_name,
+        fabric_role:        fc.fabric_role,
+        consumption_inches: fc.consumption_inches,
+    }));
     return {
         bom_id:                     bom?.id,
         bom_name:                   bom?.bom_name,
-        ratio_group_count:          rgs.length,
+        ratio_group_count:          (bom?.ratio_groups || []).length,
         fabric_consumption_count:   fabricConsumptions.length,
         material_consumption_count: (bom?.material_consumptions || []).length,
         fabricConsumptions,
@@ -171,16 +169,21 @@ const BomPreviewModal = ({ bomId, onClose }) => {
                                                         </span>
                                                     ))}
                                                 </div>
-                                                {(rg.fabric_consumptions || []).length > 0 && (
-                                                    <div className="border-t border-slate-100 px-2.5 py-2 flex flex-wrap gap-1.5">
-                                                        {rg.fabric_consumptions.map((fc, j) => (
-                                                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold">
-                                                                {fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`}: {fc.consumption_inches}"
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                )}
                                             </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Fabric Consumptions — BOM-level, not per marker/ratio group */}
+                            {(bom.fabric_consumptions || []).length > 0 && (
+                                <div>
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Fabric Consumptions</p>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {bom.fabric_consumptions.map((fc, j) => (
+                                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold">
+                                                {fc.fabric_role ? `${fc.fabric_role} (generic)` : (fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`)}: {fc.consumption_inches}" / pc
+                                            </span>
                                         ))}
                                     </div>
                                 </div>
@@ -1404,6 +1407,7 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
     const [actionMode, setActionMode] = useState(null);
     const [openReqId,  setOpenReqId]  = useState(null);
     const [reservationsItem, setReservationsItem] = useState(null);  // null = closed; item = show its reservations modal
+    const [breakdownItem, setBreakdownItem] = useState(null);        // null = closed; item = show how its requirement was calculated
     const [releasingResId, setReleasingResId] = useState(null);      // reservation id currently being released
     const [releaseErr, setReleaseErr] = useState(null);              // error shown inside the reservations modal
     const [expandAll,  setExpandAll]  = useState(false);
@@ -3009,10 +3013,16 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                                             const resCount   = item.reservations?.length || 0;
                                                                             return (
                                                                                 <div className="grid grid-cols-4 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
-                                                                                    <div>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={e => { e.stopPropagation(); setBreakdownItem(item); }}
+                                                                                        title={item.calculation_breakdown ? 'View calculation breakdown' : 'No calculation breakdown available'}
+                                                                                        disabled={!item.calculation_breakdown}
+                                                                                        className="rounded-lg hover:bg-slate-50 transition-colors cursor-pointer text-center px-1 py-1 -m-1 disabled:cursor-not-allowed"
+                                                                                    >
                                                                                         <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Required</p>
-                                                                                        <p className="text-3xl font-bold text-slate-900">{required.toFixed(1)} m</p>
-                                                                                    </div>
+                                                                                        <p className={`text-3xl font-bold text-slate-900 ${item.calculation_breakdown ? 'underline decoration-dotted underline-offset-4' : ''}`}>{required.toFixed(1)} m</p>
+                                                                                    </button>
                                                                                     <button
                                                                                         type="button"
                                                                                         onClick={e => { e.stopPropagation(); setReservationsItem(item); }}
@@ -3043,10 +3053,16 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                                                                             const resCount = item.reservations?.length || 0;
                                                                             return (
                                                                             <div className="grid grid-cols-4 gap-2 text-center bg-white border border-slate-100 rounded-lg p-2">
-                                                                                <div>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={e => { e.stopPropagation(); setBreakdownItem(item); }}
+                                                                                    title={item.calculation_breakdown ? 'View calculation breakdown' : 'No calculation breakdown available'}
+                                                                                    disabled={!item.calculation_breakdown}
+                                                                                    className="rounded-lg hover:bg-slate-50 transition-colors cursor-pointer text-center px-1 py-1 -m-1 disabled:cursor-not-allowed"
+                                                                                >
                                                                                     <p className="text-[24px] leading-tight font-bold text-slate-700 uppercase">Required</p>
-                                                                                    <p className="text-3xl font-bold text-slate-900">{item.quantity_required.toLocaleString()} {item.unit}</p>
-                                                                                </div>
+                                                                                    <p className={`text-3xl font-bold text-slate-900 ${item.calculation_breakdown ? 'underline decoration-dotted underline-offset-4' : ''}`}>{item.quantity_required.toLocaleString()} {item.unit}</p>
+                                                                                </button>
                                                                                 <button
                                                                                     type="button"
                                                                                     onClick={e => { e.stopPropagation(); setReservationsItem(item); }}
@@ -3470,6 +3486,123 @@ const ProductionTrackingModal = ({ sop, salesOrder, sopReqs, onClose, onRefresh 
                     </div>
                 );
             })()}
+            {breakdownItem && (() => {
+                const item = breakdownItem;
+                const bd   = item.calculation_breakdown;
+                const unit = item.type === 'fabric' ? 'm' : (item.unit || 'pcs');
+                return (
+                    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setBreakdownItem(null)}>
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+                                <div>
+                                    <h2 className="text-base font-black text-slate-800">Calculation · {item.title}</h2>
+                                    <p className="text-xs text-slate-500 mt-0.5">How this requirement was calculated.</p>
+                                </div>
+                                <button onClick={() => setBreakdownItem(null)} className="p-1.5 hover:bg-slate-100 rounded-full transition shrink-0">
+                                    <X size={16} className="text-slate-500" />
+                                </button>
+                            </div>
+                            <div className="overflow-auto flex-1 px-5 py-4 space-y-3">
+                                {!bd ? (
+                                    <p className="text-sm text-slate-400 italic text-center py-8">No calculation breakdown available.</p>
+                                ) : item.type === 'fabric' ? (
+                                    <>
+                                        <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs text-slate-600">
+                                            Finalized quantity: <span className="font-bold text-slate-800">{Number(bd.finalized_quantity || 0).toLocaleString()}</span> pcs
+                                        </div>
+                                        {(bd.fabric_consumption_contributions || []).length === 0 ? (
+                                            <p className="text-sm text-slate-400 italic text-center py-4">No fabric consumption row matched this fabric type on the BOM.</p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {bd.fabric_consumption_contributions.map((fc, i) => (
+                                                    <div key={i} className="border border-slate-200 rounded-xl p-3">
+                                                        <div className="flex items-center justify-between text-xs mb-1.5">
+                                                            <span className="text-slate-500">Consumption / piece</span>
+                                                            <span className="font-bold text-slate-800">{fc.consumption_inches}"</span>
+                                                        </div>
+                                                        <div className="flex items-center justify-between text-xs mb-1.5">
+                                                            <span className="text-slate-500">Wastage</span>
+                                                            <span className="font-bold text-slate-800">{fc.wastage_percentage}%</span>
+                                                        </div>
+                                                        <div className="flex items-center justify-between text-xs mb-2">
+                                                            <span className="text-slate-500">Meters (this line)</span>
+                                                            <span className="font-bold text-emerald-700">{Number(fc.meters).toLocaleString(undefined, { maximumFractionDigits: 4 })} m</span>
+                                                        </div>
+                                                        <p className="font-mono text-[10px] text-slate-400 bg-slate-50 rounded-lg px-2 py-1.5">{fc.formula}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                                            <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-bold">{bd.calculation_type}</span>
+                                            <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-bold">{bd.scope === 'agnostic' ? 'All colors' : 'Per color'}</span>
+                                            {bd.target_variant_size && (
+                                                <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-bold">Variant size: {bd.target_variant_size}</span>
+                                            )}
+                                        </div>
+                                        {bd.calculation_type === 'FIXED' ? (
+                                            <div className="border border-slate-200 rounded-xl p-3 text-xs space-y-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-slate-500">{bd.scope === 'agnostic' ? 'Total garments' : 'Finalized quantity'}</span>
+                                                    <span className="font-bold text-slate-800">{Number(bd.total_garments ?? bd.finalized_quantity ?? 0).toLocaleString()}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-slate-500">Per garment</span>
+                                                    <span className="font-bold text-slate-800">{bd.fixed_quantity_per_garment}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-slate-500">Wastage</span>
+                                                    <span className="font-bold text-slate-800">{bd.wastage_percentage}%</span>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="border border-slate-200 rounded-xl overflow-hidden">
+                                                <table className="w-full text-xs">
+                                                    <thead className="bg-slate-50 text-slate-400 uppercase text-[10px]">
+                                                        <tr>
+                                                            <th className="text-left px-2 py-1.5">Size</th>
+                                                            <th className="text-right px-2 py-1.5">Ordered</th>
+                                                            <th className="text-right px-2 py-1.5">Per Piece</th>
+                                                            <th className="text-right px-2 py-1.5">Subtotal</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-100">
+                                                        {(bd.size_details || []).map((sd, i) => (
+                                                            <tr key={i}>
+                                                                <td className="px-2 py-1.5 font-bold text-slate-700">{sd.size}</td>
+                                                                <td className="px-2 py-1.5 text-right text-slate-600">{sd.ordered_qty}</td>
+                                                                <td className="px-2 py-1.5 text-right text-slate-600">{sd.quantity_per_piece}</td>
+                                                                <td className="px-2 py-1.5 text-right font-bold text-slate-800">{sd.subtotal}</td>
+                                                            </tr>
+                                                        ))}
+                                                        {(bd.size_details || []).length === 0 && (
+                                                            <tr><td colSpan={4} className="px-2 py-3 text-center text-slate-400 italic">No size consumption rows defined.</td></tr>
+                                                        )}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                        <p className="font-mono text-[10px] text-slate-400 bg-slate-50 rounded-lg px-2 py-1.5">{bd.formula}</p>
+                                        <div className="flex items-center justify-between text-xs pt-1">
+                                            <span className="text-slate-500">Total required</span>
+                                            <span className="font-bold text-emerald-700">{Number(bd.quantity || 0).toLocaleString(undefined, { maximumFractionDigits: 4 })} {unit}</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex justify-end px-5 py-3 border-t border-slate-100">
+                                <button onClick={() => setBreakdownItem(null)}
+                                    className="text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition">
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
             {funnelGroup && (
                 <TrimFunnelModal
                     group={funnelGroup}
@@ -3493,101 +3626,70 @@ const READINESS_CFG = {
     force_ready:          { label: 'Force Ready',  cls: 'bg-violet-50 text-violet-700 border-violet-200',  icon: ShieldCheck },
 };
 
-// ─── MARKER ALLOCATION MODAL ──────────────────────────────────────────────────
-// Per-color marker assignment: user picks a BOM ratio group per color, sees runs
-// needed based on actual per-size quantities, then confirms to calculate requirements.
+// ─── FINALIZE QUANTITIES MODAL ────────────────────────────────────────────────
+// Quantities are imported straight from the Sales Order per color, per size,
+// and manually confirmed/adjusted — no marker or marker_runs involved. A
+// color's finalized_quantity sent to the backend is the sum of its (possibly
+// edited) per-size quantities. Fabric/trim requirements are computed purely
+// from that total against the BOM's own consumption rules (see
+// recalcPlanForSop on the backend), which only ever needed the total.
+const orderedTotalFor = (sizes) => (sizes || []).reduce((s, sz) => s + (Number(sz.quantity) || 0), 0);
 
-const _gcd2 = (a, b) => (b === 0 ? a : _gcd2(b, a % b));
+const sizeKeyOf = (sz) => String(sz.size_id ?? sz.size_name ?? sz.size ?? '');
 
-const MarkerAllocationModal = ({ sop, onClose, onDone }) => {
-    const [bomDetail,    setBomDetail]    = useState(null);
-    const [loading,      setLoading]      = useState(true);
+// overrides: { [sizeKey]: string } — per-size quantity edits for one color.
+// Falls back to that size's own ordered quantity when not overridden.
+const sizeQtyFor = (sz, overrides) => {
+    const override = overrides?.[sizeKeyOf(sz)];
+    return override !== undefined && override !== '' ? Number(override) : (Number(sz.quantity) || 0);
+};
+const colorTotalFor = (sizes, overrides) =>
+    (sizes || []).reduce((s, sz) => s + sizeQtyFor(sz, overrides), 0);
+
+// Editable per-size quantity grid for one color — pre-filled from the order,
+// each size individually adjustable (instead of one lump total).
+const PerSizeQuantityEditor = ({ sizes, overrides, onChange }) => (
+    <div className="flex flex-wrap gap-2">
+        {(sizes || []).filter(sz => Number(sz.quantity) > 0 || overrides?.[sizeKeyOf(sz)] !== undefined).map(sz => {
+            const key   = sizeKeyOf(sz);
+            const sName = stdSize(sz.size_name || sz.size || key);
+            const value = overrides?.[key] ?? String(Number(sz.quantity) || 0);
+            return (
+                <div key={key} className="flex flex-col items-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 min-w-[60px]">
+                    <span className="text-[9px] font-bold text-slate-500 uppercase">{sName}</span>
+                    <input type="number" min="0" value={value}
+                        onChange={e => onChange(key, e.target.value)}
+                        className="w-14 mt-0.5 border border-slate-200 rounded px-1 py-0.5 text-xs font-bold text-center outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+                    />
+                </div>
+            );
+        })}
+        {(sizes || []).length === 0 && (
+            <p className="text-xs text-slate-400 italic">No size breakdown available for this color.</p>
+        )}
+    </div>
+);
+
+const FinalizeQuantitiesModal = ({ sop, onClose, onDone }) => {
+    const [qtyOverrides, setQtyOverrides] = useState({}); // { [colorId]: { [sizeKey]: string } }
     const [error,        setError]        = useState(null);
-    const [markerChoice, setMarkerChoice] = useState({});  // { [colorId]: rgId string }
     const [submitting,   setSubmitting]   = useState(false);
 
-    useEffect(() => {
-        if (!sop.bom_id) { setLoading(false); return; }
-        bomApi.getById(sop.bom_id)
-            .then(r => {
-                const detail = r.data?.data ?? r.data;
-                console.log(`[BOM raw · MarkerAllocation] GET /boms/${sop.bom_id} — raw:`, detail);
-                logBomBrief('MARKER-ALLOC', detail);
-                setBomDetail(detail);
-                // Default every color to the first ratio group
-                const firstRg = detail?.ratio_groups?.[0];
-                if (firstRg) {
-                    const firstId = String(firstRg.ratio_group_id ?? firstRg.id);
-                    const init = {};
-                    (sop.colors || []).forEach(c => { init[String(c.fabric_color_id)] = firstId; });
-                    setMarkerChoice(init);
-                }
-            })
-            .catch(e => setError(e?.response?.data?.error || 'Failed to load BOM details'))
-            .finally(() => setLoading(false));
-    }, [sop.bom_id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    const ratioGroups = bomDetail?.ratio_groups || [];
-
-    // Build a quick lookup: rgId → { name, items:[{sizeName,pieces}], totalPieces }
-    const markerMap = useMemo(() => {
-        const map = {};
-        ratioGroups.forEach(rg => {
-            const rgId = String(rg.ratio_group_id ?? rg.id);
-            const items = (rg.items || [])
-                .map(it => ({ sizeName: stdSize(it.size || ''), pieces: parseInt(it.number_of_pieces) || 1 }))
-                .filter(it => it.sizeName);
-            const totalPieces = items.reduce((s, it) => s + it.pieces, 0) || rg.total_pieces_in_marker || 0;
-            map[rgId] = { name: rg.ratio_group_name || `Group ${rgId}`, items, totalPieces };
-        });
-        return map;
-    }, [ratioGroups]);
-
-    // Calculate runs and produced quantities for a color + marker combination
-    const calcRuns = (colorSizes, rgId) => {
-        const marker = markerMap[rgId];
-        if (!marker || !marker.items.length) return null;
-        const markerBySz = {};
-        marker.items.forEach(it => { markerBySz[it.sizeName] = it.pieces; });
-        const orderedBySz = {};
-        (colorSizes || []).forEach(sz => {
-            const name = stdSize(sz.size_name || sz.size || String(sz.size_id ?? ''));
-            if (name) orderedBySz[name] = Number(sz.quantity) || 0;
-        });
-        let runs = 0;
-        marker.items.forEach(({ sizeName, pieces }) => {
-            const ordered = orderedBySz[sizeName] || 0;
-            if (ordered > 0) runs = Math.max(runs, Math.ceil(ordered / pieces));
-        });
-        const produced = {};
-        marker.items.forEach(({ sizeName, pieces }) => { produced[sizeName] = runs * pieces; });
-        const missingInMarker = Object.keys(orderedBySz)
-            .filter(s => orderedBySz[s] > 0 && !markerBySz[s]);
-        return { runs, produced, totalProduced: runs * marker.totalPieces, orderedBySz, missingInMarker };
+    const setSizeQty = (colorId, sizeKey, value) => {
+        setQtyOverrides(prev => ({ ...prev, [colorId]: { ...(prev[colorId] || {}), [sizeKey]: value } }));
     };
 
     const handleConfirm = async () => {
         setSubmitting(true);
         setError(null);
         try {
-            const quantities = (sop.colors || []).map(c => {
-                const colorId = String(c.fabric_color_id);
-                const rgId    = markerChoice[colorId];
-                const calc    = rgId ? calcRuns(c.sizes, rgId) : null;
-                const orderedTotal = (c.sizes || []).reduce((s, sz) => s + (Number(sz.quantity) || 0), 0);
-                return {
-                    fabric_color_id:    Number(c.fabric_color_id),
-                    ratio_group_id:     rgId ? parseInt(rgId) : null,
-                    marker_runs:        calc?.runs ?? 0,
-                    // `||` (not `??`) so a 0-producing marker falls back to the ordered qty,
-                    // whose source of truth is c.sizes — c.total_quantity/quantity are often absent.
-                    finalized_quantity: calc?.totalProduced || orderedTotal || Number(c.total_quantity || c.quantity) || 0,
-                    selected_option:    'exact',
-                };
-            });
+            const quantities = (sop.colors || []).map(c => ({
+                fabric_color_id:    Number(c.fabric_color_id),
+                finalized_quantity: colorTotalFor(c.sizes, qtyOverrides[String(c.fabric_color_id)]),
+            }));
             const invalid = quantities.find(q => !q.fabric_color_id || !q.finalized_quantity);
             if (invalid) {
-                setError('Cannot finalize: a color has no valid quantity or fabric color. Check size quantities and marker selection.');
+                setError('Cannot finalize: a color has no valid quantity or fabric color.');
                 setSubmitting(false);
                 return;
             }
@@ -3600,12 +3702,12 @@ const MarkerAllocationModal = ({ sop, onClose, onDone }) => {
             await planningApi.calculateRequirements(sop.id);
             onDone();
         } catch (e) {
-            setError(e?.response?.data?.error || 'Failed to save allocation');
+            setError(e?.response?.data?.error || 'Failed to save quantities');
             setSubmitting(false);
         }
     };
 
-    const allAllocated = (sop.colors || []).every(c => markerChoice[String(c.fabric_color_id)]);
+    const hasBom = !!sop.bom_id;
 
     return (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={!submitting ? onClose : undefined}>
@@ -3613,36 +3715,29 @@ const MarkerAllocationModal = ({ sop, onClose, onDone }) => {
                 {/* Header */}
                 <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100 shrink-0">
                     <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Marker Allocation</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Finalize Quantities</p>
                         <h2 className="font-extrabold text-slate-800 text-base">{sop.product_name}</h2>
-                        <p className="text-xs text-slate-400 mt-0.5">Assign a marker to each color — runs are calculated from ordered sizes.</p>
+                        <p className="text-xs text-slate-400 mt-0.5">Quantities are imported from the Sales Order — adjust and confirm.</p>
                     </div>
                     {!submitting && <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 mt-0.5"><X size={18} /></button>}
                 </div>
 
                 {/* Body */}
-                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-                    {loading && <Spinner />}
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
                     {error && (
                         <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>
                     )}
-                    {!loading && !sop.bom_id && (
+                    {!hasBom && (
                         <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
                             No BOM linked. Link a BOM to this product line first.
                         </p>
                     )}
-                    {!loading && sop.bom_id && ratioGroups.length === 0 && (
-                        <p className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
-                            The linked BOM has no ratio groups defined.
-                        </p>
-                    )}
 
-                    {!loading && (sop.colors || []).map(c => {
-                        const colorId      = String(c.fabric_color_id);
-                        const sizes        = c.sizes || [];
-                        const selRgId      = markerChoice[colorId] || '';
-                        const calc         = selRgId ? calcRuns(sizes, selRgId) : null;
-                        const totalOrdered = sizes.reduce((s, sz) => s + (Number(sz.quantity) || 0), 0);
+                    {(sop.colors || []).map(c => {
+                        const colorId = String(c.fabric_color_id);
+                        const sizes   = c.sizes || [];
+                        const ordered = orderedTotalFor(sizes);
+                        const total   = colorTotalFor(sizes, qtyOverrides[colorId]);
 
                         return (
                             <div key={colorId} className="border border-slate-200 rounded-xl overflow-hidden">
@@ -3653,126 +3748,23 @@ const MarkerAllocationModal = ({ sop, onClose, onDone }) => {
                                         <span className="text-[10px] font-mono text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded">{c.color_number}</span>
                                     )}
                                     <span className="ml-auto text-[10px] text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded font-medium">
-                                        {totalOrdered.toLocaleString()} pcs ordered
+                                        {ordered.toLocaleString()} pcs ordered
                                     </span>
                                 </div>
 
-                                <div className="p-4 space-y-4">
-                                    {/* Size breakdown chips */}
-                                    {sizes.filter(sz => Number(sz.quantity) > 0).length > 0 && (
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {sizes.filter(sz => Number(sz.quantity) > 0).map(sz => {
-                                                const sName = stdSize(sz.size_name || sz.size || String(sz.size_id ?? ''));
-                                                return (
-                                                    <span key={sz.size_id ?? sName}
-                                                        className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-700">
-                                                        <span className="text-slate-500">{sName}</span>
-                                                        <span className="text-slate-300">:</span>
-                                                        <span>{Number(sz.quantity).toLocaleString()}</span>
-                                                    </span>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-
-                                    {/* Marker (ratio group) picker */}
-                                    {ratioGroups.length > 0 && (
-                                        <div>
-                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">Select Marker</p>
-                                            <div className="space-y-2">
-                                                {ratioGroups.map(rg => {
-                                                    const rgId  = String(rg.ratio_group_id ?? rg.id);
-                                                    const m     = markerMap[rgId];
-                                                    const active = selRgId === rgId;
-                                                    return (
-                                                        <button key={rgId}
-                                                            onClick={() => setMarkerChoice(p => ({ ...p, [colorId]: rgId }))}
-                                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-all ${
-                                                                active
-                                                                    ? 'border-violet-400 bg-violet-50'
-                                                                    : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/30'
-                                                            }`}
-                                                        >
-                                                            <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors ${
-                                                                active ? 'border-violet-500 bg-violet-500' : 'border-slate-300 bg-white'
-                                                            }`}>
-                                                                {active && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
-                                                            </div>
-                                                            <div className="flex-1 min-w-0">
-                                                                <p className="text-xs font-bold text-slate-700">{m?.name}</p>
-                                                                <div className="flex flex-wrap items-center gap-1 mt-1">
-                                                                    {(m?.items || []).map(it => (
-                                                                        <span key={it.sizeName}
-                                                                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
-                                                                                active
-                                                                                    ? 'bg-violet-100 text-violet-700 border-violet-200'
-                                                                                    : 'bg-slate-50 text-slate-600 border-slate-200'
-                                                                            }`}>
-                                                                            {it.sizeName}×{it.pieces}
-                                                                        </span>
-                                                                    ))}
-                                                                    <span className="text-[9px] text-slate-400">= {m?.totalPieces} pcs/run</span>
-                                                                </div>
-                                                            </div>
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Calculation result */}
-                                    {calc && calc.runs > 0 && (
-                                        <div className={`rounded-xl border px-4 py-3 ${
-                                            calc.missingInMarker.length > 0
-                                                ? 'bg-amber-50 border-amber-200'
-                                                : 'bg-emerald-50 border-emerald-200'
-                                        }`}>
-                                            <div className="flex items-start justify-between gap-3 mb-3">
-                                                <div>
-                                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Runs Required</p>
-                                                    <p className="text-2xl font-extrabold text-slate-800 leading-none mt-0.5">
-                                                        {calc.runs}
-                                                        <span className="text-sm font-bold text-slate-400 ml-1.5">runs</span>
-                                                    </p>
-                                                </div>
-                                                <div className="text-right">
-                                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Total Produced</p>
-                                                    <p className="text-xl font-extrabold text-slate-800 leading-none mt-0.5">
-                                                        {(calc.totalProduced || 0).toLocaleString()}
-                                                        <span className="text-sm font-normal text-slate-400 ml-1">pcs</span>
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            {/* Per-size: produced vs ordered */}
-                                            <div className="flex flex-wrap gap-1.5">
-                                                {Object.entries(calc.produced).map(([sizeName, producedQty]) => {
-                                                    const ordered = calc.orderedBySz[sizeName] || 0;
-                                                    const extra   = producedQty - ordered;
-                                                    const exact   = extra === 0;
-                                                    return (
-                                                        <span key={sizeName} className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg border ${
-                                                            exact
-                                                                ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                                                                : 'bg-amber-100 text-amber-800 border-amber-200'
-                                                        }`}>
-                                                            {sizeName}: {producedQty.toLocaleString()}
-                                                            {exact
-                                                                ? <CheckCircle2 size={10} className="text-emerald-600" />
-                                                                : <span className="text-[9px] font-normal text-amber-600">+{extra}</span>
-                                                            }
-                                                        </span>
-                                                    );
-                                                })}
-                                            </div>
-                                            {calc.missingInMarker.length > 0 && (
-                                                <p className="text-[10px] text-amber-700 mt-2 flex items-center gap-1">
-                                                    <AlertTriangle size={11} className="shrink-0" />
-                                                    Sizes not in this marker: <span className="font-bold ml-0.5">{calc.missingInMarker.join(', ')}</span>
-                                                </p>
-                                            )}
-                                        </div>
-                                    )}
+                                <div className="p-4 space-y-3">
+                                    {/* Per-size quantity — pre-filled from the order, each size editable */}
+                                    <div>
+                                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Finalized Quantity per Size</label>
+                                        <PerSizeQuantityEditor
+                                            sizes={sizes}
+                                            overrides={qtyOverrides[colorId]}
+                                            onChange={(sizeKey, val) => setSizeQty(colorId, sizeKey, val)}
+                                        />
+                                    </div>
+                                    <p className="text-xs text-slate-500 text-right">
+                                        Total: <span className="font-bold text-slate-800">{total.toLocaleString()}</span> pcs
+                                    </p>
                                 </div>
                             </div>
                         );
@@ -3780,21 +3772,16 @@ const MarkerAllocationModal = ({ sop, onClose, onDone }) => {
                 </div>
 
                 {/* Footer */}
-                <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-between shrink-0">
-                    <p className="text-xs text-slate-400">
-                        {Object.keys(markerChoice).length}/{(sop.colors || []).length} color{(sop.colors || []).length !== 1 ? 's' : ''} allocated
-                    </p>
-                    <div className="flex items-center gap-3">
-                        <button onClick={onClose} disabled={submitting}
-                            className="text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40">
-                            Cancel
-                        </button>
-                        <button onClick={handleConfirm} disabled={submitting || !allAllocated}
-                            className="flex items-center gap-2 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-5 py-2.5 rounded-xl transition-colors shadow-sm">
-                            {submitting ? <Loader2 size={15} className="animate-spin" /> : <Calculator size={15} />}
-                            Confirm & Calculate
-                        </button>
-                    </div>
+                <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-end gap-3 shrink-0">
+                    <button onClick={onClose} disabled={submitting}
+                        className="text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40">
+                        Cancel
+                    </button>
+                    <button onClick={handleConfirm} disabled={submitting || !hasBom || (sop.colors || []).length === 0}
+                        className="flex items-center gap-2 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-5 py-2.5 rounded-xl transition-colors shadow-sm">
+                        {submitting ? <Loader2 size={15} className="animate-spin" /> : <Calculator size={15} />}
+                        Confirm & Calculate
+                    </button>
                 </div>
             </div>
         </div>
@@ -4106,126 +4093,11 @@ const RecalculateConfirmModal = ({ preview, sopName, onClose, onConfirm, busy, e
     );
 };
 
-// ─── OPTIMAL MARKER ALLOCATION ────────────────────────────────────────────────
-// Jointly optimizes run counts across all selected markers for one color.
-// Three phases: (1) exclusive constraints, (2) deficit resolution, (3) reduction.
-
-const suggestOptimalRuns = (colorSizes, selectedRgIds, markerMap) => {
-    if (!selectedRgIds?.length) return null;
-
-    const required = {};
-    (colorSizes || []).forEach(sz => {
-        const name = stdSize(sz.size_name || sz.size || String(sz.size_id ?? ''));
-        if (name) required[name] = Number(sz.quantity) || 0;
-    });
-
-    const markers = selectedRgIds.map(rgId => ({
-        rgId,
-        items: markerMap[rgId]?.items || [],
-        totalPieces: markerMap[rgId]?.totalPieces || 0,
-    }));
-
-    // sizeCoverage[sizeName] = array of marker indices that include it
-    const sizeCoverage = {};
-    markers.forEach((m, i) => m.items.forEach(({ sizeName }) => {
-        (sizeCoverage[sizeName] ??= []).push(i);
-    }));
-
-    const runs = new Array(markers.length).fill(0);
-
-    const computeProduced = (r) => {
-        const p = {};
-        markers.forEach((m, i) => m.items.forEach(({ sizeName, pieces }) => {
-            p[sizeName] = (p[sizeName] || 0) + r[i] * pieces;
-        }));
-        return p;
-    };
-
-    // Phase 1: sizes covered by only ONE marker lock in that marker's minimum runs
-    Object.entries(required).forEach(([sz, qty]) => {
-        if (qty <= 0) return;
-        const idx = sizeCoverage[sz] || [];
-        if (idx.length === 1) {
-            const i = idx[0];
-            const pieces = markers[i].items.find(it => it.sizeName === sz)?.pieces || 1;
-            runs[i] = Math.max(runs[i], Math.ceil(qty / pieces));
-        }
-    });
-
-    let produced = computeProduced(runs);
-
-    // Phase 2: for any still-deficient shared size, pick the covering marker
-    // that adds the fewest extra pieces (greedy minimum-overproduction choice)
-    let anyDeficit = true;
-    while (anyDeficit) {
-        anyDeficit = false;
-        for (const [sz, qty] of Object.entries(required)) {
-            if (qty <= 0 || (produced[sz] || 0) >= qty) continue;
-            const deficit  = qty - (produced[sz] || 0);
-            const coverIdx = sizeCoverage[sz] || [];
-            if (!coverIdx.length) continue;
-
-            let bestI = -1, bestExtra = Infinity, bestCost = Infinity;
-            coverIdx.forEach(i => {
-                const pieces  = markers[i].items.find(it => it.sizeName === sz)?.pieces || 1;
-                const extra   = Math.ceil(deficit / pieces);
-                const addCost = markers[i].items.reduce((t, { sizeName: s, pieces: p }) =>
-                    t + Math.max(0, (produced[s] || 0) + extra * p - (required[s] || 0)), 0);
-                if (addCost < bestCost || (addCost === bestCost && extra < bestExtra)) {
-                    bestI = i; bestExtra = extra; bestCost = addCost;
-                }
-            });
-
-            if (bestI >= 0) {
-                runs[bestI] += bestExtra;
-                produced = computeProduced(runs);
-                anyDeficit = true;
-                break; // restart after each adjustment
-            }
-        }
-    }
-
-    // Phase 3: try reducing each marker's run count without causing underproduction
-    let reduced = true;
-    while (reduced) {
-        reduced = false;
-        for (let i = 0; i < markers.length; i++) {
-            if (runs[i] === 0) continue;
-            runs[i]--;
-            const test     = computeProduced(runs);
-            const feasible = Object.entries(required).every(([s, q]) => q <= 0 || (test[s] || 0) >= q);
-            if (feasible) { produced = test; reduced = true; }
-            else runs[i]++;
-        }
-    }
-
-    const perMarker = markers.map((m, i) => ({
-        rgId:         m.rgId,
-        runs:         runs[i],
-        produced:     Object.fromEntries(m.items.map(({ sizeName, pieces }) => [sizeName, runs[i] * pieces])),
-        totalProduced: runs[i] * m.totalPieces,
-    }));
-
-    const overProduction = {};
-    Object.entries(required).forEach(([sz, qty]) => {
-        const extra = (produced[sz] || 0) - qty;
-        if (extra > 0) overProduction[sz] = extra;
-    });
-
-    return {
-        perMarker,
-        produced,
-        overProduction,
-        totalOverProduction: Object.values(overProduction).reduce((s, v) => s + v, 0),
-        grandTotal:          Object.values(produced).reduce((s, v) => s + v, 0),
-        totalRuns:           runs.reduce((s, r) => s + r, 0),
-    };
-};
-
 // ─── LINK + ALLOCATE MODAL ────────────────────────────────────────────────────
-// Two-step flow: Step 1 = select BOM, Step 2 = assign marker per color.
-// On confirm: links the BOM, finalizes quantities, calculates requirements.
-
+// Two-step flow: Step 1 = select BOM (+ secondary fabric if the BOM needs it),
+// Step 2 = confirm quantities per color (imported from the Sales Order, no
+// marker involved). On confirm: links the BOM, finalizes quantities, calculates
+// requirements.
 const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, onLink, onPreview }) => {
     const [step,            setStep]            = useState(1);
     const [pickedBomId,     setPickedBomId]     = useState('');
@@ -4237,10 +4109,13 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
     const [pickedSecondaryFabricTypeId, setPickedSecondaryFabricTypeId] = useState(
         sop.secondary_fabric_type_id ? String(sop.secondary_fabric_type_id) : ''
     );
-    // { [colorId]: { [rgId]: boolean } } — multiple markers per color
-    const [markerChoices,   setMarkerChoices]   = useState({});
-    const [submitting,      setSubmitting]      = useState(false);
-    const [error,           setError]           = useState(null);
+    const [qtyOverrides, setQtyOverrides] = useState({}); // { [colorId]: { [sizeKey]: string } }
+    const [submitting,   setSubmitting]   = useState(false);
+    const [error,        setError]        = useState(null);
+
+    const setSizeQty = (colorId, sizeKey, value) => {
+        setQtyOverrides(prev => ({ ...prev, [colorId]: { ...(prev[colorId] || {}), [sizeKey]: value } }));
+    };
 
     // Aggregate order sizes across all colors
     const combinedSizeMap = useMemo(() => {
@@ -4260,34 +4135,22 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
             : Object.entries(sop.size_breakdown || {}).filter(([, v]) => parseInt(v) > 0),
         [combinedSizeMap, sop.size_breakdown]);
 
-    // Use detailed ratio groups when loaded, fall back to list-level data
+    // Use detailed ratio groups when loaded, fall back to list-level data — shown
+    // as informational context on the BOM picker (actual cutting-layout reference),
+    // not something the merchandiser selects here.
     const ratioGroups = pickedBomDetail?.ratio_groups
         || bomOptions.find(b => String(b.id) === pickedBomId)?.ratio_groups
         || [];
 
-    // True once the fully-detailed BOM (with fabric_consumptions per ratio group) has
+    // True once the fully-detailed BOM (with its BOM-level fabric_consumptions) has
     // loaded and at least one line is a generic SECONDARY fabric — requires the picker below.
-    const needsSecondaryFabric = !!pickedBomDetail?.ratio_groups?.some(
-        rg => (rg.fabric_consumptions || []).some(fc => fc.fabric_role === 'SECONDARY')
+    const needsSecondaryFabric = !!pickedBomDetail?.fabric_consumptions?.some(
+        fc => fc.fabric_role === 'SECONDARY'
     );
-
-    const markerMap = useMemo(() => {
-        const map = {};
-        ratioGroups.forEach(rg => {
-            const rgId = String(rg.ratio_group_id ?? rg.id);
-            const items = (rg.items || [])
-                .map(it => ({ sizeName: stdSize(it.size || ''), pieces: parseInt(it.number_of_pieces) || 1 }))
-                .filter(it => it.sizeName);
-            const totalPieces = items.reduce((s, it) => s + it.pieces, 0) || rg.total_pieces_in_marker || 0;
-            map[rgId] = { name: rg.ratio_group_name || `Group ${rgId}`, items, totalPieces };
-        });
-        return map;
-    }, [ratioGroups]);
 
     const pickBom = async (bomId) => {
         setPickedBomId(bomId);
         setPickedBomDetail(null);
-        setMarkerChoices({});
         setLoadingDetail(true);
         try {
             const res    = await bomApi.getById(parseInt(bomId));
@@ -4299,84 +4162,23 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
         finally { setLoadingDetail(false); }
     };
 
-    const toggleMarker = (colorId, rgId) => {
-        setMarkerChoices(prev => {
-            const colorMap = { ...(prev[colorId] || {}) };
-            colorMap[rgId] = !colorMap[rgId];
-            return { ...prev, [colorId]: colorMap };
-        });
-    };
-
-    // Jointly-optimised runs across all selected markers for a color
-    const calcAllForColor = (colorSizes, colorId) => {
-        const selectedIds = Object.entries(markerChoices[colorId] || {})
-            .filter(([, v]) => v).map(([id]) => id);
-        if (selectedIds.length === 0) return null;
-
-        const result = suggestOptimalRuns(colorSizes, selectedIds, markerMap);
-        if (!result) return null;
-
-        const orderedBySz = {};
-        (colorSizes || []).forEach(sz => {
-            const name = stdSize(sz.size_name || sz.size || String(sz.size_id ?? ''));
-            if (name) orderedBySz[name] = Number(sz.quantity) || 0;
-        });
-
-        const sizeCoverage = {};
-        result.perMarker.forEach(r => Object.keys(r.produced).forEach(sz => {
-            sizeCoverage[sz] = (sizeCoverage[sz] || 0) + 1;
-        }));
-
-        return {
-            ...result,
-            totalProduced: result.produced,   // alias: JSX uses totalProduced for the aggregate map
-            orderedBySz,
-            uncoveredSizes: Object.keys(orderedBySz).filter(s => orderedBySz[s] > 0 && !result.produced[s]),
-            overlapSizes:   Object.entries(sizeCoverage).filter(([, c]) => c > 1).map(([s]) => s),
-        };
-    };
-
-    const colorHasMarker = (colorId) =>
-        Object.values(markerChoices[colorId] || {}).some(Boolean);
-
-    const allAllocated = (sop.colors || []).every(c => colorHasMarker(String(c.fabric_color_id)));
-
-    const allocatedCount = (sop.colors || []).filter(c => colorHasMarker(String(c.fabric_color_id))).length;
-
     const handleConfirm = async () => {
         setSubmitting(true);
         setError(null);
         try {
-            const usedRgIds = [...new Set(
-                Object.values(markerChoices).flatMap(choices =>
-                    Object.entries(choices).filter(([, v]) => v).map(([id]) => parseInt(id))
-                )
-            )];
-            const quantities = (sop.colors || []).map(c => {
-                const colorId  = String(c.fabric_color_id);
-                const calc     = calcAllForColor(c.sizes, colorId);
-                const selectedIds = Object.entries(markerChoices[colorId] || {})
-                    .filter(([, v]) => v).map(([id]) => id);
-                const orderedTotal = (c.sizes || []).reduce((s, sz) => s + (Number(sz.quantity) || 0), 0);
-                return {
-                    fabric_color_id:    Number(c.fabric_color_id),
-                    ratio_group_id:     selectedIds.length === 1 ? parseInt(selectedIds[0]) : null,
-                    marker_runs:        calc?.totalRuns ?? 0,
-                    // `||` (not `??`) so a 0-producing marker falls back to the ordered qty,
-                    // whose source of truth is c.sizes — c.total_quantity/quantity are often absent.
-                    finalized_quantity: calc?.grandTotal || orderedTotal || Number(c.total_quantity || c.quantity) || 0,
-                    selected_option:    'exact',
-                };
-            });
+            const quantities = (sop.colors || []).map(c => ({
+                fabric_color_id:    Number(c.fabric_color_id),
+                finalized_quantity: colorTotalFor(c.sizes, qtyOverrides[String(c.fabric_color_id)]),
+            }));
             // Validate before onLink so we never leave the BOM linked but quantities un-finalized.
             const invalid = quantities.find(q => !q.fabric_color_id || !q.finalized_quantity);
             if (invalid) {
-                setError('Cannot finalize: a color has no valid quantity or fabric color. Check size quantities and marker selection.');
+                setError('Cannot finalize: a color has no valid quantity or fabric color.');
                 setSubmitting(false);
                 return;
             }
             console.group(`%c[RECALC · LINK+CALCULATE] SOP #${sop.id} — ${sop.product_name || ''}`, 'color:#7c3aed;font-weight:bold');
-            console.log('bom_id:', parseInt(pickedBomId), '| ratio_group_ids:', usedRgIds);
+            console.log('bom_id:', parseInt(pickedBomId));
             console.log('finalize-quantities payload (drives gross recompute):');
             console.table(quantities);
             console.log('%cBE: recompute GROSS from finalized_quantity above; existing reservations must be PRESERVED and their reserved amounts EXCLUDED from new PR/PO (net = gross − reserved).', 'color:#b91c1c');
@@ -4385,7 +4187,7 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
             // captured right next to the calculate result (the two must be read together).
             logBomBrief('LINK-CONFIRM', pickedBomDetail);
 
-            const linkRes = await onLink(sop.id, parseInt(pickedBomId), usedRgIds,
+            const linkRes = await onLink(sop.id, parseInt(pickedBomId),
                 pickedSecondaryFabricTypeId ? parseInt(pickedSecondaryFabricTypeId) : null);
             console.log('[LINK] linkBom done →', linkRes);
 
@@ -4408,7 +4210,7 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
         }
     };
 
-    const stepTitle = step === 1 ? 'Step 1 of 2 — Select BOM' : 'Step 2 of 2 — Allocate Markers';
+    const stepTitle = step === 1 ? 'Step 1 of 2 — Select BOM' : 'Step 2 of 2 — Confirm Quantities';
 
     return (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={!submitting ? onClose : undefined}>
@@ -4420,7 +4222,7 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">{stepTitle}</p>
                         <h2 className="font-extrabold text-slate-800 text-base">{sop.product_name}</h2>
                         <p className="text-xs text-slate-400 mt-0.5">
-                            {step === 1 ? 'Pick an approved BOM for this product line.' : 'Assign a marker to each color — runs are calculated from ordered sizes.'}
+                            {step === 1 ? 'Pick an approved BOM for this product line.' : 'Quantities are imported from the Sales Order — adjust and confirm.'}
                         </p>
                     </div>
                     {!submitting && <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 mt-0.5"><X size={18} /></button>}
@@ -4525,7 +4327,7 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
                                     Secondary Fabric — required
                                 </p>
                                 <p className="text-[11px] text-violet-600 mb-2">
-                                    This BOM's marker has a generic secondary fabric line (e.g. lining/contrast). Pick the actual fabric this order uses for it.
+                                    This BOM has a generic secondary fabric line (e.g. lining/contrast). Pick the actual fabric this order uses for it.
                                 </p>
                                 <select
                                     value={pickedSecondaryFabricTypeId}
@@ -4539,14 +4341,12 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
                         )}
                     </>)}
 
-                    {/* ── STEP 2: Marker allocation per color ── */}
+                    {/* ── STEP 2: Confirm quantities per color, per size ── */}
                     {step === 2 && (sop.colors || []).map(c => {
-                        const colorId      = String(c.fabric_color_id);
-                        const sizes        = c.sizes || [];
-                        const totalOrdered = sizes.reduce((s, sz) => s + (Number(sz.quantity) || 0), 0);
-                        const colorChoices = markerChoices[colorId] || {};
-                        const calc         = calcAllForColor(sizes, colorId);
-                        const hasAny       = colorHasMarker(colorId);
+                        const colorId = String(c.fabric_color_id);
+                        const sizes   = c.sizes || [];
+                        const ordered = orderedTotalFor(sizes);
+                        const total   = colorTotalFor(sizes, qtyOverrides[colorId]);
                         return (
                             <div key={colorId} className="border border-slate-200 rounded-xl overflow-hidden">
                                 {/* Color header */}
@@ -4555,166 +4355,24 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
                                     {c.color_number && (
                                         <span className="text-[10px] font-mono text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded">{c.color_number}</span>
                                     )}
-                                    <div className="ml-auto flex items-center gap-1.5">
-                                        {hasAny && (
-                                            <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-                                                <CheckCircle2 size={9} /> {Object.values(colorChoices).filter(Boolean).length} marker{Object.values(colorChoices).filter(Boolean).length !== 1 ? 's' : ''}
-                                            </span>
-                                        )}
-                                        <span className="text-[10px] text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded font-medium">
-                                            {totalOrdered.toLocaleString()} pcs ordered
-                                        </span>
-                                    </div>
+                                    <span className="ml-auto text-[10px] text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded font-medium">
+                                        {ordered.toLocaleString()} pcs ordered
+                                    </span>
                                 </div>
 
-                                <div className="p-4 space-y-4">
-                                    {/* Size chips */}
-                                    {sizes.filter(sz => Number(sz.quantity) > 0).length > 0 && (
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {sizes.filter(sz => Number(sz.quantity) > 0).map(sz => {
-                                                const sName = stdSize(sz.size_name || sz.size || String(sz.size_id ?? ''));
-                                                return (
-                                                    <span key={sz.size_id ?? sName}
-                                                        className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-700">
-                                                        <span className="text-slate-500">{sName}</span>
-                                                        <span className="text-slate-300">:</span>
-                                                        <span>{Number(sz.quantity).toLocaleString()}</span>
-                                                    </span>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-
-                                    {/* Multi-marker picker (checkboxes) */}
-                                    {ratioGroups.length > 0 && (
-                                        <div>
-                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                                                Select Markers <span className="font-normal normal-case text-slate-300 ml-1">— combine multiple markers to cover all sizes</span>
-                                            </p>
-                                            <div className="space-y-2">
-                                                {ratioGroups.map(rg => {
-                                                    const rgId          = String(rg.ratio_group_id ?? rg.id);
-                                                    const m             = markerMap[rgId];
-                                                    const active        = !!colorChoices[rgId];
-                                                    // Use joint-optimized run count, not the solo per-marker figure
-                                                    const optEntry      = active ? calc?.perMarker?.find(r => r.rgId === rgId) : null;
-                                                    return (
-                                                        <button key={rgId}
-                                                            onClick={() => toggleMarker(colorId, rgId)}
-                                                            className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-all ${
-                                                                active ? 'border-violet-400 bg-violet-50' : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/20'
-                                                            }`}
-                                                        >
-                                                            {/* Checkbox indicator */}
-                                                            <div className={`mt-0.5 w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${
-                                                                active ? 'border-violet-500 bg-violet-500' : 'border-slate-300 bg-white'
-                                                            }`}>
-                                                                {active && <CheckCircle2 size={10} className="text-white" strokeWidth={3} />}
-                                                            </div>
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex items-center justify-between gap-2">
-                                                                    <p className="text-xs font-bold text-slate-700">{m?.name}</p>
-                                                                    {active && optEntry && (
-                                                                        <span className="text-[9px] font-bold text-violet-700 bg-violet-100 border border-violet-200 px-1.5 py-0.5 rounded shrink-0">
-                                                                            {optEntry.runs} run{optEntry.runs !== 1 ? 's' : ''} · {(optEntry.totalProduced || 0).toLocaleString()} pcs
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                                <div className="flex flex-wrap items-center gap-1 mt-1">
-                                                                    {(m?.items || []).map(it => (
-                                                                        <span key={it.sizeName} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
-                                                                            active ? 'bg-violet-100 text-violet-700 border-violet-200' : 'bg-slate-50 text-slate-600 border-slate-200'
-                                                                        }`}>
-                                                                            {it.sizeName}×{it.pieces}
-                                                                        </span>
-                                                                    ))}
-                                                                    <span className="text-[9px] text-slate-400">= {m?.totalPieces} pcs/run</span>
-                                                                </div>
-                                                            </div>
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Combined result across all selected markers */}
-                                    {calc && calc.grandTotal > 0 && (
-                                        <div className={`rounded-xl border px-4 py-3 space-y-3 ${
-                                            calc.uncoveredSizes.length > 0 ? 'bg-red-50 border-red-200'
-                                            : calc.overlapSizes.length > 0  ? 'bg-amber-50 border-amber-200'
-                                            : 'bg-emerald-50 border-emerald-200'
-                                        }`}>
-                                            {/* Summary row */}
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div>
-                                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Total Runs</p>
-                                                    <p className="text-2xl font-extrabold text-slate-800 leading-none mt-0.5">
-                                                        {calc.totalRuns}
-                                                        <span className="text-sm font-bold text-slate-400 ml-1.5">
-                                                            across {calc.perMarker.length} marker{calc.perMarker.length !== 1 ? 's' : ''}
-                                                        </span>
-                                                    </p>
-                                                </div>
-                                                <div className="text-right">
-                                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Total Produced</p>
-                                                    <p className="text-xl font-extrabold text-slate-800 leading-none mt-0.5">
-                                                        {calc.grandTotal.toLocaleString()}
-                                                        <span className="text-sm font-normal text-slate-400 ml-1">pcs</span>
-                                                    </p>
-                                                </div>
-                                            </div>
-
-                                            {/* Per-marker breakdown */}
-                                            {calc.perMarker.length > 1 && (
-                                                <div className="space-y-1">
-                                                    {calc.perMarker.map(r => {
-                                                        const m = markerMap[r.rgId];
-                                                        return (
-                                                            <div key={r.rgId} className="flex items-center justify-between text-[10px] text-slate-600 bg-white/60 px-2 py-1 rounded-lg">
-                                                                <span className="font-bold">{m?.name}</span>
-                                                                <span className="text-slate-500">{r.runs} run{r.runs !== 1 ? 's' : ''} → {r.totalProduced?.toLocaleString()} pcs</span>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-
-                                            {/* Per-size produced vs ordered */}
-                                            <div className="flex flex-wrap gap-1.5">
-                                                {Object.entries(calc.totalProduced).map(([sz, producedQty]) => {
-                                                    const ordered = calc.orderedBySz[sz] || 0;
-                                                    const extra   = producedQty - ordered;
-                                                    const exact   = extra === 0;
-                                                    return (
-                                                        <span key={sz} className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg border ${
-                                                            exact ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-amber-100 text-amber-800 border-amber-200'
-                                                        }`}>
-                                                            {sz}: {producedQty.toLocaleString()}
-                                                            {exact
-                                                                ? <CheckCircle2 size={10} className="text-emerald-600" />
-                                                                : <span className="text-[9px] font-normal text-amber-600">+{extra}</span>
-                                                            }
-                                                        </span>
-                                                    );
-                                                })}
-                                            </div>
-
-                                            {/* Warnings */}
-                                            {calc.uncoveredSizes.length > 0 && (
-                                                <p className="text-[10px] text-red-700 flex items-center gap-1">
-                                                    <AlertTriangle size={11} className="shrink-0" />
-                                                    Not covered by any marker: <span className="font-bold ml-0.5">{calc.uncoveredSizes.join(', ')}</span>
-                                                </p>
-                                            )}
-                                            {calc.overlapSizes.length > 0 && (
-                                                <p className="text-[10px] text-amber-700 flex items-center gap-1">
-                                                    <AlertTriangle size={11} className="shrink-0" />
-                                                    Sizes in multiple markers (overproduction likely): <span className="font-bold ml-0.5">{calc.overlapSizes.join(', ')}</span>
-                                                </p>
-                                            )}
-                                        </div>
-                                    )}
+                                <div className="p-4 space-y-3">
+                                    {/* Per-size quantity — pre-filled from the order, each size editable */}
+                                    <div>
+                                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Finalized Quantity per Size</label>
+                                        <PerSizeQuantityEditor
+                                            sizes={sizes}
+                                            overrides={qtyOverrides[colorId]}
+                                            onChange={(sizeKey, val) => setSizeQty(colorId, sizeKey, val)}
+                                        />
+                                    </div>
+                                    <p className="text-xs text-slate-500 text-right">
+                                        Total: <span className="font-bold text-slate-800">{total.toLocaleString()}</span> pcs
+                                    </p>
                                 </div>
                             </div>
                         );
@@ -4735,7 +4393,7 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
                                 className="flex items-center gap-1.5 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-2.5 rounded-xl transition-colors"
                             >
                                 {loadingDetail ? <Loader2 size={14} className="animate-spin" /> : <ChevronRight size={14} />}
-                                Next: Allocate Markers
+                                Next: Confirm Quantities
                             </button>
                         </>
                     ) : (
@@ -4744,16 +4402,11 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
                                 className="flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40">
                                 <ChevronLeft size={14} /> Back
                             </button>
-                            <div className="flex items-center gap-3">
-                                <p className="text-xs text-slate-400">
-                                    {allocatedCount}/{(sop.colors || []).length} colors with markers
-                                </p>
-                                <button onClick={handleConfirm} disabled={submitting || !allAllocated}
-                                    className="flex items-center gap-2 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-2.5 rounded-xl transition-colors shadow-sm">
-                                    {submitting ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
-                                    Link & Calculate
-                                </button>
-                            </div>
+                            <button onClick={handleConfirm} disabled={submitting || (sop.colors || []).length === 0}
+                                className="flex items-center gap-2 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-2.5 rounded-xl transition-colors shadow-sm">
+                                {submitting ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+                                Link & Calculate
+                            </button>
                         </>
                     )}
                 </div>
@@ -4963,7 +4616,6 @@ const SopCard = ({ sop, salesOrder, bomOptions, fabricTypes, onLink, onUnlink, o
                             const ordered   = Number(c.quantity ?? c.total_quantity ?? 0);
                             const plan      = planByColor[colorId];
                             const finalized = plan?.finalized_quantity;
-                            const runs      = plan?.marker_runs;
                             const isExpanded = expandedColorId === colorId;
                             return (
                                 <button key={colorId}
@@ -4981,7 +4633,6 @@ const SopCard = ({ sop, salesOrder, bomOptions, fabricTypes, onLink, onUnlink, o
                                     {finalized != null && (
                                         <span className="ml-1 text-emerald-700">
                                             · {Number(finalized).toLocaleString()} final
-                                            {runs != null && <span className="font-normal text-emerald-500"> ({runs} run{runs === 1 ? '' : 's'})</span>}
                                         </span>
                                     )}
                                 </button>
@@ -5021,11 +4672,6 @@ const SopCard = ({ sop, salesOrder, bomOptions, fabricTypes, onLink, onUnlink, o
                                             {Number(expandedPlan.finalized_quantity).toLocaleString()}
                                         </span>
                                     </span>
-                                    {expandedPlan.marker_runs != null && (
-                                        <span className="text-slate-400">
-                                            ({expandedPlan.marker_runs} run{expandedPlan.marker_runs === 1 ? '' : 's'})
-                                        </span>
-                                    )}
                                     {Number(expandedPlan.finalized_quantity) > Number(expandedColor.quantity ?? expandedColor.total_quantity ?? 0) && (
                                         <span className="ml-auto text-amber-600 font-bold">
                                             +{(Number(expandedPlan.finalized_quantity) - Number(expandedColor.quantity ?? expandedColor.total_quantity ?? 0)).toLocaleString()} over
@@ -5232,7 +4878,7 @@ const SopCard = ({ sop, salesOrder, bomOptions, fabricTypes, onLink, onUnlink, o
             )}
 
             {showQuantityPicker && (
-                <MarkerAllocationModal
+                <FinalizeQuantitiesModal
                     sop={sop}
                     onClose={() => setShowQuantityPicker(false)}
                     onDone={() => {
@@ -5322,14 +4968,13 @@ const ProductionPlanningPage = () => {
 
     
 
-    const handleLink = useCallback(async (sopId, bomId, ratioGroupIds, secondaryFabricTypeId = null) => {
+    const handleLink = useCallback(async (sopId, bomId, secondaryFabricTypeId = null) => {
         setLinking(l => ({ ...l, [sopId]: true }));
         try {
             console.log(`[LINK] POST /planning/sales-order-products/${sopId}/link-bom — payload:`,
-                { bom_id: bomId, ratio_group_ids: ratioGroupIds, secondary_fabric_type_id: secondaryFabricTypeId });
+                { bom_id: bomId, secondary_fabric_type_id: secondaryFabricTypeId });
             const res = await planningApi.linkBom(sopId, {
                 bom_id: bomId,
-                ratio_group_ids: ratioGroupIds,
                 secondary_fabric_type_id: secondaryFabricTypeId,
             });
             console.log('[LINK] link-bom response →', res?.data);
@@ -5337,7 +4982,7 @@ const ProductionPlanningPage = () => {
             return res?.data;
         } catch (e) {
             console.error('[LINK] Link BOM failed', {
-                sopId, bomId, ratioGroupIds,
+                sopId, bomId,
                 status: e?.response?.status,
                 data:   e?.response?.data,
                 message: e?.message,

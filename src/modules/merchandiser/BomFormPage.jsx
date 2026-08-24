@@ -35,7 +35,6 @@ const applyFabricLineValue = (fc, value) => value.startsWith(ROLE_PREFIX)
 
 const freshRatioGroup = () => ({
     _key: genKey(), ratio_group_name: '', marker_length_inches: '',
-    fabrics: [freshFabric()],
     items: [],
 });
 
@@ -84,7 +83,7 @@ const AddBtn = ({ onClick, label }) => (
 
 // ─── Ratio Group Accordion ────────────────────────────────────────────────────
 
-const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, canRemove, fabricTypes, sizes, genericFabricOnly }) => {
+const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, canRemove, sizes }) => {
     const totalPieces = group.items.reduce((s, it) => s + (parseInt(it.number_of_pieces) || 0), 0);
     const sizeSummary = group.items.filter(it => it.size).map(it => `${it.size}×${it.number_of_pieces}`).join(' · ');
     const isBadSize = useMemo(() => makeSizeValidator(sizes), [sizes]);
@@ -97,21 +96,6 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
         const items = [...group.items];
         items[sIdx] = { ...items[sIdx], [field]: val };
         updItems(items);
-    };
-
-    const fabrics = group.fabrics || [];
-    const updFabs = (fabs) => onUpdate(gIdx, 'fabrics', fabs);
-    const addFab = () => updFabs([...fabrics, freshFabric()]);
-    const removeFab = (fIdx) => updFabs(fabrics.filter((_, i) => i !== fIdx));
-    const updateFab = (fIdx, field, val) => {
-        const fabs = [...fabrics];
-        fabs[fIdx] = { ...fabs[fIdx], [field]: val };
-        updFabs(fabs);
-    };
-    const replaceFab = (fIdx, nextFc) => {
-        const fabs = [...fabrics];
-        fabs[fIdx] = nextFc;
-        updFabs(fabs);
     };
 
     return (
@@ -239,67 +223,79 @@ const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, c
                             </p>
                         );
                     })()}
-
-                    {/* Fabric consumptions */}
-                    <div className="border-t border-slate-100 pt-3">
-                        <div className="flex items-center justify-between mb-2">
-                            <p className="text-[10px] font-bold text-slate-500 uppercase">Fabric Consumptions</p>
-                            <button onClick={addFab}
-                                className="flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 px-2 py-1 rounded-md transition-colors">
-                                <Plus size={9} /> Add Fabric
-                            </button>
-                        </div>
-                        {fabrics.length === 0 && (
-                            <p className="text-xs text-slate-500 italic text-center py-2">No fabrics. Add fabric consumption for this ratio group.</p>
-                        )}
-                        {genericFabricOnly && (
-                            <p className="text-[10px] text-violet-500 mb-1.5">
-                                Only Primary/Secondary generic fabric — the actual fabric is picked per Sales Order when this BOM is linked, so one BOM works for every fabric type.
-                            </p>
-                        )}
-                        {fabrics.map((fc, fIdx) => {
-                            // A ratio group can only have one PRIMARY and one SECONDARY generic
-                            // line (mirrors the backend's unique index) — hide roles already
-                            // taken by another fabric line here so the picker can't offer a
-                            // combination the save call would reject.
-                            const rolesUsedElsewhere = new Set(
-                                fabrics.filter((_, i) => i !== fIdx).map(f => f.fabric_role).filter(Boolean)
-                            );
-                            return (
-                                <div key={fc._key} className="flex items-center gap-2 mb-1.5">
-                                    <select value={fabricLineValue(fc)}
-                                        onChange={e => replaceFab(fIdx, applyFabricLineValue(fc, e.target.value))}
-                                        className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 bg-white">
-                                        <option value="">— Fabric type —</option>
-                                        <optgroup label="Generic — any fabric (set per order)">
-                                            {!rolesUsedElsewhere.has('PRIMARY') && <option value={`${ROLE_PREFIX}PRIMARY`}>Primary Fabric</option>}
-                                            {!rolesUsedElsewhere.has('SECONDARY') && <option value={`${ROLE_PREFIX}SECONDARY`}>Secondary Fabric</option>}
-                                        </optgroup>
-                                        {/* New BOMs are generic-only — pinning a concrete fabric type is what forced a
-                                            new BOM per fabric at volume. Only offered when editing an older BOM that
-                                            still has (or needs) a concrete line. */}
-                                        {!genericFabricOnly && (
-                                            <optgroup label="Specific fabric type">
-                                                {fabricTypes.map(ft => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
-                                            </optgroup>
-                                        )}
-                                    </select>
-                                    <input type="number" min="0" step="0.01" value={fc.consumption_inches}
-                                        onChange={e => updateFab(fIdx, 'consumption_inches', e.target.value)}
-                                        placeholder="85.5"
-                                        className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 text-right"
-                                    />
-                                    <span className="text-[10px] text-slate-600 shrink-0">in</span>
-                                    <button onClick={() => removeFab(fIdx)} className="text-slate-300 hover:text-red-400 shrink-0">
-                                        <X size={12} />
-                                    </button>
-                                </div>
-                            );
-                        })}
-                    </div>
                 </div>
             )}
         </div>
+    );
+};
+
+// ─── Fabric Consumptions (BOM-level) ──────────────────────────────────────────
+// One average per-piece consumption per fabric (or PRIMARY/SECONDARY generic
+// role), common across the whole BOM regardless of which marker/ratio group is
+// eventually used to cut it — not nested under a ratio group.
+const FabricConsumptionsSection = ({ fabrics, onChange, fabricTypes, genericFabricOnly }) => {
+    const addFab = () => onChange([...fabrics, freshFabric()]);
+    const removeFab = (fIdx) => onChange(fabrics.filter((_, i) => i !== fIdx));
+    const updateFab = (fIdx, field, val) => {
+        const fabs = [...fabrics];
+        fabs[fIdx] = { ...fabs[fIdx], [field]: val };
+        onChange(fabs);
+    };
+    const replaceFab = (fIdx, nextFc) => {
+        const fabs = [...fabrics];
+        fabs[fIdx] = nextFc;
+        onChange(fabs);
+    };
+
+    return (
+        <Section title="Fabric Consumptions" action={<AddBtn onClick={addFab} label="Add Fabric" />}>
+            {fabrics.length === 0 && (
+                <p className="text-xs text-slate-500 italic text-center py-2">No fabrics. Add fabric consumption for this BOM.</p>
+            )}
+            {genericFabricOnly && (
+                <p className="text-[10px] text-violet-500 mb-1.5">
+                    Only Primary/Secondary generic fabric — the actual fabric is picked per Sales Order when this BOM is linked, so one BOM works for every fabric type.
+                </p>
+            )}
+            {fabrics.map((fc, fIdx) => {
+                // Only one PRIMARY and one SECONDARY generic line per BOM (mirrors the
+                // backend's unique index) — hide roles already taken by another fabric
+                // line here so the picker can't offer a combination the save call would reject.
+                const rolesUsedElsewhere = new Set(
+                    fabrics.filter((_, i) => i !== fIdx).map(f => f.fabric_role).filter(Boolean)
+                );
+                return (
+                    <div key={fc._key} className="flex items-center gap-2 mb-1.5">
+                        <select value={fabricLineValue(fc)}
+                            onChange={e => replaceFab(fIdx, applyFabricLineValue(fc, e.target.value))}
+                            className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 bg-white">
+                            <option value="">— Fabric type —</option>
+                            <optgroup label="Generic — any fabric (set per order)">
+                                {!rolesUsedElsewhere.has('PRIMARY') && <option value={`${ROLE_PREFIX}PRIMARY`}>Primary Fabric</option>}
+                                {!rolesUsedElsewhere.has('SECONDARY') && <option value={`${ROLE_PREFIX}SECONDARY`}>Secondary Fabric</option>}
+                            </optgroup>
+                            {/* New BOMs are generic-only — pinning a concrete fabric type is what forced a
+                                new BOM per fabric at volume. Only offered when editing an older BOM that
+                                still has (or needs) a concrete line. */}
+                            {!genericFabricOnly && (
+                                <optgroup label="Specific fabric type">
+                                    {fabricTypes.map(ft => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                                </optgroup>
+                            )}
+                        </select>
+                        <input type="number" min="0" step="0.01" value={fc.consumption_inches}
+                            onChange={e => updateFab(fIdx, 'consumption_inches', e.target.value)}
+                            placeholder="2.5"
+                            className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 text-right"
+                        />
+                        <span className="text-[10px] text-slate-600 shrink-0">in / pc</span>
+                        <button onClick={() => removeFab(fIdx)} className="text-slate-300 hover:text-red-400 shrink-0">
+                            <X size={12} />
+                        </button>
+                    </div>
+                );
+            })}
+        </Section>
     );
 };
 
@@ -806,6 +802,7 @@ export default function BomFormPage() {
             form: {
                 product_id: '', bom_name: '',
                 ratio_groups: [rg],
+                fabric_consumptions: [freshFabric()],
                 material_consumptions: [],
             },
             rgKey: rg._key,
@@ -863,13 +860,13 @@ export default function BomFormPage() {
                         _key: genKey(),
                         ratio_group_name: rg.ratio_group_name || '',
                         marker_length_inches: rg.marker_length_inches || '',
-                        fabrics: (rg.fabric_consumptions || []).map(fc => ({
-                            _key: genKey(),
-                            fabric_type_id: fc.fabric_role ? '' : String(fc.fabric_type?.id || fc.fabric_type_id || ''),
-                            fabric_role: fc.fabric_role || '',
-                            consumption_inches: fc.consumption_inches || '',
-                        })),
                         items: (rg.items || []).map(it => ({ _key: genKey(), size: it.size, number_of_pieces: it.number_of_pieces })),
+                    })),
+                    fabric_consumptions: (bom.fabric_consumptions || []).map(fc => ({
+                        _key: genKey(),
+                        fabric_type_id: fc.fabric_role ? '' : String(fc.fabric_type?.id || fc.fabric_type_id || ''),
+                        fabric_role: fc.fabric_role || '',
+                        consumption_inches: fc.consumption_inches || '',
                     })),
                     material_consumptions: (bom.material_consumptions || []).map(mc => ({
                         _key: genKey(),
@@ -906,13 +903,16 @@ export default function BomFormPage() {
                         _key: genKey(),
                         ratio_group_name: rg.ratio_group_name || '',
                         marker_length_inches: rg.marker_length_inches || '',
-                        fabrics: (rg.fabric_consumptions || []).map(fc => ({
-                            _key: genKey(),
-                            fabric_type_id: '',
-                            fabric_role: fc.fabric_role || '',
-                            consumption_inches: fc.consumption_inches || '',
-                        })),
                         items: (rg.items || []).map(it => ({ _key: genKey(), size: it.size, number_of_pieces: it.number_of_pieces })),
+                    })),
+                    // Concrete fabric_type_id lines are cleared — picking the new fabric is
+                    // the whole reason to duplicate that kind of line. Generic PRIMARY/
+                    // SECONDARY role lines carry over as-is.
+                    fabric_consumptions: (bom.fabric_consumptions || []).map(fc => ({
+                        _key: genKey(),
+                        fabric_type_id: '',
+                        fabric_role: fc.fabric_role || '',
+                        consumption_inches: fc.consumption_inches || '',
                     })),
                     material_consumptions: (bom.material_consumptions || []).map(mc => ({
                         _key: genKey(),
@@ -989,11 +989,13 @@ export default function BomFormPage() {
             ratio_group_name: rg.ratio_group_name.trim(),
             marker_length_inches: rg.marker_length_inches ? parseFloat(rg.marker_length_inches) : null,
             items: rg.items.map(it => ({ size: it.size, number_of_pieces: parseInt(it.number_of_pieces) || 1 })),
-            fabric_consumptions: (rg.fabrics || []).map(fc => ({
-                fabric_type_id: fc.fabric_role ? null : parseInt(fc.fabric_type_id),
-                fabric_role: fc.fabric_role || null,
-                consumption_inches: parseFloat(fc.consumption_inches) || null,
-            })),
+        })),
+        // BOM-level — one average per-piece consumption per fabric (or PRIMARY/
+        // SECONDARY role), independent of any ratio group/marker.
+        fabric_consumptions: (form.fabric_consumptions || []).map(fc => ({
+            fabric_type_id: fc.fabric_role ? null : parseInt(fc.fabric_type_id),
+            fabric_role: fc.fabric_role || null,
+            consumption_inches: parseFloat(fc.consumption_inches) || null,
         })),
         material_consumptions: form.material_consumptions.map(mc => ({
             trim_item_id: parseInt(mc.trim_item_id),
@@ -1227,13 +1229,19 @@ export default function BomFormPage() {
                                 onUpdate={updateRatioGroup}
                                 onRemove={removeRatioGroup}
                                 canRemove={form.ratio_groups.length > 1}
-                                fabricTypes={formMeta.fabricTypes}
                                 sizes={formMeta.sizes}
-                                genericFabricOnly={!isEdit}
                             />
                         ))}
                     </div>
                 </Section>
+
+                {/* Fabric Consumptions — BOM-level, not per marker/ratio group */}
+                <FabricConsumptionsSection
+                    fabrics={form.fabric_consumptions || []}
+                    onChange={fabs => setForm(f => ({ ...f, fabric_consumptions: fabs }))}
+                    fabricTypes={formMeta.fabricTypes}
+                    genericFabricOnly={!isEdit}
+                />
 
                 {/* Material Consumptions */}
                 <Section

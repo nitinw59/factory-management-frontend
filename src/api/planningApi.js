@@ -6,7 +6,6 @@ export const planningApi = {
     getOrderDetail:           (orderId)          => api.get(`/planning/sales-orders/${orderId}`),
     linkBom:                  (sopId, body)      => api.post(`/planning/sales-order-products/${sopId}/link-bom`, body),
     unlinkBom:                (sopId)            => api.delete(`/planning/sales-order-products/${sopId}/bom`),
-    getSuggestions:           (sopId)            => api.get(`/planning/sales-order-products/${sopId}/quantity-suggestions`),
     finalizeQuantities:       (sopId, body)      => api.post(`/planning/sales-order-products/${sopId}/finalize-quantities`, body),
     calculateRequirements:    (sopId)            => api.post(`/planning/sales-order-products/${sopId}/calculate-requirements`),
     getRecalculationPreview:  (sopId)            => api.get(`/planning/sales-order-products/${sopId}/recalculation-preview`),

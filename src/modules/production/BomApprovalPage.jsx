@@ -135,17 +135,6 @@ const RatioGroupDetail = ({ rg, idx }) => (
                     ))}
                 </div>
             )}
-            {(rg.fabric_consumptions || []).length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-100">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase self-center mr-1">Fabric</span>
-                    {rg.fabric_consumptions.map((fc, j) => (
-                        <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold">
-                            {fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`}
-                            {fc.consumption_inches ? `: ${fc.consumption_inches}"` : ''}
-                        </span>
-                    ))}
-                </div>
-            )}
         </div>
     </div>
 );
@@ -211,6 +200,21 @@ const BomDetail = ({ bomId }) => {
                     </p>
                     <div className="space-y-2">
                         {bom.ratio_groups.map((rg, i) => <RatioGroupDetail key={i} rg={rg} idx={i} />)}
+                    </div>
+                </div>
+            )}
+            {(bom.fabric_consumptions || []).length > 0 && (
+                <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                        <Layers size={10} /> Fabric Consumptions ({bom.fabric_consumptions.length})
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                        {bom.fabric_consumptions.map((fc, j) => (
+                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold">
+                                {fc.fabric_role ? `${fc.fabric_role} (generic)` : (fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`)}
+                                {fc.consumption_inches ? `: ${fc.consumption_inches}" / pc` : ''}
+                            </span>
+                        ))}
                     </div>
                 </div>
             )}
@@ -309,11 +313,10 @@ const materialChanged = (o, n) => {
 const fabricKey     = f => String(f.fabric_type_id);
 const fabricChanged = (o, n) => String(o.consumption_inches) !== String(n.consumption_inches);
 
+// Fabric consumption is BOM-level now (see fabricKey/fabricChanged above), not
+// part of a ratio group — only its sizes distinguish one version from another.
 const ratioGroupKey     = g => g.ratio_group_name || String(g.id);
 const ratioGroupChanged = (o, n) => {
-    const oFab = (o.fabric_consumptions || []).map(f => `${f.fabric_type_id}:${f.consumption_inches}`).sort().join();
-    const nFab = (n.fabric_consumptions || []).map(f => `${f.fabric_type_id}:${f.consumption_inches}`).sort().join();
-    if (oFab !== nFab) return true;
     const oSz = (o.items || []).map(i => `${i.size}:${i.number_of_pieces}`).sort().join();
     const nSz = (n.items || []).map(i => `${i.size}:${i.number_of_pieces}`).sort().join();
     return oSz !== nSz;
@@ -442,11 +445,6 @@ const RatioGroupDiffRow = ({ entry, isFirstApproval }) => {
                         })}
                     </div>
                 )}
-                <FabricDiffChips
-                    oldFabrics={entry.old?.fabric_consumptions ?? []}
-                    newFabrics={entry.new?.fabric_consumptions ?? (rg.fabric_consumptions ?? [])}
-                    isFirstApproval={isFirstApproval}
-                />
             </div>
         </div>
     );
@@ -639,7 +637,8 @@ const ChangesTab = ({ currBom, prevBom }) => {
     const isFirst  = !prevBom;
     const matDiff  = diffByKey(prevBom?.material_consumptions ?? [], currBom.material_consumptions ?? [], materialKey, materialChanged);
     const rgDiff   = diffByKey(prevBom?.ratio_groups ?? [],          currBom.ratio_groups ?? [],          ratioGroupKey, ratioGroupChanged);
-    const changes  = isFirst ? 0 : [...matDiff, ...rgDiff].filter(d => d.type !== 'same').length;
+    const fabDiff  = diffByKey(prevBom?.fabric_consumptions ?? [],   currBom.fabric_consumptions ?? [],   fabricKey, fabricChanged);
+    const changes  = isFirst ? 0 : [...matDiff, ...rgDiff, ...fabDiff].filter(d => d.type !== 'same').length;
 
     return (
         <div className="space-y-5">
@@ -678,6 +677,19 @@ const ChangesTab = ({ currBom, prevBom }) => {
                 </section>
             )}
 
+            {fabDiff.length > 0 && (
+                <section>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                        <Layers size={10} /> Fabric Consumptions ({fabDiff.length})
+                    </p>
+                    <FabricDiffChips
+                        oldFabrics={prevBom?.fabric_consumptions ?? []}
+                        newFabrics={currBom.fabric_consumptions ?? []}
+                        isFirstApproval={isFirst}
+                    />
+                </section>
+            )}
+
             {matDiff.length > 0 && (
                 <section>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -692,7 +704,7 @@ const ChangesTab = ({ currBom, prevBom }) => {
                 </section>
             )}
 
-            {rgDiff.length === 0 && matDiff.length === 0 && (
+            {rgDiff.length === 0 && matDiff.length === 0 && fabDiff.length === 0 && (
                 <p className="text-sm text-slate-400 italic text-center py-8">No BOM content defined.</p>
             )}
             {selectedTrim && <TrimDetailModal mc={selectedTrim} onClose={() => setSelectedTrim(null)} />}
@@ -991,7 +1003,8 @@ const ChangeCountBadge = ({ bomId }) => {
                 if (!currBom || !prevBom) { setChanges(0); return; }
                 const matDiff = diffByKey(prevBom.material_consumptions ?? [], currBom.material_consumptions ?? [], materialKey, materialChanged);
                 const rgDiff  = diffByKey(prevBom.ratio_groups ?? [],          currBom.ratio_groups ?? [],          ratioGroupKey, ratioGroupChanged);
-                setChanges([...matDiff, ...rgDiff].filter(d => d.type !== 'same').length);
+                const fabDiff = diffByKey(prevBom.fabric_consumptions ?? [],   currBom.fabric_consumptions ?? [],   fabricKey, fabricChanged);
+                setChanges([...matDiff, ...rgDiff, ...fabDiff].filter(d => d.type !== 'same').length);
             })
             .catch(() => { if (!cancelled) setChanges(0); });
         return () => { cancelled = true; };
