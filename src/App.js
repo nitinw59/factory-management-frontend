@@ -190,6 +190,12 @@ import TrimLossRegisterPage from './modules/trim_loss/TrimLossRegisterPage';
 import CaseDetailPage from './modules/trim_loss/CaseDetailPage';
 import HrRecoveryQueuePage from './modules/trim_loss/HrRecoveryQueuePage';
 
+// QA Portal (QC analytics + Final QC pre-dispatch inspection)
+import QaPortalProtectedRoute from './shared/QaPortalProtectedRoute';
+import QaPortalLayout from './shared/QaPortalLayout';
+import FinalQcRegisterPage from './modules/final_qc/FinalQcRegisterPage';
+import FinalQcDetailPage from './modules/final_qc/FinalQcDetailPage';
+
 import MyBugReportsPage from './modules/bug_reports/MyBugReportsPage';
 import BugReportDetailPage from './modules/bug_reports/BugReportDetailPage';
 import BugReportAdminDashboardPage from './modules/bug_reports/BugReportAdminDashboardPage';
@@ -533,6 +539,15 @@ function App() {
         <Route path="cases/:id" element={<CaseDetailPage />} />
         <Route path="near-misses" element={<TrimLossRegisterPage nearMiss />} />
         <Route path="recovery" element={<HrRecoveryQueuePage />} />
+    </Route>
+
+    {/* QA Portal — QC analytics dashboard + Final QC (pre-dispatch AQL check).
+        Top-level group so it's reachable by every role the spec allows, not
+        nested under any single existing portal. */}
+    <Route path="/qa-portal" element={<QaPortalProtectedRoute><QaPortalLayout /></QaPortalProtectedRoute>}>
+        <Route index element={<QCAnalyticsDashboard />} />
+        <Route path="final-qc" element={<FinalQcRegisterPage />} />
+        <Route path="final-qc/:id" element={<FinalQcDetailPage />} />
     </Route>
 
       {/* --- 3. CATCH-ALL REDIRECT --- */}

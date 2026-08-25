@@ -54,7 +54,30 @@ const InitialRedirect = () => {
         case 'garment_checker':
             // Garment Checkers are sent to their garment checking dashboard.
             return <Navigate to="/garment-checker/dashboard" replace />;
-       
+
+        case 'quality_manager':
+            // Quality Managers are sent to the QA Portal (QC analytics + Final QC).
+            return <Navigate to="/qa-portal" replace />;
+
+        case 'validation_user':
+            return <Navigate to="/validation-portal" replace />;
+
+        case 'preparation_unloader':
+            return <Navigate to="/preparation-unload-portal" replace />;
+
+        case 'sewing_part_operator':
+            return <Navigate to="/sewing-part-operator" replace />;
+
+        case 'sales_manager':
+            // No dedicated sales portal yet — sales_manager is granted access
+            // to /accounts (see SalesAccessProtectedRoute's allowedRoles).
+            return <Navigate to="/accounts" replace />;
+
+        case 'numbering_user':
+            // No dedicated numbering portal exists yet — numbering_user is one
+            // of the roles allowed into the QA Portal (see QaPortalProtectedRoute).
+            return <Navigate to="/qa-portal" replace />;
+
         case 'accountant':
             // Accountants are sent to their accounting dashboard.
             return <Navigate to="/accounts/sales/orders" replace />;

@@ -32,6 +32,11 @@ const ProtectedRoute = () => {
                 'hr_manager',
                 'universal_checker',
                 'garment_checker',
+                'quality_manager',
+                'numbering_user',
+                'preparation_unloader',
+                'validation_user',
+                'sewing_part_operator',
                 'cutting_operator',
                 'line_loader',
                 'cutting_manager',
@@ -39,6 +44,7 @@ const ProtectedRoute = () => {
                 'dispatch_officer',
                 'merchandiser',
                 'purchase_manager',
+                'sales_manager',
                 'job_work_receiver'
   ];
 

@@ -8,6 +8,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { dispatchManagerApi } from '../../api/dispatchManagerApi';
 import { StatusBadge, formatBatchIdentifier } from './shared';
+import QcGateBadge from '../final_qc/QcGateBadge';
 
 // ─── SHARED ───────────────────────────────────────────────────────────────────
 
@@ -468,6 +469,7 @@ const BatchDispatchModal = ({ batchId, batchCode, onClose, canCreateDispatch = f
                             )}
                         </div>
                         {batch?.is_dispatch_closed && <StatusBadge status="CLOSED" />}
+                        {batchId && <QcGateBadge batchId={batchId} />}
                     </div>
                     <div className="flex items-center gap-2">
                         {batch && !batch.is_dispatch_closed && !closeResult && canCloseBatch && (

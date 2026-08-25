@@ -15,6 +15,11 @@ export const qcApi = {
     getQCTopDefects: (params) => api.get('/qc/analytics/top-defects', { params }),
     getQCBatches:    (params) => api.get('/qc/analytics/batches',     { params }),
 
+    // Row-level drilldown + accountability (new)
+    getQCDefects:              (params) => api.get('/qc/analytics/defects',               { params }),
+    getQCByOperator:           (params) => api.get('/qc/analytics/by-operator',            { params }),
+    getQCByResponsibleOperator: (params) => api.get('/qc/analytics/by-responsible-operator', { params }),
+
     // Line type <-> defect code mappings
     getDefectCodesForLineType: (lineTypeId) => api.get(`/qc/line-types/${lineTypeId}/defect-codes`),
     setDefectCodesForLineType: (lineTypeId, defectCodeIds) => api.put(`/qc/line-types/${lineTypeId}/defect-codes`, { defectCodeIds }),

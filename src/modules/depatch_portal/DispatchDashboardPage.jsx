@@ -7,6 +7,7 @@ import {
 import { dispatchManagerApi } from '../../api/dispatchManagerApi';
 import BatchDispatchModal from './BatchDispatchModal';
 import { StatusBadge, BatchIdentifier, matchesBatchSearch } from './shared';
+import QcGateBadge from '../final_qc/QcGateBadge';
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -126,6 +127,7 @@ const BatchCard = ({ batch, onOpenDispatch }) => {
                     <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                         <BatchIdentifier batchId={batch.id} batchCode={batch.batch_code} />
                         <StatusBadge status={ds.status} />
+                        <QcGateBadge batchId={batch.id} />
                     </div>
                     <p className="text-xs font-semibold text-slate-700 truncate">{batch.product?.name || '—'}</p>
                     <p className="text-[10px] text-slate-400 mt-0.5">

@@ -7,10 +7,11 @@ import {
 } from 'recharts';
 import { qcApi } from '../../api/qcApi';
 import { productionManagerApi } from '../../api/productionManagerApi';
+import QcDefectsDrilldownModal from './QcDefectsDrilldownModal';
 import {
     Loader2, AlertCircle, RefreshCw, Filter,
     ShieldCheck, TrendingUp, TrendingDown, Layers, BarChart2,
-    Scissors, Shirt,
+    Scissors, Shirt, Search, Users, UserCog,
 } from 'lucide-react';
 
 // ─── constants ────────────────────────────────────────────────────────────────
@@ -161,6 +162,31 @@ const normTopDef = (rows) => rows.map(d => ({
     count: parseInt(d.count) || 0,
 }));
 
+// GET /qc/analytics/by-operator returns { user_id, name, role, defects_logged,
+// rejected_count, rework_count } — the checker's identity fields are user_id/
+// name, NOT detected_by_*; the detected_by_user_id name only exists on the
+// row-level analytics/defects rows.
+const normByOperator = (rows) => rows.map(o => ({
+    user_id:         o.user_id,
+    name:            o.name || `User #${o.user_id}`,
+    role:            o.role || null,
+    defects_logged:  parseInt(o.defects_logged) || 0,
+    rejected_count:  parseInt(o.rejected_count) || 0,
+    rework_count:    parseInt(o.rework_count)   || 0,
+}));
+
+// GET /qc/analytics/by-responsible-operator returns { operator_user_id, name,
+// role, total_defects, rework_count, rejected_count, by_category }.
+const normByResponsibleOperator = (rows) => rows.map(o => ({
+    operator_user_id: o.operator_user_id,
+    name:             o.name || `User #${o.operator_user_id}`,
+    role:             o.role || null,
+    total_defects:    parseInt(o.total_defects) || 0,
+    rework_count:     parseInt(o.rework_count)  || 0,
+    rejected_count:   parseInt(o.rejected_count) || 0,
+    by_category:      o.by_category || null,
+}));
+
 const normBatches = (rows) => rows.map(b => {
     const piece_dhu    = b.piece_dhu    != null ? parseFloat(b.piece_dhu)    : null;
     const garment_dhu  = b.garment_dhu  != null ? parseFloat(b.garment_dhu)  : null;
@@ -195,15 +221,35 @@ const QCAnalyticsDashboard = () => {
     const [trend,       setTrend]       = useState([]);
     const [topDefects,  setTopDefects]  = useState([]);
     const [batches,     setBatches]     = useState([]);
+    const [byOperator,  setByOperator]  = useState([]);
+    const [byRespOperator, setByRespOperator] = useState([]);
     const [lineOptions, setLineOptions] = useState([]);
+    // code -> defect_code_id. top-defects/Pareto rows only carry the human
+    // `code` string (e.g. "B-05"), not the FK — analytics/defects needs the
+    // FK, so this map resolves it on click.
+    const [defectCodeIdByCode, setDefectCodeIdByCode] = useState({});
 
     const [loading,      setLoading]     = useState(true);
     const [error,        setError]       = useState(null);
     const [batchError,   setBatchError]  = useState(false);
+    const [operatorError, setOperatorError] = useState(false);
+
+    // Drilldown modal — { label, params } | null. Every clickable row/bar/slice
+    // below opens this, pre-filtered to the dimension that was clicked, backed
+    // by GET /qc/analytics/defects.
+    const [drilldown, setDrilldown] = useState(null);
+    const openDrilldown = (label, params) => setDrilldown({ label, params });
 
     useEffect(() => {
         productionManagerApi.getLineTypes()
             .then(r => setLineOptions(r.data || []))
+            .catch(() => {});
+        qcApi.getAllDefectCodes()
+            .then(r => {
+                const map = {};
+                (r.data || []).forEach(c => { if (c.code) map[c.code] = c.id; });
+                setDefectCodeIdByCode(map);
+            })
             .catch(() => {});
     }, []);
 
@@ -211,21 +257,23 @@ const QCAnalyticsDashboard = () => {
         setLoading(true);
         setError(null);
         setBatchError(false);
+        setOperatorError(false);
         const params = {
             date_from: filters.dateFrom,
             date_to:   filters.dateTo,
             ...(filters.lineId && { line_id: filters.lineId }),
         };
         try {
-            const [sRes, lRes, cRes, tRes, dRes, bRes] = await Promise.allSettled([
+            const [sRes, lRes, cRes, tRes, dRes, bRes, oRes, roRes] = await Promise.allSettled([
                 qcApi.getQCSummary(params),
                 qcApi.getQCByLine(params),
                 qcApi.getQCByCategory(params),
                 qcApi.getQCTrend(params),
                 qcApi.getQCTopDefects(params),
                 qcApi.getQCBatches(params),
+                qcApi.getQCByOperator(params),
+                qcApi.getQCByResponsibleOperator(params),
             ]);
-            console.log('Analytics results:', { sRes, lRes, cRes, tRes, dRes, bRes });
             if (sRes.status === 'fulfilled') setSummary(normSummary(sRes.value.data));
             if (lRes.status === 'fulfilled') setByLine(normByLine(lRes.value.data || []));
             if (cRes.status === 'fulfilled') setByCategory(normCategory(cRes.value.data || []));
@@ -236,6 +284,13 @@ const QCAnalyticsDashboard = () => {
             } else {
                 setBatches([]);
                 setBatchError(true);
+            }
+            if (oRes.status === 'fulfilled') setByOperator(normByOperator(oRes.value.data || []));
+            if (roRes.status === 'fulfilled') {
+                setByRespOperator(normByResponsibleOperator(roRes.value.data || []));
+            } else {
+                setByRespOperator([]);
+                setOperatorError(true);
             }
         } catch (e) {
             setError('Failed to load analytics.');
@@ -258,6 +313,14 @@ const QCAnalyticsDashboard = () => {
     }, [topDefects]);
 
     const applyFilters = () => setFilters(pendingFilters);
+
+    // Shared with the drilldown modal so its date range always matches whatever
+    // the dashboard is currently showing.
+    const drilldownBaseParams = {
+        date_from: filters.dateFrom,
+        date_to:   filters.dateTo,
+        ...(filters.lineId && { line_id: filters.lineId }),
+    };
 
     const byLineHasDhu = byLine.some(l => l._hasDhu);
     const byLineLabel  = byLineHasDhu ? 'DHU' : 'Defect Count';
@@ -438,7 +501,8 @@ const QCAnalyticsDashboard = () => {
                                         <Tooltip content={
                                             <CustomTooltip />
                                         } />
-                                        <Bar dataKey="chartValue" name={byLineLabel} radius={[0, 4, 4, 0]}>
+                                        <Bar dataKey="chartValue" name={byLineLabel} radius={[0, 4, 4, 0]} cursor="pointer"
+                                            onClick={(entry) => entry?.line_id != null && openDrilldown(`Line: ${entry.line_name}`, { line_id: entry.line_id })}>
                                             {byLine.map((entry, i) => (
                                                 <Cell key={i} fill={entry.fill} />
                                             ))}
@@ -450,6 +514,9 @@ const QCAnalyticsDashboard = () => {
                                 <p className="text-[10px] text-amber-600 mt-2 italic">
                                     DHU unavailable for lines with zero inspected count — showing defect count instead.
                                 </p>
+                            )}
+                            {byLine.length > 0 && (
+                                <p className="text-[10px] text-slate-400 mt-1 italic">Click a bar to see its defect detail.</p>
                             )}
                             <div className="flex flex-wrap gap-3 mt-3">
                                 {[['< 5 — Excellent', '#10b981'], ['5–20 — Acceptable', '#f59e0b'], ['20–50 — Warning', '#f97316'], ['> 50 — Critical', '#ef4444']].map(([label, color]) => (
@@ -472,6 +539,8 @@ const QCAnalyticsDashboard = () => {
                                             cx="50%" cy="50%"
                                             innerRadius={60} outerRadius={100}
                                             paddingAngle={3}
+                                            cursor="pointer"
+                                            onClick={(entry) => entry?.category && openDrilldown(`Category: ${entry.category}`, { category: entry.category })}
                                         >
                                             {byCategory.map((entry, i) => (
                                                 <Cell
@@ -558,7 +627,12 @@ const QCAnalyticsDashboard = () => {
                                         <YAxis yAxisId="left"  tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
                                         <YAxis yAxisId="right" orientation="right" domain={[0, 100]} unit="%" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
                                         <Tooltip content={<ParetoTooltip />} />
-                                        <Bar yAxisId="left" dataKey="count" name="Count" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={32} />
+                                        <Bar yAxisId="left" dataKey="count" name="Count" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={32} cursor="pointer"
+                                            onClick={(entry) => {
+                                                const codeId = defectCodeIdByCode[entry?.code];
+                                                if (codeId != null) openDrilldown(`Defect: ${entry.code}`, { defect_code_id: codeId });
+                                            }}
+                                        />
                                         <Line yAxisId="right" type="monotone" dataKey="cumPct" name="Cumulative %" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
                                     </ComposedChart>
                                 </ResponsiveContainer>
@@ -582,7 +656,11 @@ const QCAnalyticsDashboard = () => {
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {topDefects.map((d, i) => (
-                                            <tr key={d.code ?? i} className="hover:bg-slate-50 transition-colors">
+                                            <tr key={d.code ?? i} className="hover:bg-slate-50 transition-colors cursor-pointer"
+                                                onClick={() => {
+                                                    const codeId = defectCodeIdByCode[d.code];
+                                                    if (codeId != null) openDrilldown(`Defect: ${d.code}`, { defect_code_id: codeId });
+                                                }}>
                                                 <td className="py-2 pr-4 text-slate-400 font-mono text-xs">{i + 1}</td>
                                                 <td className="py-2 pr-4">
                                                     <span className="font-mono text-xs font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg">{d.code ?? '—'}</span>
@@ -642,7 +720,8 @@ const QCAnalyticsDashboard = () => {
                                             const level = dhuLevel(b._effectiveDhu);
                                             const ds    = DHU_STYLES[level];
                                             return (
-                                                <tr key={b.batch_id ?? i} className="hover:bg-slate-50 transition-colors">
+                                                <tr key={b.batch_id ?? i} className="hover:bg-slate-50 transition-colors cursor-pointer"
+                                                    onClick={() => b.batch_id != null && openDrilldown(`Batch: ${b.batch_code ?? b.batch_id}`, { batch_id: b.batch_id })}>
                                                     <td className="py-2 pr-3 font-mono font-bold text-slate-700 whitespace-nowrap">{b.batch_code ?? b.batch_id}</td>
                                                     <td className="py-2 pr-3 text-slate-600 whitespace-nowrap">{b.line_name ?? <span className="text-slate-300">—</span>}</td>
                                                     <td className="py-2 pr-3 text-slate-500 whitespace-nowrap">{b.date || <span className="text-slate-300">—</span>}</td>
@@ -676,7 +755,102 @@ const QCAnalyticsDashboard = () => {
                             </div>
                         )}
                     </SectionCard>
+
+                    {/* ── By Operator (checker leaderboard) ────────────────── */}
+                    <SectionCard title="Defects Logged — By Checker">
+                        <p className="text-[11px] text-slate-400 -mt-2 mb-3 flex items-center gap-1.5">
+                            <Users size={11} /> Volume of defects each checker has logged — this reflects how actively a checker is
+                            inspecting, not their accuracy or pass rate.
+                        </p>
+                        {byOperator.length === 0 ? (
+                            <EmptyChart msg="No checker activity for selected period" />
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm border-collapse">
+                                    <thead>
+                                        <tr className="border-b border-slate-200 text-left">
+                                            {['Checker', 'Role', 'Defects Logged', 'Rejected', 'Rework'].map(h => (
+                                                <th key={h} className="pb-2 pr-4 text-xs font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {byOperator.map((o, i) => (
+                                            <tr key={o.user_id ?? i} className="hover:bg-slate-50 transition-colors cursor-pointer"
+                                                onClick={() => o.user_id != null && openDrilldown(`Checker: ${o.name}`, { detected_by_user_id: o.user_id })}>
+                                                <td className="py-2 pr-4 font-semibold text-slate-700">{o.name}</td>
+                                                <td className="py-2 pr-4 text-slate-400 text-xs">{o.role || '—'}</td>
+                                                <td className="py-2 pr-4 font-black text-indigo-600">{o.defects_logged.toLocaleString()}</td>
+                                                <td className="py-2 pr-4 text-red-600">{o.rejected_count.toLocaleString()}</td>
+                                                <td className="py-2 pr-4 text-amber-600">{o.rework_count.toLocaleString()}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </SectionCard>
+
+                    {/* ── By Responsible Operator (accountability) ─────────── */}
+                    <SectionCard
+                        title="Defects — By Responsible Operator"
+                        warning={operatorError ? 'API error — data unavailable' : undefined}
+                    >
+                        <p className="text-[11px] text-slate-400 -mt-2 mb-3 flex items-center gap-1.5">
+                            <UserCog size={11} /> Accountability by the operator who caused the defect. This is commonly empty today —
+                            <span className="font-semibold"> responsible_operator_id</span> isn't populated by most upstream loggers yet.
+                        </p>
+                        {operatorError ? (
+                            <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm">
+                                <AlertCircle size={16} />
+                                <span>This view could not be loaded (server error). Other sections are unaffected.</span>
+                            </div>
+                        ) : byRespOperator.length === 0 ? (
+                            <EmptyChart msg="No responsible-operator data recorded yet for this period" />
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm border-collapse">
+                                    <thead>
+                                        <tr className="border-b border-slate-200 text-left">
+                                            {['Responsible Operator', 'Role', 'Total Defects', 'Rework', 'Rejected', 'By Category'].map(h => (
+                                                <th key={h} className="pb-2 pr-4 text-xs font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {byRespOperator.map((o, i) => (
+                                            <tr key={o.operator_user_id ?? i} className="hover:bg-slate-50 transition-colors cursor-pointer"
+                                                onClick={() => o.operator_user_id != null && openDrilldown(`Responsible: ${o.name}`, { responsible_operator_id: o.operator_user_id })}>
+                                                <td className="py-2 pr-4 font-semibold text-slate-700">{o.name}</td>
+                                                <td className="py-2 pr-4 text-slate-400 text-xs">{o.role || '—'}</td>
+                                                <td className="py-2 pr-4 font-black text-indigo-600">{o.total_defects.toLocaleString()}</td>
+                                                <td className="py-2 pr-4 text-amber-600">{o.rework_count.toLocaleString()}</td>
+                                                <td className="py-2 pr-4 text-red-600">{o.rejected_count.toLocaleString()}</td>
+                                                <td className="py-2 pr-4 text-[11px] text-slate-500">
+                                                    {o.by_category && Object.keys(o.by_category).length > 0
+                                                        ? Object.entries(o.by_category).map(([cat, ct]) => (
+                                                            <span key={cat} className="inline-block mr-2 whitespace-nowrap">
+                                                                <span className="font-semibold" style={{ color: CATEGORY_COLORS[cat] || '#64748b' }}>{cat}</span>: {ct}
+                                                            </span>
+                                                        ))
+                                                        : <span className="text-slate-300">—</span>}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </SectionCard>
                 </>
+            )}
+
+            {drilldown && (
+                <QcDefectsDrilldownModal
+                    baseParams={drilldownBaseParams}
+                    filter={drilldown}
+                    onClose={() => setDrilldown(null)}
+                />
             )}
         </div>
     );
