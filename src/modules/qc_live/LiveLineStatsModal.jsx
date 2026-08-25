@@ -37,7 +37,9 @@ const StatChip = ({ label, checked, defects }) => (
 
 // Shown when a line card is clicked — a stats summary (top 3 defects in the
 // last hour, top 3 today) rather than jumping straight to the full checks
-// list. "View Defect Log" hands off to LiveDrilldownModal in defects-only mode.
+// list. "View Full Log" hands off to LiveDrilldownModal showing every check
+// (passes and defects) — not filtered to defects, so the checker's full
+// activity on this line is visible, not just the failures.
 const LiveLineStatsModal = ({ lineId, lineName, onClose, onViewLog }) => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -114,7 +116,7 @@ const LiveLineStatsModal = ({ lineId, lineName, onClose, onViewLog }) => {
                         onClick={onViewLog}
                         className="w-full flex items-center justify-center gap-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2.5 rounded-lg transition"
                     >
-                        <ClipboardList size={15} /> View Defect Log
+                        <ClipboardList size={15} /> View Full Log
                     </button>
                 </div>
             </div>

@@ -7,7 +7,7 @@ export const liveQcApi = {
     getTodaySummary: () => api.get('/qc/live/today-summary'),
 
     // Line-card drilldown — every unit (piece/garment) checked on one line,
-    // defaulting to today. params: { line_id, date?, page?, page_size?, defects_only? }
+    // defaulting to today. params: { line_id, date?, page?, page_size?, defects_only?, search? }
     getLineUnits: (params) => api.get('/qc/live/line-units', { params }),
 
     // Line-card stats summary — top 3 defects in the last hour, top 3 today,

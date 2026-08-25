@@ -269,7 +269,7 @@ const LiveQcTrackingPage = () => {
                     lineName={statsLine.lineName}
                     onClose={() => setStatsLine(null)}
                     onViewLog={() => {
-                        setDrilldown({ mode: 'line', lineId: statsLine.lineId, lineName: statsLine.lineName, defectsOnly: true });
+                        setDrilldown({ mode: 'line', lineId: statsLine.lineId, lineName: statsLine.lineName });
                         setStatsLine(null);
                     }}
                 />

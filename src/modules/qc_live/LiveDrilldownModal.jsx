@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { liveQcApi } from '../../api/liveQcApi';
-import { Loader2, X, AlertCircle, ChevronLeft, ChevronRight, Scissors, Shirt } from 'lucide-react';
+import { Loader2, X, AlertCircle, ChevronLeft, ChevronRight, Scissors, Shirt, Search } from 'lucide-react';
+
+const SEARCH_DEBOUNCE_MS = 350;
 
 const PAGE_SIZE = 50;
 
@@ -26,6 +28,17 @@ const LiveDrilldownModal = ({ mode, lineId, lineName, defectsOnly, ids, title, o
     const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [search, setSearch] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+
+    // 'line' mode searches server-side (matches unit id, part name, batch
+    // code, defect code/description, checker name) so it can reach beyond
+    // the current page; 'ids' mode is a small, already-fetched fixed list, so
+    // it just filters client-side below instead of round-tripping.
+    useEffect(() => {
+        const t = setTimeout(() => setDebouncedSearch(search.trim()), SEARCH_DEBOUNCE_MS);
+        return () => clearTimeout(t);
+    }, [search]);
 
     const load = useCallback(async (pageArg) => {
         setLoading(true);
@@ -35,6 +48,7 @@ const LiveDrilldownModal = ({ mode, lineId, lineName, defectsOnly, ids, title, o
                 const res = await liveQcApi.getLineUnits({
                     line_id: lineId, page: pageArg, page_size: PAGE_SIZE,
                     ...(defectsOnly && { defects_only: true }),
+                    ...(debouncedSearch && { search: debouncedSearch }),
                 });
                 setRows(res.data?.data || []);
                 setTotal(res.data?.total || 0);
@@ -51,11 +65,19 @@ const LiveDrilldownModal = ({ mode, lineId, lineName, defectsOnly, ids, title, o
         } finally {
             setLoading(false);
         }
-    }, [mode, lineId, defectsOnly, ids]);
+    }, [mode, lineId, defectsOnly, debouncedSearch, ids]);
 
     useEffect(() => { load(1); }, [load]);
 
+    const displayRows = useMemo(() => {
+        if (mode !== 'ids' || !debouncedSearch) return rows;
+        const term = debouncedSearch.toLowerCase();
+        return rows.filter(r => [r.unit_identifier, r.part_name, r.batch_code, r.defect_code, r.description, r.detected_by_name, r.line_name]
+            .filter(Boolean).some(v => String(v).toLowerCase().includes(term)));
+    }, [mode, rows, debouncedSearch]);
+
     const totalPages = mode === 'line' ? Math.max(1, Math.ceil(total / PAGE_SIZE)) : 1;
+    const displayTotal = mode === 'ids' ? displayRows.length : total;
 
     return (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
@@ -67,11 +89,21 @@ const LiveDrilldownModal = ({ mode, lineId, lineName, defectsOnly, ids, title, o
                                 ? `${lineName} — ${defectsOnly ? "Today's Defect Log" : "Today's Checks"}`
                                 : (title || 'Check Detail')}
                         </h2>
-                        <p className="text-xs text-slate-500 mt-0.5">{total.toLocaleString()} unit{total === 1 ? '' : 's'}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{displayTotal.toLocaleString()} unit{displayTotal === 1 ? '' : 's'}</p>
                     </div>
                     <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-full transition shrink-0">
                         <X size={16} className="text-slate-500" />
                     </button>
+                </div>
+
+                <div className="px-5 py-3 border-b border-slate-100 shrink-0 relative">
+                    <Search size={14} className="absolute left-8 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <input
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        placeholder="Search unit ID, part, batch, defect code, checker…"
+                        className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
                 </div>
 
                 <div className="overflow-auto flex-1">
@@ -79,8 +111,10 @@ const LiveDrilldownModal = ({ mode, lineId, lineName, defectsOnly, ids, title, o
                         <div className="flex justify-center items-center py-16"><Loader2 className="animate-spin h-8 w-8 text-indigo-500" /></div>
                     ) : error ? (
                         <div className="flex items-center gap-2 p-5 text-red-700 text-sm"><AlertCircle size={16} /> {error}</div>
-                    ) : rows.length === 0 ? (
-                        <p className="text-sm text-slate-400 italic text-center py-16">No checks recorded yet.</p>
+                    ) : displayRows.length === 0 ? (
+                        <p className="text-sm text-slate-400 italic text-center py-16">
+                            {debouncedSearch ? 'No checks match your search.' : 'No checks recorded yet.'}
+                        </p>
                     ) : (
                         <table className="w-full text-xs">
                             <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] sticky top-0">
@@ -98,7 +132,7 @@ const LiveDrilldownModal = ({ mode, lineId, lineName, defectsOnly, ids, title, o
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {rows.map(r => {
+                                {displayRows.map(r => {
                                     const Icon = r.level === 'garment' ? Shirt : Scissors;
                                     return (
                                         <tr key={r.id} className="hover:bg-slate-50">
