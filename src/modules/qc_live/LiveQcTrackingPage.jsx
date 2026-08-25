@@ -5,6 +5,7 @@ import { liveQcApi } from '../../api/liveQcApi';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import useLiveQcSocket from './useLiveQcSocket';
 import LiveDrilldownModal from './LiveDrilldownModal';
+import LiveLineStatsModal from './LiveLineStatsModal';
 import {
     Loader2, AlertCircle, Wifi, WifiOff,
     Scissors, Shirt, Activity, Radio,
@@ -124,8 +125,10 @@ const LiveQcTrackingPage = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [now, setNow] = useState(Date.now());
-    // { mode: 'line', lineId, lineName } | { mode: 'ids', ids, title } | null
+    // { mode: 'line', lineId, lineName, defectsOnly } | { mode: 'ids', ids, title } | null
     const [drilldown, setDrilldown] = useState(null);
+    // { lineId, lineName } | null — the stats summary opened by clicking a line card
+    const [statsLine, setStatsLine] = useState(null);
 
     // Re-render every few seconds so "Xs ago" / freshness pulses stay current
     useEffect(() => {
@@ -230,7 +233,7 @@ const LiveQcTrackingPage = () => {
                                 {lineCards.map(l => (
                                     <LineCard
                                         key={l.id} line={l} now={now}
-                                        onClick={() => setDrilldown({ mode: 'line', lineId: l.id, lineName: l.name })}
+                                        onClick={() => setStatsLine({ lineId: l.id, lineName: l.name })}
                                     />
                                 ))}
                             </div>
@@ -260,6 +263,17 @@ const LiveQcTrackingPage = () => {
                 </>
             )}
 
+            {statsLine && (
+                <LiveLineStatsModal
+                    lineId={statsLine.lineId}
+                    lineName={statsLine.lineName}
+                    onClose={() => setStatsLine(null)}
+                    onViewLog={() => {
+                        setDrilldown({ mode: 'line', lineId: statsLine.lineId, lineName: statsLine.lineName, defectsOnly: true });
+                        setStatsLine(null);
+                    }}
+                />
+            )}
             {drilldown && <LiveDrilldownModal {...drilldown} onClose={() => setDrilldown(null)} />}
         </div>
     );

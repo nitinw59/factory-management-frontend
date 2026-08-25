@@ -15,9 +15,12 @@ const STATUS_CLS = {
 const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 
 // Shared drilldown for the Live QC Tracking page — two modes:
-//   { mode: 'line', lineId, lineName }  — every unit checked on this line today
-//   { mode: 'ids', ids, title }         — the exact rows one feed event wrote
-const LiveDrilldownModal = ({ mode, lineId, lineName, ids, title, onClose }) => {
+//   { mode: 'line', lineId, lineName, defectsOnly? }  — units checked on this
+//                                                        line today (or just
+//                                                        the defects among them)
+//   { mode: 'ids', ids, title }                       — the exact rows one
+//                                                        feed event wrote
+const LiveDrilldownModal = ({ mode, lineId, lineName, defectsOnly, ids, title, onClose }) => {
     const [rows, setRows] = useState([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
@@ -29,7 +32,10 @@ const LiveDrilldownModal = ({ mode, lineId, lineName, ids, title, onClose }) => 
         setError(null);
         try {
             if (mode === 'line') {
-                const res = await liveQcApi.getLineUnits({ line_id: lineId, page: pageArg, page_size: PAGE_SIZE });
+                const res = await liveQcApi.getLineUnits({
+                    line_id: lineId, page: pageArg, page_size: PAGE_SIZE,
+                    ...(defectsOnly && { defects_only: true }),
+                });
                 setRows(res.data?.data || []);
                 setTotal(res.data?.total || 0);
                 setPage(res.data?.page || pageArg);
@@ -45,7 +51,7 @@ const LiveDrilldownModal = ({ mode, lineId, lineName, ids, title, onClose }) => 
         } finally {
             setLoading(false);
         }
-    }, [mode, lineId, ids]);
+    }, [mode, lineId, defectsOnly, ids]);
 
     useEffect(() => { load(1); }, [load]);
 
@@ -57,7 +63,9 @@ const LiveDrilldownModal = ({ mode, lineId, lineName, ids, title, onClose }) => 
                 <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100 shrink-0">
                     <div>
                         <h2 className="text-base font-black text-slate-800">
-                            {mode === 'line' ? `${lineName} — Today's Checks` : (title || 'Check Detail')}
+                            {mode === 'line'
+                                ? `${lineName} — ${defectsOnly ? "Today's Defect Log" : "Today's Checks"}`
+                                : (title || 'Check Detail')}
                         </h2>
                         <p className="text-xs text-slate-500 mt-0.5">{total.toLocaleString()} unit{total === 1 ? '' : 's'}</p>
                     </div>
