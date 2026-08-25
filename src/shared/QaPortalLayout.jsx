@@ -1,7 +1,7 @@
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LogOut, ArrowLeft, ShieldCheck, BarChart2, ClipboardCheck } from 'lucide-react';
+import { LogOut, ArrowLeft, ShieldCheck, BarChart2, ClipboardCheck, Activity } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 import ReportBugButton from './ReportBugButton';
 
@@ -19,12 +19,17 @@ const PORTAL_HOME = {
     // numbering_user has no dedicated portal home mapped yet — falls back to /init below.
 };
 
+// Roles allowed on the Live Floor tab — matches LiveQcTrackingPage's own
+// inline gate and the backend's LIVE_QC_VIEWER_ROLES broadcast target.
+const LIVE_QC_ROLES = ['factory_admin', 'production_manager', 'quality_manager', 'cutting_manager'];
+
 const QaPortalLayout = () => {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
 
     const handleLogout = () => { logout(); navigate('/login'); };
     const home = PORTAL_HOME[user?.role] || '/init';
+    const canViewLive = LIVE_QC_ROLES.includes(user?.role);
 
     return (
         <div className="flex flex-col h-screen bg-slate-50 font-sans">
@@ -40,7 +45,12 @@ const QaPortalLayout = () => {
                             <span className="font-black text-base sm:text-lg text-slate-800 tracking-tight truncate">QA Portal</span>
                         </div>
                         <nav className="hidden md:flex items-center gap-5">
-                            <NavLink end to="/qa-portal" className={({ isActive }) => `flex items-center gap-1.5 text-sm font-medium transition-colors ${isActive ? 'text-indigo-600' : 'text-slate-600 hover:text-indigo-600'}`}>
+                            {canViewLive && (
+                                <NavLink end to="/qa-portal" className={({ isActive }) => `flex items-center gap-1.5 text-sm font-medium transition-colors ${isActive ? 'text-indigo-600' : 'text-slate-600 hover:text-indigo-600'}`}>
+                                    <Activity size={14} /> Live Floor
+                                </NavLink>
+                            )}
+                            <NavLink to="/qa-portal/analytics" className={({ isActive }) => `flex items-center gap-1.5 text-sm font-medium transition-colors ${isActive ? 'text-indigo-600' : 'text-slate-600 hover:text-indigo-600'}`}>
                                 <BarChart2 size={14} /> Analytics
                             </NavLink>
                             <NavLink to="/qa-portal/final-qc" className={({ isActive }) => `flex items-center gap-1.5 text-sm font-medium transition-colors ${isActive ? 'text-indigo-600' : 'text-slate-600 hover:text-indigo-600'}`}>

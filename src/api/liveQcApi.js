@@ -1,0 +1,16 @@
+import api from '../utils/api';
+
+export const liveQcApi = {
+    // [{ line_id, checked_count, defect_count, updated_at }] for today only —
+    // initial baseline for the Live QC Tracking page; live updates arrive
+    // over the /ws socket as QC_LIVE_EVENT messages (see useLiveQcSocket).
+    getTodaySummary: () => api.get('/qc/live/today-summary'),
+
+    // Line-card drilldown — every unit (piece/garment) checked on one line,
+    // defaulting to today. params: { line_id, date?, page?, page_size? }
+    getLineUnits: (params) => api.get('/qc/live/line-units', { params }),
+
+    // Live-feed record drilldown — the exact rows one broadcast event wrote,
+    // by the check_log_ids carried on the event itself.
+    getUnitsByIds: (ids) => api.get('/qc/live/units', { params: { ids: ids.join(',') } }),
+};

@@ -195,6 +195,7 @@ import QaPortalProtectedRoute from './shared/QaPortalProtectedRoute';
 import QaPortalLayout from './shared/QaPortalLayout';
 import FinalQcRegisterPage from './modules/final_qc/FinalQcRegisterPage';
 import FinalQcDetailPage from './modules/final_qc/FinalQcDetailPage';
+import LiveQcTrackingPage from './modules/qc_live/LiveQcTrackingPage';
 
 import MyBugReportsPage from './modules/bug_reports/MyBugReportsPage';
 import BugReportDetailPage from './modules/bug_reports/BugReportDetailPage';
@@ -545,7 +546,8 @@ function App() {
         Top-level group so it's reachable by every role the spec allows, not
         nested under any single existing portal. */}
     <Route path="/qa-portal" element={<QaPortalProtectedRoute><QaPortalLayout /></QaPortalProtectedRoute>}>
-        <Route index element={<QCAnalyticsDashboard />} />
+        <Route index element={<LiveQcTrackingPage />} />
+        <Route path="analytics" element={<QCAnalyticsDashboard />} />
         <Route path="final-qc" element={<FinalQcRegisterPage />} />
         <Route path="final-qc/:id" element={<FinalQcDetailPage />} />
     </Route>

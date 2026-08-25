@@ -84,8 +84,21 @@ const NotificationBell = () => {
   useEffect(() => {
     connectWs();
     return () => {
-      if (wsRef.current) wsRef.current.close();
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      const ws = wsRef.current;
+      if (ws) {
+        // Detach handlers before closing — under StrictMode's dev-only
+        // double-invoke (mount -> cleanup -> mount), this socket's close()
+        // can race with its handshake completing server-side, leaving a
+        // brief window where the backend still has it registered alongside
+        // the new socket from the second mount. A push in that window would
+        // reach both; nulling the handlers first guarantees this stale
+        // socket can't double-fire a toast/unread-count bump.
+        ws.onmessage = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.close();
+      }
     };
   }, [connectWs]);
 
