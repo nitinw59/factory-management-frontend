@@ -696,6 +696,7 @@ const AssemblyProcessingPortal = () => {
                 setBatchPieces(res.data);
             }
             loadRequiredData();
+            loadStats(); // today_rework otherwise only refreshes on the 60s interval or a page reload
 
             setTimeout(() => setLastAction(null), 4000);
         } catch (err) {

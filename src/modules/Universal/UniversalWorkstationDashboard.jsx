@@ -1709,6 +1709,7 @@ const UniversalWorkstationDashboard = () => {
             const newBatches = await fetchQueue();
             refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
             refreshTodayApproved();
+            loadStats(); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
         } catch (err) {
             alert(err.response?.data?.error || `Error: ${err.message}`);
             throw err;
@@ -1724,6 +1725,7 @@ const UniversalWorkstationDashboard = () => {
             const newBatches = await fetchQueue();
             refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
             refreshTodayApproved();
+            loadStats(); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
         } catch (err) {
             alert(err.response?.data?.error || `Error: ${err.message}`);
             throw err;
@@ -1745,6 +1747,7 @@ const UniversalWorkstationDashboard = () => {
             });
             await fetchQueue();
             refreshTodayApproved();
+            loadStats(); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
         } catch (err) { alert(err.response?.data?.error || `Error: ${err.message}`); }
         finally { setIsProcessing(false); }
     };
