@@ -741,10 +741,123 @@ const DispatchTab = ({ receipts }) => {
     );
 };
 
+// ─── TAB: BOM ─────────────────────────────────────────────────────────────────
+// Complete BOM used by this batch — fabric consumption, trims/materials
+// (with per-size breakdown), and ratio groups/markers. Sourced from the
+// sales order product's linked BOM (bomController.getBomFullDetail), embedded
+// directly in the drilldown response as `bom` (null if none linked).
+
+const BomTab = ({ bom }) => {
+    if (!bom) return <SectionEmpty label="No BOM linked to this batch's sales order product." />;
+
+    return (
+        <div className="space-y-5">
+            <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+                <div className="min-w-0">
+                    <p className="font-bold text-slate-800 text-sm truncate" title={bom.bom_name}>{bom.bom_name}</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">{bom.product?.name}</p>
+                </div>
+                <StatusBadge status={bom.status} />
+            </div>
+
+            <div>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                    <Layers size={12} /> Fabric Consumption
+                </p>
+                {bom.fabric_consumptions?.length ? (
+                    <table className="w-full text-xs border-collapse">
+                        <thead>
+                            <tr className="border-b border-slate-200 text-left">
+                                <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Fabric</th>
+                                <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Consumption</th>
+                                <th className="pb-1.5 text-[10px] font-bold text-slate-400 uppercase">Wastage</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {bom.fabric_consumptions.map(fc => (
+                                <tr key={fc.id}>
+                                    <td className="py-1.5 pr-3 font-semibold text-slate-700">{fc.fabric_type_name || fc.fabric_role}</td>
+                                    <td className="py-1.5 pr-3 text-slate-600">{fc.consumption_inches}"</td>
+                                    <td className="py-1.5 text-slate-600">{fc.wastage_percentage}%</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                ) : <SectionEmpty label="No fabric consumption defined." />}
+            </div>
+
+            <div>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                    <Box size={12} /> Trims &amp; Materials
+                </p>
+                {bom.material_consumptions?.length ? (
+                    <table className="w-full text-xs border-collapse">
+                        <thead>
+                            <tr className="border-b border-slate-200 text-left">
+                                <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Item</th>
+                                <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Placement</th>
+                                <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Qty</th>
+                                <th className="pb-1.5 text-[10px] font-bold text-slate-400 uppercase">Wastage</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {bom.material_consumptions.map(mc => (
+                                <tr key={mc.id}>
+                                    <td className="py-1.5 pr-3">
+                                        <span className="font-semibold text-slate-700">{mc.trim_item_name}</span>
+                                        {mc.item_code && <span className="text-slate-400 ml-1 font-mono text-[10px]">{mc.item_code}</span>}
+                                    </td>
+                                    <td className="py-1.5 pr-3 text-slate-500">{mc.placement_description || '—'}</td>
+                                    <td className="py-1.5 pr-3 text-slate-600">
+                                        {mc.calculation_type === 'FIXED'
+                                            ? `${mc.fixed_quantity} ${mc.unit_of_measure}`
+                                            : (mc.size_consumptions?.length
+                                                ? mc.size_consumptions.map(sc => `${sc.size}:${sc.quantity}`).join(', ')
+                                                : '—')}
+                                    </td>
+                                    <td className="py-1.5 text-slate-600">{mc.wastage_percentage}%</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                ) : <SectionEmpty label="No trims/materials defined." />}
+            </div>
+
+            <div>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                    <FileText size={12} /> Ratio Groups / Markers
+                </p>
+                {bom.ratio_groups?.length ? (
+                    <div className="space-y-2">
+                        {bom.ratio_groups.map(rg => (
+                            <div key={rg.id} className="border border-slate-200 rounded-lg px-3 py-2">
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="font-semibold text-slate-700 text-xs truncate">{rg.ratio_group_name}</span>
+                                    <span className="text-[10px] text-slate-400 shrink-0">{rg.total_pieces_in_marker || 0} pcs/marker · {rg.marker_length_inches ?? '—'}"</span>
+                                </div>
+                                {rg.items?.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                        {rg.items.map(it => (
+                                            <span key={it.id} className="text-[10px] bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5">
+                                                {it.size}: <strong>{it.number_of_pieces}</strong>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                ) : <SectionEmpty label="No ratio groups/markers defined." />}
+            </div>
+        </div>
+    );
+};
+
 // ─── MAIN MODAL ───────────────────────────────────────────────────────────────
 
 const TABS = [
     { key: 'overview', label: 'Overview',       icon: BarChart2  },
+    { key: 'bom',      label: 'BOM',             icon: FileText   },
     { key: 'cycles',   label: 'Cycles',          icon: Layers     },
     { key: 'rolls',    label: 'Rolls',            icon: Package    },
     { key: 'pieces',   label: 'Cut Pieces',       icon: Scissors   },
@@ -772,6 +885,7 @@ const BatchDrilldownModal = ({ batchId, batchCode, onClose }) => {
         if (key === 'cycles')   return data.cycle_stages?.length;
         if (key === 'pieces')   return data.cut_piece_summary?.length;
         if (key === 'dispatch') return data.dispatch_receipts?.length;
+        if (key === 'bom') return data.bom ? (data.bom.fabric_consumptions?.length || 0) + (data.bom.material_consumptions?.length || 0) || null : null;
         if (key === 'defects') {
             const p = data.defects?.piece_defects?.records?.length   || 0;
             const g = data.defects?.garment_defects?.records?.length || 0;
@@ -832,6 +946,7 @@ const BatchDrilldownModal = ({ batchId, batchCode, onClose }) => {
                     ) : (
                         <>
                             {activeTab === 'overview' && <OverviewTab data={data} />}
+                            {activeTab === 'bom'      && <BomTab bom={data.bom} />}
                             {activeTab === 'cycles'   && <CycleStagesTab
                                 stages={data.cycle_stages}
                                 partsPerGarment={(data.cut_piece_summary?.[0]?.parts?.length) || 1}

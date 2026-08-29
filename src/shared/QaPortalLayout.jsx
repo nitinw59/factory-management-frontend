@@ -1,7 +1,7 @@
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LogOut, ArrowLeft, ShieldCheck, BarChart2, ClipboardCheck, Activity } from 'lucide-react';
+import { LogOut, ArrowLeft, ShieldCheck, BarChart2, ClipboardCheck, Activity, Tags, GitBranch } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 import ReportBugButton from './ReportBugButton';
 
@@ -23,6 +23,17 @@ const PORTAL_HOME = {
 // inline gate and the backend's LIVE_QC_VIEWER_ROLES broadcast target.
 const LIVE_QC_ROLES = ['factory_admin', 'production_manager', 'quality_manager', 'cutting_manager'];
 
+// Matches DefectCodeLineTypePage's own inline gate / the backend's
+// defect-code admin endpoints — hidden from roles who'd only hit 403s.
+const DEFECT_CODES_ROLES = ['factory_admin', 'production_manager', 'quality_manager'];
+
+// Roles that both reach the QA Portal (QaPortalProtectedRoute.ALLOWED_ROLES)
+// and are authorized for the workflow dashboard/batch-drilldown backend
+// routes (authorizedRolesForWorkflow) — accountant/store_manager/
+// dispatch_officer already have this same dashboard linked from their own
+// portals, so it's left out of this nav to avoid duplicating it.
+const PRODUCTION_WORKFLOW_ROLES = ['factory_admin', 'production_manager', 'cutting_manager', 'quality_manager'];
+
 const QaPortalLayout = () => {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
@@ -30,6 +41,8 @@ const QaPortalLayout = () => {
     const handleLogout = () => { logout(); navigate('/login'); };
     const home = PORTAL_HOME[user?.role] || '/init';
     const canViewLive = LIVE_QC_ROLES.includes(user?.role);
+    const canManageDefectCodes = DEFECT_CODES_ROLES.includes(user?.role);
+    const canViewProductionWorkflow = PRODUCTION_WORKFLOW_ROLES.includes(user?.role);
 
     return (
         <div className="flex flex-col h-screen bg-slate-50 font-sans">
@@ -56,6 +69,16 @@ const QaPortalLayout = () => {
                             <NavLink to="/qa-portal/final-qc" className={({ isActive }) => `flex items-center gap-1.5 text-sm font-medium transition-colors ${isActive ? 'text-indigo-600' : 'text-slate-600 hover:text-indigo-600'}`}>
                                 <ClipboardCheck size={14} /> Final QC
                             </NavLink>
+                            {canManageDefectCodes && (
+                                <NavLink to="/qa-portal/defect-code-line-types" className={({ isActive }) => `flex items-center gap-1.5 text-sm font-medium transition-colors ${isActive ? 'text-indigo-600' : 'text-slate-600 hover:text-indigo-600'}`}>
+                                    <Tags size={14} /> Defect Codes
+                                </NavLink>
+                            )}
+                            {canViewProductionWorkflow && (
+                                <NavLink to="/qa-portal/production-workflow" className={({ isActive }) => `flex items-center gap-1.5 text-sm font-medium transition-colors ${isActive ? 'text-indigo-600' : 'text-slate-600 hover:text-indigo-600'}`}>
+                                    <GitBranch size={14} /> Production Workflow
+                                </NavLink>
+                            )}
                         </nav>
                     </div>
                     <div className="flex items-center gap-4 shrink-0">

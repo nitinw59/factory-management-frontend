@@ -1,10 +1,20 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Navigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import { useAuth } from '../../context/AuthContext';
 import { qcApi } from '../../api/qcApi';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { Loader2, AlertCircle, Check, Save, Search, Plus, X, Pencil, Trash2, FileDown } from 'lucide-react';
 
+// This page is mounted under two different portals — /production-manager
+// (gated to production_manager only) and /qa-portal (gated much more
+// broadly, to every QA-adjacent role). This inline check is what actually
+// keeps it scoped to the roles the backend's defect-code endpoints allow
+// (qcRoutes.js's adminOnly), regardless of which portal's URL got here.
+const ALLOWED_ROLES = ['factory_admin', 'production_manager', 'quality_manager'];
+
 const DefectCodeLineTypePage = () => {
+    const { user } = useAuth();
     const [lineTypes, setLineTypes] = useState([]);      // [{ id, name }]
     const [defectCodes, setDefectCodes] = useState([]);  // [{ id, code, description }]
     // matrix: { [lineTypeId]: Set<defectCodeId> }
@@ -305,6 +315,10 @@ const DefectCodeLineTypePage = () => {
         if (!name.trim()) return '';
         return `${name.trim().substring(0, 3).toUpperCase()}-001`;
     };
+
+    // Reachable from both /production-manager (production_manager only) and
+    // /qa-portal (a much broader role set) — this is the real gate.
+    if (!ALLOWED_ROLES.includes(user?.role)) return <Navigate to="/unauthorized" replace />;
 
     if (loading) return (
         <div className="flex justify-center items-center p-16">

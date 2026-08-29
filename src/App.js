@@ -548,6 +548,8 @@ function App() {
     <Route path="/qa-portal" element={<QaPortalProtectedRoute><QaPortalLayout /></QaPortalProtectedRoute>}>
         <Route index element={<LiveQcTrackingPage />} />
         <Route path="analytics" element={<QCAnalyticsDashboard />} />
+        <Route path="defect-code-line-types" element={<DefectCodeLineTypePage />} />
+        <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
         <Route path="final-qc" element={<FinalQcRegisterPage />} />
         <Route path="final-qc/:id" element={<FinalQcDetailPage />} />
     </Route>
