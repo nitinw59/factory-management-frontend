@@ -6,9 +6,10 @@ import { productionManagerApi } from '../../api/productionManagerApi';
 import useLiveQcSocket from './useLiveQcSocket';
 import LiveDrilldownModal from './LiveDrilldownModal';
 import LiveLineStatsModal from './LiveLineStatsModal';
+import { dhuLevel, DHU_STYLES, FRESH_MS } from './liveQcConstants';
 import {
     Loader2, AlertCircle, Wifi, WifiOff,
-    Scissors, Shirt, Activity, Radio,
+    Scissors, Shirt, Activity, Radio, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 
 // Manager-only — narrower than the broader /qa-portal shell gate, matching
@@ -17,22 +18,8 @@ import {
 const LIVE_QC_ROLES = ['factory_admin', 'production_manager', 'quality_manager', 'cutting_manager'];
 
 const MAX_FEED = 50;
-const FRESH_MS = 30_000; // "active now" pulse window
-
-const dhuLevel = (dhu) => {
-    if (dhu == null) return 'neutral';
-    if (dhu < 5)   return 'good';
-    if (dhu < 20)  return 'warn';
-    if (dhu < 50)  return 'bad';
-    return 'critical';
-};
-const DHU_STYLES = {
-    good:     { text: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200' },
-    warn:     { text: 'text-amber-600',   bg: 'bg-amber-50 border-amber-200' },
-    bad:      { text: 'text-orange-600',  bg: 'bg-orange-50 border-orange-200' },
-    critical: { text: 'text-red-600',     bg: 'bg-red-50 border-red-200' },
-    neutral:  { text: 'text-slate-400',   bg: 'bg-slate-50 border-slate-200' },
-};
+const LINES_PER_PAGE = 4;
+const ROTATE_MS = 20_000; // auto-advance to the next 4 lines every 20s
 
 const STATUS_CLS = {
     APPROVED:     'bg-emerald-100 text-emerald-700 border-emerald-200',
@@ -59,37 +46,56 @@ const SectionCard = ({ title, children, right }) => (
     </div>
 );
 
-const LineCard = ({ line, now, onClick }) => {
-    const { checked = 0, defects = 0, lastAt = null, lastBy = null } = line;
+// One line's full tree: header (name + today's checked/defects/DHU + a
+// freshness pulse, click opens LiveLineStatsModal for the top-defects
+// breakdown) with its workstations branching below it using literal
+// box-drawing connectors (├────► / └────►), each independently clickable
+// into that workstation's checker-scoped log.
+const LineTreeCard = ({ line, now, onHeaderClick, onWorkstationClick }) => {
+    const { checked = 0, defects = 0, lastAt = null, workstations = [] } = line;
     const dhu = checked > 0 ? (defects / checked) * 100 : null;
     const style = DHU_STYLES[dhuLevel(dhu)];
     const isFresh = lastAt && (now - new Date(lastAt).getTime()) < FRESH_MS;
 
     return (
-        <div
-            onClick={onClick}
-            className={`rounded-xl border shadow-sm p-4 cursor-pointer hover:shadow-md hover:brightness-[0.98] transition ${style.bg}`}
-        >
-            <div className="flex items-center justify-between mb-2">
-                <p className="font-black text-slate-800 truncate">{line.name}</p>
-                <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isFresh ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-            </div>
-            <div className="grid grid-cols-2 gap-2 mb-2">
-                <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Checked</p>
-                    <p className="text-xl font-extrabold text-slate-800">{checked.toLocaleString()}</p>
+        <div className={`rounded-xl border shadow-sm p-4 ${style.bg}`}>
+            <button onClick={onHeaderClick} className="w-full text-left mb-3 group">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="font-black text-slate-800 truncate group-hover:underline">{line.name}</p>
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isFresh ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
                 </div>
-                <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Defects</p>
-                    <p className="text-xl font-extrabold text-slate-800">{defects.toLocaleString()}</p>
+                <div className="flex items-center gap-3 text-xs">
+                    <span className="text-slate-600"><strong className="text-slate-800">{checked.toLocaleString()}</strong> checked</span>
+                    <span className="text-red-500 font-bold">{defects.toLocaleString()} defect{defects === 1 ? '' : 's'}</span>
+                    <span className={`font-bold ${style.text}`}>{dhu != null ? `${dhu.toFixed(1)} DHU` : '— DHU'}</span>
                 </div>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-                <span className={`font-bold ${style.text}`}>{dhu != null ? `${dhu.toFixed(1)} DHU` : '— DHU'}</span>
-                <span className="text-slate-400 truncate ml-2">
-                    {lastAt ? `${timeAgo(lastAt)}${lastBy ? ` · ${lastBy}` : ''}` : 'no checks yet'}
-                </span>
-            </div>
+            </button>
+
+            {workstations.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">No workstations configured for this line.</p>
+            ) : (
+                <div className="font-mono text-[11px] leading-relaxed">
+                    <p className="text-slate-300">│</p>
+                    {workstations.map((ws, i) => {
+                        const isLast = i === workstations.length - 1;
+                        const wsFresh = ws.last_check_at && (now - new Date(ws.last_check_at).getTime()) < FRESH_MS;
+                        return (
+                            <button
+                                key={ws.workstation_id}
+                                onClick={() => onWorkstationClick(ws)}
+                                className="w-full flex items-center gap-1.5 text-left hover:bg-white/60 rounded px-1 -mx-1 transition"
+                            >
+                                <span className="text-slate-300 shrink-0">{isLast ? '└────►' : '├────►'}</span>
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${wsFresh ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                                <span className="font-sans font-semibold text-slate-700 truncate">{ws.workstation_name}</span>
+                                <span className="font-sans text-slate-400 truncate ml-auto shrink-0 text-[10px]">
+                                    {ws.checked_today}✓{ws.defects_today > 0 ? ` ${ws.defects_today}✗` : ''}
+                                </span>
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
 };
@@ -121,14 +127,17 @@ const FeedRow = ({ e, onClick }) => {
 const LiveQcTrackingPage = () => {
     const { user } = useAuth();
     const [lines, setLines] = useState({}); // line_id -> { name, checked, defects, lastAt, lastBy }
+    const [workstationsByLine, setWorkstationsByLine] = useState({}); // line_id -> [{ workstation_id, ... }]
     const [feed, setFeed] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [now, setNow] = useState(Date.now());
-    // { mode: 'line', lineId, lineName, defectsOnly } | { mode: 'ids', ids, title } | null
+    // { mode: 'line', lineId, lineName, defectsOnly?, checkedByUserId?, checkerName? } | { mode: 'ids', ids, title } | null
     const [drilldown, setDrilldown] = useState(null);
-    // { lineId, lineName } | null — the stats summary opened by clicking a line card
+    // { lineId, lineName } | null — the stats summary opened by clicking a line's header
     const [statsLine, setStatsLine] = useState(null);
+    const [page, setPage] = useState(0); // which batch of LINES_PER_PAGE lines is showing
+    const [hovering, setHovering] = useState(false);
 
     // Re-render every few seconds so "Xs ago" / freshness pulses stay current
     useEffect(() => {
@@ -140,9 +149,10 @@ const LiveQcTrackingPage = () => {
         setLoading(true);
         setError(null);
         try {
-            const [lineRes, summaryRes] = await Promise.all([
+            const [lineRes, summaryRes, workstationsRes] = await Promise.all([
                 productionManagerApi.getAllProductionLines(),
                 liveQcApi.getTodaySummary(),
+                liveQcApi.getAllWorkstations(),
             ]);
             const summaryByLine = {};
             (summaryRes.data || []).forEach(s => { summaryByLine[s.line_id] = s; });
@@ -158,6 +168,22 @@ const LiveQcTrackingPage = () => {
                 };
             });
             setLines(next);
+
+            const wsByLine = {};
+            (workstationsRes.data || []).forEach(ws => {
+                (wsByLine[ws.line_id] ??= []).push({
+                    workstation_id: ws.workstation_id,
+                    workstation_name: ws.workstation_name,
+                    type_name: ws.type_name,
+                    sequence_no: ws.sequence_no,
+                    checker_user_id: ws.checker_user_id,
+                    checker_name: ws.checker_name,
+                    checked_today: parseInt(ws.checked_today, 10) || 0,
+                    defects_today: parseInt(ws.defects_today, 10) || 0,
+                    last_check_at: ws.last_check_at,
+                });
+            });
+            setWorkstationsByLine(wsByLine);
         } catch (e) {
             setError(e?.response?.data?.error || 'Failed to load live QC data.');
         } finally {
@@ -183,14 +209,61 @@ const LiveQcTrackingPage = () => {
                 },
             };
         });
+        // Bump the matching workstation too — today's counts only (no
+        // rolling last-hour window to drift here, unlike the deeper modals'
+        // fresh server fetches), keyed by checker since a workstation has no
+        // id of its own in qc_live_check_log.
+        setWorkstationsByLine(prev => {
+            const list = prev[e.line_id];
+            if (!list) return prev;
+            let matched = false;
+            const nextList = list.map(ws => {
+                if (ws.checker_user_id !== e.detected_by_user_id) return ws;
+                matched = true;
+                return {
+                    ...ws,
+                    checked_today: ws.checked_today + (e.qty_checked || 0),
+                    defects_today: ws.defects_today + (e.qty_defect || 0),
+                    last_check_at: e.created_at,
+                };
+            });
+            return matched ? { ...prev, [e.line_id]: nextList } : prev;
+        });
     }, []);
 
     const connected = useLiveQcSocket(onEvent);
 
-    const lineCards = useMemo(
-        () => Object.entries(lines).map(([id, l]) => ({ id, ...l })).sort((a, b) => a.name.localeCompare(b.name)),
-        [lines]
+    const lineTrees = useMemo(
+        () => Object.entries(lines)
+            .map(([id, l]) => ({ id, ...l, workstations: workstationsByLine[id] || [] }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        [lines, workstationsByLine]
     );
+
+    const linePages = useMemo(() => {
+        const pages = [];
+        for (let i = 0; i < lineTrees.length; i += LINES_PER_PAGE) pages.push(lineTrees.slice(i, i + LINES_PER_PAGE));
+        return pages;
+    }, [lineTrees]);
+
+    const totalPages = linePages.length;
+
+    // Clamp page if the line count shrinks (e.g. a line goes inactive)
+    useEffect(() => {
+        if (page > 0 && page >= totalPages) setPage(0);
+    }, [totalPages, page]);
+
+    // Auto-rotate through the pages — paused while a modal from this page is
+    // open (reading detail shouldn't get yanked away) or while hovering the
+    // board (someone's actively looking at it on a laptop, not a wall TV).
+    const paused = !!statsLine || !!drilldown || hovering;
+    useEffect(() => {
+        if (paused || totalPages <= 1) return undefined;
+        const t = setInterval(() => setPage(p => (p + 1) % totalPages), ROTATE_MS);
+        return () => clearInterval(t);
+    }, [paused, totalPages]);
+
+    const currentLines = linePages[page] || [];
 
     // This page is the /qa-portal index route — roles that can't see it land
     // on Analytics instead of a dead end.
@@ -225,15 +298,45 @@ const LiveQcTrackingPage = () => {
 
             {!loading && !error && (
                 <>
-                    <SectionCard title="Lines">
-                        {lineCards.length === 0 ? (
+                    <SectionCard
+                        title="Lines"
+                        right={totalPages > 1 && (
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => setPage(p => (p - 1 + totalPages) % totalPages)} className="p-1 rounded hover:bg-slate-100 text-slate-400 transition" title="Previous 4 lines">
+                                    <ChevronLeft size={15} />
+                                </button>
+                                <div className="flex items-center gap-1">
+                                    {linePages.map((_, i) => (
+                                        <button
+                                            key={i} onClick={() => setPage(i)}
+                                            className={`h-1.5 rounded-full transition-all ${i === page ? 'w-4 bg-indigo-600' : 'w-1.5 bg-slate-300 hover:bg-slate-400'}`}
+                                            title={`Lines ${i * LINES_PER_PAGE + 1}–${Math.min((i + 1) * LINES_PER_PAGE, lineTrees.length)}`}
+                                        />
+                                    ))}
+                                </div>
+                                <button onClick={() => setPage(p => (p + 1) % totalPages)} className="p-1 rounded hover:bg-slate-100 text-slate-400 transition" title="Next 4 lines">
+                                    <ChevronRight size={15} />
+                                </button>
+                                {!paused && <span className="text-[9px] text-slate-300 ml-1">auto</span>}
+                            </div>
+                        )}
+                    >
+                        {lineTrees.length === 0 ? (
                             <p className="text-sm text-slate-400 italic text-center py-8">No active production lines found.</p>
                         ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                {lineCards.map(l => (
-                                    <LineCard
+                            <div
+                                onMouseEnter={() => setHovering(true)}
+                                onMouseLeave={() => setHovering(false)}
+                                className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                            >
+                                {currentLines.map(l => (
+                                    <LineTreeCard
                                         key={l.id} line={l} now={now}
-                                        onClick={() => setStatsLine({ lineId: l.id, lineName: l.name })}
+                                        onHeaderClick={() => setStatsLine({ lineId: l.id, lineName: l.name })}
+                                        onWorkstationClick={(ws) => setDrilldown({
+                                            mode: 'line', lineId: l.id, lineName: l.name,
+                                            checkedByUserId: ws.checker_user_id, checkerName: ws.checker_name,
+                                        })}
                                     />
                                 ))}
                             </div>

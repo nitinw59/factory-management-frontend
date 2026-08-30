@@ -17,12 +17,15 @@ const STATUS_CLS = {
 const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 
 // Shared drilldown for the Live QC Tracking page — two modes:
-//   { mode: 'line', lineId, lineName, defectsOnly? }  — units checked on this
-//                                                        line today (or just
-//                                                        the defects among them)
+//   { mode: 'line', lineId, lineName, defectsOnly?, checkedByUserId?, checkerName? }
+//                                                     — units checked on this
+//                                                       line today (optionally
+//                                                       just the defects, or
+//                                                       just one workstation's
+//                                                       checker)
 //   { mode: 'ids', ids, title }                       — the exact rows one
 //                                                        feed event wrote
-const LiveDrilldownModal = ({ mode, lineId, lineName, defectsOnly, ids, title, onClose }) => {
+const LiveDrilldownModal = ({ mode, lineId, lineName, defectsOnly, checkedByUserId, checkerName, ids, title, onClose }) => {
     const [rows, setRows] = useState([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
@@ -48,6 +51,7 @@ const LiveDrilldownModal = ({ mode, lineId, lineName, defectsOnly, ids, title, o
                 const res = await liveQcApi.getLineUnits({
                     line_id: lineId, page: pageArg, page_size: PAGE_SIZE,
                     ...(defectsOnly && { defects_only: true }),
+                    ...(checkedByUserId && { checked_by_user_id: checkedByUserId }),
                     ...(debouncedSearch && { search: debouncedSearch }),
                 });
                 setRows(res.data?.data || []);
@@ -65,7 +69,7 @@ const LiveDrilldownModal = ({ mode, lineId, lineName, defectsOnly, ids, title, o
         } finally {
             setLoading(false);
         }
-    }, [mode, lineId, defectsOnly, debouncedSearch, ids]);
+    }, [mode, lineId, defectsOnly, checkedByUserId, debouncedSearch, ids]);
 
     useEffect(() => { load(1); }, [load]);
 
@@ -86,7 +90,7 @@ const LiveDrilldownModal = ({ mode, lineId, lineName, defectsOnly, ids, title, o
                     <div>
                         <h2 className="text-base font-black text-slate-800">
                             {mode === 'line'
-                                ? `${lineName} — ${defectsOnly ? "Today's Defect Log" : "Today's Checks"}`
+                                ? `${lineName} — ${checkedByUserId ? `${checkerName || 'Checker'}'s Log` : (defectsOnly ? "Today's Defect Log" : "Today's Checks")}`
                                 : (title || 'Check Detail')}
                         </h2>
                         <p className="text-xs text-slate-500 mt-0.5">{displayTotal.toLocaleString()} unit{displayTotal === 1 ? '' : 's'}</p>
