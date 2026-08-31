@@ -1,7 +1,10 @@
 import api from '../utils/api';
 
 export const bomApi = {
-    getFormData:          ()           => api.get('/bom/form-data'),
+    // productId is optional — when passed, the response also includes
+    // productStages: that product's own product_cycle_flow (Cutting,
+    // Preparatory, Sewing, ...), driving the BOM wizard's stage steps.
+    getFormData:          (productId) => api.get('/bom/form-data', productId ? { params: { product_id: productId } } : undefined),
     getTrimVariantSizes:  (trimItemId) => api.get(`/bom/trim-items/${trimItemId}/variant-sizes`),
     getAll:       ()            => api.get('/bom'),
     getById:      (bomId)       => api.get(`/bom/${bomId}`),

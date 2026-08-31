@@ -149,6 +149,53 @@ const BarcodePrintModal = ({ isOpen, onClose, batchId }) => {
 
 // --- Reference Data Modal (BOM & Cutting) ---
 // Reference data is already loaded once at page level; the modal reuses it rather than refetching.
+// One BOM/recipe row — shared between the stage-grouped (5-column, with
+// Comments) and legacy flat (4-column, no stage/comments concept) renderings.
+const BomRefRow = ({ item, legacy = false }) => {
+    const isPerSize = item.calculation_type === 'PER_SIZE';
+    const qty       = parseFloat(item.quantity_per_piece);
+    const waste     = parseFloat(item.wastage_percentage);
+    return (
+        <tr className="hover:bg-gray-50 align-top">
+            <td className="py-3 px-5">
+                <span className="font-semibold text-gray-800">{(item.item_name || '').trim() || '—'}</span>
+                {item.is_color_agnostic && (
+                    <span className="ml-2 text-[10px] font-medium text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded-full border border-purple-100">Generic</span>
+                )}
+            </td>
+            <td className="py-3 px-5 text-center">
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${isPerSize ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                    {isPerSize ? 'Per size' : 'Fixed'}
+                </span>
+            </td>
+            <td className="py-3 px-5">
+                {isPerSize ? (
+                    (item.size_consumptions || []).length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                            {item.size_consumptions.map(sc => (
+                                <span key={sc.size} className="inline-flex items-baseline gap-1 bg-blue-50/60 border border-blue-100 rounded px-1.5 py-0.5 text-[11px]">
+                                    <span className="font-bold text-gray-700">{sc.size}</span>
+                                    <span className="font-mono text-blue-700">{Number(sc.quantity).toFixed(2)}</span>
+                                </span>
+                            ))}
+                        </div>
+                    ) : (
+                        <span className="text-xs text-amber-600 italic">Per-size, but no sizes defined</span>
+                    )
+                ) : (
+                    <span className="font-mono font-bold text-indigo-600">{Number.isFinite(qty) ? qty.toFixed(4) : '—'}</span>
+                )}
+            </td>
+            <td className="py-3 px-5 text-center text-sm font-medium text-gray-500">
+                {Number.isFinite(waste) && waste > 0 ? `+${waste}%` : '—'}
+            </td>
+            {!legacy && (
+                <td className="py-3 px-5 text-sm text-gray-400 italic">{item.comments || '—'}</td>
+            )}
+        </tr>
+    );
+};
+
 const ReferenceDataModal = ({ isOpen, onClose, data = { bom: [], cutting: [] }, loading = false }) => {
     const [activeTab, setActiveTab] = useState('bom');
 
@@ -156,6 +203,24 @@ const ReferenceDataModal = ({ isOpen, onClose, data = { bom: [], cutting: [] }, 
     (sum, cut) => sum + Number(cut.total_cut || 0),
     0
     );
+
+    // Group BOM rows by the product's own workflow stage — only meaningful
+    // when this data actually came from an approved BOM (bom_source==='BOM');
+    // the legacy product_materials_required fallback has no stage concept,
+    // so it renders as a single flat list as before. Mirrors the grouping
+    // used everywhere else BOM materials are shown.
+    const bomByStage = (() => {
+        if (data.bom_source !== 'BOM') return null;
+        const stages = data.product_stages || [];
+        const groups = stages.map(s => ({
+            key: `stage-${s.production_line_type_id}`,
+            label: s.stage_name,
+            items: (data.bom || []).filter(item => String(item.production_line_type_id || '') === String(s.production_line_type_id)),
+        })).filter(g => g.items.length > 0);
+        const unassigned = (data.bom || []).filter(item => !item.production_line_type_id);
+        if (unassigned.length > 0) groups.unshift({ key: 'unassigned', label: 'Unassigned', items: unassigned });
+        return groups;
+    })();
 
     if (!isOpen) return null;
 
@@ -233,61 +298,49 @@ const ReferenceDataModal = ({ isOpen, onClose, data = { bom: [], cutting: [] }, 
                         <>
                             {/* BOM TAB */}
                             {activeTab === 'bom' && (
-                                <table className="min-w-full text-left border-collapse">
-                                    <thead className="bg-gray-100 text-xs uppercase text-gray-600 font-bold sticky top-0">
-                                        <tr>
-                                            <th className="py-3 px-5 border-b">Material Name</th>
-                                            <th className="py-3 px-5 border-b text-center">Type</th>
-                                            <th className="py-3 px-5 border-b">Req. Qty / Pc</th>
-                                            <th className="py-3 px-5 border-b text-center">Wastage</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-200 bg-white">
-                                        {data.bom.length > 0 ? data.bom.map((item, idx) => {
-                                            const isPerSize = item.calculation_type === 'PER_SIZE';
-                                            const qty       = parseFloat(item.quantity_per_piece);
-                                            const waste     = parseFloat(item.wastage_percentage);
-                                            return (
-                                                <tr key={item.trim_item_id ?? idx} className="hover:bg-gray-50 align-top">
-                                                    <td className="py-3 px-5">
-                                                        <span className="font-semibold text-gray-800">{(item.item_name || '').trim() || '—'}</span>
-                                                        {item.is_color_agnostic && (
-                                                            <span className="ml-2 text-[10px] font-medium text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded-full border border-purple-100">Generic</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="py-3 px-5 text-center">
-                                                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${isPerSize ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
-                                                            {isPerSize ? 'Per size' : 'Fixed'}
-                                                        </span>
-                                                    </td>
-                                                    <td className="py-3 px-5">
-                                                        {isPerSize ? (
-                                                            (item.size_consumptions || []).length > 0 ? (
-                                                                <div className="flex flex-wrap gap-1">
-                                                                    {item.size_consumptions.map(sc => (
-                                                                        <span key={sc.size} className="inline-flex items-baseline gap-1 bg-blue-50/60 border border-blue-100 rounded px-1.5 py-0.5 text-[11px]">
-                                                                            <span className="font-bold text-gray-700">{sc.size}</span>
-                                                                            <span className="font-mono text-blue-700">{Number(sc.quantity).toFixed(2)}</span>
-                                                                        </span>
-                                                                    ))}
-                                                                </div>
-                                                            ) : (
-                                                                <span className="text-xs text-amber-600 italic">Per-size, but no sizes defined</span>
-                                                            )
-                                                        ) : (
-                                                            <span className="font-mono font-bold text-indigo-600">{Number.isFinite(qty) ? qty.toFixed(4) : '—'}</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="py-3 px-5 text-center text-sm font-medium text-gray-500">
-                                                        {Number.isFinite(waste) && waste > 0 ? `+${waste}%` : '—'}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        }) : (
-                                            <tr><td colSpan="4" className="py-10 text-center text-gray-400">No BOM data found for this product.</td></tr>
-                                        )}
-                                    </tbody>
-                                </table>
+                                data.bom.length === 0 ? (
+                                    <p className="py-10 text-center text-gray-400">No BOM data found for this product.</p>
+                                ) : bomByStage ? (
+                                    // From an approved BOM — group by the product's own workflow stage.
+                                    <div className="divide-y divide-gray-200">
+                                        {bomByStage.map(group => (
+                                            <div key={group.key} className="px-5 py-3">
+                                                <p className={`text-[11px] font-bold uppercase tracking-wider mb-2 ${group.key === 'unassigned' ? 'text-amber-600' : 'text-indigo-600'}`}>
+                                                    {group.label} <span className="font-normal normal-case text-gray-400">· {group.items.length}</span>
+                                                </p>
+                                                <table className="min-w-full text-left border-collapse">
+                                                    <thead className="text-xs uppercase text-gray-500 font-bold">
+                                                        <tr>
+                                                            <th className="py-1.5 pr-3 border-b">Material Name</th>
+                                                            <th className="py-1.5 pr-3 border-b text-center">Type</th>
+                                                            <th className="py-1.5 pr-3 border-b">Req. Qty / Pc</th>
+                                                            <th className="py-1.5 pr-3 border-b text-center">Wastage</th>
+                                                            <th className="py-1.5 border-b">Comments</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-gray-100 bg-white">
+                                                        {group.items.map((item, idx) => <BomRefRow key={item.trim_item_id ?? idx} item={item} />)}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    // Legacy product_materials_required fallback — no stage concept, flat list.
+                                    <table className="min-w-full text-left border-collapse">
+                                        <thead className="bg-gray-100 text-xs uppercase text-gray-600 font-bold sticky top-0">
+                                            <tr>
+                                                <th className="py-3 px-5 border-b">Material Name</th>
+                                                <th className="py-3 px-5 border-b text-center">Type</th>
+                                                <th className="py-3 px-5 border-b">Req. Qty / Pc</th>
+                                                <th className="py-3 px-5 border-b text-center">Wastage</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-200 bg-white">
+                                            {data.bom.map((item, idx) => <BomRefRow key={item.trim_item_id ?? idx} item={item} legacy />)}
+                                        </tbody>
+                                    </table>
+                                )
                             )}
 
                             {/* CUTTING TAB */}

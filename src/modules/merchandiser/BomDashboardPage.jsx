@@ -118,7 +118,23 @@ const BomDetailModal = ({ bomId, onClose, onEdit, onDuplicate }) => {
         );
     const visibleGroups    = (bom?.ratio_groups || []).filter(groupMatches);
     const visibleMaterials = (bom?.material_consumptions || []).filter(materialMatches);
-    const noSearchResults  = !!query && visibleGroups.length === 0 && visibleMaterials.length === 0;
+
+    // Group materials by their product_cycle_flow stage — ordered by that
+    // stage's sequence_no via bom.product_stages, with an "Unassigned" bucket
+    // (legacy rows, or rows never given a stage) surfaced first when present.
+    const materialsByStage = useMemo(() => {
+        const stages = bom?.product_stages || [];
+        const groups = stages.map(s => ({
+            key: `stage-${s.production_line_type_id}`,
+            label: s.stage_name,
+            materials: visibleMaterials.filter(mc => String(mc.production_line_type_id || '') === String(s.production_line_type_id)),
+        })).filter(g => g.materials.length > 0);
+        const unassigned = visibleMaterials.filter(mc => !mc.production_line_type_id);
+        if (unassigned.length > 0) groups.unshift({ key: 'unassigned', label: 'Unassigned', materials: unassigned });
+        return groups;
+    }, [bom, visibleMaterials]);
+
+    const noSearchResults = !!query && visibleGroups.length === 0 && visibleMaterials.length === 0;
 
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -261,79 +277,92 @@ const BomDetailModal = ({ bomId, onClose, onEdit, onDuplicate }) => {
                                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Fabric Consumptions</p>
                                     <div className="flex flex-wrap gap-1.5">
                                         {bom.fabric_consumptions.map((fc, j) => (
-                                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold">
+                                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold" title={fc.comments || undefined}>
                                                 {fc.fabric_role ? `${fc.fabric_role} (generic)` : (fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`)}: {fc.consumption_inches}" / pc
+                                                {fc.comments && <span className="font-normal text-sky-500"> — {fc.comments}</span>}
                                             </span>
                                         ))}
                                     </div>
                                 </div>
                             )}
 
-                            {/* Material / Trim Consumptions */}
+                            {/* Material / Trim Consumptions — grouped by the product's own workflow stage */}
                             {visibleMaterials.length > 0 && (
                                 <div>
                                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Material / Trim Consumptions</p>
-                                    <div className="space-y-2">
-                                        {visibleMaterials.map((mc, i) => (
-                                            <div key={i} className="border border-slate-200 rounded-xl p-3">
-                                                <div className="flex items-start justify-between gap-2 mb-1.5">
-                                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                                        <p className="font-bold text-slate-700 text-sm">
-                                                            {mc.trim_item_name || `Trim #${mc.trim_item_id}`}
-                                                        </p>
-                                                        {mc.item_code && (
-                                                            <span className="text-[10px] text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded">
-                                                                {mc.item_code}
-                                                            </span>
-                                                        )}
-                                                        {mc.unit_of_measure && (
-                                                            <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold">
-                                                                {mc.unit_of_measure}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <div className="flex items-center gap-2 shrink-0">
-                                                        <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">{mc.calculation_type}</span>
-                                                        {mc.wastage_percentage > 0 && (
-                                                            <span className="text-[10px] text-slate-400">{mc.wastage_percentage}% wastage</span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                {mc.placement_description && (
-                                                    <p className="text-[10px] text-slate-400 mb-1.5">📍 {mc.placement_description}</p>
-                                                )}
-                                                {mc.calculation_type === 'FIXED' ? (
-                                                    <p className="text-xs text-slate-700 font-bold">
-                                                        {mc.fixed_quantity}{' '}
-                                                        <span className="font-normal text-slate-400">
-                                                            {mc.unit_of_measure ? `${mc.unit_of_measure} per garment (fixed)` : 'per garment (fixed)'}
-                                                        </span>
-                                                    </p>
-                                                ) : (
-                                                    <div className="space-y-1">
-                                                        {(mc.size_consumptions || []).map((sc, j) => {
-                                                            const badSize = isFlagged(sc.size);
-                                                            const badTarget = isFlagged(sc.target_variant_size);
-                                                            return (
-                                                                <div key={j} className="flex items-center gap-2">
-                                                                    <span
-                                                                        title={badSize ? 'Non-standard size — not in Sizes master' : undefined}
-                                                                        className={`inline-flex items-center justify-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold min-w-[52px] text-center border ${badSize ? 'bg-red-50 text-red-700 border-red-300' : 'bg-violet-50 text-violet-700 border-violet-100'}`}
-                                                                    >
-                                                                        {badSize && <AlertTriangle size={10} />}
-                                                                        {sc.size || '—'}: {sc.quantity}{mc.unit_of_measure ? ` ${mc.unit_of_measure}` : ''}
-                                                                    </span>
-                                                                    {sc.target_variant_size && (
-                                                                        <span className={`text-[10px] font-medium inline-flex items-center gap-1 ${badTarget ? 'text-red-600' : 'text-slate-400'}`}>
-                                                                            {badTarget && <AlertTriangle size={10} />}
-                                                                            → sz <span className={`font-bold ${badTarget ? 'text-red-700' : 'text-slate-600'}`}>{sc.target_variant_size}</span>
+                                    <div className="space-y-4">
+                                        {materialsByStage.map(group => (
+                                            <div key={group.key}>
+                                                <p className={`text-[10px] font-bold uppercase tracking-wider mb-1.5 ${group.key === 'unassigned' ? 'text-amber-600' : 'text-violet-500'}`}>
+                                                    {group.label} <span className="font-normal normal-case text-slate-400">· {group.materials.length} item{group.materials.length === 1 ? '' : 's'}</span>
+                                                </p>
+                                                <div className="space-y-2">
+                                                    {group.materials.map((mc, i) => (
+                                                        <div key={i} className="border border-slate-200 rounded-xl p-3">
+                                                            <div className="flex items-start justify-between gap-2 mb-1.5">
+                                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                                    <p className="font-bold text-slate-700 text-sm">
+                                                                        {mc.trim_item_name || `Trim #${mc.trim_item_id}`}
+                                                                    </p>
+                                                                    {mc.item_code && (
+                                                                        <span className="text-[10px] text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded">
+                                                                            {mc.item_code}
+                                                                        </span>
+                                                                    )}
+                                                                    {mc.unit_of_measure && (
+                                                                        <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold">
+                                                                            {mc.unit_of_measure}
                                                                         </span>
                                                                     )}
                                                                 </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                )}
+                                                                <div className="flex items-center gap-2 shrink-0">
+                                                                    <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">{mc.calculation_type}</span>
+                                                                    {mc.wastage_percentage > 0 && (
+                                                                        <span className="text-[10px] text-slate-400">{mc.wastage_percentage}% wastage</span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            {mc.placement_description && (
+                                                                <p className="text-[10px] text-slate-400 mb-1.5">📍 {mc.placement_description}</p>
+                                                            )}
+                                                            {mc.comments && (
+                                                                <p className="text-[10px] text-slate-400 mb-1.5 italic">💬 {mc.comments}</p>
+                                                            )}
+                                                            {mc.calculation_type === 'FIXED' ? (
+                                                                <p className="text-xs text-slate-700 font-bold">
+                                                                    {mc.fixed_quantity}{' '}
+                                                                    <span className="font-normal text-slate-400">
+                                                                        {mc.unit_of_measure ? `${mc.unit_of_measure} per garment (fixed)` : 'per garment (fixed)'}
+                                                                    </span>
+                                                                </p>
+                                                            ) : (
+                                                                <div className="space-y-1">
+                                                                    {(mc.size_consumptions || []).map((sc, j) => {
+                                                                        const badSize = isFlagged(sc.size);
+                                                                        const badTarget = isFlagged(sc.target_variant_size);
+                                                                        return (
+                                                                            <div key={j} className="flex items-center gap-2">
+                                                                                <span
+                                                                                    title={badSize ? 'Non-standard size — not in Sizes master' : undefined}
+                                                                                    className={`inline-flex items-center justify-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold min-w-[52px] text-center border ${badSize ? 'bg-red-50 text-red-700 border-red-300' : 'bg-violet-50 text-violet-700 border-violet-100'}`}
+                                                                                >
+                                                                                    {badSize && <AlertTriangle size={10} />}
+                                                                                    {sc.size || '—'}: {sc.quantity}{mc.unit_of_measure ? ` ${mc.unit_of_measure}` : ''}
+                                                                                </span>
+                                                                                {sc.target_variant_size && (
+                                                                                    <span className={`text-[10px] font-medium inline-flex items-center gap-1 ${badTarget ? 'text-red-600' : 'text-slate-400'}`}>
+                                                                                        {badTarget && <AlertTriangle size={10} />}
+                                                                                        → sz <span className={`font-bold ${badTarget ? 'text-red-700' : 'text-slate-600'}`}>{sc.target_variant_size}</span>
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             </div>
                                         ))}
                                     </div>

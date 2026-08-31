@@ -100,6 +100,23 @@ const logBomBrief = (phase, bom) => {
     }
 };
 
+// Groups a BOM's material_consumptions by the product's own workflow stage
+// (bom.product_stages, from bomController.getBomFullDetail), ordered by
+// sequence_no, with an "Unassigned" bucket (legacy/no-stage rows) surfaced
+// first when present. Mirrors the grouping used in the BOM editor, dashboard,
+// approval, and batch-drilldown views.
+const materialsByStage = (bom) => {
+    const stages = bom?.product_stages || [];
+    const groups = stages.map(s => ({
+        key: `stage-${s.production_line_type_id}`,
+        label: s.stage_name,
+        materials: (bom?.material_consumptions || []).filter(mc => String(mc.production_line_type_id || '') === String(s.production_line_type_id)),
+    })).filter(g => g.materials.length > 0);
+    const unassigned = (bom?.material_consumptions || []).filter(mc => !mc.production_line_type_id);
+    if (unassigned.length > 0) groups.unshift({ key: 'unassigned', label: 'Unassigned', materials: unassigned });
+    return groups;
+};
+
 // ─── BOM PREVIEW MODAL ────────────────────────────────────────────────────────
 
 const BomPreviewModal = ({ bomId, onClose }) => {
@@ -181,47 +198,60 @@ const BomPreviewModal = ({ bomId, onClose }) => {
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Fabric Consumptions</p>
                                     <div className="flex flex-wrap gap-1.5">
                                         {bom.fabric_consumptions.map((fc, j) => (
-                                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold">
+                                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold" title={fc.comments || undefined}>
                                                 {fc.fabric_role ? `${fc.fabric_role} (generic)` : (fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`)}: {fc.consumption_inches}" / pc
+                                                {fc.comments && <span className="font-normal text-sky-500"> — {fc.comments}</span>}
                                             </span>
                                         ))}
                                     </div>
                                 </div>
                             )}
 
-                            {/* Materials */}
+                            {/* Materials — grouped by the product's own workflow stage */}
                             {(bom.material_consumptions || []).length > 0 && (
                                 <div>
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Materials & Trims</p>
-                                    <div className="space-y-1.5">
-                                        {bom.material_consumptions.map((mc, i) => (
-                                            <div key={i} className="border border-slate-200 rounded-xl px-3 py-2">
-                                                <div className="flex items-start justify-between gap-2 mb-1">
-                                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                                        <span className="font-semibold text-slate-700 text-xs">{mc.trim_item_name || `Trim #${mc.trim_item_id}`}</span>
-                                                        {mc.item_code && <span className="text-[9px] font-mono text-slate-400 bg-slate-100 px-1 rounded">{mc.item_code}</span>}
-                                                        {mc.unit_of_measure && (
-                                                            <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold">{mc.unit_of_measure}</span>
-                                                        )}
-                                                    </div>
-                                                    <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold shrink-0">{mc.calculation_type}</span>
+                                    <div className="space-y-3">
+                                        {materialsByStage(bom).map(group => (
+                                            <div key={group.key}>
+                                                <p className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${group.key === 'unassigned' ? 'text-amber-600' : 'text-violet-500'}`}>
+                                                    {group.label} <span className="font-normal normal-case text-slate-400">· {group.materials.length}</span>
+                                                </p>
+                                                <div className="space-y-1.5">
+                                                    {group.materials.map((mc, i) => (
+                                                        <div key={i} className="border border-slate-200 rounded-xl px-3 py-2">
+                                                            <div className="flex items-start justify-between gap-2 mb-1">
+                                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                                    <span className="font-semibold text-slate-700 text-xs">{mc.trim_item_name || `Trim #${mc.trim_item_id}`}</span>
+                                                                    {mc.item_code && <span className="text-[9px] font-mono text-slate-400 bg-slate-100 px-1 rounded">{mc.item_code}</span>}
+                                                                    {mc.unit_of_measure && (
+                                                                        <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold">{mc.unit_of_measure}</span>
+                                                                    )}
+                                                                </div>
+                                                                <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold shrink-0">{mc.calculation_type}</span>
+                                                            </div>
+                                                            {mc.placement_description && (
+                                                                <p className="text-[9px] text-slate-400 mb-1">📍 {mc.placement_description}</p>
+                                                            )}
+                                                            {mc.comments && (
+                                                                <p className="text-[9px] text-slate-400 mb-1 italic">💬 {mc.comments}</p>
+                                                            )}
+                                                            {mc.calculation_type === 'FIXED' ? (
+                                                                <p className="text-[10px] text-slate-600 font-bold">
+                                                                    {mc.fixed_quantity} <span className="font-normal text-slate-400">{mc.unit_of_measure || 'unit'} per garment</span>
+                                                                </p>
+                                                            ) : (
+                                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                                    {(mc.size_consumptions || []).map((sc, j) => (
+                                                                        <span key={j} className="bg-violet-50 text-violet-700 border border-violet-100 rounded px-1.5 py-0.5 text-[9px] font-bold">
+                                                                            {sc.size || '—'}: {sc.quantity}{mc.unit_of_measure ? ` ${mc.unit_of_measure}` : ''}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
                                                 </div>
-                                                {mc.placement_description && (
-                                                    <p className="text-[9px] text-slate-400 mb-1">📍 {mc.placement_description}</p>
-                                                )}
-                                                {mc.calculation_type === 'FIXED' ? (
-                                                    <p className="text-[10px] text-slate-600 font-bold">
-                                                        {mc.fixed_quantity} <span className="font-normal text-slate-400">{mc.unit_of_measure || 'unit'} per garment</span>
-                                                    </p>
-                                                ) : (
-                                                    <div className="flex flex-wrap gap-1 mt-1">
-                                                        {(mc.size_consumptions || []).map((sc, j) => (
-                                                            <span key={j} className="bg-violet-50 text-violet-700 border border-violet-100 rounded px-1.5 py-0.5 text-[9px] font-bold">
-                                                                {sc.size || '—'}: {sc.quantity}{mc.unit_of_measure ? ` ${mc.unit_of_measure}` : ''}
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                )}
                                             </div>
                                         ))}
                                     </div>

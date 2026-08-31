@@ -22,7 +22,11 @@ const TabButton = ({ label, isActive, onClick }) => (
 
 const ProductForm = ({ onSave, onClose, initialData = null }) => {
   const [product, setProduct] = useState({});
-  const [materials, setMaterials] = useState([{ trim_item_id: '', quantity: '1' }]);
+  // Legacy per-product recipe (product_materials_required) — deprecated in
+  // favor of the stage-grouped BOM. New products get none; editing a product
+  // that already has legacy rows still shows/keeps them (see the Materials
+  // tab below), but no blank starter row is seeded anymore.
+  const [materials, setMaterials] = useState([]);
   const [pieceParts, setPieceParts] = useState([{ part_name: '', part_type: 'PRIMARY' }]);
   const [cycleFlow, setCycleFlow] = useState([]);
   const [options, setOptions] = useState({ brands: [], types: [], trimItems: [], lineTypes: [] });
@@ -45,7 +49,7 @@ const ProductForm = ({ onSave, onClose, initialData = null }) => {
           const productRes = await productApi.getById(initialData.id);
           const { materials: initialMaterials, cycleFlow: initialCycle, piece_parts: initialParts, ...productDetails } = productRes.data;
           setProduct(productDetails);
-          setMaterials(initialMaterials && initialMaterials.length > 0 ? initialMaterials : [{ trim_item_id: '', quantity: '1' }]);
+          setMaterials(initialMaterials || []);
           setPieceParts(initialParts && initialParts.length > 0 ? initialParts : [{ part_name: '', part_type: 'PRIMARY' }]);
           setCycleFlow(initialCycle || []);
         } else {
@@ -124,6 +128,12 @@ const ProductForm = ({ onSave, onClose, initialData = null }) => {
       opt => !cycleFlow.some(step => step.production_line_type_id.toString() === opt.id.toString())
   );
 
+  // The legacy flat recipe is deprecated in favor of the stage-grouped BOM —
+  // hide the tab entirely for new products (nothing to migrate) and for any
+  // existing product that never had legacy rows. Only shown, relabeled, when
+  // there's actual legacy data to preserve/edit.
+  const showMaterialsTab = materials.length > 0;
+
   return (
     <form onSubmit={handleSubmit} className="flex flex-col h-full">
       {error && <div className="p-3 mb-4 bg-red-100 text-red-700 rounded-md">{error}</div>}
@@ -131,7 +141,9 @@ const ProductForm = ({ onSave, onClose, initialData = null }) => {
       {/* --- Tab Navigation --- */}
       <div className="flex border-b">
         <TabButton label="Details" isActive={activeTab === 'details'} onClick={() => setActiveTab('details')} />
-        <TabButton label="Materials" isActive={activeTab === 'materials'} onClick={() => setActiveTab('materials')} />
+        {showMaterialsTab && (
+          <TabButton label="Materials (Legacy)" isActive={activeTab === 'materials'} onClick={() => setActiveTab('materials')} />
+        )}
         <TabButton label="Piece Parts" isActive={activeTab === 'parts'} onClick={() => setActiveTab('parts')} />
         <TabButton label="Production Flow" isActive={activeTab === 'flow'} onClick={() => setActiveTab('flow')} />
       </div>
@@ -150,9 +162,14 @@ const ProductForm = ({ onSave, onClose, initialData = null }) => {
           </div>
         )}
 
-        {activeTab === 'materials' && (
+        {activeTab === 'materials' && showMaterialsTab && (
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Materials Required</h3>
+            <h3 className="text-lg font-semibold">Materials Required (Legacy)</h3>
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2">
+              Deprecated — new material/trim requirements belong on the product's BOM, grouped by
+              production stage. This flat list is kept only because this product already has entries;
+              it's still editable, but no longer the recommended place to add new ones.
+            </p>
             <div className="max-h-[40vh] overflow-y-auto space-y-4 p-2 border rounded-md">
             {materials.map((material, index) => (
               <div key={index} className="flex items-center space-x-2">

@@ -170,6 +170,21 @@ const BomDetail = ({ bomId }) => {
     if (err)     return <p className="text-xs text-red-500 py-3">{err}</p>;
     if (!bom)    return null;
 
+    // Group materials by the product's own workflow stage — ordered by
+    // bom.product_stages' sequence_no, with "Unassigned" (legacy/no-stage
+    // rows) surfaced first when present.
+    const materialsByStage = (() => {
+        const stages = bom.product_stages || [];
+        const groups = stages.map(s => ({
+            key: `stage-${s.production_line_type_id}`,
+            label: s.stage_name,
+            materials: (bom.material_consumptions || []).filter(mc => String(mc.production_line_type_id || '') === String(s.production_line_type_id)),
+        })).filter(g => g.materials.length > 0);
+        const unassigned = (bom.material_consumptions || []).filter(mc => !mc.production_line_type_id);
+        if (unassigned.length > 0) groups.unshift({ key: 'unassigned', label: 'Unassigned', materials: unassigned });
+        return groups;
+    })();
+
     return (
         <div className="space-y-4">
             {bom.status === 'REJECTED' && bom.rejection_notes && (
@@ -210,9 +225,10 @@ const BomDetail = ({ bomId }) => {
                     </p>
                     <div className="flex flex-wrap gap-1.5">
                         {bom.fabric_consumptions.map((fc, j) => (
-                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold">
+                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold" title={fc.comments || undefined}>
                                 {fc.fabric_role ? `${fc.fabric_role} (generic)` : (fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`)}
                                 {fc.consumption_inches ? `: ${fc.consumption_inches}" / pc` : ''}
+                                {fc.comments && <span className="font-normal text-sky-500"> — {fc.comments}</span>}
                             </span>
                         ))}
                     </div>
@@ -223,28 +239,37 @@ const BomDetail = ({ bomId }) => {
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                         <Tag size={10} /> Materials & Trims ({bom.material_consumptions.length})
                     </p>
-                    <div className="grid grid-cols-2 gap-2">
-                        {bom.material_consumptions.map((mc, i) => (
-                            <div key={i} onClick={() => setSelectedTrim(mc)}
-                                className="border border-slate-200 rounded-xl px-3 py-2 cursor-pointer hover:bg-slate-50 hover:border-slate-300 transition-colors">
-                                <div className="flex items-center justify-between gap-1 mb-0.5">
-                                    <span className="font-semibold text-slate-700 text-xs truncate">
-                                        {mc.trim_item_name || `Trim #${mc.trim_item_id}`}
-                                    </span>
-                                    {mc.unit_of_measure && (
-                                        <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold shrink-0">
-                                            {mc.unit_of_measure}
-                                        </span>
-                                    )}
-                                </div>
-                                {mc.placement_description && (
-                                    <p className="text-[9px] text-slate-400 truncate">📍 {mc.placement_description}</p>
-                                )}
-                                <p className="text-[10px] text-slate-600 font-bold mt-0.5">
-                                    {mc.calculation_type === 'FIXED'
-                                        ? `${mc.fixed_quantity} ${mc.unit_of_measure || 'unit'} fixed`
-                                        : `Per size · ${(mc.size_consumptions || []).length} sizes`}
+                    <div className="space-y-3">
+                        {materialsByStage.map(group => (
+                            <div key={group.key}>
+                                <p className={`text-[9px] font-bold uppercase tracking-wider mb-1.5 ${group.key === 'unassigned' ? 'text-amber-600' : 'text-violet-500'}`}>
+                                    {group.label} <span className="font-normal normal-case text-slate-400">· {group.materials.length}</span>
                                 </p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {group.materials.map((mc, i) => (
+                                        <div key={i} onClick={() => setSelectedTrim(mc)}
+                                            className="border border-slate-200 rounded-xl px-3 py-2 cursor-pointer hover:bg-slate-50 hover:border-slate-300 transition-colors">
+                                            <div className="flex items-center justify-between gap-1 mb-0.5">
+                                                <span className="font-semibold text-slate-700 text-xs truncate">
+                                                    {mc.trim_item_name || `Trim #${mc.trim_item_id}`}
+                                                </span>
+                                                {mc.unit_of_measure && (
+                                                    <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold shrink-0">
+                                                        {mc.unit_of_measure}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {mc.placement_description && (
+                                                <p className="text-[9px] text-slate-400 truncate">📍 {mc.placement_description}</p>
+                                            )}
+                                            <p className="text-[10px] text-slate-600 font-bold mt-0.5">
+                                                {mc.calculation_type === 'FIXED'
+                                                    ? `${mc.fixed_quantity} ${mc.unit_of_measure || 'unit'} fixed`
+                                                    : `Per size · ${(mc.size_consumptions || []).length} sizes`}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -301,7 +326,13 @@ function diffByKey(oldList = [], newList = [], keyFn, isChangedFn) {
     return result;
 }
 
-const materialKey     = m => String(m.trim_item_id);
+// Stage is baked into the key (not just materialChanged) because the same
+// trim can legitimately exist at two different stages — keying on
+// trim_item_id alone would collapse two distinct rows into one and hide the
+// second from the diff. A trim moved between stages surfaces as one
+// 'removed' + one 'added' entry rather than a same-row 'changed' — arguably
+// clearer for a reviewer (it's a structural change, not a quantity edit).
+const materialKey     = m => `${m.trim_item_id}:${m.production_line_type_id ?? 'none'}`;
 const materialChanged = (o, n) => {
     if (o.calculation_type !== n.calculation_type) return true;
     if (o.calculation_type === 'FIXED') return String(o.fixed_quantity) !== String(n.fixed_quantity);
@@ -467,6 +498,7 @@ const MaterialDiffRow = ({ entry, isFirstApproval, onClick }) => {
             <div className="flex items-center justify-between gap-1 mb-0.5">
                 <span className="font-semibold text-slate-700 text-xs truncate">
                     {item.trim_item_name || `Trim #${item.trim_item_id}`}
+                    {item.stage_name && <span className="font-normal text-slate-400"> · {item.stage_name}</span>}
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
                     {item.unit_of_measure && (
@@ -530,6 +562,11 @@ const TrimDetailModal = ({ mc, onClose }) => {
                             <h2 className="text-sm font-extrabold text-slate-800 truncate">
                                 {mc.trim_item_name || `Trim #${mc.trim_item_id}`}
                             </h2>
+                            {mc.stage_name && (
+                                <span className="text-[9px] bg-violet-50 text-violet-600 border border-violet-100 px-1.5 py-0.5 rounded font-bold shrink-0">
+                                    {mc.stage_name}
+                                </span>
+                            )}
                             {mc.unit_of_measure && (
                                 <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold shrink-0">
                                     {mc.unit_of_measure}
@@ -538,6 +575,9 @@ const TrimDetailModal = ({ mc, onClose }) => {
                         </div>
                         {mc.placement_description && (
                             <p className="text-xs text-slate-500 mt-1">📍 {mc.placement_description}</p>
+                        )}
+                        {mc.comments && (
+                            <p className="text-xs text-slate-500 mt-1 italic">💬 {mc.comments}</p>
                         )}
                     </div>
                     <button onClick={onClose}

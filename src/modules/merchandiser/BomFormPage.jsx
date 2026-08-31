@@ -20,7 +20,7 @@ const makeSizeValidator = (sizes) => {
     };
 };
 
-const freshFabric = () => ({ _key: genKey(), fabric_type_id: '', fabric_role: '', consumption_inches: '' });
+const freshFabric = () => ({ _key: genKey(), fabric_type_id: '', fabric_role: '', consumption_inches: '', comments: '' });
 
 // A fabric line is either a specific fabric_type_id OR a generic fabric_role
 // (PRIMARY/SECONDARY — "whatever fabric this order uses for that role", resolved
@@ -55,10 +55,12 @@ const effectiveQty = (qty, wastagePercentage) => {
     return q * (1 + w / 100);
 };
 
-const freshMaterial = () => ({
-    _key: genKey(), trim_item_id: '',
+// stageId stamps the new row with the stage step it was added from (or ''
+// for the Basics/no-product state) — see the per-stage material steps below.
+const freshMaterial = (stageId = '') => ({
+    _key: genKey(), trim_item_id: '', production_line_type_id: stageId,
     calculation_type: 'FIXED', fixed_quantity: '',
-    placement_description: '', wastage_percentage: '',
+    placement_description: '', wastage_percentage: '', comments: '',
     size_consumptions: [],
 });
 
@@ -289,6 +291,11 @@ const FabricConsumptionsSection = ({ fabrics, onChange, fabricTypes, genericFabr
                             className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 text-right"
                         />
                         <span className="text-[10px] text-slate-600 shrink-0">in / pc</span>
+                        <input type="text" value={fc.comments || ''}
+                            onChange={e => updateFab(fIdx, 'comments', e.target.value)}
+                            placeholder="Comments (optional)"
+                            className="w-40 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300"
+                        />
                         <button onClick={() => removeFab(fIdx)} className="text-slate-300 hover:text-red-400 shrink-0">
                             <X size={12} />
                         </button>
@@ -485,7 +492,7 @@ const CreateTrimModal = ({ onClose, onCreated }) => {
 
 // ─── Material Accordion ───────────────────────────────────────────────────────
 
-const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, onUpdate, onRemove, onDuplicate, onTrimCreated, excludeTrimIds }) => {
+const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, productStages, expanded, onToggle, onUpdate, onRemove, onDuplicate, onTrimCreated, excludeTrimIds }) => {
     const trimItem = trimItems.find(t => String(t.id) === String(mc.trim_item_id));
     const uom = trimItem?.unit_of_measure;
     const upd = (field, val) => onUpdate(mIdx, field, val);
@@ -606,6 +613,12 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                             <AlertTriangle size={10} /> Duplicate
                         </span>
                     )}
+                    {!mc.production_line_type_id && productStages?.length > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full"
+                            title="No production stage assigned yet">
+                            <AlertCircle size={10} /> No stage
+                        </span>
+                    )}
                 </div>
 
                 {/* Actions */}
@@ -653,6 +666,21 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                             </select>
                         </div>
                     </div>
+                    {productStages?.length > 0 && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">
+                                Stage {!mc.production_line_type_id && <span className="text-amber-600 normal-case font-normal">— pick where this is consumed</span>}
+                            </label>
+                            <select value={mc.production_line_type_id || ''}
+                                onChange={e => upd('production_line_type_id', e.target.value)}
+                                className={`w-full mt-0.5 border rounded-lg px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 bg-white ${!mc.production_line_type_id ? 'border-amber-300' : 'border-slate-200'}`}>
+                                <option value="">— Unassigned —</option>
+                                {productStages.map(s => (
+                                    <option key={s.production_line_type_id} value={s.production_line_type_id}>{s.stage_name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                     <div className="flex gap-3">
                         {mc.calculation_type === 'FIXED' && (
                             <div className="w-36 shrink-0">
@@ -687,6 +715,14 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, expanded, onToggle, on
                                 className="w-full mt-0.5 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300"
                             />
                         </div>
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Comments</label>
+                        <input type="text" value={mc.comments || ''}
+                            onChange={e => upd('comments', e.target.value)}
+                            placeholder="General remarks — e.g. confirm shade with buyer"
+                            className="w-full mt-0.5 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300"
+                        />
                     </div>
                     {mc.calculation_type === 'PER_SIZE' && (
                         <div>
@@ -824,6 +860,20 @@ export default function BomFormPage() {
     );
     const [expandedMaterials, setExpandedMaterials] = useState(new Set());
 
+    // The selected product's own product_cycle_flow stages — drives the
+    // wizard's per-stage steps. Refetched whenever form.product_id changes.
+    const [productStages, setProductStages] = useState([]);
+    // Set to true only by the Basics product <select>'s onChange (an actual
+    // user-driven product change), never by the initial-load hydration
+    // effects — so the remap effect below only fires on a real product swap.
+    const productChangedByUserRef = useRef(false);
+
+    // Wizard step navigation. Tracked by key (not index) so the step list
+    // reshaping — e.g. the "Unassigned" step appearing/disappearing as
+    // materials get a stage assigned — never leaves currentStep pointing at
+    // the wrong slot; it just falls back to Basics if its key vanishes.
+    const [currentStepKey, setCurrentStepKey] = useState('basics');
+
     const showToast = (msg, ok = true) => {
         setToast({ msg, ok });
         setTimeout(() => setToast(null), 3000);
@@ -844,6 +894,36 @@ export default function BomFormPage() {
             })
             .catch(() => {});
     }, []);
+
+    // Refetch the selected product's stages whenever product_id changes —
+    // covers the initial hydration (edit/duplicate) and interactive changes alike.
+    useEffect(() => {
+        if (!form.product_id) { setProductStages([]); return; }
+        bomApi.getFormData(form.product_id)
+            .then(res => {
+                const d = res.data?.data ?? res.data ?? {};
+                setProductStages(d.productStages || []);
+            })
+            .catch(() => setProductStages([]));
+    }, [form.product_id]);
+
+    // Only runs the re-map after an interactive product change (see
+    // productChangedByUserRef) — never on initial load. Materials tagged to
+    // a stage the new product doesn't have become unassigned rather than
+    // being silently dropped.
+    useEffect(() => {
+        if (!productChangedByUserRef.current) return;
+        productChangedByUserRef.current = false;
+        const validIds = new Set(productStages.map(s => String(s.production_line_type_id)));
+        setForm(f => ({
+            ...f,
+            material_consumptions: f.material_consumptions.map(mc =>
+                mc.production_line_type_id && !validIds.has(String(mc.production_line_type_id))
+                    ? { ...mc, production_line_type_id: '' }
+                    : mc
+            ),
+        }));
+    }, [productStages]);
 
     useEffect(() => {
         if (!isEdit) return;
@@ -867,14 +947,17 @@ export default function BomFormPage() {
                         fabric_type_id: fc.fabric_role ? '' : String(fc.fabric_type?.id || fc.fabric_type_id || ''),
                         fabric_role: fc.fabric_role || '',
                         consumption_inches: fc.consumption_inches || '',
+                        comments: fc.comments || '',
                     })),
                     material_consumptions: (bom.material_consumptions || []).map(mc => ({
                         _key: genKey(),
                         trim_item_id: String(mc.trim_item?.id || mc.trim_item_id || ''),
+                        production_line_type_id: mc.production_line_type_id ? String(mc.production_line_type_id) : '',
                         calculation_type: mc.calculation_type || 'FIXED',
                         fixed_quantity: mc.fixed_quantity || '',
                         placement_description: mc.placement_description || '',
                         wastage_percentage: mc.wastage_percentage || '',
+                        comments: mc.comments || '',
                         size_consumptions: (mc.size_consumptions || []).map(sc => ({ _key: genKey(), size: sc.size, quantity: sc.quantity || '', target_variant_size: sc.target_variant_size || '' })),
                     })),
                 });
@@ -913,14 +996,17 @@ export default function BomFormPage() {
                         fabric_type_id: '',
                         fabric_role: fc.fabric_role || '',
                         consumption_inches: fc.consumption_inches || '',
+                        comments: fc.comments || '',
                     })),
                     material_consumptions: (bom.material_consumptions || []).map(mc => ({
                         _key: genKey(),
                         trim_item_id: String(mc.trim_item?.id || mc.trim_item_id || ''),
+                        production_line_type_id: mc.production_line_type_id ? String(mc.production_line_type_id) : '',
                         calculation_type: mc.calculation_type || 'FIXED',
                         fixed_quantity: mc.fixed_quantity || '',
                         placement_description: mc.placement_description || '',
                         wastage_percentage: mc.wastage_percentage || '',
+                        comments: mc.comments || '',
                         size_consumptions: (mc.size_consumptions || []).map(sc => ({ _key: genKey(), size: sc.size, quantity: sc.quantity || '', target_variant_size: sc.target_variant_size || '' })),
                     })),
                 });
@@ -952,8 +1038,8 @@ export default function BomFormPage() {
     });
 
     // ── Material handlers ──
-    const addMaterial = () => {
-        const nm = freshMaterial();
+    const addMaterial = (stageId = '') => {
+        const nm = freshMaterial(stageId);
         setForm(f => ({ ...f, material_consumptions: [...f.material_consumptions, nm] }));
         setExpandedMaterials(prev => new Set([...prev, nm._key]));
     };
@@ -996,13 +1082,16 @@ export default function BomFormPage() {
             fabric_type_id: fc.fabric_role ? null : parseInt(fc.fabric_type_id),
             fabric_role: fc.fabric_role || null,
             consumption_inches: parseFloat(fc.consumption_inches) || null,
+            comments: fc.comments?.trim() || null,
         })),
         material_consumptions: form.material_consumptions.map(mc => ({
             trim_item_id: parseInt(mc.trim_item_id),
+            production_line_type_id: mc.production_line_type_id ? parseInt(mc.production_line_type_id) : null,
             calculation_type: mc.calculation_type,
             fixed_quantity: mc.calculation_type === 'FIXED' ? parseFloat(mc.fixed_quantity) : null,
             placement_description: mc.placement_description.trim(),
             wastage_percentage: parseFloat(mc.wastage_percentage) || 0,
+            comments: mc.comments?.trim() || null,
             size_consumptions: mc.calculation_type === 'PER_SIZE'
                 ? mc.size_consumptions.map(sc => ({
                     size: sc.size,
@@ -1025,22 +1114,65 @@ export default function BomFormPage() {
         return markerSizes.filter(isBad);
     }, [markerSizes, formMeta.sizes]);
 
-    // trim_item_id -> count across all material rows, to catch the same trim being added twice.
-    const duplicateTrimIds = useMemo(() => {
+    // "trim_item_id|stage" -> count, to catch the same trim added twice AT THE
+    // SAME STAGE. The same trim at two different stages (e.g. a label at both
+    // Sewing and Finishing) is legitimate — only a same-stage repeat is a
+    // real duplicate (mirrors the backend's unique_bom_trim_stage constraint).
+    const duplicateTrimStageKeys = useMemo(() => {
         const counts = {};
         form.material_consumptions.forEach(mc => {
             if (!mc.trim_item_id) return;
-            counts[mc.trim_item_id] = (counts[mc.trim_item_id] || 0) + 1;
+            const key = `${mc.trim_item_id}|${mc.production_line_type_id || 'none'}`;
+            counts[key] = (counts[key] || 0) + 1;
         });
-        return new Set(Object.keys(counts).filter(id => counts[id] > 1));
+        return new Set(Object.keys(counts).filter(k => counts[k] > 1));
     }, [form.material_consumptions]);
+    const isDuplicateMaterial = (mc) => !!mc.trim_item_id
+        && duplicateTrimStageKeys.has(`${mc.trim_item_id}|${mc.production_line_type_id || 'none'}`);
 
     const materialIssueCount = useMemo(() => (
         form.material_consumptions.filter(mc =>
-            missingSizesFor(mc, markerSizes).length > 0
-            || (mc.trim_item_id && duplicateTrimIds.has(String(mc.trim_item_id)))
+            missingSizesFor(mc, markerSizes).length > 0 || isDuplicateMaterial(mc)
         ).length
-    ), [form.material_consumptions, markerSizes, duplicateTrimIds]);
+    ), [form.material_consumptions, markerSizes, duplicateTrimStageKeys]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const unassignedMaterialCount = useMemo(() => (
+        form.material_consumptions.filter(mc => !mc.production_line_type_id).length
+    ), [form.material_consumptions]);
+
+    // Wizard steps: Basics, an "Unassigned" step (only shown when needed — no
+    // stages configured on this product at all, so it's the only place to add
+    // materials, or there are pre-existing unassigned rows to reassign), one
+    // step per configured product stage (in sequence order), then Review.
+    // Tracked by key, not index, so the list reshaping — the Unassigned step
+    // appearing/disappearing as rows get a stage — never leaves currentStep
+    // pointing at the wrong slot.
+    const showUnassignedStep = productStages.length === 0 || unassignedMaterialCount > 0;
+    const steps = useMemo(() => ([
+        { key: 'basics', kind: 'basics', label: 'Basics' },
+        ...(showUnassignedStep ? [{ key: 'unassigned', kind: 'stage', label: 'Unassigned', production_line_type_id: null }] : []),
+        ...productStages.map(s => ({
+            key: `stage-${s.production_line_type_id}`, kind: 'stage',
+            label: s.stage_name, production_line_type_id: s.production_line_type_id,
+        })),
+        { key: 'review', kind: 'review', label: 'Review' },
+    ]), [productStages, showUnassignedStep]);
+    const currentStepIndex = Math.max(0, steps.findIndex(s => s.key === currentStepKey));
+    const currentStep = steps[currentStepIndex] || steps[0];
+    const goNext = () => { if (currentStepIndex < steps.length - 1) setCurrentStepKey(steps[currentStepIndex + 1].key); };
+    const goBack = () => { if (currentStepIndex > 0) setCurrentStepKey(steps[currentStepIndex - 1].key); };
+
+    // Materials belonging to the currently-shown stage step (Unassigned's
+    // production_line_type_id is null, matching rows with no stage set),
+    // paired with their real index into form.material_consumptions so
+    // update/remove/duplicate handlers still address the right row.
+    const stepStageId = currentStep.kind === 'stage' && currentStep.production_line_type_id
+        ? String(currentStep.production_line_type_id) : '';
+    const stepMaterials = useMemo(() => (
+        form.material_consumptions
+            .map((mc, idx) => ({ mc, idx }))
+            .filter(({ mc }) => String(mc.production_line_type_id || '') === stepStageId)
+    ), [form.material_consumptions, stepStageId]);
 
     const handleSave = async () => {
         if (!form.product_id) { setErr('Please select a product.'); return; }
@@ -1055,8 +1187,8 @@ export default function BomFormPage() {
                 issues.push(`"${name}" is missing qty for: ${missing.join(', ')}`);
                 rowsToExpand.add(mc._key);
             }
-            if (mc.trim_item_id && duplicateTrimIds.has(String(mc.trim_item_id))) {
-                issues.push(`"${name}" is used on more than one material row — remove the duplicate`);
+            if (isDuplicateMaterial(mc)) {
+                issues.push(`"${name}" is used more than once at the same stage — remove the duplicate or move one to a different stage`);
                 rowsToExpand.add(mc._key);
             }
         });
@@ -1064,6 +1196,12 @@ export default function BomFormPage() {
             setErr(issues.length === 1 ? issues[0] : `${issues.length} issues to fix: ${issues.join('; ')}`);
             setExpandedMaterials(prev => new Set([...prev, ...rowsToExpand]));
             return;
+        }
+        if (unassignedMaterialCount > 0) {
+            const ok = window.confirm(
+                `${unassignedMaterialCount} material${unassignedMaterialCount === 1 ? '' : 's'} ${unassignedMaterialCount === 1 ? 'has' : 'have'} no production stage assigned. Save anyway?`
+            );
+            if (!ok) { setCurrentStepKey('review'); return; }
         }
 
         setSaving(true); setErr(null);
@@ -1129,12 +1267,46 @@ export default function BomFormPage() {
                             className="px-4 py-1.5 text-sm font-bold text-slate-600 hover:text-slate-800 rounded-lg hover:bg-slate-100 transition-colors">
                             Cancel
                         </button>
-                        <button onClick={handleSave} disabled={saving}
-                            className="flex items-center gap-1.5 px-5 py-1.5 text-sm font-bold bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition-colors disabled:opacity-50">
-                            {saving ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
-                            {isEdit ? 'Save Changes' : 'Save as Draft'}
-                        </button>
+                        {currentStepIndex > 0 && (
+                            <button onClick={goBack}
+                                className="px-4 py-1.5 text-sm font-bold text-slate-600 hover:text-slate-800 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+                                Back
+                            </button>
+                        )}
+                        {currentStep.kind !== 'review' ? (
+                            <button onClick={goNext}
+                                className="flex items-center gap-1.5 px-5 py-1.5 text-sm font-bold bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition-colors">
+                                Next <ChevronRight size={13} />
+                            </button>
+                        ) : (
+                            <button onClick={handleSave} disabled={saving}
+                                className="flex items-center gap-1.5 px-5 py-1.5 text-sm font-bold bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition-colors disabled:opacity-50">
+                                {saving ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
+                                {isEdit ? 'Save Changes' : 'Save as Draft'}
+                            </button>
+                        )}
                     </div>
+                </div>
+
+                {/* Step strip */}
+                <div className="max-w-3xl mx-auto px-6 pb-3 flex items-center gap-2 overflow-x-auto">
+                    {steps.map((s, i) => (
+                        <div key={s.key} className="flex items-center gap-2 shrink-0">
+                            <button onClick={() => setCurrentStepKey(s.key)}
+                                className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 transition-colors shrink-0 ${
+                                    currentStepIndex === i ? 'border-violet-600 bg-violet-600 text-white'
+                                    : currentStepIndex > i ? 'border-emerald-500 bg-emerald-500 text-white'
+                                    : 'border-slate-200 bg-white text-slate-400'
+                                }`}>
+                                {currentStepIndex > i ? <Check size={11} /> : i + 1}
+                            </button>
+                            <button onClick={() => setCurrentStepKey(s.key)}
+                                className={`text-[11px] font-bold whitespace-nowrap ${currentStepIndex === i ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`}>
+                                {s.label}
+                            </button>
+                            {i < steps.length - 1 && <ChevronRight size={12} className="text-slate-300 shrink-0" />}
+                        </div>
+                    ))}
                 </div>
             </div>
 
@@ -1186,124 +1358,250 @@ export default function BomFormPage() {
                     </div>
                 )}
 
-                {/* Basic Info */}
-                <Section title="Basic Info">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-xs font-bold text-slate-600 mb-1">
-                                Product <span className="text-red-400">*</span>
-                            </label>
-                            <select value={form.product_id}
-                                onChange={e => setForm(f => ({ ...f, product_id: e.target.value }))}
-                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-400 outline-none bg-white">
-                                <option value="">— Select product —</option>
-                                {formMeta.products.map(p => (
-                                    <option key={p.id} value={p.id}>{p.name}{p.brand ? ` · ${p.brand}` : ''}</option>
+                {/* ── Step 1: Basics — product, name, primary/secondary fabric requirements, markers ── */}
+                {currentStep.kind === 'basics' && (
+                    <>
+                        <Section title="Basic Info">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1">
+                                        Product <span className="text-red-400">*</span>
+                                    </label>
+                                    <select value={form.product_id}
+                                        onChange={e => {
+                                            const nextId = e.target.value;
+                                            if (form.material_consumptions.length > 0 && nextId !== form.product_id) {
+                                                const ok = window.confirm(
+                                                    `Changing the product will require re-mapping ${form.material_consumptions.length} trim(s) tagged to stages this product doesn't have. Continue?`
+                                                );
+                                                if (!ok) return;
+                                            }
+                                            productChangedByUserRef.current = true;
+                                            setForm(f => ({ ...f, product_id: nextId }));
+                                        }}
+                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-400 outline-none bg-white">
+                                        <option value="">— Select product —</option>
+                                        {formMeta.products.map(p => (
+                                            <option key={p.id} value={p.id}>{p.name}{p.brand ? ` · ${p.brand}` : ''}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1">
+                                        BOM Name <span className="text-red-400">*</span>
+                                    </label>
+                                    <input type="text" value={form.bom_name}
+                                        onChange={e => setForm(f => ({ ...f, bom_name: e.target.value }))}
+                                        placeholder="e.g. Summer 2026 Production BOM"
+                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-400 outline-none"
+                                    />
+                                </div>
+                            </div>
+                        </Section>
+
+                        {/* Primary/Secondary fabric — the basic requirement every BOM starts with */}
+                        <FabricConsumptionsSection
+                            fabrics={form.fabric_consumptions || []}
+                            onChange={fabs => setForm(f => ({ ...f, fabric_consumptions: fabs }))}
+                            fabricTypes={formMeta.fabricTypes}
+                            genericFabricOnly={!isEdit}
+                        />
+
+                        <Section title="Ratio Groups" action={<AddBtn onClick={addRatioGroup} label="Add Group" />}>
+                            <div className="space-y-2">
+                                {form.ratio_groups.length === 0 && (
+                                    <p className="text-slate-500 text-sm italic text-center py-4">No ratio groups. Add one to define your marker lay plan.</p>
+                                )}
+                                {form.ratio_groups.map((group, gIdx) => (
+                                    <RatioGroupCard key={group._key}
+                                        group={group} gIdx={gIdx}
+                                        expanded={expandedRatios.has(group._key)}
+                                        onToggle={() => toggleRatio(group._key)}
+                                        onUpdate={updateRatioGroup}
+                                        onRemove={removeRatioGroup}
+                                        canRemove={form.ratio_groups.length > 1}
+                                        sizes={formMeta.sizes}
+                                    />
                                 ))}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-slate-600 mb-1">
-                                BOM Name <span className="text-red-400">*</span>
-                            </label>
-                            <input type="text" value={form.bom_name}
-                                onChange={e => setForm(f => ({ ...f, bom_name: e.target.value }))}
-                                placeholder="e.g. Summer 2026 Production BOM"
-                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-400 outline-none"
-                            />
-                        </div>
-                    </div>
-                </Section>
+                            </div>
+                        </Section>
+                    </>
+                )}
 
-                {/* Ratio Groups */}
-                <Section title="Ratio Groups" action={<AddBtn onClick={addRatioGroup} label="Add Group" />}>
-                    <div className="space-y-2">
-                        {form.ratio_groups.length === 0 && (
-                            <p className="text-slate-500 text-sm italic text-center py-4">No ratio groups. Add one to define your marker lay plan.</p>
+                {/* ── Stage steps (incl. "Unassigned") — trims/materials grouped under this product's own workflow stages ── */}
+                {currentStep.kind === 'stage' && (
+                    <Section
+                        title={currentStep.key === 'unassigned' ? 'Unassigned Materials' : `${currentStep.label} — Trims & Materials`}
+                        action={
+                            <div className="flex items-center gap-2">
+                                {stepMaterials.length > 0 && (
+                                    <span className="text-[10px] font-bold text-slate-600">
+                                        {stepMaterials.length} material{stepMaterials.length > 1 ? 's' : ''}
+                                    </span>
+                                )}
+                                <AddBtn onClick={() => addMaterial(currentStep.production_line_type_id || '')} label="Add Material" />
+                            </div>
+                        }
+                    >
+                        {currentStep.key === 'unassigned' && (
+                            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                                {productStages.length === 0
+                                    ? "This product has no workflow stages configured yet, so materials added here have no stage. Configure the product's Production Flow to group them by stage."
+                                    : 'These materials have no stage yet. Open a row and pick a Stage — or leave it, saving with unassigned materials is allowed but flagged for review.'}
+                            </p>
                         )}
-                        {form.ratio_groups.map((group, gIdx) => (
-                            <RatioGroupCard key={group._key}
-                                group={group} gIdx={gIdx}
-                                expanded={expandedRatios.has(group._key)}
-                                onToggle={() => toggleRatio(group._key)}
-                                onUpdate={updateRatioGroup}
-                                onRemove={removeRatioGroup}
-                                canRemove={form.ratio_groups.length > 1}
-                                sizes={formMeta.sizes}
-                            />
-                        ))}
-                    </div>
-                </Section>
-
-                {/* Fabric Consumptions — BOM-level, not per marker/ratio group */}
-                <FabricConsumptionsSection
-                    fabrics={form.fabric_consumptions || []}
-                    onChange={fabs => setForm(f => ({ ...f, fabric_consumptions: fabs }))}
-                    fabricTypes={formMeta.fabricTypes}
-                    genericFabricOnly={!isEdit}
-                />
-
-                {/* Material Consumptions */}
-                <Section
-                    title="Trim / Material Consumptions"
-                    action={
-                        <div className="flex items-center gap-2">
-                            {form.material_consumptions.length > 0 && (
-                                <span className="text-[10px] font-bold text-slate-600">
-                                    {form.material_consumptions.length} material{form.material_consumptions.length > 1 ? 's' : ''}
-                                    {materialIssueCount > 0 && (
-                                        <span className="text-amber-600"> · {materialIssueCount} need{materialIssueCount === 1 ? 's' : ''} attention</span>
-                                    )}
-                                </span>
+                        <div className="space-y-2">
+                            {stepMaterials.length === 0 && (
+                                <p className="text-slate-500 text-sm italic text-center py-4">No materials for this stage yet.</p>
                             )}
-                            <AddBtn onClick={addMaterial} label="Add Material" />
+                            {stepMaterials.map(({ mc, idx: mIdx }, sIdx) => {
+                                const excludeTrimIds = new Set(
+                                    stepMaterials
+                                        .filter((_, i) => i !== sIdx)
+                                        .map(({ mc: m }) => m.trim_item_id)
+                                        .filter(Boolean)
+                                        .map(String)
+                                );
+                                return (
+                                    <MaterialCard key={mc._key}
+                                        mc={mc} mIdx={mIdx}
+                                        trimItems={formMeta.trimItems}
+                                        markerSizes={markerSizes}
+                                        productStages={productStages}
+                                        excludeTrimIds={excludeTrimIds}
+                                        expanded={expandedMaterials.has(mc._key)}
+                                        onToggle={() => toggleMaterial(mc._key)}
+                                        onUpdate={updateMaterial}
+                                        onRemove={removeMaterial}
+                                        onDuplicate={duplicateMaterial}
+                                        onTrimCreated={newTrim => {
+                                            setFormMeta(prev => ({ ...prev, trimItems: [...prev.trimItems, newTrim] }));
+                                            updateMaterial(mIdx, 'trim_item_id', String(newTrim.id));
+                                        }}
+                                    />
+                                );
+                            })}
                         </div>
-                    }
-                >
-                    <div className="space-y-2">
-                        {form.material_consumptions.length === 0 && (
-                            <p className="text-slate-500 text-sm italic text-center py-4">No materials added. Add trim items required for this product.</p>
-                        )}
-                        {form.material_consumptions.map((mc, mIdx) => {
-                            const excludeTrimIds = new Set(
-                                form.material_consumptions
-                                    .filter((_, i) => i !== mIdx)
-                                    .map(m => m.trim_item_id)
-                                    .filter(Boolean)
-                                    .map(String)
-                            );
-                            return (
-                                <MaterialCard key={mc._key}
-                                    mc={mc} mIdx={mIdx}
-                                    trimItems={formMeta.trimItems}
-                                    markerSizes={markerSizes}
-                                    excludeTrimIds={excludeTrimIds}
-                                    expanded={expandedMaterials.has(mc._key)}
-                                    onToggle={() => toggleMaterial(mc._key)}
-                                    onUpdate={updateMaterial}
-                                    onRemove={removeMaterial}
-                                    onDuplicate={duplicateMaterial}
-                                    onTrimCreated={newTrim => {
-                                        setFormMeta(prev => ({ ...prev, trimItems: [...prev.trimItems, newTrim] }));
-                                        updateMaterial(mIdx, 'trim_item_id', String(newTrim.id));
-                                    }}
-                                />
-                            );
-                        })}
-                    </div>
-                </Section>
+                    </Section>
+                )}
 
-                {/* Bottom save */}
+                {/* ── Review — read-only recap, grouped by stage, before saving ── */}
+                {currentStep.kind === 'review' && (
+                    <Section title="Review">
+                        <div className="space-y-5">
+                            <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Product</p>
+                                <p className="text-sm font-bold text-slate-800">
+                                    {formMeta.products.find(p => String(p.id) === String(form.product_id))?.name || '—'}
+                                    <span className="text-slate-400 font-normal"> · {form.bom_name || 'Untitled BOM'}</span>
+                                </p>
+                            </div>
+
+                            <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Fabric Requirements</p>
+                                {(form.fabric_consumptions || []).length === 0 ? (
+                                    <p className="text-xs text-slate-400 italic">None added.</p>
+                                ) : (
+                                    <ul className="space-y-1">
+                                        {form.fabric_consumptions.map(fc => (
+                                            <li key={fc._key} className="text-xs text-slate-700 flex items-center gap-2 flex-wrap">
+                                                <span className="font-bold">
+                                                    {fc.fabric_role
+                                                        ? (fc.fabric_role === 'PRIMARY' ? 'Primary Fabric' : 'Secondary Fabric')
+                                                        : (formMeta.fabricTypes.find(ft => String(ft.id) === String(fc.fabric_type_id))?.name || '—')}
+                                                </span>
+                                                <span className="text-slate-500">{fc.consumption_inches || 0} in/pc</span>
+                                                {fc.comments && <span className="text-slate-400 italic">— {fc.comments}</span>}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
+
+                            <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">Materials by Stage</p>
+                                <div className="space-y-3">
+                                    {steps.filter(s => s.kind === 'stage').map(s => {
+                                        const stageId = s.production_line_type_id ? String(s.production_line_type_id) : '';
+                                        const mats = form.material_consumptions.filter(mc => String(mc.production_line_type_id || '') === stageId);
+                                        return (
+                                            <div key={s.key}>
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <p className="text-xs font-bold text-slate-700">{s.label}</p>
+                                                    <span className="text-[10px] text-slate-400">{mats.length} material{mats.length === 1 ? '' : 's'}</span>
+                                                    {mats.length === 0 && <span className="text-[10px] text-amber-600 italic">— empty</span>}
+                                                </div>
+                                                {mats.length > 0 && (
+                                                    <ul className="space-y-0.5 pl-3 border-l-2 border-slate-100">
+                                                        {mats.map(mc => {
+                                                            const trim = formMeta.trimItems.find(t => String(t.id) === String(mc.trim_item_id));
+                                                            return (
+                                                                <li key={mc._key} className="text-xs text-slate-600 flex items-center gap-2 flex-wrap">
+                                                                    <span className="font-bold text-slate-700">{trim?.name || 'Unnamed'}</span>
+                                                                    <span className="text-slate-400">
+                                                                        {mc.calculation_type === 'FIXED'
+                                                                            ? `${mc.fixed_quantity || 0}${trim?.unit_of_measure ? ` ${trim.unit_of_measure}` : ''}`
+                                                                            : 'Per Size'}
+                                                                    </span>
+                                                                    {mc.wastage_percentage ? <span className="text-slate-400">· {mc.wastage_percentage}% wastage</span> : null}
+                                                                    {mc.comments && <span className="text-slate-400 italic">— {mc.comments}</span>}
+                                                                </li>
+                                                            );
+                                                        })}
+                                                    </ul>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {materialIssueCount > 0 && (
+                                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                                    <AlertCircle size={15} className="text-red-500 shrink-0 mt-0.5" />
+                                    <p className="text-xs text-red-700">
+                                        {materialIssueCount} material{materialIssueCount === 1 ? '' : 's'} need{materialIssueCount === 1 ? 's' : ''} attention — missing per-size quantity, or duplicated at the same stage. Saving will block until fixed.
+                                    </p>
+                                </div>
+                            )}
+
+                            {unassignedMaterialCount > 0 && (
+                                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                                    <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
+                                    <p className="text-xs text-amber-700">
+                                        {unassignedMaterialCount} material{unassignedMaterialCount === 1 ? '' : 's'} still {unassignedMaterialCount === 1 ? 'has' : 'have'} no stage assigned.
+                                        You'll be asked to confirm before saving.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </Section>
+                )}
+
+                {/* Bottom nav — mirrors the sticky header's Back/Next/Save */}
                 <div className="flex justify-end gap-3 pb-6">
                     <button onClick={() => navigate('/merchandiser/bom')}
                         className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:text-slate-800 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
                         Cancel
                     </button>
-                    <button onClick={handleSave} disabled={saving}
-                        className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold bg-violet-600 hover:bg-violet-700 text-white rounded-xl transition-colors disabled:opacity-50 shadow-sm">
-                        {saving ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
-                        {isEdit ? 'Save Changes' : 'Save as Draft'}
-                    </button>
+                    {currentStepIndex > 0 && (
+                        <button onClick={goBack}
+                            className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:text-slate-800 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
+                            Back
+                        </button>
+                    )}
+                    {currentStep.kind !== 'review' ? (
+                        <button onClick={goNext}
+                            className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold bg-violet-600 hover:bg-violet-700 text-white rounded-xl transition-colors shadow-sm">
+                            Next <ChevronRight size={14} />
+                        </button>
+                    ) : (
+                        <button onClick={handleSave} disabled={saving}
+                            className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold bg-violet-600 hover:bg-violet-700 text-white rounded-xl transition-colors disabled:opacity-50 shadow-sm">
+                            {saving ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                            {isEdit ? 'Save Changes' : 'Save as Draft'}
+                        </button>
+                    )}
                 </div>
             </div>
         </div>

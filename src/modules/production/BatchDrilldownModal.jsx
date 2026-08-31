@@ -750,6 +750,22 @@ const DispatchTab = ({ receipts }) => {
 const BomTab = ({ bom }) => {
     if (!bom) return <SectionEmpty label="No BOM linked to this batch's sales order product." />;
 
+    // Group materials by the product's own workflow stage — ordered by
+    // bom.product_stages' sequence_no, with "Unassigned" (legacy/no-stage
+    // rows) surfaced first when present. Mirrors the grouping used in the
+    // BOM editor, dashboard, and approval views.
+    const materialsByStage = (() => {
+        const stages = bom.product_stages || [];
+        const groups = stages.map(s => ({
+            key: `stage-${s.production_line_type_id}`,
+            label: s.stage_name,
+            materials: (bom.material_consumptions || []).filter(mc => String(mc.production_line_type_id || '') === String(s.production_line_type_id)),
+        })).filter(g => g.materials.length > 0);
+        const unassigned = (bom.material_consumptions || []).filter(mc => !mc.production_line_type_id);
+        if (unassigned.length > 0) groups.unshift({ key: 'unassigned', label: 'Unassigned', materials: unassigned });
+        return groups;
+    })();
+
     return (
         <div className="space-y-5">
             <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
@@ -770,7 +786,8 @@ const BomTab = ({ bom }) => {
                             <tr className="border-b border-slate-200 text-left">
                                 <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Fabric</th>
                                 <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Consumption</th>
-                                <th className="pb-1.5 text-[10px] font-bold text-slate-400 uppercase">Wastage</th>
+                                <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Wastage</th>
+                                <th className="pb-1.5 text-[10px] font-bold text-slate-400 uppercase">Comments</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -778,7 +795,8 @@ const BomTab = ({ bom }) => {
                                 <tr key={fc.id}>
                                     <td className="py-1.5 pr-3 font-semibold text-slate-700">{fc.fabric_type_name || fc.fabric_role}</td>
                                     <td className="py-1.5 pr-3 text-slate-600">{fc.consumption_inches}"</td>
-                                    <td className="py-1.5 text-slate-600">{fc.wastage_percentage}%</td>
+                                    <td className="py-1.5 pr-3 text-slate-600">{fc.wastage_percentage}%</td>
+                                    <td className="py-1.5 text-slate-400 italic">{fc.comments || '—'}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -790,36 +808,47 @@ const BomTab = ({ bom }) => {
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                     <Box size={12} /> Trims &amp; Materials
                 </p>
-                {bom.material_consumptions?.length ? (
-                    <table className="w-full text-xs border-collapse">
-                        <thead>
-                            <tr className="border-b border-slate-200 text-left">
-                                <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Item</th>
-                                <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Placement</th>
-                                <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Qty</th>
-                                <th className="pb-1.5 text-[10px] font-bold text-slate-400 uppercase">Wastage</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {bom.material_consumptions.map(mc => (
-                                <tr key={mc.id}>
-                                    <td className="py-1.5 pr-3">
-                                        <span className="font-semibold text-slate-700">{mc.trim_item_name}</span>
-                                        {mc.item_code && <span className="text-slate-400 ml-1 font-mono text-[10px]">{mc.item_code}</span>}
-                                    </td>
-                                    <td className="py-1.5 pr-3 text-slate-500">{mc.placement_description || '—'}</td>
-                                    <td className="py-1.5 pr-3 text-slate-600">
-                                        {mc.calculation_type === 'FIXED'
-                                            ? `${mc.fixed_quantity} ${mc.unit_of_measure}`
-                                            : (mc.size_consumptions?.length
-                                                ? mc.size_consumptions.map(sc => `${sc.size}:${sc.quantity}`).join(', ')
-                                                : '—')}
-                                    </td>
-                                    <td className="py-1.5 text-slate-600">{mc.wastage_percentage}%</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                {materialsByStage.length ? (
+                    <div className="space-y-4">
+                        {materialsByStage.map(group => (
+                            <div key={group.key}>
+                                <p className={`text-[10px] font-bold uppercase tracking-wide mb-1 ${group.key === 'unassigned' ? 'text-amber-600' : 'text-violet-500'}`}>
+                                    {group.label} <span className="font-normal normal-case text-slate-400">· {group.materials.length}</span>
+                                </p>
+                                <table className="w-full text-xs border-collapse">
+                                    <thead>
+                                        <tr className="border-b border-slate-200 text-left">
+                                            <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Item</th>
+                                            <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Placement</th>
+                                            <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Qty</th>
+                                            <th className="pb-1.5 pr-3 text-[10px] font-bold text-slate-400 uppercase">Wastage</th>
+                                            <th className="pb-1.5 text-[10px] font-bold text-slate-400 uppercase">Comments</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {group.materials.map(mc => (
+                                            <tr key={mc.id}>
+                                                <td className="py-1.5 pr-3">
+                                                    <span className="font-semibold text-slate-700">{mc.trim_item_name}</span>
+                                                    {mc.item_code && <span className="text-slate-400 ml-1 font-mono text-[10px]">{mc.item_code}</span>}
+                                                </td>
+                                                <td className="py-1.5 pr-3 text-slate-500">{mc.placement_description || '—'}</td>
+                                                <td className="py-1.5 pr-3 text-slate-600">
+                                                    {mc.calculation_type === 'FIXED'
+                                                        ? `${mc.fixed_quantity} ${mc.unit_of_measure}`
+                                                        : (mc.size_consumptions?.length
+                                                            ? mc.size_consumptions.map(sc => `${sc.size}:${sc.quantity}`).join(', ')
+                                                            : '—')}
+                                                </td>
+                                                <td className="py-1.5 pr-3 text-slate-600">{mc.wastage_percentage}%</td>
+                                                <td className="py-1.5 text-slate-400 italic">{mc.comments || '—'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ))}
+                    </div>
                 ) : <SectionEmpty label="No trims/materials defined." />}
             </div>
 
