@@ -3,16 +3,20 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
 import {
-    LuLogOut, LuMenu, LuX, LuClipboardList, LuPackageCheck, LuLayers, LuBookOpen, LuTag, LuInbox, LuFilePlus, LuPackageX,
+    LuLogOut, LuMenu, LuX, LuPackageCheck, LuLayers, LuBookOpen, LuTag, LuInbox, LuFilePlus, LuPackageX, LuCalendarDays,
 } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
 import ReportBugButton from './ReportBugButton';
 
+// Requirements is removed from the portal nav (still reachable directly at
+// /purchase-department/requirements?standalone=true — TrimLossLayout's
+// purchase_manager dashboard link and ReplacementPanel's review link both
+// depend on that route still existing, so it stays defined in App.js).
 const NAV = [
-    { to: '/purchase-department/requirements',         icon: LuClipboardList, label: 'Requirements' },
     // { to: '/purchase-department/raise-requirement',    icon: LuFilePlus,      label: 'Raise Request' },
     { to: '/purchase-department/orders',               icon: LuPackageCheck,  label: 'Purchase Orders' },
     { to: '/purchase-department/inwards',              icon: LuInbox,         label: 'Inwards' },
+    { to: '/purchase-department/grn-invoices-by-date', icon: LuCalendarDays,  label: 'GRN & Invoices by Date' },
     { to: '/purchase-department/fabric-rolls',         icon: LuLayers,        label: 'Fabric' },
     { to: '/purchase-department/trims-ledger',         icon: LuBookOpen,      label: 'Trims Ledger' },
     { to: '/purchase-department/supplier-color-codes', icon: LuTag,           label: 'Supplier Codes' },

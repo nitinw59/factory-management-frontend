@@ -62,6 +62,32 @@ const Toast = ({ msg, ok, onDone }) => {
     );
 };
 
+const fmtCost = (n) => n == null ? null : '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Estimated cost for one BOM material line. bmc.avg_unit_cost (from
+// bomController.getBomFullDetail) is the average cost_price/last_purchase_price
+// across the trim item's own variants — a BOM line targets the trim item, not
+// one priced color/size variant, so this is an estimate for approval-time
+// visibility, not a booked/actual cost. null when no variant has any price on
+// record at all (never silently shown as ₹0). FIXED lines resolve to one
+// total; PER_SIZE lines resolve to a min–max range across their sizes, since
+// wastage is one flat % but per-size quantities differ.
+const materialCost = (mc) => {
+    if (mc?.avg_unit_cost == null) return null;
+    const wastageMult = 1 + (parseFloat(mc.wastage_percentage) || 0) / 100;
+    if (mc.calculation_type === 'FIXED') {
+        const qty = parseFloat(mc.fixed_quantity);
+        if (isNaN(qty)) return null;
+        return { total: qty * wastageMult * mc.avg_unit_cost };
+    }
+    const sizes = (mc.size_consumptions || [])
+        .filter(sc => sc.quantity !== '' && sc.quantity != null)
+        .map(sc => ({ size: sc.size, cost: (parseFloat(sc.quantity) || 0) * wastageMult * mc.avg_unit_cost }));
+    if (!sizes.length) return null;
+    const costs = sizes.map(s => s.cost);
+    return { min: Math.min(...costs), max: Math.max(...costs), sizes };
+};
+
 // ─── inline confirm / reject bars (used for archive + reject only) ─────────────
 
 const ConfirmBar = ({ message, confirmLabel, confirmColor, onConfirm, onCancel, busy }) => (
@@ -238,6 +264,14 @@ const BomDetail = ({ bomId }) => {
                 <div>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                         <Tag size={10} /> Materials & Trims ({bom.material_consumptions.length})
+                        {(() => {
+                            const unknown = bom.material_consumptions.filter(mc => !materialCost(mc)).length;
+                            return unknown > 0 ? (
+                                <span className="font-normal normal-case text-amber-500">
+                                    · cost unknown for {unknown}
+                                </span>
+                            ) : null;
+                        })()}
                     </p>
                     <div className="space-y-3">
                         {materialsByStage.map(group => (
@@ -262,11 +296,22 @@ const BomDetail = ({ bomId }) => {
                                             {mc.placement_description && (
                                                 <p className="text-[9px] text-slate-400 truncate">📍 {mc.placement_description}</p>
                                             )}
-                                            <p className="text-[10px] text-slate-600 font-bold mt-0.5">
-                                                {mc.calculation_type === 'FIXED'
-                                                    ? `${mc.fixed_quantity} ${mc.unit_of_measure || 'unit'} fixed`
-                                                    : `Per size · ${(mc.size_consumptions || []).length} sizes`}
-                                            </p>
+                                            <div className="flex items-center justify-between gap-2 mt-0.5">
+                                                <p className="text-[10px] text-slate-600 font-bold">
+                                                    {mc.calculation_type === 'FIXED'
+                                                        ? `${mc.fixed_quantity} ${mc.unit_of_measure || 'unit'} fixed`
+                                                        : `Per size · ${(mc.size_consumptions || []).length} sizes`}
+                                                </p>
+                                                {(() => {
+                                                    const c = materialCost(mc);
+                                                    if (!c) return <span className="text-[9px] text-slate-300 italic shrink-0">cost unknown</span>;
+                                                    return (
+                                                        <span className="text-[10px] font-bold text-emerald-600 shrink-0">
+                                                            {c.total != null ? fmtCost(c.total) : `${fmtCost(c.min)}–${fmtCost(c.max)}`}
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -492,6 +537,11 @@ const MaterialDiffRow = ({ entry, isFirstApproval, onClick }) => {
         if (m.calculation_type === 'FIXED') return `${m.fixed_quantity} ${m.unit_of_measure || 'unit'} (fixed)`;
         return `per-size (${(m.size_consumptions || []).length} sizes)`;
     };
+    const costStr = m => {
+        const c = materialCost(m);
+        if (!c) return null;
+        return c.total != null ? fmtCost(c.total) : `${fmtCost(c.min)}–${fmtCost(c.max)}`;
+    };
 
     return (
         <div onClick={onClick} className={`border rounded-xl px-3 py-2 cursor-pointer hover:brightness-95 transition-[filter] ${s.row}`}>
@@ -521,6 +571,11 @@ const MaterialDiffRow = ({ entry, isFirstApproval, onClick }) => {
             ) : (
                 <p className="text-[10px] text-slate-600 mt-0.5">{qtyStr(item)}</p>
             )}
+            {costStr(item) ? (
+                <p className="text-[10px] font-bold text-emerald-600 mt-0.5">{costStr(item)}</p>
+            ) : (
+                <p className="text-[9px] text-slate-300 italic mt-0.5">cost unknown</p>
+            )}
         </div>
     );
 };
@@ -548,6 +603,7 @@ const TrimDetailModal = ({ mc, onClose }) => {
     }, [mc.trim_item_id]);
 
     const fixedEff = mc.calculation_type === 'FIXED' ? effectiveQty(mc.fixed_quantity, mc.wastage_percentage) : null;
+    const cost = materialCost(mc);
 
     return (
         <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4" onClick={onClose}>
@@ -588,7 +644,7 @@ const TrimDetailModal = ({ mc, onClose }) => {
 
                 {/* Body */}
                 <div className="flex-1 overflow-y-auto p-5 space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-3 gap-3">
                         <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Calculation</p>
                             <p className="text-xs font-semibold text-slate-700">{mc.calculation_type === 'FIXED' ? 'Fixed quantity' : 'Per size'}</p>
@@ -597,10 +653,16 @@ const TrimDetailModal = ({ mc, onClose }) => {
                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Wastage</p>
                             <p className="text-xs font-semibold text-slate-700">{mc.wastage_percentage || '0'}%</p>
                         </div>
+                        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Avg. Unit Cost</p>
+                            <p className="text-xs font-semibold text-slate-700">
+                                {mc.avg_unit_cost != null ? `${fmtCost(mc.avg_unit_cost)} / ${mc.unit_of_measure || 'unit'}` : <span className="text-slate-300 italic font-normal">unknown</span>}
+                            </p>
+                        </div>
                     </div>
 
                     {mc.calculation_type === 'FIXED' ? (
-                        <div className="border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between">
+                        <div className="border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
                             <div>
                                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Fixed Quantity</p>
                                 <p className="text-sm font-bold text-slate-700">{mc.fixed_quantity} {mc.unit_of_measure || 'unit'}</p>
@@ -611,6 +673,12 @@ const TrimDetailModal = ({ mc, onClose }) => {
                                     <p className="text-sm font-bold text-violet-600">{fixedEff.toFixed(2)} {mc.unit_of_measure || 'unit'}</p>
                                 </div>
                             )}
+                            <div className="text-right">
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Est. Cost</p>
+                                <p className="text-sm font-bold text-emerald-600">
+                                    {cost?.total != null ? fmtCost(cost.total) : <span className="text-slate-300 italic font-normal text-xs">unknown</span>}
+                                </p>
+                            </div>
                         </div>
                     ) : (
                         <div>
@@ -624,11 +692,13 @@ const TrimDetailModal = ({ mc, onClose }) => {
                                         <th className="text-left pb-1.5 px-2">Trim Variant Size</th>
                                         <th className="text-right pb-1.5">Qty</th>
                                         <th className="text-right pb-1.5 pl-2">Effective</th>
+                                        <th className="text-right pb-1.5 pl-2">Est. Cost</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {(mc.size_consumptions || []).map((sc, i) => {
                                         const eff = effectiveQty(sc.quantity, mc.wastage_percentage);
+                                        const sizeCost = cost?.sizes?.find(s => s.size === sc.size)?.cost;
                                         return (
                                             <tr key={i} className="border-b border-slate-50">
                                                 <td className="py-1.5">
@@ -639,6 +709,7 @@ const TrimDetailModal = ({ mc, onClose }) => {
                                                 <td className="py-1.5 px-2 text-slate-600">{sc.target_variant_size || <span className="text-slate-300 italic">same as product</span>}</td>
                                                 <td className="py-1.5 text-right font-semibold text-slate-700">{sc.quantity ?? '—'}</td>
                                                 <td className="py-1.5 pl-2 text-right text-slate-500">{eff != null ? eff.toFixed(2) : '—'}</td>
+                                                <td className="py-1.5 pl-2 text-right font-semibold text-emerald-600">{sizeCost != null ? fmtCost(sizeCost) : '—'}</td>
                                             </tr>
                                         );
                                     })}

@@ -86,6 +86,11 @@ const ReceiptList = ({ receipts }) => {
                         <div className="flex items-center gap-3 text-[9px] text-slate-400 flex-wrap">
                             <span className="flex items-center gap-1"><Clock size={8} /> {fmtDate(r.dispatch_date)}</span>
                             {r.dispatched_by && <span className="flex items-center gap-1"><User size={8} /> {r.dispatched_by}</span>}
+                            {r.vendor_name && (
+                                <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded">
+                                    Jobber: {r.vendor_name}
+                                </span>
+                            )}
                         </div>
                         {r.notes && (
                             <p className="text-[9px] text-slate-500 mt-1.5 flex items-start gap-1">

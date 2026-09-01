@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Package, Search, Plus, AlertTriangle,
     Filter, X, Loader2, CheckCircle2,
-    FileSpreadsheet, Upload, Check,
+    FileSpreadsheet, Upload, Check, Pencil,
 } from 'lucide-react';
 
 import { sparesApi } from '../../api/sparesApi';
@@ -89,11 +89,23 @@ const Modal = ({ title, onClose, children }) => (
     </div>
 );
 
-// --- SUB-COMPONENT: Create Part Form ---
-const CreatePartForm = ({ categories, onSave, onCancel }) => {
-    const [formData, setFormData] = useState({
-        name: '', part_number: '', category_id: '', 
-        location: '', min_stock_threshold: 5, 
+// --- SUB-COMPONENT: Create / Edit Part Form ---
+// initialData present -> edit mode: current_stock is never shown/submitted —
+// it's owned entirely by inwards (IN) and issuance (OUT), never a direct
+// field edit (see PUT /spares/:id — current_stock isn't even in its accepted
+// field list). initialData absent -> create mode, opening stock included.
+const PartForm = ({ categories, initialData, onSave, onCancel }) => {
+    const isEdit = !!initialData;
+    const [formData, setFormData] = useState(() => isEdit ? {
+        name: initialData.name || '',
+        part_number: initialData.part_number || '',
+        category_id: initialData.category_id ?? '',
+        location: initialData.location || '',
+        min_stock_threshold: initialData.min_stock_threshold ?? 5,
+        unit_cost: initialData.unit_cost ?? 0,
+    } : {
+        name: '', part_number: '', category_id: '',
+        location: '', min_stock_threshold: 5,
         current_stock: 0, unit_cost: 0
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -131,24 +143,31 @@ const CreatePartForm = ({ categories, onSave, onCancel }) => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Location / Shelf</label>
                 <input type="text" className="w-full p-2 border rounded-lg" value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} placeholder="e.g. Aisle 3, Bin B" />
             </div>
-            <div className="grid grid-cols-3 gap-4 bg-gray-50 p-3 rounded-lg border border-gray-100">
+            <div className={`grid gap-4 bg-gray-50 p-3 rounded-lg border border-gray-100 ${isEdit ? 'grid-cols-2' : 'grid-cols-3'}`}>
                 <div>
                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Min Limit</label>
                     <input type="number" className="w-full p-1 border rounded text-sm" value={formData.min_stock_threshold} onChange={e => setFormData({...formData, min_stock_threshold: e.target.value})} />
                 </div>
-                <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Opening Stock</label>
-                    <input type="number" className="w-full p-1 border rounded text-sm" value={formData.current_stock} onChange={e => setFormData({...formData, current_stock: e.target.value})} />
-                </div>
+                {!isEdit && (
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Opening Stock</label>
+                        <input type="number" className="w-full p-1 border rounded text-sm" value={formData.current_stock} onChange={e => setFormData({...formData, current_stock: e.target.value})} />
+                    </div>
+                )}
                 <div>
                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Unit Cost</label>
                     <input type="number" step="0.01" className="w-full p-1 border rounded text-sm" value={formData.unit_cost} onChange={e => setFormData({...formData, unit_cost: e.target.value})} />
                 </div>
             </div>
+            {isEdit && (
+                <p className="text-[11px] text-gray-400 -mt-2">
+                    Current stock ({initialData.current_stock}) isn't editable here — it's tracked entirely through inwards and issuance.
+                </p>
+            )}
             <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={onCancel} className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
                 <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm disabled:opacity-70">
-                    {isSubmitting ? 'Saving...' : 'Create Part'}
+                    {isSubmitting ? 'Saving...' : isEdit ? 'Save Changes' : 'Create Part'}
                 </button>
             </div>
         </form>
@@ -168,7 +187,8 @@ const SparePartsPage = () => {
     const [filterCategory, setFilterCategory] = useState('');
 
     // Modal States
-    const [activeModal, setActiveModal] = useState(null); // 'create'
+    const [activeModal, setActiveModal] = useState(null); // 'create' | 'edit'
+    const [editingSpare, setEditingSpare] = useState(null); // the spare row being edited, for 'edit'
 
     // Export / Import
     const [isExporting, setIsExporting] = useState(false);
@@ -211,6 +231,20 @@ const SparePartsPage = () => {
             setActiveModal(null);
         } catch (err) {
             setToast({ kind: 'error', message: sparesErrorMessage(err, 'Failed to create spare part.') });
+        }
+    };
+
+    const handleEditClick = (spare) => { setEditingSpare(spare); setActiveModal('edit'); };
+
+    const handleUpdate = async (data) => {
+        try {
+            await sparesApi.updateSpare(editingSpare.id, data);
+            await fetchData();
+            setActiveModal(null);
+            setEditingSpare(null);
+            setToast({ kind: 'success', message: `${data.name || editingSpare.name} updated.` });
+        } catch (err) {
+            setToast({ kind: 'error', message: sparesErrorMessage(err, 'Failed to update spare part.') });
         }
     };
 
@@ -392,11 +426,12 @@ const SparePartsPage = () => {
                                     <th className="px-6 py-3 font-semibold text-gray-700 hidden sm:table-cell">Location</th>
                                     <th className="px-6 py-3 font-semibold text-gray-700 text-right">Stock Level</th>
                                     <th className="px-6 py-3 font-semibold text-gray-700 text-right">Value</th>
+                                    {isAdmin && <th className="px-6 py-3 font-semibold text-gray-700 text-right w-16"></th>}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                                 {filteredSpares.length === 0 && (
-                                    <tr><td colSpan="4" className="p-8 text-center text-gray-400 italic">No parts found matching your search.</td></tr>
+                                    <tr><td colSpan={isAdmin ? 5 : 4} className="p-8 text-center text-gray-400 italic">No parts found matching your search.</td></tr>
                                 )}
                                 {filteredSpares.map(part => {
                                     const isLowStock = part.current_stock <= part.min_stock_threshold;
@@ -422,6 +457,17 @@ const SparePartsPage = () => {
                                                 <div className="font-medium text-gray-900">₹{parseFloat(part.unit_cost).toFixed(2)}</div>
                                                 <div className="text-xs text-gray-400">per unit</div>
                                             </td>
+                                            {isAdmin && (
+                                                <td className="px-6 py-3 text-right">
+                                                    <button
+                                                        onClick={() => handleEditClick(part)}
+                                                        title="Edit part"
+                                                        className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                                                    >
+                                                        <Pencil size={15} />
+                                                    </button>
+                                                </td>
+                                            )}
                                         </tr>
                                     );
                                 })}
@@ -434,7 +480,17 @@ const SparePartsPage = () => {
             {/* MODALS */}
             {activeModal === 'create' && (
                 <Modal title="Add New Spare Part" onClose={() => setActiveModal(null)}>
-                    <CreatePartForm categories={categories} onSave={handleCreate} onCancel={() => setActiveModal(null)} />
+                    <PartForm categories={categories} onSave={handleCreate} onCancel={() => setActiveModal(null)} />
+                </Modal>
+            )}
+            {activeModal === 'edit' && editingSpare && (
+                <Modal title={`Edit ${editingSpare.name}`} onClose={() => { setActiveModal(null); setEditingSpare(null); }}>
+                    <PartForm
+                        categories={categories}
+                        initialData={editingSpare}
+                        onSave={handleUpdate}
+                        onCancel={() => { setActiveModal(null); setEditingSpare(null); }}
+                    />
                 </Modal>
             )}
 

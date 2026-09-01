@@ -91,11 +91,12 @@ export default function TypeScorecardCard({
         );
     }
 
-    const { line_type, parts = [], totals = {} } = summary;
+    const { line_type, parts = [], totals = {}, by_line: byLine = [], by_day: byDay = [] } = summary;
     const trackingAvailable = line_type?.tracking_available !== false;
     const mergedParts = collapseByName(parts);
     const dhu = totals.dhu;
     const totalOutput = totals.total_output ?? 0;
+    const maxDayOutput = byDay.reduce((m, d) => Math.max(m, d.total_output), 0);
 
     return (
         <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
@@ -184,6 +185,86 @@ export default function TypeScorecardCard({
                     ))
                 )}
             </div>
+
+            {trackingAvailable && byLine.length > 0 && (
+                <div className="px-6 py-5 border-t border-gray-800">
+                    <p className="text-sm text-gray-400 mb-3 font-bold uppercase tracking-widest">
+                        Line-wise Scorecard
+                    </p>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead>
+                                <tr className="text-[11px] text-gray-600 uppercase tracking-widest">
+                                    <th className="pb-2 font-bold">Line</th>
+                                    <th className="pb-2 font-bold text-right">Output</th>
+                                    <th className="pb-2 font-bold text-right">vs Target</th>
+                                    <th className="pb-2 font-bold text-right">Defects</th>
+                                    <th className="pb-2 font-bold text-right">DHU</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-800/60">
+                                {byLine.map(l => (
+                                    <tr key={l.line_id}>
+                                        <td className="py-2.5 text-sm font-bold text-white">{l.line_name}</td>
+                                        <td className="py-2.5 text-sm text-gray-300 text-right tabular-nums">
+                                            {l.actual.toLocaleString()}
+                                        </td>
+                                        <td className="py-2.5 text-right tabular-nums">
+                                            {l.achievement_pct != null ? (
+                                                <span className="text-sm font-black" style={{ color: pctColor(l.achievement_pct) }}>
+                                                    {l.achievement_pct}%
+                                                </span>
+                                            ) : (
+                                                <span className="text-sm text-gray-700">—</span>
+                                            )}
+                                            <span className="text-[11px] text-gray-700 ml-1">
+                                                ({l.target_quantity.toLocaleString()} target)
+                                            </span>
+                                        </td>
+                                        <td className="py-2.5 text-sm text-right tabular-nums"
+                                            style={{ color: l.total_defects > 0 ? '#f87171' : '#4b5563' }}>
+                                            {l.total_defects.toLocaleString()}
+                                        </td>
+                                        <td className="py-2.5 text-right tabular-nums">
+                                            <span className="text-sm font-black" style={{ color: l.dhu != null ? dhuColor(l.dhu) : '#4b5563' }}>
+                                                {l.dhu != null ? fmt2(l.dhu) : '—'}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {trackingAvailable && byDay.length > 0 && (
+                <div className="px-6 py-5 border-t border-gray-800">
+                    <p className="text-sm text-gray-400 mb-3 font-bold uppercase tracking-widest">
+                        Daily Output
+                    </p>
+                    <div className="flex items-end gap-1 h-24">
+                        {byDay.map(d => {
+                            const h = maxDayOutput > 0 ? Math.max(3, (d.total_output / maxDayOutput) * 100) : 3;
+                            return (
+                                <div
+                                    key={d.date}
+                                    title={`${d.date} — ${d.total_output.toLocaleString()} pcs`}
+                                    className="flex-1 rounded-t bg-indigo-500/70 hover:bg-indigo-400 transition-colors"
+                                    style={{ height: `${h}%` }}
+                                />
+                            );
+                        })}
+                    </div>
+                    <div className="flex justify-between text-[11px] text-gray-700 mt-1.5">
+                        <span>{byDay[0]?.date}</span>
+                        <span className="text-gray-500">
+                            avg {Math.round(byDay.reduce((s, d) => s + d.total_output, 0) / byDay.length).toLocaleString()} / day
+                        </span>
+                        <span>{byDay[byDay.length - 1]?.date}</span>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

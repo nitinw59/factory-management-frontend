@@ -1864,6 +1864,12 @@ const UniversalWorkstationDashboard = () => {
                             </span>
                             {loadingWork && !showApprovedModal && <Loader2 size={11} className="animate-spin text-emerald-500" />}
                         </button>
+                        <span className="text-gray-200 hidden sm:inline">│</span>
+                        <div className="flex items-center gap-1.5">
+                            <LuClock size={13} className="text-sky-500 shrink-0" />
+                            <span className="text-xs text-gray-500">Checked This Hour</span>
+                            <span className="text-sm font-black tabular-nums text-sky-600">{stats == null ? '—' : (stats.checked_this_hour ?? 0)}</span>
+                        </div>
                     </div>
                     <button
                         onClick={handleOpenModal}

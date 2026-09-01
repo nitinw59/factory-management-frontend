@@ -144,6 +144,7 @@ import OrdersPage from './modules/purchase_department/OrdersPage';
 import TrimsLedgerPage from './modules/purchase_department/TrimsLedgerPage';
 import PurchaseFlowPage from './modules/purchase_department/PurchaseFlowPage';
 import InwardsPage from './modules/purchase_department/InwardsPage';
+import GrnInvoiceByDatePage from './modules/purchase_department/GrnInvoiceByDatePage';
 
 
 
@@ -505,7 +506,6 @@ function App() {
         <Route path="bom/:bomId/measurement-chart" element={<GarmentMeasurementChartPage />} />
         <Route path="planning" element={<MerchandiserPlanningPage />} />
         <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
-        <Route path="trims" element={<TrimManagementPage />} />
         <Route path="sales-orders" element={<SalesOrderListPage />} />
         <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
         <Route path="products" element={<ProductManagementPage />} />
@@ -516,7 +516,11 @@ function App() {
 
     {/* Purchase Department Portal */}
     <Route path="/purchase-department" element={<PurchaseDepartmentProtectedRoute><PurchaseDepartmentLayout /></PurchaseDepartmentProtectedRoute>}>
-        <Route index element={<Navigate to="requirements" replace />} />
+        <Route index element={<Navigate to="orders" replace />} />
+        {/* Requirements is off the portal nav (see PurchaseDepartmentLayout's NAV
+            comment) but the route stays — TrimLossLayout's purchase_manager
+            dashboard link and ReplacementPanel's standalone review link both
+            still point here. */}
         <Route path="requirements" element={<RequirementsPage />} />
         <Route path="raise-requirement" element={<RaiseRequirementPage />} />
         <Route path="orders" element={<OrdersPage />} />
@@ -525,6 +529,7 @@ function App() {
         <Route path="trims-ledger" element={<TrimsLedgerPage />} />
         <Route path="supplier-color-codes" element={<SupplierColorCodesPage />} />
         <Route path="inwards" element={<InwardsPage />} />
+        <Route path="grn-invoices-by-date" element={<GrnInvoiceByDatePage />} />
     </Route>
 
     {/* Receiver Portal */}

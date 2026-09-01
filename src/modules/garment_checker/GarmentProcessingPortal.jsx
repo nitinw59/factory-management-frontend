@@ -868,7 +868,7 @@ const AssemblyProcessingPortal = () => {
                 )}
 
                 {/* STATS BAR */}
-                <div className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="mb-6 grid grid-cols-2 md:grid-cols-5 gap-3">
                     <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
                         <p className="text-[10px] font-black uppercase tracking-widest text-amber-500 mb-0.5">Pending Rework</p>
                         <p className="text-2xl font-black text-amber-700">{stats?.pending_rework ?? '—'}</p>
@@ -880,6 +880,12 @@ const AssemblyProcessingPortal = () => {
                     <div className="bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3">
                         <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500 mb-0.5">Today's Approved</p>
                         <p className="text-2xl font-black text-emerald-700">{stats?.today_approved ?? '—'}</p>
+                    </div>
+                    <div className="bg-sky-50 border border-sky-200 rounded-2xl px-4 py-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-sky-500 mb-0.5 flex items-center gap-1">
+                            <Clock size={10} /> Checked This Hour
+                        </p>
+                        <p className="text-2xl font-black text-sky-700">{stats?.checked_this_hour ?? '—'}</p>
                     </div>
                     <button onClick={handleOpenModal}
                         className="bg-white border border-slate-200 rounded-2xl px-4 py-3 hover:border-indigo-400 hover:bg-indigo-50 transition-all text-left flex items-center gap-3">

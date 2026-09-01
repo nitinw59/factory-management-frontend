@@ -380,10 +380,33 @@ export default function InwardCreateModal({
         return next;
     });
 
-    // Free-form items merged by variant — one input per unique variant, FCFS distribution at review time
-    const ffVarKey = (g) => g.item_type === 'fabric'
-        ? `fabric_${g.fabric_type_id}_${g.fabric_color_id}`
-        : `trim_${g.trim_item_variant_id}`;
+    // Free-form items merged by variant — one input per unique variant, FCFS
+    // distribution at review time. Must branch on every item_type this PO can
+    // carry: falling through non-fabric items to trim_item_variant_id (as
+    // this used to) gives every spare/other line the same `trim_undefined`
+    // key — since only trims have that column — silently merging every spare
+    // (and every "other" item) on the PO into a single combined entry.
+    const ffVarKey = (g) => {
+        if (g.item_type === 'fabric') return `fabric_${g.fabric_type_id}_${g.fabric_color_id}`;
+        if (g.item_type === 'trim')   return `trim_${g.trim_item_variant_id}`;
+        if (g.item_type === 'spare')  return `spare_${g.spare_part_id}`;
+        if (g.item_type === 'other')  return `other_${g.general_item_id}`;
+        // Unknown/future item_type — key by the PO item's own id so it never
+        // silently merges with anything else, rather than repeating the bug.
+        return `poitem_${g.id}`;
+    };
+
+    // Display label for one PO item/group — same item_type branching as
+    // ffVarKey above (and the same bug this fixes: falling through to
+    // trim_item_name/'Trim' for a spare or other-item row, since those
+    // columns are only populated for trims).
+    const ffItemLabel = (g) => {
+        if (g.item_type === 'fabric') return `${g.fabric_type_name || 'Fabric'}${g.fabric_color_number ? ` · ${g.fabric_color_number}` : ''}${g.fabric_color_name ? ` · ${g.fabric_color_name}` : ''}`;
+        if (g.item_type === 'trim')   return `${g.trim_item_name || 'Trim'}${g.variant_color_number ? ` · ${g.variant_color_number}` : ''}${g.variant_color_name ? ` · ${g.variant_color_name}` : ''}${g.variant_size ? ` · Sz ${g.variant_size}` : ''}`;
+        if (g.item_type === 'spare')  return `${g.spare_part_name || 'Spare Part'}${g.spare_part_number ? ` · ${g.spare_part_number}` : ''}`;
+        if (g.item_type === 'other')  return `${g.general_item_name || 'Item'}${g.general_item_code ? ` · ${g.general_item_code}` : ''}`;
+        return g.description || `PO Item #${g.id}`;
+    };
 
     // Same "starts empty, not pre-filled with pending qty" fix as
     // trimTotalByGroup above, for the free-form-by-variant trim cards.
@@ -887,9 +910,7 @@ export default function InwardCreateModal({
                         .map(group => {
                             const Icon = TYPE_ICON[group.item_type] || Package;
                             const isFabricGroup = group.item_type === 'fabric';
-                            const groupLabel = isFabricGroup
-                                ? `${group.fabric_type_name || 'Fabric'}${group.fabric_color_number ? ` · ${group.fabric_color_number}` : ''}${group.fabric_color_name ? ` · ${group.fabric_color_name}` : ''}`
-                                : `${group.trim_item_name || 'Trim'}${group.variant_color_number ? ` · ${group.variant_color_number}` : ''}${group.variant_color_name ? ` · ${group.variant_color_name}` : ''}${group.variant_size ? ` · Sz ${group.variant_size}` : ''}`;
+                            const groupLabel = ffItemLabel(group);
                             const activeReqs = (group.requirements || []).filter(r => !removedReqIds.has(r.id));
                             const unit = activeReqs[0] ? reqUnit(activeReqs[0]) : (isFabricGroup ? 'm' : 'pcs');
                             // pendingByReqMap's baseline is the *shared* PO item quantity, repeated
@@ -1126,9 +1147,7 @@ export default function InwardCreateModal({
                             .filter(({ key }) => !removedVarGroupKeys.has(key))
                             .map(({ key, items, isFabric, ref }) => {
                                 const Icon = TYPE_ICON[ref.item_type] || Package;
-                                const itemLabel = isFabric
-                                    ? `${ref.fabric_type_name || 'Fabric'}${ref.fabric_color_number ? ` · ${ref.fabric_color_number}` : ''}${ref.fabric_color_name ? ` · ${ref.fabric_color_name}` : ''}`
-                                    : `${ref.trim_item_name || 'Trim'}${ref.variant_color_number ? ` · ${ref.variant_color_number}` : ''}${ref.variant_color_name ? ` · ${ref.variant_color_name}` : ''}${ref.variant_size ? ` · Sz ${ref.variant_size}` : ''}`;
+                                const itemLabel = ffItemLabel(ref);
                                 const groupUom = ref.uom || (isFabric ? 'm' : 'pcs');
                                 const activeItems = items.filter(g => !removedPoItemIds.has(g.id));
                                 const totalPending = activeItems.reduce((s, g) => s + (pendingByPoItem[g.id] || 0), 0);

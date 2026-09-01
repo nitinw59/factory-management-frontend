@@ -4,7 +4,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
     LuLogOut, LuMenu, LuX, LuFileText,
-    LuLayoutDashboard, LuPackage, LuClipboardList, LuLayers,
+    LuLayoutDashboard, LuClipboardList, LuLayers,
     LuShirt, LuTag, LuList, LuScissors,
 } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
@@ -14,7 +14,6 @@ const NAV = [
     { to: '/merchandiser/bom',                 icon: LuFileText,        label: 'BOM Management'       },
     { to: '/merchandiser/planning',            icon: LuClipboardList,   label: 'Production Planning'  },
     { to: '/merchandiser/production-workflow', icon: LuLayoutDashboard, label: 'Production Workflow'  },
-    { to: '/merchandiser/trims',               icon: LuPackage,         label: 'Trim Management'      },
     { to: '/merchandiser/fabric-rolls',        icon: LuLayers,          label: 'Fabric'               },
     // Product management (moved here from the Production Manager portal).
     { to: '/merchandiser/products',            icon: LuShirt,           label: 'Products'             },

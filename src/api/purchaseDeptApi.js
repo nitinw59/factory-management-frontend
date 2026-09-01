@@ -68,6 +68,8 @@ export const purchaseDeptApi = {
 
     // Invoices
     getInvoices: (poId) => api.get(`/purchase-department/orders/${poId}/invoices`),
+    // Every invoice across every PO — params: { date_from?, date_to?, payment_status?, supplier_id?, q? }
+    listInvoices: (params) => api.get('/purchase-department/invoices', { params }),
     createInvoice: (data, scanFile) =>
         scanFile
             ? api.post('/purchase-department/invoices', buildFormData(data, 'scan', scanFile))

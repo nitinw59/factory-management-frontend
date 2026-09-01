@@ -7,6 +7,7 @@ import {
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { dispatchManagerApi } from '../../api/dispatchManagerApi';
+import { storeManagerApi } from '../../api/storeManagerApi';
 import { StatusBadge, formatBatchIdentifier } from './shared';
 import QcGateBadge from '../final_qc/QcGateBadge';
 
@@ -116,31 +117,206 @@ const OverviewTab = ({ batch, totals, pipeline }) => (
     </div>
 );
 
-// ─── TAB: CREATE RECEIPT ─────────────────────────────────────────────────────
+// ─── TAB: CREATE RECEIPT (2-step: pick stage, then quantities) ───────────────
+// Step 1 makes explicit what used to be an invisible auto-pick — which
+// production stage's approved count the dispatch ceiling is drawn from
+// (getBatchDetail returns every roll's approved count at every trackable
+// stage in rolls[].stage_counts, so this is all client-side math, no extra
+// fetch). Step 2's per-roll "max" is that stage's approved count minus
+// already_dispatched — the same number the backend recomputes and enforces
+// server-side in submitDispatch (never trusts the client's number).
 
-const CreateReceiptTab = ({ batchId, rolls, onSuccess }) => {
-    const [inputs, setInputs] = useState(() => Object.fromEntries(rolls.map(r => [r.roll_id, 0])));
-    const [notes, setNotes]   = useState('');
-    const [saving, setSaving] = useState(false);
-    const [error, setError]   = useState(null);
-    const [result, setResult] = useState(null);
+const StagePickerStep = ({ pipeline, rolls, stageSeq, onPick, onNext }) => {
+    const trackableStages = (pipeline || []).filter(s => s.tracking_table && s.tracking_table !== 'SKIP');
 
-    const available = (roll) => roll.available_to_dispatch ?? 0;
-    const setMax = () => setInputs(Object.fromEntries(rolls.map(r => [r.roll_id, available(r)])));
+    const availabilityAt = (seq) => rolls.reduce((sum, r) => {
+        const approved = r.stage_counts?.find(sc => sc.sequence_no === seq)?.approved || 0;
+        return sum + Math.max(0, approved - (r.already_dispatched || 0));
+    }, 0);
 
+    if (!trackableStages.length) {
+        return <p className="text-center text-slate-400 italic text-sm py-8">This product has no trackable production stages.</p>;
+    }
+
+    return (
+        <div className="space-y-4">
+            <p className="text-xs font-bold text-slate-600">
+                Which production stage should this dispatch be counted against?
+            </p>
+            <p className="text-[11px] text-slate-400 -mt-2">
+                Max dispatchable per roll = pieces approved at that stage, minus what's already been dispatched from it.
+            </p>
+
+            <div className="space-y-2">
+                {trackableStages.map(s => {
+                    const avail = availabilityAt(s.sequence_no);
+                    const active = stageSeq === s.sequence_no;
+                    return (
+                        <button
+                            key={s.sequence_no}
+                            onClick={() => onPick(s.sequence_no)}
+                            className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl border text-left transition-colors ${
+                                active ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 hover:bg-slate-50'
+                            }`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${active ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'}`}>
+                                    {active && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                                </span>
+                                <div>
+                                    <p className="text-sm font-bold text-slate-700">{s.line_type}</p>
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                        <StatusBadge status={s.status} />
+                                        <span className="text-[10px] text-slate-400">{(s.approved_count || 0).toLocaleString()} approved total</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                                <p className={`text-lg font-black tabular-nums ${avail > 0 ? 'text-indigo-700' : 'text-slate-300'}`}>{avail.toLocaleString()}</p>
+                                <p className="text-[9px] font-bold uppercase text-slate-400">available</p>
+                            </div>
+                        </button>
+                    );
+                })}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+                <button
+                    onClick={onNext}
+                    disabled={stageSeq == null}
+                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-colors"
+                >
+                    Next: Set Quantities
+                </button>
+            </div>
+        </div>
+    );
+};
+
+const QuantitiesStep = ({ rolls, stageSeq, stageLabel, inputs, setInputs, notes, setNotes, onBack, onNext }) => {
+    const available = (roll) => Math.max(0, (roll.stage_counts?.find(sc => sc.sequence_no === stageSeq)?.approved || 0) - (roll.already_dispatched || 0));
+    const dispatchableRolls = rolls.filter(r => available(r) > 0);
+
+    const setMax = () => setInputs(Object.fromEntries(dispatchableRolls.map(r => [r.roll_id, available(r)])));
     const total = Object.values(inputs).reduce((s, v) => s + (parseInt(v) || 0), 0);
 
+    return (
+        <div className="space-y-4">
+            <button onClick={onBack} className="text-xs font-bold text-slate-400 hover:text-slate-600">
+                ← Back to stage selection
+            </button>
+
+            {!dispatchableRolls.length ? (
+                <p className="text-center text-slate-400 italic text-sm py-8">
+                    No rolls have pieces available at "{stageLabel}" yet.
+                </p>
+            ) : (
+                <>
+                    <div className="flex justify-between items-center">
+                        <p className="text-xs font-bold text-slate-600">
+                            Set quantities per roll <span className="font-normal text-slate-400">— against "{stageLabel}"</span>
+                        </p>
+                        <button onClick={setMax} className="text-xs font-bold text-indigo-600 hover:underline">
+                            Max All
+                        </button>
+                    </div>
+
+                    <div className="border border-slate-200 rounded-xl overflow-hidden">
+                        <div className="hidden md:grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 text-[10px] font-bold uppercase text-slate-400 border-b border-slate-200">
+                            <div className="col-span-1">Roll</div>
+                            <div className="col-span-3">Color</div>
+                            <div className="col-span-2">Fabric</div>
+                            <div className="col-span-2 text-center">Cut</div>
+                            <div className="col-span-2 text-center">Dispatched</div>
+                            <div className="col-span-2 text-center text-indigo-500">Available</div>
+                        </div>
+                        {dispatchableRolls.map(roll => (
+                            <div key={roll.roll_id} className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-slate-100 last:border-b-0 items-center hover:bg-slate-50">
+                                <div className="col-span-1 font-mono text-xs text-slate-500">#{roll.roll_id}</div>
+                                <div className="col-span-3 text-xs font-semibold text-slate-700 truncate">{roll.color}</div>
+                                <div className="col-span-2 text-xs text-slate-500 truncate">{roll.fabric_type}</div>
+                                <div className="col-span-2 text-center text-xs text-slate-500">{roll.total_cut}</div>
+                                <div className="col-span-2 text-center text-xs text-slate-500">{roll.already_dispatched}</div>
+                                <div className="col-span-2">
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        max={available(roll)}
+                                        value={inputs[roll.roll_id] ?? 0}
+                                        onChange={e => setInputs(prev => ({ ...prev, [roll.roll_id]: Math.min(Math.max(parseInt(e.target.value) || 0, 0), available(roll)) }))}
+                                        className="w-full text-center border border-indigo-200 rounded-lg px-2 py-1.5 text-sm font-bold focus:ring-2 focus:ring-indigo-400 outline-none"
+                                    />
+                                    <p className="text-[9px] text-center text-slate-400 mt-0.5">max {available(roll)}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">Notes (optional)</label>
+                        <textarea
+                            rows={2}
+                            value={notes}
+                            onChange={e => setNotes(e.target.value)}
+                            placeholder="Shipment notes..."
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 outline-none resize-none"
+                        />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                        <div className="text-sm">
+                            <span className="text-slate-500">Total dispatching:</span>
+                            <span className="font-black text-indigo-700 ml-2 text-lg">{total} pcs</span>
+                        </div>
+                        <button
+                            onClick={onNext}
+                            disabled={total === 0}
+                            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-colors"
+                        >
+                            Next: Jobber &amp; Review
+                        </button>
+                    </div>
+                </>
+            )}
+        </div>
+    );
+};
+
+// ─── STEP 3: Jobber (optional) + full preview before creating the receipt ────
+// "Jobber" reuses the same `supplier` table job-work challans already use for
+// their vendor_id (controllers/jobWorkController.js) — one vendor/jobber
+// master list, not a second parallel one. Left unselected, the receipt is a
+// plain dispatch (e.g. final shipment to the customer/warehouse); picked, it
+// records which external contractor the goods are going out to.
+const JobberPreviewStep = ({ batchId, rolls, stageSeq, stageLabel, inputs, notes, onBack, onSuccess }) => {
+    const [suppliers, setSuppliers]   = useState([]);
+    const [vendorId, setVendorId]     = useState('');
+    const [saving, setSaving]         = useState(false);
+    const [error, setError]           = useState(null);
+    const [result, setResult]         = useState(null);
+
+    useEffect(() => {
+        storeManagerApi.getSuppliers()
+            .then(res => setSuppliers(res.data?.data ?? res.data ?? []))
+            .catch(() => setSuppliers([]));
+    }, []);
+
+    const previewRolls = rolls
+        .filter(r => (parseInt(inputs[r.roll_id]) || 0) > 0)
+        .map(r => ({ ...r, quantity: parseInt(inputs[r.roll_id]) }));
+    const total = previewRolls.reduce((s, r) => s + r.quantity, 0);
+    const jobberName = vendorId ? suppliers.find(s => String(s.id) === String(vendorId))?.name : null;
+
     const handleSubmit = async () => {
-        if (total === 0) { setError('Enter at least 1 piece to dispatch.'); return; }
         setError(null);
         setSaving(true);
         try {
             const payload = {
                 batchId,
-                dispatchedRolls: rolls
-                    .filter(r => (parseInt(inputs[r.roll_id]) || 0) > 0)
-                    .map(r => ({ roll_id: r.roll_id, quantity: parseInt(inputs[r.roll_id]) })),
+                stageSequenceNo: stageSeq,
+                dispatchedRolls: previewRolls.map(r => ({ roll_id: r.roll_id, quantity: r.quantity })),
                 notes,
+                vendorId: vendorId || null,
                 closeBatch: false,
             };
             const res = await dispatchManagerApi.submitDispatch(payload);
@@ -162,63 +338,66 @@ const CreateReceiptTab = ({ batchId, rolls, onSuccess }) => {
         </div>
     );
 
-    if (!rolls.length) return <p className="text-center text-slate-400 italic text-sm py-8">No rolls with available pieces.</p>;
-
     return (
         <div className="space-y-4">
+            <button onClick={onBack} className="text-xs font-bold text-slate-400 hover:text-slate-600">
+                ← Back to quantities
+            </button>
+
             {error && (
                 <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-600">
                     <AlertCircle size={14} /> {error}
                 </div>
             )}
 
-            <div className="flex justify-between items-center">
-                <p className="text-xs font-bold text-slate-600">Set quantities per roll</p>
-                <button onClick={setMax} className="text-xs font-bold text-indigo-600 hover:underline">
-                    Max All
-                </button>
-            </div>
-
-            <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <div className="hidden md:grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 text-[10px] font-bold uppercase text-slate-400 border-b border-slate-200">
-                    <div className="col-span-1">Roll</div>
-                    <div className="col-span-3">Color</div>
-                    <div className="col-span-2">Fabric</div>
-                    <div className="col-span-2 text-center">Cut</div>
-                    <div className="col-span-2 text-center">Dispatched</div>
-                    <div className="col-span-2 text-center text-indigo-500">Available</div>
-                </div>
-                {rolls.map(roll => (
-                    <div key={roll.roll_id} className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-slate-100 last:border-b-0 items-center hover:bg-slate-50">
-                        <div className="col-span-1 font-mono text-xs text-slate-500">#{roll.roll_id}</div>
-                        <div className="col-span-3 text-xs font-semibold text-slate-700 truncate">{roll.color}</div>
-                        <div className="col-span-2 text-xs text-slate-500 truncate">{roll.fabric_type}</div>
-                        <div className="col-span-2 text-center text-xs text-slate-500">{roll.total_cut}</div>
-                        <div className="col-span-2 text-center text-xs text-slate-500">{roll.already_dispatched}</div>
-                        <div className="col-span-2">
-                            <input
-                                type="number"
-                                min={0}
-                                max={available(roll)}
-                                value={inputs[roll.roll_id] ?? 0}
-                                onChange={e => setInputs(prev => ({ ...prev, [roll.roll_id]: Math.min(Math.max(parseInt(e.target.value) || 0, 0), available(roll)) }))}
-                                className="w-full text-center border border-indigo-200 rounded-lg px-2 py-1.5 text-sm font-bold focus:ring-2 focus:ring-indigo-400 outline-none"
-                            />
-                            <p className="text-[9px] text-center text-slate-400 mt-0.5">max {available(roll)}</p>
-                        </div>
-                    </div>
-                ))}
-            </div>
-
             <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">Notes (optional)</label>
-                <textarea
-                    rows={2}
-                    value={notes}
-                    onChange={e => setNotes(e.target.value)}
-                    placeholder="Shipment notes..."
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 outline-none resize-none"
-                />
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                    Jobber <span className="font-normal normal-case text-slate-400">(optional — leave blank for a direct/customer dispatch)</span>
+                </label>
+                <select
+                    value={vendorId}
+                    onChange={e => setVendorId(e.target.value)}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-indigo-400 outline-none"
+                >
+                    <option value="">— No jobber / direct dispatch —</option>
+                    {suppliers.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                </select>
+            </div>
+
+            <div className="border border-slate-200 rounded-xl p-4 space-y-3 bg-slate-50">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Review before creating receipt</p>
+
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                        <p className="text-slate-400">Stage</p>
+                        <p className="font-bold text-slate-700">{stageLabel}</p>
+                    </div>
+                    <div>
+                        <p className="text-slate-400">Jobber</p>
+                        <p className="font-bold text-slate-700">{jobberName || 'None — direct dispatch'}</p>
+                    </div>
+                </div>
+
+                <div>
+                    <p className="text-slate-400 text-xs mb-1.5">Rolls</p>
+                    <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
+                        {previewRolls.map(r => (
+                            <div key={r.roll_id} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                                <span className="text-slate-600">#{r.roll_id} · {r.color}</span>
+                                <span className="font-bold text-indigo-700">{r.quantity} pcs</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {notes && (
+                    <div>
+                        <p className="text-slate-400 text-xs">Notes</p>
+                        <p className="text-xs text-slate-700 italic">"{notes}"</p>
+                    </div>
+                )}
             </div>
 
             <div className="flex items-center justify-between pt-2 border-t border-slate-100">
@@ -236,6 +415,66 @@ const CreateReceiptTab = ({ batchId, rolls, onSuccess }) => {
                 </button>
             </div>
         </div>
+    );
+};
+
+const CreateReceiptTab = ({ batchId, rolls, pipeline, onSuccess }) => {
+    // Default stage = the furthest-along trackable stage that already has
+    // some approved pieces (mirrors the old auto-pick), but the user can
+    // change it — that's the whole point of this step.
+    const trackableStages = (pipeline || []).filter(s => s.tracking_table && s.tracking_table !== 'SKIP');
+    const defaultStageSeq = (() => {
+        const withApproved = trackableStages.filter(s => s.approved_count > 0);
+        if (withApproved.length) return withApproved[withApproved.length - 1].sequence_no;
+        return trackableStages[0]?.sequence_no ?? null;
+    })();
+
+    const [step, setStep]         = useState(1);
+    const [stageSeq, setStageSeq] = useState(defaultStageSeq);
+    const [inputs, setInputs]     = useState({});
+    const [notes, setNotes]       = useState('');
+
+    if (!rolls.length) return <p className="text-center text-slate-400 italic text-sm py-8">No rolls on this batch.</p>;
+
+    const stageLabel = trackableStages.find(s => s.sequence_no === stageSeq)?.line_type || '';
+
+    if (step === 1) {
+        return (
+            <StagePickerStep
+                pipeline={pipeline}
+                rolls={rolls}
+                stageSeq={stageSeq}
+                onPick={setStageSeq}
+                onNext={() => setStep(2)}
+            />
+        );
+    }
+    if (step === 2) {
+        return (
+            <QuantitiesStep
+                rolls={rolls}
+                stageSeq={stageSeq}
+                stageLabel={stageLabel}
+                inputs={inputs}
+                setInputs={setInputs}
+                notes={notes}
+                setNotes={setNotes}
+                onBack={() => setStep(1)}
+                onNext={() => setStep(3)}
+            />
+        );
+    }
+    return (
+        <JobberPreviewStep
+            batchId={batchId}
+            rolls={rolls}
+            stageSeq={stageSeq}
+            stageLabel={stageLabel}
+            inputs={inputs}
+            notes={notes}
+            onBack={() => setStep(2)}
+            onSuccess={onSuccess}
+        />
     );
 };
 
@@ -275,6 +514,7 @@ const generateReceiptPDF = async (receiptNumber) => {
     line('Receipt No:', r.receipt_number);
     line('Date:', r.dispatch_date ? new Date(r.dispatch_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
     line('Dispatched By:', r.dispatched_by ?? '—');
+    if (r.vendor_name) line('Jobber:', r.vendor_name);
     if (r.notes) line('Notes:', r.notes);
 
     // Divider
@@ -383,6 +623,7 @@ const ReceiptsTab = ({ receipts }) => {
                         <p className="text-xs text-slate-500 mt-0.5">
                             {r.dispatch_date ? new Date(r.dispatch_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                             {r.dispatched_by && ` · ${r.dispatched_by}`}
+                            {r.vendor_name && ` · Jobber: ${r.vendor_name}`}
                         </p>
                         {r.notes && <p className="text-[10px] text-slate-400 mt-0.5 italic">"{r.notes}"</p>}
                     </div>
@@ -445,7 +686,10 @@ const BatchDispatchModal = ({ batchId, batchCode, onClose, canCreateDispatch = f
         }
     };
     const batch    = data?.batch;
-    const rolls    = (data?.rolls || []).filter(r => (r.available_to_dispatch ?? 0) > 0 || r.total_cut > 0);
+    // Not pre-filtered to the (formerly auto-picked) last stage's availability —
+    // Step 1 of CreateReceiptTab needs every roll's counts across ALL stages to
+    // let the user pick a different stage than the one this used to assume.
+    const rolls    = (data?.rolls || []).filter(r => r.total_cut > 0);
     const pipeline = data?.stage_pipeline || [];
     const receipts = data?.existing_receipts || [];
     const totals   = data?.totals || {};
@@ -537,6 +781,7 @@ const BatchDispatchModal = ({ batchId, batchCode, onClose, canCreateDispatch = f
                                 <CreateReceiptTab
                                     batchId={batchId}
                                     rolls={rolls}
+                                    pipeline={pipeline}
                                     onSuccess={() => { load(); setActiveTab('receipts'); }}
                                 />
                             )}
