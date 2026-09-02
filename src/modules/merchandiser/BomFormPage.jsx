@@ -492,7 +492,7 @@ const CreateTrimModal = ({ onClose, onCreated }) => {
 
 // ─── Material Accordion ───────────────────────────────────────────────────────
 
-const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, productStages, expanded, onToggle, onUpdate, onRemove, onDuplicate, onTrimCreated, excludeTrimIds }) => {
+const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, productStages, expanded, onToggle, onUpdate, onRemove, onDuplicate, onTrimCreated, excludeTrimIds, selectable, selected, onToggleSelect }) => {
     const trimItem = trimItems.find(t => String(t.id) === String(mc.trim_item_id));
     const uom = trimItem?.unit_of_measure;
     const upd = (field, val) => onUpdate(mIdx, field, val);
@@ -545,8 +545,24 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, productStages, expande
 
     return (
         <div className={`border rounded-xl ${isDuplicateTrim ? 'border-red-300' : 'border-slate-200'}`}>
-            <button onClick={onToggle}
-                className="w-full flex items-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left rounded-t-xl">
+            {/* A plain div, not a <button> — it wraps the Duplicate/Remove
+                buttons (and, in bulk-select mode, a checkbox), and nested
+                interactive elements inside a <button> are invalid HTML that
+                browsers silently reflow, which can make clicks land on the
+                wrong target. role="button" + tabIndex/onKeyDown keep it
+                keyboard-accessible without that problem. */}
+            <div onClick={onToggle} role="button" tabIndex={0}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
+                className="w-full flex items-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left rounded-t-xl cursor-pointer">
+                {selectable && (
+                    <input
+                        type="checkbox"
+                        checked={!!selected}
+                        onClick={e => e.stopPropagation()}
+                        onChange={onToggleSelect}
+                        className="w-4 h-4 accent-violet-600 shrink-0 cursor-pointer"
+                    />
+                )}
                 {expanded
                     ? <ChevronDown size={13} className="text-slate-400 shrink-0" />
                     : <ChevronRight size={13} className="text-slate-400 shrink-0" />}
@@ -630,7 +646,7 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, productStages, expande
                     className="p-1 text-slate-300 hover:text-red-400 transition-colors shrink-0">
                     <X size={13} />
                 </button>
-            </button>
+            </div>
 
             {expanded && (
                 <div className="px-4 pb-4 pt-3 border-t border-slate-100 bg-white space-y-3">
@@ -874,6 +890,23 @@ export default function BomFormPage() {
     // the wrong slot; it just falls back to Basics if its key vanishes.
     const [currentStepKey, setCurrentStepKey] = useState('basics');
 
+    // Bulk stage assignment — for the legacy backlog: every material saved
+    // before stage-tagging existed sits in "Unassigned", often dozens per
+    // BOM, and assigning them one dropdown at a time doesn't scale. Lets the
+    // user multi-select rows on the Unassigned step and assign them all to
+    // one stage in a single action.
+    const [bulkSelectMode, setBulkSelectMode] = useState(false);
+    const [selectedKeys, setSelectedKeys] = useState(new Set());
+    const [bulkTargetStage, setBulkTargetStage] = useState('');
+    // Leaving the Unassigned step (or its material list changing shape)
+    // resets bulk mode rather than carrying a stale selection to a step
+    // where it has no meaning.
+    useEffect(() => {
+        setBulkSelectMode(false);
+        setSelectedKeys(new Set());
+        setBulkTargetStage('');
+    }, [currentStepKey]);
+
     const showToast = (msg, ok = true) => {
         setToast({ msg, ok });
         setTimeout(() => setToast(null), 3000);
@@ -1066,6 +1099,25 @@ export default function BomFormPage() {
             return { ...f, material_consumptions: list };
         });
         setExpandedMaterials(prev => new Set([...prev, clone._key]));
+    };
+
+    const toggleSelectKey = (key) => setSelectedKeys(prev => {
+        const next = new Set(prev);
+        next.has(key) ? next.delete(key) : next.add(key);
+        return next;
+    });
+
+    const applyBulkAssign = () => {
+        if (!bulkTargetStage || selectedKeys.size === 0) return;
+        setForm(f => ({
+            ...f,
+            material_consumptions: f.material_consumptions.map(mc =>
+                selectedKeys.has(mc._key) ? { ...mc, production_line_type_id: bulkTargetStage } : mc
+            ),
+        }));
+        setSelectedKeys(new Set());
+        setBulkTargetStage('');
+        setBulkSelectMode(false);
     };
 
     const serialize = () => ({
@@ -1439,6 +1491,14 @@ export default function BomFormPage() {
                                         {stepMaterials.length} material{stepMaterials.length > 1 ? 's' : ''}
                                     </span>
                                 )}
+                                {currentStep.key === 'unassigned' && productStages.length > 0 && stepMaterials.length > 0 && (
+                                    <button
+                                        onClick={() => { setBulkSelectMode(v => !v); setSelectedKeys(new Set()); }}
+                                        className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-colors ${bulkSelectMode ? 'bg-violet-600 text-white' : 'text-violet-600 hover:bg-violet-50 border border-violet-200'}`}
+                                    >
+                                        {bulkSelectMode ? 'Cancel' : 'Select Multiple'}
+                                    </button>
+                                )}
                                 <AddBtn onClick={() => addMaterial(currentStep.production_line_type_id || '')} label="Add Material" />
                             </div>
                         }
@@ -1447,9 +1507,51 @@ export default function BomFormPage() {
                             <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
                                 {productStages.length === 0
                                     ? "This product has no workflow stages configured yet, so materials added here have no stage. Configure the product's Production Flow to group them by stage."
-                                    : 'These materials have no stage yet. Open a row and pick a Stage — or leave it, saving with unassigned materials is allowed but flagged for review.'}
+                                    : 'These materials have no stage yet. Open a row and pick a Stage — or leave it, saving with unassigned materials is allowed but flagged for review. Use "Select Multiple" to assign several at once.'}
                             </p>
                         )}
+
+                        {/* Bulk-assign toolbar — for the legacy backlog: pick several
+                            Unassigned materials and set their stage in one action instead
+                            of one dropdown per row. */}
+                        {bulkSelectMode && currentStep.key === 'unassigned' && (
+                            <div className="flex flex-wrap items-center gap-2 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2 mb-3">
+                                <span className="text-xs font-bold text-violet-700">
+                                    {selectedKeys.size} selected
+                                </span>
+                                <button
+                                    onClick={() => setSelectedKeys(new Set(stepMaterials.map(({ mc }) => mc._key)))}
+                                    className="text-[11px] font-bold text-violet-600 hover:underline"
+                                >
+                                    Select all {stepMaterials.length}
+                                </button>
+                                <button
+                                    onClick={() => setSelectedKeys(new Set())}
+                                    className="text-[11px] font-bold text-slate-400 hover:underline"
+                                >
+                                    Clear
+                                </button>
+                                <div className="flex-1" />
+                                <select
+                                    value={bulkTargetStage}
+                                    onChange={e => setBulkTargetStage(e.target.value)}
+                                    className="border border-violet-300 rounded-lg px-2 py-1.5 text-xs bg-white outline-none focus:ring-2 focus:ring-violet-300"
+                                >
+                                    <option value="">— Assign to stage —</option>
+                                    {productStages.map(s => (
+                                        <option key={s.production_line_type_id} value={s.production_line_type_id}>{s.stage_name}</option>
+                                    ))}
+                                </select>
+                                <button
+                                    onClick={applyBulkAssign}
+                                    disabled={!bulkTargetStage || selectedKeys.size === 0}
+                                    className="text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors"
+                                >
+                                    Assign {selectedKeys.size > 0 ? selectedKeys.size : ''}
+                                </button>
+                            </div>
+                        )}
+
                         <div className="space-y-2">
                             {stepMaterials.length === 0 && (
                                 <p className="text-slate-500 text-sm italic text-center py-4">No materials for this stage yet.</p>
@@ -1478,6 +1580,9 @@ export default function BomFormPage() {
                                             setFormMeta(prev => ({ ...prev, trimItems: [...prev.trimItems, newTrim] }));
                                             updateMaterial(mIdx, 'trim_item_id', String(newTrim.id));
                                         }}
+                                        selectable={bulkSelectMode && currentStep.key === 'unassigned'}
+                                        selected={selectedKeys.has(mc._key)}
+                                        onToggleSelect={() => toggleSelectKey(mc._key)}
                                     />
                                 );
                             })}
