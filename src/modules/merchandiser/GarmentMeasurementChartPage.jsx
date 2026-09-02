@@ -108,10 +108,9 @@ export default function GarmentMeasurementChartPage() {
     const { bomId } = useParams();
     const navigate  = useNavigate();
 
-    const [bomName,     setBomName]     = useState('');
-    const [markerSizes, setMarkerSizes] = useState([]);
-    const [customSizes, setCustomSizes] = useState([]);
-    const [masterSizes, setMasterSizes] = useState([]);
+    const [bomName,       setBomName]       = useState('');
+    const [selectedSizes, setSelectedSizes] = useState([]);
+    const [masterSizes,   setMasterSizes]   = useState([]);
     const [chart,       setChart]       = useState(null);
     const [step,        setStep]        = useState(0.25);
     const [loading,     setLoading]     = useState(true);
@@ -129,12 +128,6 @@ export default function GarmentMeasurementChartPage() {
             const bom = bomRes.data?.data ?? bomRes.data;
             setBomName(bom?.bom_name || '');
             setMasterSizes(sizesRes?.data?.data ?? sizesRes?.data ?? []);
-
-            const mSizes = new Set();
-            (bom?.ratio_groups || []).forEach(rg =>
-                (rg.items || []).forEach(it => { if (it.size) mSizes.add(it.size); })
-            );
-            setMarkerSizes([...mSizes]);
 
             const data = chartRes?.data?.data ?? chartRes?.data;
             if (data?.points?.length) {
@@ -155,7 +148,7 @@ export default function GarmentMeasurementChartPage() {
                     data.points.flatMap(p => Object.keys(p.gradings || {}))
                 );
                 if (data.base_size) chartSizesFromGradings.add(data.base_size);
-                setCustomSizes([...chartSizesFromGradings].filter(s => !mSizes.has(s)));
+                setSelectedSizes([...chartSizesFromGradings]);
             } else {
                 setChart({ base_size: '', notes: '', points: [] });
             }
@@ -167,8 +160,8 @@ export default function GarmentMeasurementChartPage() {
     const sortSizes = useMemo(() => makeSortSizes(masterSizes), [masterSizes]);
 
     const allSizes = useMemo(
-        () => sortSizes([...markerSizes, ...customSizes]),
-        [sortSizes, markerSizes, customSizes]
+        () => sortSizes(selectedSizes),
+        [sortSizes, selectedSizes]
     );
 
     // Master sizes not already shown — offered in the "+ Size" column dropdown.
@@ -208,12 +201,12 @@ export default function GarmentMeasurementChartPage() {
     // ── size column handlers ──
     const addSizeFromMaster = (name) => {
         if (name && !allSizes.map(x => x.toLowerCase()).includes(name.toLowerCase())) {
-            setCustomSizes(prev => [...prev, name]);
+            setSelectedSizes(prev => [...prev, name]);
         }
     };
 
-    const removeCustomSize = (size) => {
-        setCustomSizes(prev => prev.filter(s => s !== size));
+    const removeSize = (size) => {
+        setSelectedSizes(prev => prev.filter(s => s !== size));
         setChart(c => ({
             ...c,
             points: c.points.map(p => {
@@ -378,24 +371,19 @@ export default function GarmentMeasurementChartPage() {
 
                             {/* size columns */}
                             {orderedCols.map(size => {
-                                const isBase   = size === chart?.base_size;
-                                const isMarker = markerSizes.includes(size);
+                                const isBase = size === chart?.base_size;
                                 return (
                                     <th key={size} style={{ minWidth: 88 }}
                                         className={`border-b-2 border-r border-slate-200 text-center px-1 py-2 ${isBase ? 'bg-violet-50' : 'bg-slate-50'}`}>
                                         <div className="flex flex-col items-center gap-0.5">
                                             <span className={`text-xs font-black ${isBase ? 'text-violet-700' : 'text-slate-600'}`}>{size}</span>
-                                            {isBase && (
+                                            {isBase ? (
                                                 <span className="text-[8px] bg-violet-600 text-white px-1.5 py-0.5 rounded font-black tracking-wide">BASE</span>
-                                            )}
-                                            {!isMarker && !isBase && (
-                                                <button onClick={() => removeCustomSize(size)}
+                                            ) : (
+                                                <button onClick={() => removeSize(size)}
                                                     className="text-slate-300 hover:text-red-400 transition-colors" title="Remove size column">
                                                     <X size={9} />
                                                 </button>
-                                            )}
-                                            {!isMarker && isBase && (
-                                                <span className="text-[8px] text-violet-400">non-marker</span>
                                             )}
                                         </div>
                                     </th>

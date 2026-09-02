@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     Plus, FileText, Loader2, X, ChevronDown, ChevronRight,
-    AlertCircle, AlertTriangle, Scissors, ArrowLeft, Check, XCircle, Ruler, Copy,
+    AlertCircle, AlertTriangle, ArrowLeft, Check, XCircle, Ruler, Copy,
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
 import { accountingApi } from '../../api/accountingApi';
@@ -33,18 +33,12 @@ const applyFabricLineValue = (fc, value) => value.startsWith(ROLE_PREFIX)
     ? { ...fc, fabric_role: value.slice(ROLE_PREFIX.length), fabric_type_id: '' }
     : { ...fc, fabric_role: '', fabric_type_id: value };
 
-const freshRatioGroup = () => ({
-    _key: genKey(), ratio_group_name: '', marker_length_inches: '',
-    items: [],
-});
-
-// Sizes in markerSizes with no qty entered yet for a PER_SIZE material.
-const missingSizesFor = (mc, markerSizes) => {
+// Sizes explicitly added to a PER_SIZE material with no qty entered yet.
+const missingSizesFor = (mc) => {
     if (mc.calculation_type !== 'PER_SIZE') return [];
-    return markerSizes.filter(s => {
-        const row = mc.size_consumptions.find(sc => sc.size === s);
-        return !row || row.quantity === '' || row.quantity == null;
-    });
+    return mc.size_consumptions
+        .filter(sc => sc.quantity === '' || sc.quantity == null)
+        .map(sc => sc.size);
 };
 
 // Effective qty = qty * (1 + wastage% / 100), null-safe.
@@ -82,154 +76,6 @@ const AddBtn = ({ onClick, label }) => (
         <Plus size={12} /> {label}
     </button>
 );
-
-// ─── Ratio Group Accordion ────────────────────────────────────────────────────
-
-const RatioGroupCard = ({ group, gIdx, expanded, onToggle, onUpdate, onRemove, canRemove, sizes }) => {
-    const totalPieces = group.items.reduce((s, it) => s + (parseInt(it.number_of_pieces) || 0), 0);
-    const sizeSummary = group.items.filter(it => it.size).map(it => `${it.size}×${it.number_of_pieces}`).join(' · ');
-    const isBadSize = useMemo(() => makeSizeValidator(sizes), [sizes]);
-    const hasBadSize = group.items.some(it => isBadSize(it.size));
-
-    const updItems = (items) => onUpdate(gIdx, 'items', items);
-    const addSize = (sizeName) => updItems([...group.items, { _key: genKey(), size: sizeName, number_of_pieces: 1 }]);
-    const removeSize = (sIdx) => updItems(group.items.filter((_, i) => i !== sIdx));
-    const updateSize = (sIdx, field, val) => {
-        const items = [...group.items];
-        items[sIdx] = { ...items[sIdx], [field]: val };
-        updItems(items);
-    };
-
-    return (
-        <div className="border border-slate-200 rounded-xl overflow-hidden">
-            <button onClick={onToggle}
-                className="w-full flex items-center gap-2 px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left">
-                {expanded
-                    ? <ChevronDown size={13} className="text-slate-400 shrink-0" />
-                    : <ChevronRight size={13} className="text-slate-400 shrink-0" />}
-                <Scissors size={13} className="text-slate-400 shrink-0" />
-                <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-slate-700 text-sm">
-                        {group.ratio_group_name || <span className="text-slate-500 font-normal italic">Unnamed group</span>}
-                    </span>
-                    {!expanded && sizeSummary && (
-                        <span className="text-xs text-slate-500">{sizeSummary}</span>
-                    )}
-                    {hasBadSize && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full shrink-0"
-                            title="Contains non-standard sizes not in the Sizes master">
-                            <AlertTriangle size={10} /> Non-standard size
-                        </span>
-                    )}
-                </div>
-                {!expanded && group.marker_length_inches && (
-                    <span className="text-[10px] bg-slate-100 text-slate-500 border border-slate-200 px-2 py-0.5 rounded-full font-bold shrink-0">
-                        {group.marker_length_inches}"
-                    </span>
-                )}
-                {!expanded && totalPieces > 0 && (
-                    <span className="text-[10px] bg-violet-50 text-violet-600 border border-violet-100 px-2 py-0.5 rounded-full font-bold shrink-0">
-                        {totalPieces} pcs
-                    </span>
-                )}
-                {canRemove && (
-                    <button onClick={e => { e.stopPropagation(); onRemove(gIdx); }}
-                        className="p-1 text-slate-300 hover:text-red-400 transition-colors shrink-0 ml-1">
-                        <X size={13} />
-                    </button>
-                )}
-            </button>
-
-            {expanded && (
-                <div className="px-4 pb-4 pt-3 border-t border-slate-100 bg-white">
-                    <div className="flex gap-3 mb-3">
-                        <div className="flex-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Group Name</label>
-                            <input type="text" value={group.ratio_group_name}
-                                onChange={e => onUpdate(gIdx, 'ratio_group_name', e.target.value)}
-                                placeholder="e.g. Main Marker"
-                                className="w-full mt-0.5 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300"
-                            />
-                        </div>
-                        <div className="w-36 shrink-0">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Marker Length (in)</label>
-                            <input type="number" value={group.marker_length_inches}
-                                onChange={e => onUpdate(gIdx, 'marker_length_inches', e.target.value)}
-                                placeholder="72"
-                                className="w-full mt-0.5 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 text-center"
-                            />
-                        </div>
-                    </div>
-
-                    {/* Size ratio table */}
-                    {group.items.length > 0 && (
-                        <table className="w-full text-xs mb-2">
-                            <thead>
-                                <tr className="text-slate-500 font-bold border-b border-slate-100">
-                                    <th className="text-left pb-1.5">Size</th>
-                                    <th className="text-right pb-1.5 pr-3">Pieces in Marker</th>
-                                    <th className="w-7" />
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {group.items.map((item, sIdx) => {
-                                    const usedNamesExceptThis = new Set(
-                                        group.items.filter((_, i) => i !== sIdx).map(it => it.size)
-                                    );
-                                    const bad = isBadSize(item.size);
-                                    return (
-                                        <tr key={item._key} className="border-b border-slate-50">
-                                            <td className="py-1.5 pr-2">
-                                                <div className="flex items-center gap-1">
-                                                    <select value={item.size}
-                                                        onChange={e => updateSize(sIdx, 'size', e.target.value)}
-                                                        title={bad ? 'Non-standard size — pick a size from the master list' : undefined}
-                                                        className={`w-20 border rounded px-2 py-1 text-xs outline-none bg-white text-center ${bad ? 'border-red-400 text-red-700 bg-red-50 font-bold' : 'border-slate-200'}`}
-                                                    >
-                                                        {item.size && <option value={item.size}>{item.size}</option>}
-                                                        {sizes.filter(s => !usedNamesExceptThis.has(s.name) && s.name !== item.size)
-                                                            .map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                                                    </select>
-                                                    {bad && <AlertTriangle size={12} className="text-red-500 shrink-0" title="Not in Sizes master" />}
-                                                </div>
-                                            </td>
-                                            <td className="py-1.5 text-right pr-3">
-                                                <input type="number" min="1" value={item.number_of_pieces}
-                                                    onChange={e => updateSize(sIdx, 'number_of_pieces', parseInt(e.target.value) || 1)}
-                                                    className="w-20 border border-slate-200 rounded px-2 py-1 text-xs outline-none text-right"
-                                                />
-                                            </td>
-                                            <td className="py-1.5 text-center">
-                                                <button onClick={() => removeSize(sIdx)} className="text-slate-300 hover:text-red-400">
-                                                    <X size={12} />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    )}
-                    {(() => {
-                        const usedNames = new Set(group.items.map(it => it.size).filter(Boolean));
-                        const available = sizes.filter(s => !usedNames.has(s.name));
-                        return available.length > 0 ? (
-                            <select value="" onChange={e => { if (e.target.value) addSize(e.target.value); }}
-                                className="mb-4 text-[10px] font-bold text-violet-500 border border-dashed border-violet-300 rounded-lg px-3 py-1 bg-white hover:border-violet-500 hover:text-violet-700 cursor-pointer outline-none transition">
-                                <option value="">+ Add size</option>
-                                {available.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                            </select>
-                        ) : (
-                            <p className="mb-4 text-[10px] text-slate-600 italic">
-                                {sizes.length === 0 ? 'No sizes configured — add sizes in Admin → Inventory → Manage Sizes.' : 'All available sizes added.'}
-                            </p>
-                        );
-                    })()}
-                </div>
-            )}
-        </div>
-    );
-};
 
 // ─── Fabric Consumptions (BOM-level) ──────────────────────────────────────────
 // One average per-piece consumption per fabric (or PRIMARY/SECONDARY generic
@@ -492,7 +338,7 @@ const CreateTrimModal = ({ onClose, onCreated }) => {
 
 // ─── Material Accordion ───────────────────────────────────────────────────────
 
-const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, productStages, expanded, onToggle, onUpdate, onRemove, onDuplicate, onTrimCreated, excludeTrimIds, selectable, selected, onToggleSelect }) => {
+const MaterialCard = ({ mc, mIdx, trimItems, sizes, productStages, expanded, onToggle, onUpdate, onRemove, onDuplicate, onTrimCreated, excludeTrimIds, selectable, selected, onToggleSelect }) => {
     const trimItem = trimItems.find(t => String(t.id) === String(mc.trim_item_id));
     const uom = trimItem?.unit_of_measure;
     const upd = (field, val) => onUpdate(mIdx, field, val);
@@ -509,19 +355,15 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, productStages, expande
             .finally(() => setVariantSizesLoading(false));
     }, [mc.trim_item_id]);
 
-    // Sync size_consumptions whenever calculation_type or marker sizes change
-    const syncKeyRef = useRef(null);
-    useEffect(() => {
-        if (mc.calculation_type !== 'PER_SIZE') { syncKeyRef.current = null; return; }
-        const key = markerSizes.join(',');
-        if (syncKeyRef.current === key) return;
-        syncKeyRef.current = key;
-        // PER_SIZE quantities strictly follow the marker sizes (from the /sizes master).
-        // Off-marker rows are not allowed — sizes must come from a ratio group.
-        const existingMap = Object.fromEntries(mc.size_consumptions.map(sc => [sc.size, sc]));
-        const markerRows = markerSizes.map(s => existingMap[s] ?? { _key: genKey(), size: s, quantity: '', target_variant_size: '' });
-        onUpdate(mIdx, 'size_consumptions', markerRows);
-    }, [mc.calculation_type, markerSizes]); // eslint-disable-line react-hooks/exhaustive-deps
+    const isBadSize = useMemo(() => makeSizeValidator(sizes), [sizes]);
+
+    // PER_SIZE quantities are an explicit, user-picked list of sizes (from the
+    // /sizes master) — added/removed one at a time, independent of any other
+    // trim or of a marker/ratio group.
+    const addSizeRow = (sizeName) => upd('size_consumptions', [
+        ...mc.size_consumptions, { _key: genKey(), size: sizeName, quantity: '', target_variant_size: '' },
+    ]);
+    const removeSizeRow = (sIdx) => upd('size_consumptions', mc.size_consumptions.filter((_, i) => i !== sIdx));
 
     const updateSize = (sIdx, field, val) => {
         const sc = [...mc.size_consumptions];
@@ -539,7 +381,7 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, productStages, expande
         upd('size_consumptions', sc);
     };
 
-    const missing = missingSizesFor(mc, markerSizes);
+    const missing = missingSizesFor(mc);
     const isDuplicateTrim = !!mc.trim_item_id && excludeTrimIds?.has(String(mc.trim_item_id));
     const fixedEffQty = mc.calculation_type === 'FIXED' ? effectiveQty(mc.fixed_quantity, mc.wastage_percentage) : null;
 
@@ -745,18 +587,18 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, productStages, expande
                             <p className="text-[10px] font-bold text-slate-500 uppercase mb-1.5">
                                 Qty Per Size{uom ? ` (${uom})` : ''}
                             </p>
-                            {markerSizes.length === 0 && (
+                            {mc.size_consumptions.length === 0 && (
                                 <p className="text-[10px] text-slate-600 italic mb-2">
-                                    No marker sizes yet — add sizes to a ratio group first. Per-size quantities follow the marker.
+                                    No sizes added yet — use + Add size below.
                                 </p>
                             )}
-                            {markerSizes.length > 0 && missing.length > 0 && (
+                            {mc.size_consumptions.length > 0 && missing.length > 0 && (
                                 <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2 text-[10px] text-amber-700 font-bold">
                                     <AlertCircle size={11} className="shrink-0" />
                                     Qty required for: {missing.join(', ')}
                                 </div>
                             )}
-                            {markerSizes.length > 0 && (
+                            {mc.size_consumptions.length > 0 && (
                                 <div className="flex items-center gap-2 mb-2">
                                     <input type="number" min="0" step="0.0001" value={bulkFillValue}
                                         onChange={e => setBulkFillValue(e.target.value)}
@@ -773,62 +615,83 @@ const MaterialCard = ({ mc, mIdx, trimItems, markerSizes, productStages, expande
                                     </button>
                                 </div>
                             )}
-                            <table className="w-full text-xs mb-2">
-                                <thead>
-                                    <tr className="text-slate-500 font-bold border-b border-slate-100">
-                                        <th className="text-left pb-1">Product Size</th>
-                                        <th className="text-left pb-1 px-2">Trim Variant Size</th>
-                                        <th className="text-right pb-1 pr-3">Qty{uom ? ` (${uom})` : ''}</th>
-                                        <th className="w-6" />
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {mc.size_consumptions.map((sc, sIdx) => {
-                                        const isEmpty = sc.quantity === '' || sc.quantity == null;
-                                        return (
-                                        <tr key={sc._key} className="border-b border-slate-50">
-                                            <td className="py-1.5 pr-2">
-                                                <span className={`inline-flex items-center justify-center w-14 px-2 py-0.5 text-xs font-bold rounded border ${isEmpty ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
-                                                    {sc.size}
-                                                </span>
-                                            </td>
-                                            <td className="py-1.5 px-2">
-                                                <div className="flex items-center gap-1">
-                                                    <select
-                                                        value={sc.target_variant_size || ''}
-                                                        onChange={e => updateSize(sIdx, 'target_variant_size', e.target.value || null)}
-                                                        disabled={variantSizesLoading}
-                                                        className="w-full border border-slate-200 rounded px-2 py-0.5 text-xs outline-none focus:ring-1 focus:ring-violet-300 bg-white disabled:opacity-50"
-                                                    >
-                                                        <option value="">{variantSizesLoading ? 'Loading sizes…' : '— same as product —'}</option>
-                                                        {(variantSizes || []).map(vs => (
-                                                            <option key={vs} value={vs}>{vs}</option>
-                                                        ))}
-                                                    </select>
-                                                    {variantSizesLoading && <Loader2 size={11} className="animate-spin text-slate-300 shrink-0" />}
-                                                </div>
-                                            </td>
-                                            <td className="py-1.5 text-right pr-3">
-                                                <input type="number" min="0" step="0.0001" value={sc.quantity}
-                                                    onChange={e => updateSize(sIdx, 'quantity', e.target.value)}
-                                                    placeholder="6"
-                                                    className={`w-20 border rounded px-2 py-0.5 text-xs outline-none text-right ${isEmpty ? 'border-amber-300 focus:ring-amber-300' : 'border-slate-200'}`}
-                                                />
-                                                {(() => {
-                                                    const eff = effectiveQty(sc.quantity, mc.wastage_percentage);
-                                                    return eff != null ? (
-                                                        <span className="text-[9px] text-slate-600 block text-right mt-0.5">= {eff.toFixed(2)}</span>
-                                                    ) : null;
-                                                })()}
-                                            </td>
-                                            <td className="py-1.5 text-center">
-                                                <span className="w-5 inline-block" title="Required by marker" />
-                                            </td>
+                            {mc.size_consumptions.length > 0 && (
+                                <table className="w-full text-xs mb-2">
+                                    <thead>
+                                        <tr className="text-slate-500 font-bold border-b border-slate-100">
+                                            <th className="text-left pb-1">Product Size</th>
+                                            <th className="text-left pb-1 px-2">Trim Variant Size</th>
+                                            <th className="text-right pb-1 pr-3">Qty{uom ? ` (${uom})` : ''}</th>
+                                            <th className="w-6" />
                                         </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        {mc.size_consumptions.map((sc, sIdx) => {
+                                            const isEmpty = sc.quantity === '' || sc.quantity == null;
+                                            const bad = isBadSize(sc.size);
+                                            return (
+                                            <tr key={sc._key} className="border-b border-slate-50">
+                                                <td className="py-1.5 pr-2">
+                                                    <span className={`inline-flex items-center justify-center gap-1 w-16 px-2 py-0.5 text-xs font-bold rounded border ${bad ? 'border-red-400 bg-red-50 text-red-700' : isEmpty ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}
+                                                        title={bad ? 'Not in Sizes master' : undefined}>
+                                                        {sc.size}{bad && <AlertTriangle size={10} className="shrink-0" />}
+                                                    </span>
+                                                </td>
+                                                <td className="py-1.5 px-2">
+                                                    <div className="flex items-center gap-1">
+                                                        <select
+                                                            value={sc.target_variant_size || ''}
+                                                            onChange={e => updateSize(sIdx, 'target_variant_size', e.target.value || null)}
+                                                            disabled={variantSizesLoading}
+                                                            className="w-full border border-slate-200 rounded px-2 py-0.5 text-xs outline-none focus:ring-1 focus:ring-violet-300 bg-white disabled:opacity-50"
+                                                        >
+                                                            <option value="">{variantSizesLoading ? 'Loading sizes…' : '— same as product —'}</option>
+                                                            {(variantSizes || []).map(vs => (
+                                                                <option key={vs} value={vs}>{vs}</option>
+                                                            ))}
+                                                        </select>
+                                                        {variantSizesLoading && <Loader2 size={11} className="animate-spin text-slate-300 shrink-0" />}
+                                                    </div>
+                                                </td>
+                                                <td className="py-1.5 text-right pr-3">
+                                                    <input type="number" min="0" step="0.0001" value={sc.quantity}
+                                                        onChange={e => updateSize(sIdx, 'quantity', e.target.value)}
+                                                        placeholder="6"
+                                                        className={`w-20 border rounded px-2 py-0.5 text-xs outline-none text-right ${isEmpty ? 'border-amber-300 focus:ring-amber-300' : 'border-slate-200'}`}
+                                                    />
+                                                    {(() => {
+                                                        const eff = effectiveQty(sc.quantity, mc.wastage_percentage);
+                                                        return eff != null ? (
+                                                            <span className="text-[9px] text-slate-600 block text-right mt-0.5">= {eff.toFixed(2)}</span>
+                                                        ) : null;
+                                                    })()}
+                                                </td>
+                                                <td className="py-1.5 text-center">
+                                                    <button type="button" onClick={() => removeSizeRow(sIdx)} className="text-slate-300 hover:text-red-400">
+                                                        <X size={12} />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            )}
+                            {(() => {
+                                const usedNames = new Set(mc.size_consumptions.map(sc => sc.size).filter(Boolean));
+                                const available = sizes.filter(s => !usedNames.has(s.name));
+                                return available.length > 0 ? (
+                                    <select value="" onChange={e => { if (e.target.value) addSizeRow(e.target.value); }}
+                                        className="text-[10px] font-bold text-violet-500 border border-dashed border-violet-300 rounded-lg px-3 py-1 bg-white hover:border-violet-500 hover:text-violet-700 cursor-pointer outline-none transition">
+                                        <option value="">+ Add size</option>
+                                        {available.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                                    </select>
+                                ) : (
+                                    <p className="text-[10px] text-slate-600 italic">
+                                        {sizes.length === 0 ? 'No sizes configured — add sizes in Admin → Inventory → Manage Sizes.' : 'All available sizes added.'}
+                                    </p>
+                                );
+                            })()}
                         </div>
                     )}
                 </div>
@@ -848,18 +711,13 @@ export default function BomFormPage() {
     // Only honored on the "new BOM" route, never alongside an actual edit.
     const duplicateFromId = !isEdit ? searchParams.get('duplicateFrom') : null;
 
-    const [initialData] = useState(() => {
-        const rg = freshRatioGroup();
-        return {
-            form: {
-                product_id: '', bom_name: '',
-                ratio_groups: [rg],
-                fabric_consumptions: [freshFabric()],
-                material_consumptions: [],
-            },
-            rgKey: rg._key,
-        };
-    });
+    const [initialData] = useState(() => ({
+        form: {
+            product_id: '', bom_name: '',
+            fabric_consumptions: [freshFabric()],
+            material_consumptions: [],
+        },
+    }));
 
     const [form, setForm] = useState(initialData.form);
     const [formMeta, setFormMeta] = useState({ products: [], fabricTypes: [], trimItems: [], sizes: [] });
@@ -871,9 +729,6 @@ export default function BomFormPage() {
     const [rejectionNotes, setRejectionNotes] = useState(null);
     const [duplicateSourceName, setDuplicateSourceName] = useState(null);
 
-    const [expandedRatios, setExpandedRatios] = useState(
-        isEdit ? new Set() : new Set([initialData.rgKey])
-    );
     const [expandedMaterials, setExpandedMaterials] = useState(new Set());
 
     // The selected product's own product_cycle_flow stages — drives the
@@ -969,12 +824,6 @@ export default function BomFormPage() {
                 setForm({
                     product_id: String(bom.product?.id || bom.product_id || ''),
                     bom_name: bom.bom_name || '',
-                    ratio_groups: (bom.ratio_groups || []).map(rg => ({
-                        _key: genKey(),
-                        ratio_group_name: rg.ratio_group_name || '',
-                        marker_length_inches: rg.marker_length_inches || '',
-                        items: (rg.items || []).map(it => ({ _key: genKey(), size: it.size, number_of_pieces: it.number_of_pieces })),
-                    })),
                     fabric_consumptions: (bom.fabric_consumptions || []).map(fc => ({
                         _key: genKey(),
                         fabric_type_id: fc.fabric_role ? '' : String(fc.fabric_type?.id || fc.fabric_type_id || ''),
@@ -999,8 +848,8 @@ export default function BomFormPage() {
             .finally(() => setLoading(false));
     }, [bomId, isEdit]);
 
-    // Duplicate an existing BOM into a fresh DRAFT. Same ratio groups, sizes,
-    // trims and consumption values carry over as a starting point. A concrete
+    // Duplicate an existing BOM into a fresh DRAFT. Same sizes, trims and
+    // consumption values carry over as a starting point. A concrete
     // fabric_type_id line gets cleared — picking the new fabric is the whole
     // reason to duplicate that kind of line. A generic PRIMARY/SECONDARY role
     // line carries over as-is — it isn't pinned to a fabric in the first place,
@@ -1015,12 +864,6 @@ export default function BomFormPage() {
                 setForm({
                     product_id: String(bom.product?.id || bom.product_id || ''),
                     bom_name: bom.bom_name ? `${bom.bom_name} (Copy)` : '',
-                    ratio_groups: (bom.ratio_groups || []).map(rg => ({
-                        _key: genKey(),
-                        ratio_group_name: rg.ratio_group_name || '',
-                        marker_length_inches: rg.marker_length_inches || '',
-                        items: (rg.items || []).map(it => ({ _key: genKey(), size: it.size, number_of_pieces: it.number_of_pieces })),
-                    })),
                     // Concrete fabric_type_id lines are cleared — picking the new fabric is
                     // the whole reason to duplicate that kind of line. Generic PRIMARY/
                     // SECONDARY role lines carry over as-is.
@@ -1047,28 +890,6 @@ export default function BomFormPage() {
             .catch(e => setErr(e?.response?.data?.error || e.message || 'Failed to load source BOM for duplication.'))
             .finally(() => setLoading(false));
     }, [duplicateFromId]);
-
-    // ── Ratio group handlers ──
-    const addRatioGroup = () => {
-        const ng = freshRatioGroup();
-        setForm(f => {
-            const existingSizes = new Set();
-            f.ratio_groups.forEach(rg => rg.items.forEach(it => { if (it.size) existingSizes.add(it.size); }));
-            ng.items = ng.items.filter(it => !existingSizes.has(it.size));
-            return { ...f, ratio_groups: [...f.ratio_groups, ng] };
-        });
-        setExpandedRatios(prev => new Set([...prev, ng._key]));
-    };
-    const removeRatioGroup = (idx) => {
-        const key = form.ratio_groups[idx]._key;
-        setForm(f => ({ ...f, ratio_groups: f.ratio_groups.filter((_, i) => i !== idx) }));
-        setExpandedRatios(prev => { const s = new Set(prev); s.delete(key); return s; });
-    };
-    const updateRatioGroup = (idx, field, val) =>
-        setForm(f => { const rg = [...f.ratio_groups]; rg[idx] = { ...rg[idx], [field]: val }; return { ...f, ratio_groups: rg }; });
-    const toggleRatio = (key) => setExpandedRatios(prev => {
-        const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s;
-    });
 
     // ── Material handlers ──
     const addMaterial = (stageId = '') => {
@@ -1123,13 +944,8 @@ export default function BomFormPage() {
     const serialize = () => ({
         product_id: parseInt(form.product_id),
         bom_name: form.bom_name.trim(),
-        ratio_groups: form.ratio_groups.map(rg => ({
-            ratio_group_name: rg.ratio_group_name.trim(),
-            marker_length_inches: rg.marker_length_inches ? parseFloat(rg.marker_length_inches) : null,
-            items: rg.items.map(it => ({ size: it.size, number_of_pieces: parseInt(it.number_of_pieces) || 1 })),
-        })),
         // BOM-level — one average per-piece consumption per fabric (or PRIMARY/
-        // SECONDARY role), independent of any ratio group/marker.
+        // SECONDARY role).
         fabric_consumptions: (form.fabric_consumptions || []).map(fc => ({
             fabric_type_id: fc.fabric_role ? null : parseInt(fc.fabric_type_id),
             fabric_role: fc.fabric_role || null,
@@ -1154,18 +970,6 @@ export default function BomFormPage() {
         })),
     });
 
-    const markerSizes = useMemo(() => {
-        const sizes = new Set();
-        form.ratio_groups.forEach(rg => rg.items.forEach(it => { if (it.size) sizes.add(it.size); }));
-        return [...sizes];
-    }, [form.ratio_groups]);
-
-    // Distinct sizes used in the form that are not in the /sizes master table.
-    const nonStandardSizes = useMemo(() => {
-        const isBad = makeSizeValidator(formMeta.sizes);
-        return markerSizes.filter(isBad);
-    }, [markerSizes, formMeta.sizes]);
-
     // "trim_item_id|stage" -> count, to catch the same trim added twice AT THE
     // SAME STAGE. The same trim at two different stages (e.g. a label at both
     // Sewing and Finishing) is legitimate — only a same-stage repeat is a
@@ -1184,9 +988,9 @@ export default function BomFormPage() {
 
     const materialIssueCount = useMemo(() => (
         form.material_consumptions.filter(mc =>
-            missingSizesFor(mc, markerSizes).length > 0 || isDuplicateMaterial(mc)
+            missingSizesFor(mc).length > 0 || isDuplicateMaterial(mc)
         ).length
-    ), [form.material_consumptions, markerSizes, duplicateTrimStageKeys]); // eslint-disable-line react-hooks/exhaustive-deps
+    ), [form.material_consumptions, duplicateTrimStageKeys]);
 
     const unassignedMaterialCount = useMemo(() => (
         form.material_consumptions.filter(mc => !mc.production_line_type_id).length
@@ -1234,7 +1038,7 @@ export default function BomFormPage() {
         const rowsToExpand = new Set();
         form.material_consumptions.forEach(mc => {
             const name = formMeta.trimItems.find(t => String(t.id) === String(mc.trim_item_id))?.name || 'Unnamed material';
-            const missing = missingSizesFor(mc, markerSizes);
+            const missing = missingSizesFor(mc);
             if (missing.length > 0) {
                 issues.push(`"${name}" is missing qty for: ${missing.join(', ')}`);
                 rowsToExpand.add(mc._key);
@@ -1395,20 +1199,6 @@ export default function BomFormPage() {
                     </div>
                 )}
 
-                {nonStandardSizes.length > 0 && (
-                    <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                        <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
-                        <div>
-                            <p className="text-sm font-bold text-amber-700">
-                                {nonStandardSizes.length} non-standard size{nonStandardSizes.length > 1 ? 's' : ''} in this BOM
-                            </p>
-                            <p className="text-xs text-amber-700 mt-0.5">
-                                Not in the Sizes master — please replace with a standard size:{' '}
-                                <span className="font-bold">{nonStandardSizes.join(', ')}</span>. Manage the master list in Admin → Inventory → Manage Sizes.
-                            </p>
-                        </div>
-                    </div>
-                )}
 
                 {/* ── Step 1: Basics — product, name, primary/secondary fabric requirements, markers ── */}
                 {currentStep.kind === 'basics' && (
@@ -1459,24 +1249,6 @@ export default function BomFormPage() {
                             genericFabricOnly={!isEdit}
                         />
 
-                        <Section title="Ratio Groups" action={<AddBtn onClick={addRatioGroup} label="Add Group" />}>
-                            <div className="space-y-2">
-                                {form.ratio_groups.length === 0 && (
-                                    <p className="text-slate-500 text-sm italic text-center py-4">No ratio groups. Add one to define your marker lay plan.</p>
-                                )}
-                                {form.ratio_groups.map((group, gIdx) => (
-                                    <RatioGroupCard key={group._key}
-                                        group={group} gIdx={gIdx}
-                                        expanded={expandedRatios.has(group._key)}
-                                        onToggle={() => toggleRatio(group._key)}
-                                        onUpdate={updateRatioGroup}
-                                        onRemove={removeRatioGroup}
-                                        canRemove={form.ratio_groups.length > 1}
-                                        sizes={formMeta.sizes}
-                                    />
-                                ))}
-                            </div>
-                        </Section>
                     </>
                 )}
 
@@ -1568,7 +1340,7 @@ export default function BomFormPage() {
                                     <MaterialCard key={mc._key}
                                         mc={mc} mIdx={mIdx}
                                         trimItems={formMeta.trimItems}
-                                        markerSizes={markerSizes}
+                                        sizes={formMeta.sizes}
                                         productStages={productStages}
                                         excludeTrimIds={excludeTrimIds}
                                         expanded={expandedMaterials.has(mc._key)}
