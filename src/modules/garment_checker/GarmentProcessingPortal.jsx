@@ -22,6 +22,49 @@ const ActionBadge = ({ action }) => (
         {action?.replace(/_/g, ' ') ?? '—'}
     </span>
 );
+// Horizontal chain of every stage this product's cycle flow defines, from the
+// scan response's `stage_progress`. Each stage's `state` is one of:
+//   'passed'   — green check. The garment has moved on from here.
+//   'current'  — amber, pulsing. Its ACTUAL position right now — a row
+//                existing here does NOT mean it's cleared (e.g. still
+//                PENDING), only that it has arrived and is awaiting its
+//                checkpoint. Hover shows the raw status (PENDING, etc).
+//   'upcoming' — grey, not reached yet.
+// `is_user_stage` (the scanning operator's own line) is a separate axis from
+// `state` — it gets an indigo ring + "(You)" regardless of state, since the
+// operator's line and the garment's actual current position can differ
+// (that mismatch is exactly why this popup exists).
+const STAGE_STATE_STYLE = {
+    passed:   { circle: 'bg-emerald-500 border-emerald-500 text-white', label: 'text-emerald-600', line: 'bg-emerald-400' },
+    current:  { circle: 'bg-amber-500 border-amber-500 text-white animate-pulse', label: 'text-amber-600', line: 'bg-slate-200' },
+    upcoming: { circle: 'bg-white border-slate-200 text-slate-300', label: 'text-slate-300', line: 'bg-slate-200' },
+};
+const StageProgressStepper = ({ stages }) => {
+    if (!stages || stages.length === 0) return null;
+    return (
+        <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+            {stages.map((s, i) => {
+                const style = STAGE_STATE_STYLE[s.state] || STAGE_STATE_STYLE.upcoming;
+                return (
+                <React.Fragment key={s.stage_name}>
+                    <div className="flex flex-col items-center shrink-0" title={s.status ? `${s.stage_label} — ${s.status}` : s.stage_label}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 font-black text-[11px] transition-colors ${style.circle} ${s.is_user_stage ? 'ring-4 ring-red-800' : ''}`}>
+                            {s.state === 'passed' ? <Check size={14} strokeWidth={4} /> : i + 1}
+                        </div>
+                        <span className={`mt-1 text-[9px] font-bold uppercase tracking-wide whitespace-nowrap ${s.is_user_stage ? 'text-red-800' : style.label}`}>
+                            {s.stage_label}{s.is_user_stage ? ' (You)' : ''}
+                        </span>
+                    </div>
+                    {i < stages.length - 1 && (
+                        <div className={`h-0.5 flex-1 min-w-[16px] ${style.line}`} />
+                    )}
+                </React.Fragment>
+                );
+            })}
+        </div>
+    );
+};
+
 const fmtTime = (iso) => {
     if (!iso) return '—';
     try { return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
@@ -349,6 +392,7 @@ const AssemblyProcessingPortal = () => {
     const [approvingPieceId, setApprovingPieceId] = useState(null);
     const [componentInfo, setComponentInfo] = useState(null); // { comp, loading, items }
     const [batchInactive, setBatchInactive] = useState(null);
+    const [notAtStage, setNotAtStage] = useState(null); // { error, message, batch_id, batch_code, stage_progress }
     const [defectCodes, setDefectCodes] = useState([]);
     const [showDefectModal, setShowDefectModal] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -532,6 +576,7 @@ const AssemblyProcessingPortal = () => {
         setIsPieceLoading(true);
         setError(null);
         setBatchInactive(null);
+        setNotAtStage(null);
         setGarment(null);
         setSelectedPiece(piece);
         try {
@@ -548,6 +593,9 @@ const AssemblyProcessingPortal = () => {
             } else if (status === 400 && errData?.error === 'Batch Not Active') {
                 playFeedback('batch_inactive');
                 setBatchInactive(errData);
+            } else if (status === 404 && (errData?.error === 'Not Yet At This Stage' || errData?.error === 'Already Passed This Stage')) {
+                playFeedback('error');
+                setNotAtStage(errData);
             } else {
                 playFeedback('error');
                 setError(errData?.message || errData?.error || 'Failed to load piece.');
@@ -575,6 +623,7 @@ const AssemblyProcessingPortal = () => {
         setMismatch(null);
         setDnaDefect(null);
         setBatchInactive(null);
+        setNotAtStage(null);
         setGarment(null);
         setScannedTextVisual(cleanUid);
 
@@ -596,6 +645,9 @@ const AssemblyProcessingPortal = () => {
             } else if (status === 400 && errData?.error === 'Batch Not Active') {
                 playFeedback('batch_inactive');
                 setBatchInactive(errData);
+            } else if (status === 404 && (errData?.error === 'Not Yet At This Stage' || errData?.error === 'Already Passed This Stage')) {
+                playFeedback('error');
+                setNotAtStage(errData);
             } else {
                 playFeedback('error');
                 setError(errData?.message || errData?.error || 'Invalid Scan: Check Barcode Integrity.');
@@ -801,6 +853,42 @@ const AssemblyProcessingPortal = () => {
                 </div>
             )}
 
+            {/* NOT AT THIS STAGE — garment_uid is real, just hasn't reached (or already
+                passed) the scanning operator's own line yet; shows the full chain of
+                stages so it's clear where it actually is instead of a bare "not found" */}
+            {notAtStage && (
+                <div className="fixed inset-0 z-[400] bg-amber-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-white border-[8px] border-amber-400 rounded-[3rem] p-10 md:p-14 max-w-2xl w-full text-center shadow-2xl animate-in zoom-in-95">
+                        <div className="w-24 h-24 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <Clock className="w-14 h-14 text-amber-600" />
+                        </div>
+                        <h2 className="text-3xl md:text-4xl font-black text-amber-600 tracking-tight mb-3">
+                            {notAtStage.error === 'Already Passed This Stage' ? 'ALREADY PASSED THIS STAGE' : 'NOT AT THIS STAGE YET'}
+                        </h2>
+                        <p className="text-slate-500 font-bold text-lg mb-6">{notAtStage.message}</p>
+                        {notAtStage.batch_id != null && (
+                            <div className="bg-amber-50 border-2 border-amber-100 rounded-3xl p-6 mb-6 text-left">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-slate-400 font-bold text-xs uppercase tracking-widest">Batch ID</span>
+                                    <span className="font-mono font-black text-amber-700 text-lg">{notAtStage.batch_id}</span>
+                                </div>
+                            </div>
+                        )}
+                        {notAtStage.stage_progress && (
+                            <div className="bg-slate-50 border-2 border-slate-100 rounded-3xl p-6 mb-8">
+                                <StageProgressStepper stages={notAtStage.stage_progress} />
+                            </div>
+                        )}
+                        <button
+                            onClick={() => { setNotAtStage(null); setSelectedPiece(null); }}
+                            className="px-14 py-5 bg-amber-500 text-white font-black text-xl rounded-3xl hover:bg-amber-600 active:scale-95 transition-all shadow-xl w-full"
+                        >
+                            OK
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* ALREADY APPROVED ALERT — piece was scanned again after passing QC */}
             {garment && garment.qc_status === STATUS.APPROVED && (
                 <div className="fixed inset-0 z-[400] bg-emerald-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
@@ -948,7 +1036,7 @@ const AssemblyProcessingPortal = () => {
                     <div className="animate-in fade-in zoom-in-95 duration-200">
                         
                         {/* IDLE SCAN STATE WITH SCANNED TEXT VISUAL */}
-                        {!garment && !mismatch && !dnaDefect && !batchInactive && (
+                        {!garment && !mismatch && !dnaDefect && !batchInactive && !notAtStage && (
                             <div className="text-center py-32 bg-white rounded-[3rem] border-4 border-dashed border-slate-200 shadow-inner">
                                 <div className="relative inline-block mb-8">
                                     <QrCode size={140} className="text-slate-100" />
@@ -1172,6 +1260,12 @@ const AssemblyProcessingPortal = () => {
                                             </div>
                                         </div>
                                     </div>
+
+                                    {garment.stage_progress && (
+                                        <div className="px-10 py-6 bg-slate-50 border-b border-slate-100">
+                                            <StageProgressStepper stages={garment.stage_progress} />
+                                        </div>
+                                    )}
 
                                     <div className="p-10">
                                         <div className="flex items-center justify-between mb-8">
@@ -1521,6 +1615,13 @@ const AssemblyProcessingPortal = () => {
                                             <X size={16} className="text-slate-600" />
                                         </button>
                                     </div>
+
+                                    {/* Stage chain — compact horizontal */}
+                                    {garment.stage_progress && (
+                                        <div className="mb-4">
+                                            <StageProgressStepper stages={garment.stage_progress} />
+                                        </div>
+                                    )}
 
                                     {/* Component map — compact horizontal */}
                                     {garment.components?.length > 0 && (
