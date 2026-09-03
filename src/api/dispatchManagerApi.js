@@ -8,6 +8,7 @@ export const dispatchManagerApi = {
     getReceiptByNumber:     (receiptNumber)  => api.get(`/dispatch/receipt/${receiptNumber}`),
     getReceiptDetails:      (receiptNumber)  => api.get(`/dispatch/receipt/${receiptNumber}`),
     getAllReceipts:          ()               => api.get('/dispatch/receipts'),
+    getSalesOrderDispatchSummary: (soId)      => api.get(`/dispatch/sales-order/${soId}`),
     // legacy — keep for old pages that may still reference them
     getRollDetailsForBatch: (batchId)        => api.get(`/dispatch/batch/${batchId}/detail`),
 };

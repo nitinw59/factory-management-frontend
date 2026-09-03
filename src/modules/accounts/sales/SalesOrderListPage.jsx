@@ -4,10 +4,11 @@ import { createPortal } from 'react-dom';
 import { storeManagerApi } from '../../../api/storeManagerApi';
 import { accountingApi } from '../../../api/accountingApi';
 import { adminApi } from '../../../api/adminApi';
+import { dispatchManagerApi } from '../../../api/dispatchManagerApi';
 import {
     Search, Loader2, X, Paperclip, Package, Plus,
     Layers, Edit3, FileText, Truck, ExternalLink,
-    Pencil, AlertCircle, ChevronDown, Download
+    Pencil, AlertCircle, ChevronDown, Download, CheckCircle2, Clock
 } from 'lucide-react';
 import Modal from '../../../shared/Modal';
 import FabricIntakeForm from '../purchase/FabricIntakeForm';
@@ -19,6 +20,9 @@ import { generateSalesOrderPdf } from './salesOrderPdfGenerator';
 const fmt = (d) =>
     d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
+const fmtDateTime = (d) =>
+    d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+
 const formatFileSize = (bytes) => {
     if (!bytes) return '';
     if (bytes < 1024) return `${bytes} B`;
@@ -26,12 +30,18 @@ const formatFileSize = (bytes) => {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+// StatusBadge is fed two different enums (db.render_arc.sql) — cover both:
+//   sales_order_status:    DRAFT, CONFIRMED, IN_PRODUCTION, SHIPPED, CANCELLED
+//   purchase_order_status: DRAFT, ISSUED, PARTIAL_RECEIPT, COMPLETED, CANCELLED
 const STATUS_STYLE = {
-    PENDING:     'bg-amber-50 text-amber-700 border-amber-200',
-    ACTIVE:      'bg-blue-50 text-blue-700 border-blue-200',
-    IN_PROGRESS: 'bg-violet-50 text-violet-700 border-violet-200',
-    COMPLETED:   'bg-emerald-50 text-emerald-700 border-emerald-200',
-    CANCELLED:   'bg-red-50 text-red-700 border-red-200',
+    DRAFT:           'bg-slate-100 text-slate-600 border-slate-200',
+    CONFIRMED:       'bg-blue-50 text-blue-700 border-blue-200',
+    IN_PRODUCTION:   'bg-violet-50 text-violet-700 border-violet-200',
+    SHIPPED:         'bg-emerald-50 text-emerald-700 border-emerald-200',
+    ISSUED:          'bg-blue-50 text-blue-700 border-blue-200',
+    PARTIAL_RECEIPT: 'bg-amber-50 text-amber-700 border-amber-200',
+    COMPLETED:       'bg-emerald-50 text-emerald-700 border-emerald-200',
+    CANCELLED:       'bg-red-50 text-red-700 border-red-200',
 };
 
 const StatusBadge = ({ status }) => (
@@ -170,6 +180,9 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
     const [selectedPO, setSelectedPO]   = useState(null);
     const [downloading, setDownloading] = useState(false);
     const [downloadError, setDownloadError] = useState(null);
+    const [dispatch, setDispatch]       = useState(null);   // { batches, receipts, summary }
+    const [dispatchLoading, setDispatchLoading] = useState(true);
+    const [expandedReceipts, setExpandedReceipts] = useState({});
 
     useEffect(() => {
         Promise.all([
@@ -185,6 +198,18 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
             .catch(() => setError('Failed to load order details.'))
             .finally(() => setLoading(false));
     }, [soId]);
+
+    // Separate effect/loading flag — dispatch info is a distinct, optional
+    // section; a slow or failing dispatch call shouldn't block the rest of
+    // the modal (products/attachments/POs) from rendering.
+    useEffect(() => {
+        dispatchManagerApi.getSalesOrderDispatchSummary(soId)
+            .then(res => setDispatch(res.data))
+            .catch(() => setDispatch(null))
+            .finally(() => setDispatchLoading(false));
+    }, [soId]);
+
+    const toggleReceipt = (id) => setExpandedReceipts(prev => ({ ...prev, [id]: !prev[id] }));
 
     const togglePO = (id) => setExpandedPOs(prev => ({ ...prev, [id]: !prev[id] }));
 
@@ -258,6 +283,25 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
                 {downloadError && (
                     <div className="flex items-center gap-2 bg-red-50 text-red-700 px-4 py-2 text-xs font-medium border-b border-red-100 shrink-0">
                         <AlertCircle size={13} className="shrink-0"/> {downloadError}
+                    </div>
+                )}
+
+                {/* ── Why is this SHIPPED (or not)? — dispatch.summary.shipped_reason
+                    states the exact live condition: sales_orders.status flips to
+                    SHIPPED the moment every production batch on this order has
+                    is_dispatch_closed = TRUE (see dispatchController.js
+                    submitDispatch/closeBatch) — a dispatch receipt existing is not
+                    required, a batch can be closed with nothing to dispatch. ── */}
+                {!dispatchLoading && dispatch?.summary && dispatch.summary.batch_count > 0 && (
+                    <div className={`flex items-start gap-2 px-4 py-2.5 text-xs font-medium border-b shrink-0 ${
+                        dispatch.summary.all_batches_closed
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                            : 'bg-blue-50 text-blue-700 border-blue-100'
+                    }`}>
+                        {dispatch.summary.all_batches_closed
+                            ? <CheckCircle2 size={13} className="shrink-0 mt-0.5"/>
+                            : <Clock size={13} className="shrink-0 mt-0.5"/>}
+                        <span>{dispatch.summary.shipped_reason}</span>
                     </div>
                 )}
 
@@ -461,6 +505,106 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
                             </div>
                         )}
                     </div>
+
+                    {/* ── Dispatch Details ── */}
+                    <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                            <Truck size={12}/> Dispatch Details
+                        </p>
+                        {dispatchLoading ? (
+                            <div className="flex justify-center py-6">
+                                <Loader2 className="w-5 h-5 animate-spin text-indigo-400"/>
+                            </div>
+                        ) : !dispatch || dispatch.summary.batch_count === 0 ? (
+                            <div className="px-4 py-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl text-sm text-slate-400 text-center">
+                                No production batches yet — nothing to dispatch.
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                {dispatch.batches.map(batch => {
+                                    const batchReceipts = dispatch.receipts.filter(r => String(r.batch_id) === String(batch.id));
+                                    return (
+                                        <div key={batch.id} className="border border-slate-200 rounded-xl overflow-hidden">
+                                            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-slate-50">
+                                                <div>
+                                                    <p className="text-sm font-bold text-slate-700">{batch.batch_code || `Batch #${batch.id}`}</p>
+                                                    <p className="text-[11px] text-slate-500 mt-0.5">
+                                                        {batch.product_name}
+                                                        {batch.is_dispatch_closed && batch.dispatch_closed_at && (
+                                                            <span className="text-slate-400"> · closed {fmtDateTime(batch.dispatch_closed_at)}</span>
+                                                        )}
+                                                    </p>
+                                                </div>
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold rounded-full border ${
+                                                        batch.is_dispatch_closed
+                                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                            : 'bg-amber-50 text-amber-700 border-amber-200'
+                                                    }`}>
+                                                        {batch.is_dispatch_closed ? <CheckCircle2 size={11}/> : <Clock size={11}/>}
+                                                        {batch.is_dispatch_closed ? 'Closed' : 'Open'}
+                                                    </span>
+                                                    <span className="text-xs font-semibold text-slate-600 tabular-nums">
+                                                        {batch.total_dispatched.toLocaleString()} pcs dispatched
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {batchReceipts.length > 0 ? (
+                                                <div className="divide-y divide-slate-100">
+                                                    {batchReceipts.map(r => (
+                                                        <div key={r.receipt_id}>
+                                                            <button
+                                                                onClick={() => toggleReceipt(r.receipt_id)}
+                                                                className="w-full flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left"
+                                                            >
+                                                                <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                                                                    <span className="font-mono text-xs font-bold text-indigo-600 shrink-0">{r.receipt_number}</span>
+                                                                    <span className="text-[11px] text-slate-400 shrink-0">{fmtDateTime(r.dispatch_date)}</span>
+                                                                    {r.dispatched_by && <span className="text-[11px] text-slate-400 shrink-0">· by {r.dispatched_by}</span>}
+                                                                    {r.vendor_name && (
+                                                                        <span className="text-[11px] font-bold text-purple-600 bg-purple-50 border border-purple-100 rounded px-1.5 py-0.5 shrink-0">
+                                                                            {r.vendor_name}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex items-center gap-2 shrink-0">
+                                                                    <span className="text-xs font-bold text-slate-700 tabular-nums">{r.total_dispatched.toLocaleString()} pcs</span>
+                                                                    <ChevronDown size={13} className={`text-slate-400 transition-transform ${expandedReceipts[r.receipt_id] ? 'rotate-180' : ''}`}/>
+                                                                </div>
+                                                            </button>
+                                                            {expandedReceipts[r.receipt_id] && (
+                                                                <div className="px-4 pb-3 bg-slate-50/50">
+                                                                    {r.notes && (
+                                                                        <p className="text-[11px] text-slate-500 italic mb-2 pt-1">"{r.notes}"</p>
+                                                                    )}
+                                                                    <div className="flex flex-wrap gap-1.5 pt-1">
+                                                                        {r.rolls.map(roll => (
+                                                                            <div key={roll.roll_id} className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5">
+                                                                                <span className="font-mono text-[10px] text-indigo-500">R-{roll.roll_id}</span>
+                                                                                <span className="text-[11px] text-slate-600">{roll.color}</span>
+                                                                                <span className="text-[11px] font-bold text-slate-800">{roll.quantity_dispatched}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="px-4 py-3 text-[11px] text-slate-400 italic">
+                                                    {batch.is_dispatch_closed
+                                                        ? 'Closed with no dispatch receipt (e.g. nothing left to dispatch on this batch).'
+                                                        : 'No receipts yet.'}
+                                                </p>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -483,7 +627,8 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-const STATUS_FILTERS = ['All', 'ACTIVE', 'PENDING', 'COMPLETED', 'CANCELLED'];
+// Matches sales_order_status (db.render_arc.sql) in lifecycle order.
+const STATUS_FILTERS = ['All', 'DRAFT', 'CONFIRMED', 'IN_PRODUCTION', 'SHIPPED', 'CANCELLED'];
 
 const SalesOrderListPage = () => {
     const [orders, setOrders]         = useState([]);
@@ -516,7 +661,7 @@ const SalesOrderListPage = () => {
 
     // Stats from list data
     const totalOrders  = orders.length;
-    const activeOrders = orders.filter(o => o.status === 'ACTIVE' || o.status === 'PENDING').length;
+    const activeOrders = orders.filter(o => o.status === 'CONFIRMED' || o.status === 'IN_PRODUCTION').length;
     const totalValue   = orders.reduce((s, o) => s + (parseFloat(o.total_amount) || 0), 0);
 
     return (
@@ -556,7 +701,7 @@ const SalesOrderListPage = () => {
                     <div className="grid grid-cols-3 gap-4">
                         {[
                             { label: 'Total Orders',  value: totalOrders,                 sub: 'all time' },
-                            { label: 'Open Orders',   value: activeOrders,               sub: 'active / pending' },
+                            { label: 'Open Orders',   value: activeOrders,               sub: 'confirmed / in production' },
                             { label: 'Total Value',   value: `₹${totalValue.toLocaleString('en-IN', { minimumFractionDigits: 0 })}`, sub: 'across all orders' },
                         ].map(({ label, value, sub }) => (
                             <div key={label} className="bg-white border border-slate-200 rounded-xl px-5 py-4">
