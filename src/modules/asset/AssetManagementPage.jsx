@@ -339,6 +339,19 @@ const AssetManagementPage = () => {
         processQrId(qrSearchTerm);
     };
 
+    const handleExport = async () => {
+        try {
+            const res = await assetApi.exportAssets();
+            if (!res.data || !res.data.length) {
+                showToast('No assets available to export.', 'error');
+                return;
+            }
+            downloadAsCSV(res.data, 'assets_export.csv');
+        } catch (err) {
+            showToast('Failed to generate export report.', 'error');
+        }
+    };
+
     const handleFileImport = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -374,7 +387,7 @@ const AssetManagementPage = () => {
                             <Upload className="mr-2 w-4 h-4 text-blue-600"/> Import CSV
                             <input type="file" accept=".csv" className="hidden" onChange={handleFileImport} />
                         </label>
-                        <button onClick={() => downloadAsCSV(assets)} className="px-5 py-2.5 bg-white text-gray-700 border-2 border-gray-200 font-bold rounded-xl hover:bg-gray-50 flex items-center transition-colors shadow-sm">
+                        <button onClick={handleExport} className="px-5 py-2.5 bg-white text-gray-700 border-2 border-gray-200 font-bold rounded-xl hover:bg-gray-50 flex items-center transition-colors shadow-sm">
                             <Download className="mr-2 w-4 h-4 text-green-600"/> Export Report
                         </button>
                     </div>
