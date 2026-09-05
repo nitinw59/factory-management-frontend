@@ -104,6 +104,10 @@ const InitialRedirect = () => {
         case 'job_work_receiver':
             return <Navigate to="/receiver/dashboard" replace />;
 
+        case 'fabric_store_manager':
+            // Fabric Store Managers are sent to their fabric rolls dashboard.
+            return <Navigate to="/fabric-store-portal/rolls" replace />;
+
         default:
             // If a user has a valid login but their role is not recognized
             // by the application's portals, they are sent to an unauthorized page.

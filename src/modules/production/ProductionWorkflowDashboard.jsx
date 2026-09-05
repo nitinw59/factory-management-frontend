@@ -12,6 +12,7 @@ import {
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { accountingApi } from '../../api/accountingApi';
 import { storeManagerApi } from '../../api/storeManagerApi';
+import { fabricStoreApi } from '../../api/fabricStoreApi';
 import { adminApi } from '../../api/adminApi';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -1410,7 +1411,7 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
     }, [poId]);
 
     useEffect(() => {
-        if (poId) storeManagerApi.getFabricRollsByPO(poId).then(res => setRolls(res.data)).catch(console.error);
+        if (poId) fabricStoreApi.getFabricRollsByPO(poId).then(res => setRolls(res.data)).catch(console.error);
     }, [poId]);
 
     if (loading) return <Modal title="Loading PO…" onClose={onClose}><Spinner /></Modal>;
@@ -1516,7 +1517,7 @@ const CreatePOModal = ({ salesOrderId, onClose, onSave }) => {
 
     useEffect(() => {
         Promise.all([
-            storeManagerApi.getFabricIntakeFormData(),
+            fabricStoreApi.getFabricIntakeFormData(),
             productionManagerApi.getFabricTypes(),
             productionManagerApi.getFabricColors(),
         ]).then(([intake, types, colors]) => {
@@ -2713,7 +2714,7 @@ const ProductionWorkflowDashboard = () => {
                         purchaseOrder={inwardPO}
                         onClose={() => setInwardPO(null)}
                         onSave={async (payload) => {
-                            await storeManagerApi.createFabricIntake(payload);
+                            await fabricStoreApi.createFabricIntake(payload);
                             setInwardPO(null);
                             fetchData();
                         }}

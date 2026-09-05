@@ -29,6 +29,7 @@ const ROLE_META = {
   supplier:           { label: 'Supplier',           category: 'Supply Chain',  bg: 'bg-amber-50',   badge: 'bg-amber-100 text-amber-800',    accent: 'bg-amber-400'  },
   dispatch_officer:   { label: 'Dispatch Officer',   category: 'Supply Chain',  bg: 'bg-amber-50',   badge: 'bg-amber-100 text-amber-800',    accent: 'bg-amber-400'  },
   purchase_manager:   { label: 'Purchase Manager',   category: 'Supply Chain',  bg: 'bg-amber-50',   badge: 'bg-amber-100 text-amber-800',    accent: 'bg-amber-400'  },
+  fabric_store_manager: { label: 'Fabric Store Manager', category: 'Supply Chain', bg: 'bg-amber-50', badge: 'bg-amber-100 text-amber-800',    accent: 'bg-amber-400'  },
   merchandiser:       { label: 'Merchandiser',       category: 'Commercial',    bg: 'bg-teal-50',    badge: 'bg-teal-100 text-teal-800',      accent: 'bg-teal-400'   },
   sales_manager:      { label: 'Sales Manager',      category: 'Commercial',    bg: 'bg-teal-50',    badge: 'bg-teal-100 text-teal-800',      accent: 'bg-teal-400'   },
   mechanic:           { label: 'Mechanic',           category: 'Technical',     bg: 'bg-rose-50',    badge: 'bg-rose-100 text-rose-800',      accent: 'bg-rose-400'   },

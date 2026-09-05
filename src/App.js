@@ -120,6 +120,11 @@ import SupplierColorCodesPage from './modules/store_manager/SupplierColorCodesPa
 import TrimStockLedgerPage from './modules/store_manager/TrimStockLedgerPage';
 
 
+import FabricStoreLayout from './shared/FabricStoreLayout';
+import FabricStoreProtectedRoute from './shared/FabricStoreProtectedRoute';
+import FabricRollsPage from './modules/fabric_store/FabricRollsPage';
+import FabricInwardsPage from './modules/fabric_store/FabricInwardsPage';
+
 import DispatchLayout from './shared/DispatchLayout';
 import DispatchProtectedRoute from './shared/DispatchProtectedRoute';
 import DispatchDashboardPage from './modules/depatch_portal/DispatchDashboardPage';
@@ -135,6 +140,7 @@ import BomDashboardPage from './modules/merchandiser/BomDashboardPage';
 import BomFormPage from './modules/merchandiser/BomFormPage';
 import GarmentMeasurementChartPage from './modules/merchandiser/GarmentMeasurementChartPage';
 import MerchandiserPlanningPage from './modules/merchandiser/MerchandiserPlanningPage';
+import ReleaseRecommendationsPage from './modules/merchandiser/ReleaseRecommendationsPage';
 
 import PurchaseDepartmentProtectedRoute from './shared/PurchaseDepartmentProtectedRoute';
 import PurchaseDepartmentLayout from './shared/PurchaseDepartmentLayout';
@@ -263,7 +269,8 @@ function App() {
 
               {/* Store Manager Portal */}
         <Route path="/store-manager" element={<StoreManagerProtectedRoute><StoreManagerLayout /></StoreManagerProtectedRoute>}>
-          <Route index element={<Navigate to="fabric-rolls" replace />} />
+          {/* Fabric moved to its own portal — /fabric-store-portal (role: fabric_store_manager) */}
+          <Route index element={<Navigate to="trim-management" replace />} />
           <Route path="trim-management" element={<TrimManagementPage />} />
 
           {/* Corrected Routes for Trim Orders */}
@@ -288,7 +295,6 @@ function App() {
           <Route path="raise-requirement" element={<RaiseRequirementPage />} />
           <Route path="general-items" element={<GeneralItemsPage />} />
           <Route path="planning" element={<MerchandiserPlanningPage />} />
-          <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
           <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
         </Route>
 
@@ -482,6 +488,14 @@ function App() {
         <Route path="attendance" element={<DailyAttendancePage />} />
     </Route>
 
+    <Route path="/fabric-store-portal" element={<FabricStoreProtectedRoute><FabricStoreLayout /></FabricStoreProtectedRoute>}>
+        <Route index element={<Navigate to="rolls" replace />} />
+        <Route path="dashboard" element={<Navigate to="/fabric-store-portal/rolls" replace />} />
+        <Route path="rolls" element={<FabricRollsPage />} />
+        <Route path="inwards" element={<FabricInwardsPage />} />
+        <Route path="planning" element={<MerchandiserPlanningPage />} />
+    </Route>
+
 
     <Route path="/hr-portal" element={<HRProtectedRoute><HRLayout /></HRProtectedRoute>}>
             {/* Redirect /hr-portal to dashboard */}
@@ -505,6 +519,7 @@ function App() {
         <Route path="bom/:bomId/edit" element={<BomFormPage />} />
         <Route path="bom/:bomId/measurement-chart" element={<GarmentMeasurementChartPage />} />
         <Route path="planning" element={<MerchandiserPlanningPage />} />
+        <Route path="release-recommendations" element={<ReleaseRecommendationsPage />} />
         <Route path="production-workflow" element={<ProductionWorkflowDashboard />} />
         <Route path="sales-orders" element={<SalesOrderListPage />} />
         <Route path="fabric-rolls" element={<FabricRollManagementPage />} />

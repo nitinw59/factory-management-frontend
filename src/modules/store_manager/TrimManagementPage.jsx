@@ -8,6 +8,9 @@ import {
 } from 'lucide-react';
 import ApplyClusterModal from './ApplyClusterModal';
 
+// Roles allowed to apply/unapply a substitute cluster to a trim item.
+const CLUSTER_ROLES = ['factory_admin', 'store_manager', 'fabric_store_manager'];
+
 // ── Stock-tone helper: emerald (healthy) / amber (low) / red (out) ────────────
 const stockTone = (stock, threshold = 0) => {
     const s = Number(stock ?? 0);
@@ -505,9 +508,9 @@ const TrimManagementPage = () => {
         }
     }, [selectedItem]);
 
-    // Pull applied clusters for the currently-selected trim (factory_admin only).
+    // Pull applied clusters for the currently-selected trim.
     const refreshAppliedClusters = useCallback(async () => {
-        if (!selectedItem || user.role !== 'factory_admin') { setAppliedClusters([]); return; }
+        if (!selectedItem || !CLUSTER_ROLES.includes(user.role)) { setAppliedClusters([]); return; }
         try {
             const res = await trimsApi.clustersOnTrim(selectedItem.id);
             setAppliedClusters(res.data?.data ?? res.data ?? []);
@@ -1170,7 +1173,7 @@ const TrimManagementPage = () => {
                                 )}
                             </h2>
                             <div className="flex items-center gap-1.5">
-                                {selectedItem && user.role === 'factory_admin' && (
+                                {selectedItem && CLUSTER_ROLES.includes(user.role) && (
                                     <button
                                         onClick={(e) => { e.stopPropagation(); setClusterModalOpen(true); }}
                                         title="Apply a substitute cluster to this trim"
@@ -1199,7 +1202,7 @@ const TrimManagementPage = () => {
                                             {c.cluster_name}
                                             <span className="text-[9px] font-normal opacity-80">· {c.row_count}</span>
                                             {stale && <span>⚠</span>}
-                                            {user.role === 'factory_admin' && (
+                                            {CLUSTER_ROLES.includes(user.role) && (
                                                 <button onClick={(e) => { e.stopPropagation(); handleUnapplyCluster(c); }}
                                                     disabled={unapplyBusyId === c.cluster_id}
                                                     className="ml-0.5 hover:text-red-600 disabled:opacity-40" title="Unapply">

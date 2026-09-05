@@ -3,20 +3,20 @@
 import api from '../utils/api';
 
 export const storeManagerApi = {
-    // Fabric
-    getFabricInventory: () => api.get('/store-manager/fabric-inventory'),
-    createFabricIntake: (data) => api.post('/store-manager/fabric-intake', data),
-    getFabricIntakeFormData: () => api.get('/store-manager/form-data/fabric-intake'),
-    getFabricIntakeById: (intakeId) => api.get(`/store-manager/fabric-intake/${intakeId}`),
-    updateFabricIntake: (intakeId, data) => api.put(`/store-manager/fabric-intake/${intakeId}`, data),
-    getFabricRollsByPO: (poId) => api.get(`/store-manager/fabric-stock/po/${poId}`),
-    getFabricRollsBySOP: (sopId) => api.get(`/store-manager/fabric-stock/sop/${sopId}`),
-    getAvailableRollsForRequirement: (reqId) => api.get(`/store-manager/fabric-requirements/${reqId}/available-rolls`),
-    getInStockFabricRolls: () => api.get('/store-manager/fabric-rolls/in-stock'),
-    updateFabricRoll: (rollId, data) => api.put(`/store-manager/fabric-rolls/${rollId}`, data),
-    deleteFabricRoll: (rollId) => api.delete(`/store-manager/fabric-rolls/${rollId}`),
     // Shared departments master — plain array of { id, name, is_overhead, created_at }
     getDepartments: () => api.get('/shared/departments'),
+
+    // Unified GRN (Goods Receipt Note) intake — shared across TRIMS/SPARES/FABRIC,
+    // so it stays here rather than under fabricStoreApi. See
+    // controllers/storeManagerController.js createInventoryIntake (multipart:
+    // 'challan_image' file field + inventory_category/supplier_id/challan_number/items).
+    getInventoryIntakeFormData: () => api.get('/store-manager/form-data/inventory-intake'),
+    createInventoryIntake: (formData) => api.post('/store-manager/inventory-intake', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+    getInventoryIntakes: () => api.get('/store-manager/inventory-intakes-list'),
+    approveInventoryIntake: (id) => api.patch(`/store-manager/inventory-intake/${id}/approve`),
+    rejectInventoryIntake: (id, notes) => api.patch(`/store-manager/inventory-intake/${id}/reject`, { notes }),
     // Trims
     getAllTrimItems: () => api.get('/store-manager/trim-items'),
     getVariantsByTrimItem: (trimItemId) => api.get(`/store-manager/trim-item-variants/${trimItemId}`),

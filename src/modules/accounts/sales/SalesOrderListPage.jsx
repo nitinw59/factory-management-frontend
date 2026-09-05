@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import { storeManagerApi } from '../../../api/storeManagerApi';
+import { fabricStoreApi } from '../../../api/fabricStoreApi';
 import { accountingApi } from '../../../api/accountingApi';
 import { adminApi } from '../../../api/adminApi';
 import { dispatchManagerApi } from '../../../api/dispatchManagerApi';
@@ -63,7 +63,7 @@ const ReceivedRollsList = ({ purchaseOrderId }) => {
     const fetchRolls = async () => {
         setLoading(true);
         try {
-            const res = await storeManagerApi.getFabricRollsByPO(purchaseOrderId);
+            const res = await fabricStoreApi.getFabricRollsByPO(purchaseOrderId);
             setRolls(res.data);
         } catch { setError('Failed to load rolls'); }
         finally { setLoading(false); }
@@ -72,14 +72,14 @@ const ReceivedRollsList = ({ purchaseOrderId }) => {
     useEffect(() => { if (purchaseOrderId) fetchRolls(); }, [purchaseOrderId]);
 
     const handleUpdateRoll = async (data) => {
-        await storeManagerApi.updateFabricRoll(data.id, {
+        await fabricStoreApi.updateFabricRoll(data.id, {
             meter: data.meter, uom: data.uom, fabric_color_id: data.fabric_color_id,
         });
         setEditingRoll(null); fetchRolls();
     };
 
     const handleDeleteRoll = async (id) => {
-        await storeManagerApi.deleteFabricRoll(id);
+        await fabricStoreApi.deleteFabricRoll(id);
         setEditingRoll(null); fetchRolls();
     };
 
@@ -612,7 +612,7 @@ const SalesOrderDetailModal = ({ so, onClose }) => {
                 <Modal title={`Receive Fabric — ${selectedPO.po_code || selectedPO.po_number}`} onClose={() => setIntakeModalOpen(false)}>
                     <FabricIntakeForm
                         onSave={async (data) => {
-                            await storeManagerApi.createFabricIntake(data);
+                            await fabricStoreApi.createFabricIntake(data);
                             setIntakeModalOpen(false);
                         }}
                         onClose={() => setIntakeModalOpen(false)}

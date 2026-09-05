@@ -25,4 +25,8 @@ export const planningApi = {
     // Removed: createTrimPurchase / deleteTrimPurchase
     // Use purchaseDeptApi.raiseRequirement / cancelRequirement instead.
     updateProductionReadiness: (sopId, readiness) => api.patch(`/planning/sales-order-products/${sopId}/production-readiness`, { readiness }),
+    // Release recommendations — shipped/cancelled/fully-dispatched orders still
+    // holding live trim/fabric reservations. Release itself reuses
+    // deleteFabricReservation / deleteTrimReservation above, one row at a time.
+    getReleaseRecommendations: () => api.get('/planning/release-recommendations'),
 };

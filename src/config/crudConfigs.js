@@ -34,7 +34,8 @@ export const factoryUserConfig = {
                 'dispatch_officer',
                 'merchandiser',
                 'purchase_manager',
-                'sales_manager'
+                'sales_manager',
+                'fabric_store_manager'
                 ],
     },
   ],

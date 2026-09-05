@@ -45,7 +45,8 @@ const ProtectedRoute = () => {
                 'merchandiser',
                 'purchase_manager',
                 'sales_manager',
-                'job_work_receiver'
+                'job_work_receiver',
+                'fabric_store_manager'
   ];
 
   if (!user.role || !allowedRoles.includes(user.role)) {

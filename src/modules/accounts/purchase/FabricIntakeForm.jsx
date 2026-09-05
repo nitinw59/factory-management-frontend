@@ -3,9 +3,11 @@ import {
     Loader2, Plus, RefreshCw, Pencil, Trash2, X,
     AlertCircle, ChevronDown, ChevronRight, Search,
     Package, Layers, AlertTriangle, CheckCircle2, FileDown,
+    Eye, EyeOff,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { storeManagerApi } from '../../../api/storeManagerApi';
+import { fabricStoreApi } from '../../../api/fabricStoreApi';
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -51,7 +53,7 @@ const IntakeModal = ({ onClose, onSuccess }) => {
     const [err,        setErr]        = useState(null);
 
     useEffect(() => {
-        storeManagerApi.getFabricIntakeFormData()
+        fabricStoreApi.getFabricIntakeFormData()
             .then(r => setFormData(r.data?.data ?? r.data))
             .catch(() => setErr('Failed to load form data'))
             .finally(() => setLoading(false));
@@ -109,7 +111,7 @@ const IntakeModal = ({ onClose, onSuccess }) => {
                     bale_no:         r.bale_no || null,
                 }))
             );
-            await storeManagerApi.createFabricIntake({
+            await fabricStoreApi.createFabricIntake({
                 supplier_id:      parseInt(supplierId),
                 bill_date:        billDate,
                 reference_number: refNumber || null,
@@ -333,7 +335,7 @@ const EditRollModal = ({ roll, colors, onSaved, onDeleted, onClose }) => {
         if (!meter || parseFloat(meter) <= 0) { setErr('Enter a valid quantity'); return; }
         setSaving(true); setErr(null);
         try {
-            await storeManagerApi.updateFabricRoll(roll.roll_id, {
+            await fabricStoreApi.updateFabricRoll(roll.roll_id, {
                 meter:           parseFloat(meter),
                 uom,
                 fabric_color_id: colorId ? parseInt(colorId) : undefined,
@@ -349,7 +351,7 @@ const EditRollModal = ({ roll, colors, onSaved, onDeleted, onClose }) => {
     const handleDelete = async () => {
         setDeleting(true); setErr(null);
         try {
-            await storeManagerApi.deleteFabricRoll(roll.roll_id);
+            await fabricStoreApi.deleteFabricRoll(roll.roll_id);
             onDeleted();
         } catch (e) {
             setErr(e?.response?.data?.error || 'Cannot delete — roll may be assigned or in production');
@@ -563,58 +565,104 @@ const PoolRollDetailModal = ({ row, allRolls, colors, onClose, onRefresh }) => {
     );
 };
 
-// ─── POOL CARD ────────────────────────────────────────────────────────────────
+// ─── POOL TABLE ROW ───────────────────────────────────────────────────────────
+// One fabric_type × fabric_color combination. A slim free/reserved bar replaces
+// the old card's 4-stat grid — the numbers that actually drive a decision
+// (In Stock, Free) get their own columns; Reserved/In Production are still
+// there, just not fighting for the same visual weight.
 
-const PoolCard = ({ row, onClick, dim }) => {
+const PoolRow = ({ row, onClick, dim }) => {
     const usedPct = row.total_meters > 0 ? ((row.total_meters - row.free_meters) / row.total_meters) * 100 : 0;
     return (
-        <button type="button" onClick={onClick}
-            className={`w-full text-left bg-white border rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer ${dim ? 'opacity-50 border-slate-200' : 'border-slate-200'}`}>
-            <div className="flex items-start justify-between mb-3">
-                <div className="min-w-0">
-                    <p className="font-extrabold text-slate-800 text-sm truncate">{row.fabric_type}</p>
-                    <p className="text-xs text-slate-500 mt-0.5 truncate">
-                        <span className="font-bold text-slate-600">{row.fabric_color}</span>
-                        {row.color_number && <span className="ml-1 text-slate-400">({row.color_number})</span>}
-                    </p>
+        <tr onClick={onClick}
+            className={`cursor-pointer transition-colors ${dim ? 'opacity-50 hover:opacity-80' : 'hover:bg-indigo-50/40'}`}>
+            <td className="px-4 py-2.5">
+                <p className="font-bold text-slate-700">{row.fabric_color}</p>
+                {row.color_number && <p className="text-[10px] text-slate-400 font-mono">{row.color_number}</p>}
+            </td>
+            <td className="px-4 py-2.5 text-right text-slate-500">{row.roll_count}</td>
+            <td className="px-4 py-2.5 text-right font-bold text-slate-700">{fmt(row.total_meters)}</td>
+            <td className="px-4 py-2.5 text-right font-bold">
+                <span className={row.in_stock_meters > 0 ? 'text-emerald-600' : 'text-slate-300'}>{fmt(row.in_stock_meters)}</span>
+            </td>
+            <td className="px-4 py-2.5 text-right text-amber-600">{fmt(row.reserved_meters)}</td>
+            <td className="px-4 py-2.5 text-right text-blue-600">{fmt(row.in_production_meters)}</td>
+            <td className="px-4 py-2.5">
+                <div className="flex items-center gap-2 justify-end">
+                    <span className={`font-bold text-xs w-16 text-right ${row.free_meters <= 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                        {fmt(row.free_meters)} m
+                    </span>
+                    <div className="w-14 h-1.5 bg-slate-100 rounded-full overflow-hidden shrink-0">
+                        <div className={`h-full rounded-full ${usedPct >= 90 ? 'bg-red-400' : usedPct >= 60 ? 'bg-amber-400' : 'bg-emerald-400'}`}
+                            style={{ width: `${Math.min(100, usedPct)}%` }} />
+                    </div>
                 </div>
-                <span className={`text-[10px] font-bold shrink-0 ml-2 px-2 py-0.5 rounded-full border ${
-                    dim ? 'bg-slate-50 text-slate-400 border-slate-200' : 'bg-indigo-50 text-indigo-600 border-indigo-100'
-                }`}>
-                    {row.roll_count} roll{row.roll_count !== 1 ? 's' : ''}
+            </td>
+        </tr>
+    );
+};
+
+// ─── POOL TYPE GROUP ──────────────────────────────────────────────────────────
+// One fabric_type, collapsible, holding a dense table of its colors instead of
+// a card per color — with 100+ pool entries a card grid becomes an unscannable
+// wall; a grouped table lets you see a type's whole color spread (and which
+// ones are actually free) in one glance, and collapse types you don't need.
+
+const PoolTypeGroup = ({ typeName, rows, defaultOpen = false, forceOpen = false, onRowClick }) => {
+    const [open, setOpen] = useState(defaultOpen);
+    // While a search is active, every visible group is shown expanded (its
+    // rows are exactly what matched) regardless of collapse state — otherwise
+    // "collapsed by default" would hide search results behind a closed group.
+    const isOpen = open || forceOpen;
+    const totals = rows.reduce((acc, r) => ({
+        rolls:        acc.rolls + (r.roll_count || 0),
+        total:        acc.total + (r.total_meters || 0),
+        inStock:      acc.inStock + (r.in_stock_meters || 0),
+        reserved:     acc.reserved + (r.reserved_meters || 0),
+        inProduction: acc.inProduction + (r.in_production_meters || 0),
+        free:         acc.free + (r.free_meters || 0),
+    }), { rolls: 0, total: 0, inStock: 0, reserved: 0, inProduction: 0, free: 0 });
+
+    return (
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+            <button type="button" onClick={() => setOpen(p => !p)}
+                className="w-full flex items-center gap-3 px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left">
+                {isOpen ? <ChevronDown size={14} className="text-slate-400 shrink-0" /> : <ChevronRight size={14} className="text-slate-400 shrink-0" />}
+                <p className="font-extrabold text-slate-800 text-sm">{typeName}</p>
+                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
+                    {rows.length} color{rows.length !== 1 ? 's' : ''}
                 </span>
-            </div>
+                <div className="flex-1" />
+                <div className="hidden sm:flex items-center gap-4 text-[11px] shrink-0">
+                    <span className="text-slate-500">Total <b className="text-slate-700">{fmt(totals.total)} m</b></span>
+                    <span className="text-slate-500">In Stock <b className="text-emerald-600">{fmt(totals.inStock)} m</b></span>
+                    <span className="text-slate-500">Free <b className={totals.free <= 0 ? 'text-red-500' : 'text-emerald-600'}>{fmt(totals.free)} m</b></span>
+                </div>
+            </button>
 
-            <div className="grid grid-cols-2 gap-y-2 gap-x-3 text-xs mb-3">
-                <div>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Total</p>
-                    <p className="font-bold text-slate-700">{fmt(row.total_meters)} m</p>
+            {isOpen && (
+                <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                        <thead className="bg-slate-50/60 border-y border-slate-100">
+                            <tr>
+                                <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Color</th>
+                                <th className="text-right px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Rolls</th>
+                                <th className="text-right px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Total</th>
+                                <th className="text-right px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">In Stock</th>
+                                <th className="text-right px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Reserved</th>
+                                <th className="text-right px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">In Prod.</th>
+                                <th className="text-right px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Free</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                            {rows.map((row, i) => (
+                                <PoolRow key={i} row={row} dim={row.in_stock_meters === 0} onClick={() => onRowClick(row)} />
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
-                <div>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">In Stock</p>
-                    <p className={`font-bold ${row.in_stock_meters > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>{fmt(row.in_stock_meters)} m</p>
-                </div>
-                <div>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Reserved</p>
-                    <p className="font-bold text-amber-600">{fmt(row.reserved_meters)} m</p>
-                </div>
-                <div>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">In Production</p>
-                    <p className="font-bold text-blue-600">{fmt(row.in_production_meters)} m</p>
-                </div>
-            </div>
-
-            <div className="space-y-1">
-                <div className="flex justify-between text-[9px] font-bold text-slate-400 uppercase">
-                    <span>Free</span>
-                    <span className={row.free_meters <= 0 ? 'text-red-500' : 'text-emerald-600'}>{fmt(row.free_meters)} m</span>
-                </div>
-                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full ${usedPct >= 90 ? 'bg-red-400' : usedPct >= 60 ? 'bg-amber-400' : 'bg-emerald-400'}`}
-                        style={{ width: `${Math.min(100, usedPct)}%` }} />
-                </div>
-            </div>
-        </button>
+            )}
+        </div>
     );
 };
 
@@ -641,13 +689,30 @@ const PoolTab = ({ pool, allRolls, colors, onRefreshRolls }) => {
         String(r.color_number || '').toLowerCase().includes(q)
     );
 
-    const filtered   = pool.filter(matchesQuery);
-    const inStock    = filtered.filter(r => r.in_stock_meters > 0);
-    const zeroStock  = filtered.filter(r => r.in_stock_meters === 0);
+    const zeroStockCount = pool.filter(matchesQuery).filter(r => r.in_stock_meters === 0).length;
+    const visible = pool.filter(matchesQuery).filter(r => showZeroStock || r.in_stock_meters > 0);
+
+    // Group by fabric type, colors sorted within (backend already orders by
+    // type name then color name, so this preserves that order).
+    const groups = [];
+    const groupIndex = new Map();
+    for (const row of visible) {
+        const key = row.fabric_type_id ?? row.fabric_type;
+        if (!groupIndex.has(key)) {
+            groupIndex.set(key, groups.length);
+            groups.push({ typeName: row.fabric_type, rows: [] });
+        }
+        groups[groupIndex.get(key)].rows.push(row);
+    }
+
+    const summary = visible.reduce((acc, r) => ({
+        inStock: acc.inStock + (r.in_stock_meters || 0),
+        free:    acc.free + (r.free_meters || 0),
+    }), { inStock: 0, free: 0 });
 
     return (
         <>
-            <div className="mb-4 flex items-center gap-3">
+            <div className="mb-4 flex flex-wrap items-center gap-3">
                 <div className="relative flex-1 max-w-xs">
                     <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                     <input
@@ -658,41 +723,34 @@ const PoolTab = ({ pool, allRolls, colors, onRefreshRolls }) => {
                         className="w-full text-xs pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-400"
                     />
                 </div>
-                <span className="text-xs text-slate-400">{filtered.length} of {pool.length} pool entr{pool.length === 1 ? 'y' : 'ies'}</span>
+                <button
+                    onClick={() => setShowZeroStock(p => !p)}
+                    className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg border transition-colors ${
+                        showZeroStock ? 'bg-slate-100 border-slate-300 text-slate-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                    }`}
+                >
+                    {showZeroStock ? <Eye size={13} /> : <EyeOff size={13} />}
+                    Out-of-stock ({zeroStockCount})
+                </button>
+                <div className="flex-1" />
+                <div className="flex items-center gap-4 text-xs">
+                    <span className="text-slate-400">{groups.length} type{groups.length !== 1 ? 's' : ''} · {visible.length} color{visible.length !== 1 ? 's' : ''}</span>
+                    <span className="text-slate-500">In Stock <b className="text-emerald-600">{fmt(summary.inStock)} m</b></span>
+                    <span className="text-slate-500">Free <b className={summary.free <= 0 ? 'text-red-500' : 'text-emerald-600'}>{fmt(summary.free)} m</b></span>
+                </div>
             </div>
 
-            {q && filtered.length === 0 && (
-                <p className="text-sm text-slate-400 italic mb-4">No pool entries match "{search}".</p>
+            {visible.length === 0 && (
+                <p className="text-sm text-slate-400 italic mb-4">
+                    {q ? `No pool entries match "${search}".` : 'No fabric currently in stock.'}
+                </p>
             )}
 
-            {!q && inStock.length === 0 && (
-                <p className="text-sm text-slate-400 italic mb-4">No fabric currently in stock.</p>
-            )}
-
-            {inStock.length > 0 && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
-                    {inStock.map((row, i) => (
-                        <PoolCard key={i} row={row} onClick={() => setSelected(row)} />
+            {groups.length > 0 && (
+                <div className="space-y-3">
+                    {groups.map(g => (
+                        <PoolTypeGroup key={g.typeName} typeName={g.typeName} rows={g.rows} forceOpen={!!q} onRowClick={setSelected} />
                     ))}
-                </div>
-            )}
-
-            {zeroStock.length > 0 && (
-                <div>
-                    <button
-                        onClick={() => setShowZeroStock(p => !p)}
-                        className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-slate-600 mb-3 transition-colors"
-                    >
-                        {showZeroStock ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                        {zeroStock.length} out-of-stock fabric type{zeroStock.length !== 1 ? 's' : ''}
-                    </button>
-                    {showZeroStock && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                            {zeroStock.map((row, i) => (
-                                <PoolCard key={i} row={row} dim onClick={() => setSelected(row)} />
-                            ))}
-                        </div>
-                    )}
                 </div>
             )}
 
@@ -1134,7 +1192,7 @@ const FabricRollManagementPage = () => {
     const loadInventory = useCallback(async () => {
         setErr(null);
         try {
-            const r = await storeManagerApi.getFabricInventory();
+            const r = await fabricStoreApi.getFabricInventory();
             setInventory(r.data?.data ?? r.data);
         } catch (e) {
             setErr(e?.response?.data?.error || 'Failed to load inventory');
@@ -1145,7 +1203,7 @@ const FabricRollManagementPage = () => {
         setRollsLoading(true);
         try {
             const [rollsRes, colorsRes] = await Promise.all([
-                storeManagerApi.getInStockFabricRolls(),
+                fabricStoreApi.getInStockFabricRolls(),
                 storeManagerApi.getFabricColors(),
             ]);
             setAllRolls(rollsRes.data?.data ?? rollsRes.data ?? []);

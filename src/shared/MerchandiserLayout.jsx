@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import {
     LuLogOut, LuMenu, LuX, LuFileText,
     LuLayoutDashboard, LuClipboardList, LuLayers,
-    LuShirt, LuTag, LuList, LuScissors,
+    LuShirt, LuTag, LuList, LuScissors, LuRotateCcw,
 } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
 import ReportBugButton from './ReportBugButton';
@@ -13,6 +13,7 @@ import ReportBugButton from './ReportBugButton';
 const NAV = [
     { to: '/merchandiser/bom',                 icon: LuFileText,        label: 'BOM Management'       },
     { to: '/merchandiser/planning',            icon: LuClipboardList,   label: 'Production Planning'  },
+    { to: '/merchandiser/release-recommendations', icon: LuRotateCcw,   label: 'Release Recommendations' },
     { to: '/merchandiser/production-workflow', icon: LuLayoutDashboard, label: 'Production Workflow'  },
     { to: '/merchandiser/fabric-rolls',        icon: LuLayers,          label: 'Fabric'               },
     // Product management (moved here from the Production Manager portal).

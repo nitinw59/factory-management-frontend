@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
-import { LuPackage, LuLogOut, LuChevronDown, LuLayers, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag, LuScrollText, LuInbox, LuFilePlus, LuBoxes, LuPackageX } from 'react-icons/lu';
+import { LuPackage, LuLogOut, LuChevronDown, LuScissors, LuClipboardList, LuMenu, LuX, LuCalendarClock, LuChartLine, LuBookmark, LuTag, LuScrollText, LuInbox, LuFilePlus, LuBoxes, LuPackageX } from 'react-icons/lu';
 import NotificationBell from './NotificationBell';
 import ReportBugButton from './ReportBugButton';
 import { LuLayoutDashboard } from 'react-icons/lu';
@@ -59,9 +59,6 @@ const StoreManagerLayout = () => {
                         <nav className="hidden md:flex items-center space-x-6">
                             <NavLink to="/store-manager/production-workflow" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
                                 <LuLayoutDashboard className="mr-1" /> Production Workflow
-                            </NavLink>
-                            <NavLink to="/store-manager/fabric-rolls" className="flex items-center text-sm font-medium text-gray-600 hover:text-blue-600">
-                                <LuLayers className="mr-1" /> Fabric
                             </NavLink>
                              <NavDropdown title="Trims">
                                 <NavLink to="/store-manager/trim-management" className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
@@ -147,9 +144,6 @@ const StoreManagerLayout = () => {
                         <nav className="flex flex-col p-4 space-y-4">
                             <NavLink to="/store-manager/production-workflow" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuLayoutDashboard className="mr-2" /> Production Workflow
-                            </NavLink>
-                            <NavLink to="/store-manager/fabric-rolls" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
-                                <LuLayers className="mr-2" /> Fabric
                             </NavLink>
                             <NavLink to="/store-manager/trim-management" onClick={closeMobileMenu} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
                                 <LuScissors className="mr-2" /> Trim Management

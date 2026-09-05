@@ -482,16 +482,25 @@ function Toast({ msg, type }) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-export default function InwardsPage() {
+// lockedItemType: when set (e.g. 'fabric'), the item-type filter is fixed to
+// that value and its selector is hidden — used by the Fabric Store Portal's
+// FabricInwardsPage to reuse this whole page/flow scoped to fabric only,
+// instead of building a separate Goods Receipt UI (fabric intake already goes
+// through this same PO-matched, price-variance-approved inward pipeline that
+// Trims/Spares use — see createInward/createStandaloneInward's 'fabric' branch
+// in purchaseDepartmentController.js).
+export default function InwardsPage({ lockedItemType = null, title, subtitle }) {
     const { user } = useAuth();
     const canApprove = user?.role === 'purchase_manager' || user?.role === 'factory_admin';
     // Matches the backend's route guard on PATCH /inwards/:id — purchase_manager,
-    // factory_admin, and store_manager can all edit any inward, no ownership
-    // restriction (see docs/purchase-department/edit-inward-backend-spec.md §7).
-    // Not per-row today, but kept as a function in case a restriction returns.
+    // factory_admin, store_manager, and fabric_store_manager can all edit any
+    // inward, no ownership restriction (see
+    // docs/purchase-department/edit-inward-backend-spec.md §7 and
+    // routes/purchaseDepartmentRoutes.js). Not per-row today, but kept as a
+    // function in case a restriction returns.
     const canEdit = useCallback(() => {
         if (!user) return false;
-        return ['purchase_manager', 'factory_admin', 'store_manager'].includes(user.role);
+        return ['purchase_manager', 'factory_admin', 'store_manager', 'fabric_store_manager'].includes(user.role);
     }, [user]);
     // Whether the Edit action is actually clickable for this row today — see
     // EDIT_APPROVED_INWARD_ENABLED above.
@@ -504,7 +513,7 @@ export default function InwardsPage() {
 
     // Filters — status from URL param for deep-link support
     const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || 'ALL');
-    const [itemType,     setItemType]     = useState('');
+    const [itemType,     setItemType]     = useState(lockedItemType || '');
     const [dateFrom,     setDateFrom]     = useState('');
     const [dateTo,       setDateTo]       = useState('');
     const [supplierId,   setSupplierId]   = useState('');
@@ -670,9 +679,9 @@ export default function InwardsPage() {
             <div className="flex items-start justify-between gap-3">
                 <div>
                     <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                        <Inbox size={20} className="text-orange-500" /> Inwards
+                        <Inbox size={20} className="text-orange-500" /> {title || 'Inwards'}
                     </h1>
-                    <p className="text-sm text-slate-500 mt-0.5">History of all goods receipt notes and pending approvals</p>
+                    <p className="text-sm text-slate-500 mt-0.5">{subtitle || 'History of all goods receipt notes and pending approvals'}</p>
                 </div>
                 <button
                     onClick={() => setShowCreate(true)}
@@ -719,18 +728,26 @@ export default function InwardsPage() {
                     )}
                 </div>
 
-                {/* Item type */}
-                <select
-                    value={itemType}
-                    onChange={e => setItemType(e.target.value)}
-                    className="text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400 bg-white"
-                >
-                    <option value="">All types</option>
-                    <option value="fabric">Fabric</option>
-                    <option value="trim">Trim</option>
-                    <option value="spare">Spare</option>
-                    <option value="other">Other</option>
-                </select>
+                {/* Item type — locked (hidden selector) when this page is scoped
+                    to one type, e.g. the Fabric Store Portal's FabricInwardsPage */}
+                {lockedItemType ? (
+                    <span className="flex items-center gap-1.5 text-xs font-bold text-orange-700 bg-orange-50 border border-orange-200 rounded-xl px-3 py-2 capitalize">
+                        {ITEM_TYPE_ICONS[lockedItemType] && (() => { const Icon = ITEM_TYPE_ICONS[lockedItemType]; return <Icon size={12} />; })()}
+                        {lockedItemType}
+                    </span>
+                ) : (
+                    <select
+                        value={itemType}
+                        onChange={e => setItemType(e.target.value)}
+                        className="text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400 bg-white"
+                    >
+                        <option value="">All types</option>
+                        <option value="fabric">Fabric</option>
+                        <option value="trim">Trim</option>
+                        <option value="spare">Spare</option>
+                        <option value="other">Other</option>
+                    </select>
+                )}
 
                 {/* Supplier */}
                 {suppliers.length > 0 && (
@@ -762,9 +779,9 @@ export default function InwardsPage() {
                     className="text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-orange-400"
                 />
 
-                {(itemType || dateFrom || dateTo || supplierId) && (
+                {((!lockedItemType && itemType) || dateFrom || dateTo || supplierId) && (
                     <button
-                        onClick={() => { setItemType(''); setDateFrom(''); setDateTo(''); setSupplierId(''); }}
+                        onClick={() => { setItemType(lockedItemType || ''); setDateFrom(''); setDateTo(''); setSupplierId(''); }}
                         className="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-slate-100 transition"
                     >
                         Clear filters
