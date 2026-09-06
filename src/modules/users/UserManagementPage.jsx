@@ -55,6 +55,7 @@ const UserManagementPage = () => {
   const [deleting, setDeleting] = useState(null);
   const [apiError, setApiError] = useState(null);
   const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
   const [modalUser, setModalUser] = useState(undefined); // undefined=closed, null=create, obj=edit
   const [collapsedRoles, setCollapsedRoles] = useState(new Set());
 
@@ -112,11 +113,22 @@ const UserManagementPage = () => {
 
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter(
-      (u) => u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q)
-    );
-  }, [users, search]);
+    return users.filter((u) => {
+      if (roleFilter && u.role !== roleFilter) return false;
+      if (!q) return true;
+      return u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q);
+    });
+  }, [users, search, roleFilter]);
+
+  const availableRoles = useMemo(() =>
+    [...new Set(users.map((u) => u.role))].sort((a, b) => {
+      const catA = CATEGORY_ORDER.indexOf(getMeta(a).category);
+      const catB = CATEGORY_ORDER.indexOf(getMeta(b).category);
+      if (catA !== catB) return catA - catB;
+      return a.localeCompare(b);
+    }),
+    [users]
+  );
 
   const groupedByRole = useMemo(() =>
     filteredUsers.reduce((acc, u) => {
@@ -138,6 +150,7 @@ const UserManagementPage = () => {
   );
 
   const isSearchActive = search.trim().length > 0;
+  const isFilterActive = isSearchActive || roleFilter.length > 0;
 
   return (
     <div className="max-w-4xl mx-auto py-6 px-4 space-y-4">
@@ -167,29 +180,56 @@ const UserManagementPage = () => {
           <span className="inline-flex items-center gap-1.5 bg-gray-100 text-gray-600 text-xs font-semibold px-3 py-1 rounded-full">
             <Users size={11} /> {users.length} total user{users.length !== 1 ? 's' : ''}
           </span>
-          {isSearchActive && (
+          {isFilterActive && (
             <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full">
-              {filteredUsers.length} matching &ldquo;{search}&rdquo;
+              {filteredUsers.length} matching
+              {isSearchActive ? <>&nbsp;&ldquo;{search}&rdquo;</> : ''}
+              {roleFilter ? <>&nbsp;in {getMeta(roleFilter).label}</> : ''}
             </span>
           )}
-        </div>
-        <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or email…"
-            className="w-full pl-9 pr-8 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-blue-400 bg-white"
-          />
-          {isSearchActive && (
+          {isFilterActive && (
             <button
-              onClick={() => setSearch('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              onClick={() => { setSearch(''); setRoleFilter(''); }}
+              className="text-xs font-semibold text-gray-400 hover:text-gray-600 underline"
             >
-              <X size={14} />
+              Clear filters
             </button>
           )}
+        </div>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or email…"
+              className="w-full pl-9 pr-8 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-blue-400 bg-white"
+            />
+            {isSearchActive && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <div className="relative">
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className={`appearance-none pl-3 pr-8 py-2 text-sm border rounded-xl focus:outline-none bg-white cursor-pointer ${
+                roleFilter ? 'border-blue-300 text-blue-700 font-semibold' : 'border-gray-200 text-gray-700 focus:border-blue-400'
+              }`}
+            >
+              <option value="">All roles</option>
+              {availableRoles.map((role) => (
+                <option key={role} value={role}>{getMeta(role).label}</option>
+              ))}
+            </select>
+            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          </div>
         </div>
       </div>
 
@@ -227,11 +267,17 @@ const UserManagementPage = () => {
           <p className="text-xs text-gray-400 mt-1">Click &ldquo;Add User&rdquo; to create the first one.</p>
         </div>
       )}
-      {!loading && users.length > 0 && isSearchActive && filteredUsers.length === 0 && (
+      {!loading && users.length > 0 && isFilterActive && filteredUsers.length === 0 && (
         <div className="flex flex-col items-center py-16 text-center">
           <Search size={36} className="text-gray-300 mb-3" />
-          <p className="font-semibold text-gray-500 text-sm">No users match your search</p>
-          <p className="text-xs text-gray-400 mt-1">Try a different name or email.</p>
+          <p className="font-semibold text-gray-500 text-sm">No users match your filters</p>
+          <p className="text-xs text-gray-400 mt-1">
+            {isSearchActive && roleFilter
+              ? 'Try a different name/email, or clear the role filter.'
+              : isSearchActive
+                ? 'Try a different name or email.'
+                : 'No users have this role yet.'}
+          </p>
         </div>
       )}
 
@@ -241,7 +287,7 @@ const UserManagementPage = () => {
           {sortedRoleNames.map((role) => {
             const meta = getMeta(role);
             const roleUsers = groupedByRole[role];
-            const isCollapsed = isSearchActive ? false : collapsedRoles.has(role);
+            const isCollapsed = isFilterActive ? false : collapsedRoles.has(role);
 
             return (
               <section key={role} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -313,8 +359,8 @@ const UserManagementPage = () => {
       {/* Footer */}
       {!loading && filteredUsers.length > 0 && (
         <p className="text-[11px] text-gray-400 px-1">
-          {isSearchActive
-            ? `${filteredUsers.length} user${filteredUsers.length !== 1 ? 's' : ''} matching "${search}"`
+          {isFilterActive
+            ? `${filteredUsers.length} user${filteredUsers.length !== 1 ? 's' : ''} matching filters`
             : `${users.length} user${users.length !== 1 ? 's' : ''} across ${sortedRoleNames.length} role${sortedRoleNames.length !== 1 ? 's' : ''}`
           }
         </p>
