@@ -1850,6 +1850,12 @@ const UniversalWorkstationDashboard = () => {
                             <span className="text-sm font-black tabular-nums text-indigo-600">{stats == null ? '—' : (stats.today_rework ?? 0)}</span>
                         </div>
                         <span className="text-gray-200 hidden sm:inline">│</span>
+                        <div className="flex items-center gap-1.5">
+                            <CheckCircle2 size={13} className="text-teal-500 shrink-0" />
+                            <span className="text-xs text-gray-500">Today's Resolved</span>
+                            <span className="text-sm font-black tabular-nums text-teal-600">{stats == null ? '—' : (stats.today_resolved ?? 0)}</span>
+                        </div>
+                        <span className="text-gray-200 hidden sm:inline">│</span>
                         <button
                             type="button"
                             onClick={handleOpenApprovedModal}
