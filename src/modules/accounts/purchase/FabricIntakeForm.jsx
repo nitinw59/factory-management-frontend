@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-    Loader2, Plus, RefreshCw, Pencil, Trash2, X,
+    Loader2, RefreshCw, Pencil, Trash2, X,
     AlertCircle, ChevronDown, ChevronRight, Search,
     Package, Layers, AlertTriangle, CheckCircle2, FileDown,
     Eye, EyeOff,
@@ -34,288 +34,6 @@ const REQ_STATUS = {
 const ReqBadge = ({ status }) => {
     const { cls, label } = REQ_STATUS[status] || { cls: 'bg-slate-100 text-slate-500', label: status };
     return <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${cls}`}>{label}</span>;
-};
-
-// ─── INTAKE MODAL ─────────────────────────────────────────────────────────────
-
-let _gk = 0, _rk = 0;
-const newGroup = () => ({ _k: ++_gk, fabric_type_id: '', uom: 'meter', rolls: [{ _k: ++_rk, fabric_color_id: '', meter: '', bale_no: '' }] });
-const newRoll  = () => ({ _k: ++_rk, fabric_color_id: '', meter: '', bale_no: '' });
-
-const IntakeModal = ({ onClose, onSuccess }) => {
-    const [formData,   setFormData]   = useState(null);
-    const [loading,    setLoading]    = useState(true);
-    const [supplierId, setSupplierId] = useState('');
-    const [billDate,   setBillDate]   = useState(new Date().toISOString().slice(0, 10));
-    const [refNumber,  setRefNumber]  = useState('');
-    const [groups,     setGroups]     = useState([newGroup()]);
-    const [saving,     setSaving]     = useState(false);
-    const [err,        setErr]        = useState(null);
-
-    useEffect(() => {
-        fabricStoreApi.getFabricIntakeFormData()
-            .then(r => setFormData(r.data?.data ?? r.data))
-            .catch(() => setErr('Failed to load form data'))
-            .finally(() => setLoading(false));
-    }, []);
-
-    // ── Group helpers ────────────────────────────────────────────────────────
-    const setGroup = (gi, k, v) =>
-        setGroups(prev => prev.map((g, i) => i === gi ? { ...g, [k]: v } : g));
-
-    const addGroup = () => setGroups(p => [...p, newGroup()]);
-
-    const removeGroup = (gi) => setGroups(p => p.filter((_, i) => i !== gi));
-
-    // ── Roll helpers ─────────────────────────────────────────────────────────
-    const setRoll = (gi, ri, k, v) =>
-        setGroups(prev => prev.map((g, i) =>
-            i !== gi ? g : { ...g, rolls: g.rolls.map((r, j) => j === ri ? { ...r, [k]: v } : r) }
-        ));
-
-    const addRoll = (gi) =>
-        setGroups(prev => prev.map((g, i) =>
-            i !== gi ? g : { ...g, rolls: [...g.rolls, newRoll()] }
-        ));
-
-    const removeRoll = (gi, ri) =>
-        setGroups(prev => prev.map((g, i) =>
-            i !== gi ? g : { ...g, rolls: g.rolls.filter((_, j) => j !== ri) }
-        ));
-
-    // ── Totals ───────────────────────────────────────────────────────────────
-    const totalRolls  = groups.reduce((s, g) => s + g.rolls.length, 0);
-    const totalMeters = groups.reduce((s, g) =>
-        s + g.rolls.reduce((ss, r) => ss + (parseFloat(r.meter) || 0), 0), 0);
-
-    // ── Submit ───────────────────────────────────────────────────────────────
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!supplierId) { setErr('Select a supplier'); return; }
-        for (const g of groups) {
-            if (!g.fabric_type_id) { setErr('Select a fabric type for every group'); return; }
-            for (const r of g.rolls) {
-                if (!r.fabric_color_id || !r.meter || parseFloat(r.meter) <= 0) {
-                    setErr('Every roll needs a color and a quantity greater than 0'); return;
-                }
-            }
-        }
-        setSaving(true); setErr(null);
-        try {
-            const rolls = groups.flatMap(g =>
-                g.rolls.map(r => ({
-                    fabric_type_id:  parseInt(g.fabric_type_id),
-                    fabric_color_id: parseInt(r.fabric_color_id),
-                    meter:           parseFloat(r.meter),
-                    uom:             g.uom,
-                    bale_no:         r.bale_no || null,
-                }))
-            );
-            await fabricStoreApi.createFabricIntake({
-                supplier_id:      parseInt(supplierId),
-                bill_date:        billDate,
-                reference_number: refNumber || null,
-                rolls,
-            });
-            onSuccess();
-            onClose();
-        } catch (e) {
-            setErr(e?.response?.data?.error || 'Failed to record intake');
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col"
-                onClick={e => e.stopPropagation()}>
-
-                {/* Modal header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
-                    <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Fabric Roll Management</p>
-                        <h2 className="font-extrabold text-slate-800 text-base">Record Fabric Intake</h2>
-                    </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><X size={18} /></button>
-                </div>
-
-                {loading ? <Spinner /> : (
-                    <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0">
-
-                        {/* Scrollable body */}
-                        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-                            {err && <Err msg={err} />}
-
-                            {/* ── Intake header ── */}
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Supplier *</label>
-                                    <select value={supplierId} onChange={e => setSupplierId(e.target.value)} required
-                                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400 bg-white">
-                                        <option value="">Select supplier</option>
-                                        {(formData?.suppliers || []).map(s => (
-                                            <option key={s.id} value={s.id}>{s.name}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Bill Date *</label>
-                                    <input type="date" value={billDate} onChange={e => setBillDate(e.target.value)} required
-                                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400" />
-                                </div>
-                                <div className="col-span-2">
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Challan / Reference No.</label>
-                                    <input type="text" value={refNumber} onChange={e => setRefNumber(e.target.value)}
-                                        placeholder="CH-042, INV-001…"
-                                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400" />
-                                </div>
-                            </div>
-
-                            {/* ── Fabric type groups ── */}
-                            <div className="space-y-4">
-                                {groups.map((group, gi) => (
-                                    <div key={group._k} className="border border-slate-200 rounded-2xl overflow-hidden">
-
-                                        {/* Group header: fabric type + UOM */}
-                                        <div className="flex items-center gap-3 px-4 py-3 bg-indigo-50 border-b border-indigo-100">
-                                            <Layers size={13} className="text-indigo-400 shrink-0" />
-                                            <select
-                                                value={group.fabric_type_id}
-                                                onChange={e => setGroup(gi, 'fabric_type_id', e.target.value)}
-                                                required
-                                                className="flex-1 text-sm font-bold text-indigo-800 bg-transparent border-0 focus:outline-none focus:ring-0 cursor-pointer min-w-0"
-                                            >
-                                                <option value="">Select fabric type…</option>
-                                                {(formData?.fabricTypes || []).map(ft => (
-                                                    <option key={ft.id} value={ft.id}>{ft.name}</option>
-                                                ))}
-                                            </select>
-                                            <div className="flex items-center gap-1.5 shrink-0">
-                                                <span className="text-[10px] font-bold text-indigo-400 uppercase">UOM</span>
-                                                <select
-                                                    value={group.uom}
-                                                    onChange={e => setGroup(gi, 'uom', e.target.value)}
-                                                    className="text-xs font-bold text-indigo-700 bg-white border border-indigo-200 rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-400"
-                                                >
-                                                    <option value="meter">Meters</option>
-                                                    <option value="yard">Yards</option>
-                                                    <option value="kg">Kg</option>
-                                                </select>
-                                            </div>
-                                            {groups.length > 1 && (
-                                                <button type="button" onClick={() => removeGroup(gi)}
-                                                    className="p-1 text-indigo-300 hover:text-red-500 transition-colors shrink-0">
-                                                    <X size={14} />
-                                                </button>
-                                            )}
-                                        </div>
-
-                                        {/* Rolls inside this group */}
-                                        <div className="px-4 py-3 space-y-2">
-                                            {/* Column labels */}
-                                            <div className="flex items-center gap-3 px-1">
-                                                <span className="text-[9px] font-bold text-slate-400 uppercase flex-1">Color</span>
-                                                <span className="text-[9px] font-bold text-slate-400 uppercase w-24">Bale No.</span>
-                                                <span className="text-[9px] font-bold text-slate-400 uppercase w-24 text-right">
-                                                    Meters ({group.uom})
-                                                </span>
-                                                <span className="w-6" />
-                                            </div>
-
-                                            {group.rolls.map((roll, ri) => (
-                                                <div key={roll._k} className="flex items-center gap-3">
-                                                    <select
-                                                        value={roll.fabric_color_id}
-                                                        onChange={e => setRoll(gi, ri, 'fabric_color_id', e.target.value)}
-                                                        required
-                                                        className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400 bg-white"
-                                                    >
-                                                        <option value="">Select color</option>
-                                                        {(formData?.fabricColors || []).map(fc => (
-                                                            <option key={fc.id} value={fc.id}>
-                                                                {fc.color_number}{fc.name ? ` · ${fc.name}` : ''}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                    <input
-                                                        type="text"
-                                                        placeholder="B-001"
-                                                        value={roll.bale_no}
-                                                        onChange={e => setRoll(gi, ri, 'bale_no', e.target.value)}
-                                                        className="w-24 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400 font-mono"
-                                                    />
-                                                    <input
-                                                        type="number" step="0.01" min="0.01"
-                                                        placeholder="0.00"
-                                                        value={roll.meter}
-                                                        onChange={e => setRoll(gi, ri, 'meter', e.target.value)}
-                                                        required
-                                                        className="w-24 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400 text-right tabular-nums"
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => removeRoll(gi, ri)}
-                                                        disabled={group.rolls.length === 1}
-                                                        className="p-1.5 text-slate-300 hover:text-red-500 disabled:opacity-0 transition-colors shrink-0"
-                                                    >
-                                                        <Trash2 size={14} />
-                                                    </button>
-                                                </div>
-                                            ))}
-
-                                            {/* Add roll within group */}
-                                            <button type="button" onClick={() => addRoll(gi)}
-                                                className="flex items-center gap-1 text-xs font-bold text-indigo-500 hover:text-indigo-700 mt-1 transition-colors">
-                                                <Plus size={12} /> Add Roll
-                                            </button>
-                                        </div>
-
-                                        {/* Group subtotal */}
-                                        <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-                                            <span className="text-[10px] text-slate-400">
-                                                {group.rolls.length} roll{group.rolls.length !== 1 ? 's' : ''}
-                                            </span>
-                                            <span className="text-[11px] font-bold text-slate-600 tabular-nums">
-                                                {group.rolls.reduce((s, r) => s + (parseFloat(r.meter) || 0), 0).toFixed(2)} {group.uom}
-                                            </span>
-                                        </div>
-                                    </div>
-                                ))}
-
-                                {/* Add another fabric type group */}
-                                <button type="button" onClick={addGroup}
-                                    className="w-full flex items-center justify-center gap-1.5 text-sm font-bold text-indigo-600 hover:text-indigo-800 border-2 border-dashed border-indigo-200 hover:border-indigo-400 rounded-2xl py-3 transition-colors">
-                                    <Plus size={14} /> Add Fabric Type Group
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Footer: totals + actions */}
-                        <div className="px-6 py-4 border-t border-slate-100 flex items-center gap-4 shrink-0">
-                            <div className="flex-1 flex items-center gap-4">
-                                <span className="text-xs text-slate-500">
-                                    <span className="font-bold text-slate-700">{totalRolls}</span> roll{totalRolls !== 1 ? 's' : ''}
-                                </span>
-                                <span className="text-xs text-slate-500">
-                                    <span className="font-bold text-slate-700 tabular-nums">{totalMeters.toFixed(2)}</span> m total
-                                </span>
-                            </div>
-                            <button type="button" onClick={onClose}
-                                className="text-sm text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors">
-                                Cancel
-                            </button>
-                            <button type="submit" disabled={saving}
-                                className="flex items-center gap-1.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-5 py-2 rounded-lg transition-colors">
-                                {saving && <Loader2 size={13} className="animate-spin" />}
-                                Confirm Intake
-                            </button>
-                        </div>
-                    </form>
-                )}
-            </div>
-        </div>
-    );
 };
 
 // ─── EDIT ROLL MODAL ─────────────────────────────────────────────────────────
@@ -1187,7 +905,6 @@ const FabricRollManagementPage = () => {
     const [loading,      setLoading]      = useState(true);
     const [rollsLoading, setRollsLoading] = useState(false);
     const [err,          setErr]          = useState(null);
-    const [showIntake,   setShowIntake]   = useState(false);
 
     const loadInventory = useCallback(async () => {
         setErr(null);
@@ -1265,10 +982,6 @@ const FabricRollManagementPage = () => {
                             className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50">
                             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
                         </button>
-                        <button onClick={() => setShowIntake(true)}
-                            className="flex items-center gap-1.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg transition-colors">
-                            <Plus size={15} /> Record Intake
-                        </button>
                     </div>
                 </div>
             </div>
@@ -1315,13 +1028,6 @@ const FabricRollManagementPage = () => {
                     </>
                 )}
             </div>
-
-            {showIntake && (
-                <IntakeModal
-                    onClose={() => setShowIntake(false)}
-                    onSuccess={loadAll}
-                />
-            )}
         </div>
     );
 };

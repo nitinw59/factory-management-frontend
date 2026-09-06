@@ -14,6 +14,7 @@ import RecalculateConfirmModal, { logRecalcBrief } from './RecalculateConfirmMod
 import { generateBomExcel } from './bomExcelExport';
 import { generateFabricRequirementsPdf } from './fabricRequirementsPdfGenerator';
 import { generateTrimRequirementsExcel } from './trimRequirementsExcelExport';
+import { useSecondaryFabricInfo } from './merchandiserShared';
 
 const ToolbarButton = ({ icon: Icon, label, onClick, disabled, busy, title, tone = 'slate' }) => {
     const toneCls = {
@@ -60,6 +61,13 @@ const SopHeaderToolbar = ({ sop, sopReqs, bomOptions, fabricTypes, salesOrder, o
 
     const fabricRequirements = sopReqs?.fabric_requirements || [];
     const trimRequirements   = sopReqs?.trim_requirements   || [];
+
+    // Color Cluster rule(s) attached to the currently-linked BOM's SECONDARY fabric
+    // line (if any — a line can carry more than one) — previewed in the
+    // recalculate-confirm dialog below so a merchandiser sees which of this
+    // order's colors resolve to which rule's target color before confirming,
+    // not just the resulting requirement rows after the fact.
+    const { clusters: secondaryClusters } = useSecondaryFabricInfo(sop.bom_id);
 
     const handleDownloadBomExcel = async () => {
         if (!sop.bom_id) return;
@@ -198,7 +206,11 @@ const SopHeaderToolbar = ({ sop, sopReqs, bomOptions, fabricTypes, salesOrder, o
                     onClose={() => setShowLinkModal(false)}
                     onLink={onLinkBom}
                     onPreview={onPreviewBom}
-                    onDone={() => { setShowLinkModal(false); onRefresh(); }}
+                    onDone={(warnings) => {
+                        setShowLinkModal(false);
+                        onRefresh();
+                        setErr(warnings?.length > 0 ? warnings.join(' ') : null);
+                    }}
                 />
             )}
 
@@ -206,6 +218,8 @@ const SopHeaderToolbar = ({ sop, sopReqs, bomOptions, fabricTypes, salesOrder, o
                 <RecalculateConfirmModal
                     preview={preview}
                     sopName={sop?.product_name}
+                    clusterInfo={secondaryClusters}
+                    sopColors={sop.colors}
                     busy={recalcing}
                     err={recalcErr}
                     onClose={() => { if (recalcing) return; setShowRecalcConfirm(false); setPreview(null); }}
@@ -216,8 +230,13 @@ const SopHeaderToolbar = ({ sop, sopReqs, bomOptions, fabricTypes, salesOrder, o
             {showQuantityPicker && (
                 <FinalizeQuantitiesModal
                     sop={sop}
+                    fabricTypes={fabricTypes}
                     onClose={() => setShowQuantityPicker(false)}
-                    onDone={() => { setShowQuantityPicker(false); onRefresh(); }}
+                    onDone={(warnings) => {
+                        setShowQuantityPicker(false);
+                        onRefresh();
+                        setErr(warnings?.length > 0 ? warnings.join(' ') : null);
+                    }}
                 />
             )}
         </>

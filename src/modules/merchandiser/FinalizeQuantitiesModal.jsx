@@ -10,10 +10,10 @@
 // LinkAndAllocateModal's Step 2 (same per-size confirmation UI at link time).
 
 import { useState } from 'react';
-import { Calculator, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Calculator, Loader2, X } from 'lucide-react';
 import { planningApi } from '../../api/planningApi';
 import { stdSize } from '../../utils/sizeUtils';
-import { dedupeColorsById } from './merchandiserShared';
+import { dedupeColorsById, ClusterMatchPreview, useSecondaryFabricInfo } from './merchandiserShared';
 
 export const orderedTotalFor = (sizes) => (sizes || []).reduce((s, sz) => s + (Number(sz.quantity) || 0), 0);
 
@@ -52,10 +52,21 @@ export const PerSizeQuantityEditor = ({ sizes, overrides, onChange }) => (
     </div>
 );
 
-const FinalizeQuantitiesModal = ({ sop, onClose, onDone }) => {
+const FinalizeQuantitiesModal = ({ sop, fabricTypes = [], onClose, onDone }) => {
     const [qtyOverrides, setQtyOverrides] = useState({}); // { [colorId]: { [sizeKey]: string } }
     const [error,        setError]        = useState(null);
     const [submitting,   setSubmitting]   = useState(false);
+
+    // Whether the linked BOM has a generic SECONDARY fabric line (e.g. lining/
+    // contrast) — if so, this order MUST supply a concrete fabric for it, same as
+    // at initial Link BOM time (see LinkAndAllocateModal.jsx). A BOM can gain this
+    // line AFTER a SOP was already linked to it, so re-finalizing/recalculating
+    // here must ask for it too — otherwise that fabric's requirement silently
+    // disappears (recalcPlanForSop has nothing to resolve it against).
+    const { needsSecondaryFabric, clusters: secondaryClusters } = useSecondaryFabricInfo(sop.bom_id);
+    const [pickedSecondaryFabricTypeId, setPickedSecondaryFabricTypeId] = useState(
+        sop.secondary_fabric_type_id ? String(sop.secondary_fabric_type_id) : ''
+    );
 
     const setSizeQty = (colorId, sizeKey, value) => {
         setQtyOverrides(prev => ({ ...prev, [colorId]: { ...(prev[colorId] || {}), [sizeKey]: value } }));
@@ -75,9 +86,27 @@ const FinalizeQuantitiesModal = ({ sop, onClose, onDone }) => {
                 setSubmitting(false);
                 return;
             }
+            if (needsSecondaryFabric && !pickedSecondaryFabricTypeId) {
+                setError('This BOM has a generic Secondary Fabric line — pick the secondary fabric for this order first.');
+                setSubmitting(false);
+                return;
+            }
+            // Re-post the (unchanged) bom_id together with the secondary fabric type —
+            // linkBom is the only endpoint that persists secondary_fabric_type_id, and
+            // is safe to call again with the same BOM (see productionPlanningController.js).
+            if (needsSecondaryFabric) {
+                await planningApi.linkBom(sop.id, {
+                    bom_id: sop.bom_id,
+                    secondary_fabric_type_id: parseInt(pickedSecondaryFabricTypeId),
+                });
+            }
             await planningApi.finalizeQuantities(sop.id, { quantities });
-            await planningApi.calculateRequirements(sop.id);
-            onDone();
+            const calcRes  = await planningApi.calculateRequirements(sop.id);
+            const calcData = calcRes?.data?.data ?? calcRes?.data;
+            if (calcData?.warnings?.length > 0) {
+                console.warn('%c⚠ calculate-requirements warnings for SOP ' + sop.id + ':', 'color:#b91c1c;font-weight:bold', calcData.warnings);
+            }
+            onDone(calcData?.warnings);
         } catch (e) {
             setError(e?.response?.data?.error || e?.response?.data?.message || 'Failed to save quantities');
             setSubmitting(false);
@@ -108,6 +137,33 @@ const FinalizeQuantitiesModal = ({ sop, onClose, onDone }) => {
                         <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
                             No BOM linked. Link a BOM to this product line first.
                         </p>
+                    )}
+
+                    {/* Secondary fabric — only when the linked BOM has a generic SECONDARY line.
+                        Required even here (not just at initial Link BOM time) because the BOM
+                        can gain this line after the SOP was already linked to it. */}
+                    {needsSecondaryFabric && (
+                        <div className="p-3 bg-violet-50 border border-violet-200 rounded-xl">
+                            <p className="text-[10px] font-bold text-violet-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                                {!pickedSecondaryFabricTypeId && <AlertTriangle size={11} className="text-amber-500 shrink-0" />}
+                                Secondary Fabric — required
+                            </p>
+                            <p className="text-[11px] text-violet-600 mb-2">
+                                This BOM has a generic secondary fabric line (e.g. lining/contrast). Pick the actual fabric this order uses for it.
+                            </p>
+                            <select
+                                value={pickedSecondaryFabricTypeId}
+                                onChange={e => setPickedSecondaryFabricTypeId(e.target.value)}
+                                className="w-full border border-violet-300 rounded-lg px-2.5 py-2 text-xs outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+                            >
+                                <option value="">— Select secondary fabric —</option>
+                                {fabricTypes.map(ft => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                            </select>
+                        </div>
+                    )}
+
+                    {secondaryClusters.length > 0 && (
+                        <ClusterMatchPreview clusters={secondaryClusters} sopColors={sop.colors} />
                     )}
 
                     {dedupeColorsById(sop.colors).map(c => {
@@ -154,7 +210,7 @@ const FinalizeQuantitiesModal = ({ sop, onClose, onDone }) => {
                         className="text-sm font-medium text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40">
                         Cancel
                     </button>
-                    <button onClick={handleConfirm} disabled={submitting || !hasBom || (sop.colors || []).length === 0}
+                    <button onClick={handleConfirm} disabled={submitting || !hasBom || (sop.colors || []).length === 0 || (needsSecondaryFabric && !pickedSecondaryFabricTypeId)}
                         className="flex items-center gap-2 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 px-5 py-2.5 rounded-xl transition-colors shadow-sm">
                         {submitting ? <Loader2 size={15} className="animate-spin" /> : <Calculator size={15} />}
                         Confirm & Calculate

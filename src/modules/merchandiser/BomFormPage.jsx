@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
 import { accountingApi } from '../../api/accountingApi';
+import { adminApi } from '../../api/adminApi';
+import { swatchHex } from '../admin/TrimClustersPage';
 
 const genKey = () => `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
@@ -20,7 +22,7 @@ const makeSizeValidator = (sizes) => {
     };
 };
 
-const freshFabric = () => ({ _key: genKey(), fabric_type_id: '', fabric_role: '', consumption_inches: '', comments: '' });
+const freshFabric = () => ({ _key: genKey(), fabric_type_id: '', fabric_role: '', consumption_inches: '', comments: '', color_cluster_ids: [] });
 
 // A fabric line is either a specific fabric_type_id OR a generic fabric_role
 // (PRIMARY/SECONDARY — "whatever fabric this order uses for that role", resolved
@@ -81,7 +83,79 @@ const AddBtn = ({ onClick, label }) => (
 // One average per-piece consumption per fabric (or PRIMARY/SECONDARY generic
 // role), common across the whole BOM regardless of which marker/ratio group is
 // eventually used to cut it — not nested under a ratio group.
-const FabricConsumptionsSection = ({ fabrics, onChange, fabricTypes, genericFabricOnly }) => {
+// Attached color-cluster rules for one SECONDARY fabric line — more than one can
+// be attached at once (e.g. "dark colors -> black" AND "light colors -> white"
+// on the same interlining line), each resolved independently per order color at
+// calculation time (see productionPlanningController.js's resolveEffectiveColorId).
+// Only fallback-mode clusters (a single target color) are offered — mesh clusters
+// have no single color to resolve to and are rejected server-side too.
+const ClusterRulesEditor = ({ attachedIds, fallbackClusters, onChange }) => {
+    const [overlapWarning, setOverlapWarning] = useState(null);
+
+    const attached  = attachedIds.map(id => fallbackClusters.find(c => String(c.id) === String(id))).filter(Boolean);
+    const available = fallbackClusters.filter(c => !attachedIds.includes(String(c.id)));
+
+    const removeCluster = (id) => {
+        setOverlapWarning(null);
+        onChange(attachedIds.filter(a => a !== String(id)));
+    };
+
+    const addCluster = (idStr) => {
+        if (!idStr) return;
+        const candidate = fallbackClusters.find(c => String(c.id) === idStr);
+        const candidateMembers = new Set((candidate?.members || []).map(m => String(m.fabric_color_id)));
+        // Soft client-side check — instant feedback only; the save call is the real
+        // gate and will reject overlapping clusters with the same authoritative check.
+        const conflicts = new Set();
+        for (const a of attached) {
+            for (const m of (a.members || [])) {
+                if (candidateMembers.has(String(m.fabric_color_id))) conflicts.add(m.color_name);
+            }
+        }
+        setOverlapWarning(conflicts.size > 0
+            ? `${[...conflicts].join(', ')} already covered by another rule on this line — saving will be rejected until that's resolved.`
+            : null);
+        onChange([...attachedIds, idStr]);
+    };
+
+    return (
+        <div className="mt-1.5 pl-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+                {attached.map(c => (
+                    <span key={c.id} className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full pl-1 pr-1.5 py-0.5">
+                        <span className="w-2.5 h-2.5 rounded-full border border-slate-300 shrink-0"
+                            style={{ background: swatchHex({ color_name: c.target_color_name, color_number: c.target_color_number }) }} />
+                        {c.name} → {c.target_color_name}{c.target_color_number ? ` (${c.target_color_number})` : ''}
+                        <button type="button" onClick={() => removeCluster(c.id)} className="text-indigo-400 hover:text-red-500 ml-0.5">
+                            <X size={10} />
+                        </button>
+                    </span>
+                ))}
+                {available.length > 0 && (
+                    <select value="" onChange={e => addCluster(e.target.value)}
+                        className="text-[10px] font-bold text-violet-600 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-full px-2 py-0.5 outline-none cursor-pointer">
+                        <option value="">+ Add color rule</option>
+                        {available.map(c => (
+                            <option key={c.id} value={c.id}>
+                                {c.name} → {c.target_color_name}{c.target_color_number ? ` (${c.target_color_number})` : ''}
+                            </option>
+                        ))}
+                    </select>
+                )}
+                {attached.length === 0 && available.length === 0 && (
+                    <span className="text-[10px] text-slate-400 italic">No fallback color clusters defined yet.</span>
+                )}
+            </div>
+            {overlapWarning && (
+                <p className="text-[10px] text-amber-600 font-bold mt-1 flex items-center gap-1">
+                    <AlertTriangle size={10} className="shrink-0" /> {overlapWarning}
+                </p>
+            )}
+        </div>
+    );
+};
+
+const FabricConsumptionsSection = ({ fabrics, onChange, fabricTypes, genericFabricOnly, colorClusters }) => {
     const addFab = () => onChange([...fabrics, freshFabric()]);
     const removeFab = (fIdx) => onChange(fabrics.filter((_, i) => i !== fIdx));
     const updateFab = (fIdx, field, val) => {
@@ -94,6 +168,11 @@ const FabricConsumptionsSection = ({ fabrics, onChange, fabricTypes, genericFabr
         fabs[fIdx] = nextFc;
         onChange(fabs);
     };
+
+    // Only fallback-mode clusters (a single target color) can answer "which
+    // color should this line use" — mesh clusters (no target) are excluded;
+    // the backend rejects them defensively too if one somehow got picked.
+    const fallbackClusters = (colorClusters || []).filter(c => c.target_fabric_color_id != null);
 
     return (
         <Section title="Fabric Consumptions" action={<AddBtn onClick={addFab} label="Add Fabric" />}>
@@ -113,38 +192,47 @@ const FabricConsumptionsSection = ({ fabrics, onChange, fabricTypes, genericFabr
                     fabrics.filter((_, i) => i !== fIdx).map(f => f.fabric_role).filter(Boolean)
                 );
                 return (
-                    <div key={fc._key} className="flex items-center gap-2 mb-1.5">
-                        <select value={fabricLineValue(fc)}
-                            onChange={e => replaceFab(fIdx, applyFabricLineValue(fc, e.target.value))}
-                            className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 bg-white">
-                            <option value="">— Fabric type —</option>
-                            <optgroup label="Generic — any fabric (set per order)">
-                                {!rolesUsedElsewhere.has('PRIMARY') && <option value={`${ROLE_PREFIX}PRIMARY`}>Primary Fabric</option>}
-                                {!rolesUsedElsewhere.has('SECONDARY') && <option value={`${ROLE_PREFIX}SECONDARY`}>Secondary Fabric</option>}
-                            </optgroup>
-                            {/* New BOMs are generic-only — pinning a concrete fabric type is what forced a
-                                new BOM per fabric at volume. Only offered when editing an older BOM that
-                                still has (or needs) a concrete line. */}
-                            {!genericFabricOnly && (
-                                <optgroup label="Specific fabric type">
-                                    {fabricTypes.map(ft => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                    <div key={fc._key} className="mb-1.5">
+                        <div className="flex items-center gap-2">
+                            <select value={fabricLineValue(fc)}
+                                onChange={e => replaceFab(fIdx, applyFabricLineValue(fc, e.target.value))}
+                                className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 bg-white">
+                                <option value="">— Fabric type —</option>
+                                <optgroup label="Generic — any fabric (set per order)">
+                                    {!rolesUsedElsewhere.has('PRIMARY') && <option value={`${ROLE_PREFIX}PRIMARY`}>Primary Fabric</option>}
+                                    {!rolesUsedElsewhere.has('SECONDARY') && <option value={`${ROLE_PREFIX}SECONDARY`}>Secondary Fabric</option>}
                                 </optgroup>
-                            )}
-                        </select>
-                        <input type="number" min="0" step="0.01" value={fc.consumption_inches}
-                            onChange={e => updateFab(fIdx, 'consumption_inches', e.target.value)}
-                            placeholder="2.5"
-                            className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 text-right"
-                        />
-                        <span className="text-[10px] text-slate-600 shrink-0">in / pc</span>
-                        <input type="text" value={fc.comments || ''}
-                            onChange={e => updateFab(fIdx, 'comments', e.target.value)}
-                            placeholder="Comments (optional)"
-                            className="w-40 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300"
-                        />
-                        <button onClick={() => removeFab(fIdx)} className="text-slate-300 hover:text-red-400 shrink-0">
-                            <X size={12} />
-                        </button>
+                                {/* New BOMs are generic-only — pinning a concrete fabric type is what forced a
+                                    new BOM per fabric at volume. Only offered when editing an older BOM that
+                                    still has (or needs) a concrete line. */}
+                                {!genericFabricOnly && (
+                                    <optgroup label="Specific fabric type">
+                                        {fabricTypes.map(ft => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                                    </optgroup>
+                                )}
+                            </select>
+                            <input type="number" min="0" step="0.001" value={fc.consumption_inches}
+                                onChange={e => updateFab(fIdx, 'consumption_inches', e.target.value)}
+                                placeholder="2.5"
+                                className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300 text-right"
+                            />
+                            <span className="text-[10px] text-slate-600 shrink-0">in / pc</span>
+                            <input type="text" value={fc.comments || ''}
+                                onChange={e => updateFab(fIdx, 'comments', e.target.value)}
+                                placeholder="Comments (optional)"
+                                className="w-40 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-violet-300"
+                            />
+                            <button onClick={() => removeFab(fIdx)} className="text-slate-300 hover:text-red-400 shrink-0">
+                                <X size={12} />
+                            </button>
+                        </div>
+                        {fc.fabric_role === 'SECONDARY' && (
+                            <ClusterRulesEditor
+                                attachedIds={fc.color_cluster_ids || []}
+                                fallbackClusters={fallbackClusters}
+                                onChange={(ids) => updateFab(fIdx, 'color_cluster_ids', ids)}
+                            />
+                        )}
                     </div>
                 );
             })}
@@ -442,7 +530,7 @@ const MaterialCard = ({ mc, mIdx, trimItems, sizes, productStages, expanded, onT
                 <div className="w-16 shrink-0 text-right" title="Effective qty = qty × (1 + wastage%)">
                     <span className="text-xs text-slate-500">
                         {mc.calculation_type === 'FIXED'
-                            ? (fixedEffQty != null ? fixedEffQty.toFixed(2) : '—')
+                            ? (fixedEffQty != null ? fixedEffQty.toFixed(3) : '—')
                             : '—'}
                     </span>
                 </div>
@@ -552,7 +640,7 @@ const MaterialCard = ({ mc, mIdx, trimItems, sizes, productStages, expanded, onT
                                 />
                                 {fixedEffQty != null && (
                                     <p className="text-[10px] text-slate-600 mt-1">
-                                        Effective: {fixedEffQty.toFixed(2)}{uom ? ` ${uom}` : ''} (with wastage)
+                                        Effective: {fixedEffQty.toFixed(3)}{uom ? ` ${uom}` : ''} (with wastage)
                                     </p>
                                 )}
                             </div>
@@ -662,7 +750,7 @@ const MaterialCard = ({ mc, mIdx, trimItems, sizes, productStages, expanded, onT
                                                     {(() => {
                                                         const eff = effectiveQty(sc.quantity, mc.wastage_percentage);
                                                         return eff != null ? (
-                                                            <span className="text-[9px] text-slate-600 block text-right mt-0.5">= {eff.toFixed(2)}</span>
+                                                            <span className="text-[9px] text-slate-600 block text-right mt-0.5">= {eff.toFixed(3)}</span>
                                                         ) : null;
                                                     })()}
                                                 </td>
@@ -720,7 +808,7 @@ export default function BomFormPage() {
     }));
 
     const [form, setForm] = useState(initialData.form);
-    const [formMeta, setFormMeta] = useState({ products: [], fabricTypes: [], trimItems: [], sizes: [] });
+    const [formMeta, setFormMeta] = useState({ products: [], fabricTypes: [], trimItems: [], sizes: [], colorClusters: [] });
     const [loading, setLoading] = useState(isEdit || !!duplicateFromId);
     const [saving, setSaving] = useState(false);
     const [err, setErr] = useState(null);
@@ -768,8 +856,8 @@ export default function BomFormPage() {
     };
 
     useEffect(() => {
-        Promise.all([bomApi.getFormData(), accountingApi.getSizes()])
-            .then(([formRes, sizesRes]) => {
+        Promise.all([bomApi.getFormData(), accountingApi.getSizes(), adminApi.trimClusters.list(false)])
+            .then(([formRes, sizesRes, clustersRes]) => {
                 console.log('[BOM] raw form-data response:', formRes.data);
                 console.log('[BOM] raw sizes response:', sizesRes.data);
                 const d = formRes.data?.data ?? formRes.data ?? {};
@@ -778,6 +866,7 @@ export default function BomFormPage() {
                     fabricTypes: d.fabricTypes || [],
                     trimItems:   d.trimItems   || [],
                     sizes:       sizesRes.data?.data ?? sizesRes.data ?? [],
+                    colorClusters: clustersRes.data?.data ?? clustersRes.data ?? [],
                 });
             })
             .catch(() => {});
@@ -830,6 +919,7 @@ export default function BomFormPage() {
                         fabric_role: fc.fabric_role || '',
                         consumption_inches: fc.consumption_inches || '',
                         comments: fc.comments || '',
+                        color_cluster_ids: (fc.color_clusters || []).map(c => String(c.id)),
                     })),
                     material_consumptions: (bom.material_consumptions || []).map(mc => ({
                         _key: genKey(),
@@ -873,6 +963,7 @@ export default function BomFormPage() {
                         fabric_role: fc.fabric_role || '',
                         consumption_inches: fc.consumption_inches || '',
                         comments: fc.comments || '',
+                        color_cluster_ids: (fc.color_clusters || []).map(c => String(c.id)),
                     })),
                     material_consumptions: (bom.material_consumptions || []).map(mc => ({
                         _key: genKey(),
@@ -951,6 +1042,7 @@ export default function BomFormPage() {
             fabric_role: fc.fabric_role || null,
             consumption_inches: parseFloat(fc.consumption_inches) || null,
             comments: fc.comments?.trim() || null,
+            color_cluster_ids: (fc.color_cluster_ids || []).map(id => parseInt(id)),
         })),
         material_consumptions: form.material_consumptions.map(mc => ({
             trim_item_id: parseInt(mc.trim_item_id),
@@ -1247,6 +1339,7 @@ export default function BomFormPage() {
                             onChange={fabs => setForm(f => ({ ...f, fabric_consumptions: fabs }))}
                             fabricTypes={formMeta.fabricTypes}
                             genericFabricOnly={!isEdit}
+                            colorClusters={formMeta.colorClusters}
                         />
 
                     </>
@@ -1379,25 +1472,55 @@ export default function BomFormPage() {
                                 {(form.fabric_consumptions || []).length === 0 ? (
                                     <p className="text-xs text-slate-400 italic">None added.</p>
                                 ) : (
-                                    <ul className="space-y-1">
-                                        {form.fabric_consumptions.map(fc => (
-                                            <li key={fc._key} className="text-xs text-slate-700 flex items-center gap-2 flex-wrap">
-                                                <span className="font-bold">
-                                                    {fc.fabric_role
-                                                        ? (fc.fabric_role === 'PRIMARY' ? 'Primary Fabric' : 'Secondary Fabric')
-                                                        : (formMeta.fabricTypes.find(ft => String(ft.id) === String(fc.fabric_type_id))?.name || '—')}
-                                                </span>
-                                                <span className="text-slate-500">{fc.consumption_inches || 0} in/pc</span>
-                                                {fc.comments && <span className="text-slate-400 italic">— {fc.comments}</span>}
-                                            </li>
-                                        ))}
-                                    </ul>
+                                    <div className="overflow-x-auto rounded-lg border border-slate-200">
+                                        <table className="w-full text-xs">
+                                            <thead>
+                                                <tr className="text-slate-500 font-bold bg-slate-50 border-b border-slate-200">
+                                                    <th className="text-left py-1.5 px-3">Fabric</th>
+                                                    <th className="text-right py-1.5 px-3">Consumption (in/pc)</th>
+                                                    <th className="text-left py-1.5 px-3">Color Rule</th>
+                                                    <th className="text-left py-1.5 px-3">Comments</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {form.fabric_consumptions.map(fc => {
+                                                    const clusters = (fc.color_cluster_ids || [])
+                                                        .map(id => (formMeta.colorClusters || []).find(c => String(c.id) === String(id)))
+                                                        .filter(Boolean);
+                                                    return (
+                                                        <tr key={fc._key} className="border-b border-slate-100 last:border-0">
+                                                            <td className="py-1.5 px-3 font-bold text-slate-700">
+                                                                {fc.fabric_role
+                                                                    ? (fc.fabric_role === 'PRIMARY' ? 'Primary Fabric' : 'Secondary Fabric')
+                                                                    : (formMeta.fabricTypes.find(ft => String(ft.id) === String(fc.fabric_type_id))?.name || '—')}
+                                                            </td>
+                                                            <td className="py-1.5 px-3 text-right text-slate-700">{fc.consumption_inches || 0}</td>
+                                                            <td className="py-1.5 px-3">
+                                                                {clusters.length > 0 ? (
+                                                                    <div className="flex flex-wrap gap-1">
+                                                                        {clusters.map(cluster => (
+                                                                            <span key={cluster.id} className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5">
+                                                                                <span className="w-2.5 h-2.5 rounded-full border border-slate-300 shrink-0"
+                                                                                    style={{ background: swatchHex({ color_name: cluster.target_color_name, color_number: cluster.target_color_number }) }} />
+                                                                                {cluster.name} → {cluster.target_color_name}
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : <span className="text-slate-300">—</span>}
+                                                            </td>
+                                                            <td className="py-1.5 px-3 text-slate-400 italic">{fc.comments || '—'}</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 )}
                             </div>
 
                             <div>
                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">Materials by Stage</p>
-                                <div className="space-y-3">
+                                <div className="space-y-4">
                                     {steps.filter(s => s.kind === 'stage').map(s => {
                                         const stageId = s.production_line_type_id ? String(s.production_line_type_id) : '';
                                         const mats = form.material_consumptions.filter(mc => String(mc.production_line_type_id || '') === stageId);
@@ -1409,23 +1532,57 @@ export default function BomFormPage() {
                                                     {mats.length === 0 && <span className="text-[10px] text-amber-600 italic">— empty</span>}
                                                 </div>
                                                 {mats.length > 0 && (
-                                                    <ul className="space-y-0.5 pl-3 border-l-2 border-slate-100">
-                                                        {mats.map(mc => {
-                                                            const trim = formMeta.trimItems.find(t => String(t.id) === String(mc.trim_item_id));
-                                                            return (
-                                                                <li key={mc._key} className="text-xs text-slate-600 flex items-center gap-2 flex-wrap">
-                                                                    <span className="font-bold text-slate-700">{trim?.name || 'Unnamed'}</span>
-                                                                    <span className="text-slate-400">
-                                                                        {mc.calculation_type === 'FIXED'
-                                                                            ? `${mc.fixed_quantity || 0}${trim?.unit_of_measure ? ` ${trim.unit_of_measure}` : ''}`
-                                                                            : 'Per Size'}
-                                                                    </span>
-                                                                    {mc.wastage_percentage ? <span className="text-slate-400">· {mc.wastage_percentage}% wastage</span> : null}
-                                                                    {mc.comments && <span className="text-slate-400 italic">— {mc.comments}</span>}
-                                                                </li>
-                                                            );
-                                                        })}
-                                                    </ul>
+                                                    <div className="overflow-x-auto rounded-lg border border-slate-200">
+                                                        <table className="w-full text-xs">
+                                                            <thead>
+                                                                <tr className="text-slate-500 font-bold bg-slate-50 border-b border-slate-200">
+                                                                    <th className="text-left py-1.5 px-3">Trim Item</th>
+                                                                    <th className="text-left py-1.5 px-3">Calculation</th>
+                                                                    <th className="text-left py-1.5 px-3">Quantity</th>
+                                                                    <th className="text-right py-1.5 px-3">Wastage %</th>
+                                                                    <th className="text-left py-1.5 px-3">Placement</th>
+                                                                    <th className="text-left py-1.5 px-3">Comments</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {mats.map(mc => {
+                                                                    const trim = formMeta.trimItems.find(t => String(t.id) === String(mc.trim_item_id));
+                                                                    const uom  = trim?.unit_of_measure ? ` ${trim.unit_of_measure}` : '';
+                                                                    return (
+                                                                        <tr key={mc._key} className="border-b border-slate-100 last:border-0 align-top">
+                                                                            <td className="py-1.5 px-3 font-bold text-slate-700 whitespace-nowrap">{trim?.name || 'Unnamed'}</td>
+                                                                            <td className="py-1.5 px-3 text-slate-500">{mc.calculation_type === 'FIXED' ? 'Fixed' : 'Per Size'}</td>
+                                                                            <td className="py-1.5 px-3 text-slate-700">
+                                                                                {mc.calculation_type === 'FIXED' ? (
+                                                                                    <span>{mc.fixed_quantity || 0}{uom}</span>
+                                                                                ) : (
+                                                                                    <div className="flex flex-wrap gap-1">
+                                                                                        {mc.size_consumptions.length === 0
+                                                                                            ? <span className="text-slate-300 italic">No sizes</span>
+                                                                                            : mc.size_consumptions.map(sc => (
+                                                                                                <span key={sc._key} className="inline-flex items-center gap-1 text-[10px] font-medium bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5">
+                                                                                                    {sc.size}
+                                                                                                    {sc.target_variant_size && sc.target_variant_size !== sc.size && (
+                                                                                                        <span className="text-slate-400">→{sc.target_variant_size}</span>
+                                                                                                    )}
+                                                                                                    <span className="text-slate-400">:</span>
+                                                                                                    <span className={sc.quantity === '' || sc.quantity == null ? 'text-amber-600 font-bold' : ''}>
+                                                                                                        {sc.quantity === '' || sc.quantity == null ? '—' : sc.quantity}{uom}
+                                                                                                    </span>
+                                                                                                </span>
+                                                                                            ))}
+                                                                                    </div>
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="py-1.5 px-3 text-right text-slate-500">{mc.wastage_percentage || 0}</td>
+                                                                            <td className="py-1.5 px-3 text-slate-500">{mc.placement_description || '—'}</td>
+                                                                            <td className="py-1.5 px-3 text-slate-400 italic">{mc.comments || '—'}</td>
+                                                                        </tr>
+                                                                    );
+                                                                })}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
                                                 )}
                                             </div>
                                         );

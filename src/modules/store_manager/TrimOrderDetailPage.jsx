@@ -175,7 +175,7 @@ const BomRefRow = ({ item, legacy = false }) => {
                             {item.size_consumptions.map(sc => (
                                 <span key={sc.size} className="inline-flex items-baseline gap-1 bg-blue-50/60 border border-blue-100 rounded px-1.5 py-0.5 text-[11px]">
                                     <span className="font-bold text-gray-700">{sc.size}</span>
-                                    <span className="font-mono text-blue-700">{Number(sc.quantity).toFixed(2)}</span>
+                                    <span className="font-mono text-blue-700">{Number(sc.quantity).toFixed(3)}</span>
                                 </span>
                             ))}
                         </div>

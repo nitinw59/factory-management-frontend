@@ -4,14 +4,15 @@
 // marker involved). On confirm: links the BOM, finalizes quantities, calculates
 // requirements. Wired directly from SopHeaderToolbar's "Link/Change BOM" button.
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Eye, Link2, Loader2, X } from 'lucide-react';
 import { planningApi } from '../../api/planningApi';
 import { bomApi } from '../../api/bomApi';
+import { adminApi } from '../../api/adminApi';
 import { stdSize } from '../../utils/sizeUtils';
 import { logBomBrief } from './BomPreviewModal';
 import { colorTotalFor, PerSizeQuantityEditor } from './FinalizeQuantitiesModal';
-import { dedupeColorsById } from './merchandiserShared';
+import { dedupeColorsById, ClusterMatchPreview } from './merchandiserShared';
 
 const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, onLink, onPreview }) => {
     const [step,            setStep]            = useState(1);
@@ -63,6 +64,26 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
         fc => fc.fabric_role === 'SECONDARY'
     );
 
+    // If that SECONDARY line has Color Cluster rule(s) attached (see BomFormPage.jsx —
+    // a line can carry more than one, e.g. dark->black AND light->white at once),
+    // load each cluster's members/target so the panel below can show which of THIS
+    // order's colors will resolve to which rule's target color.
+    const secondaryColorClusterIds = (pickedBomDetail?.fabric_consumptions?.find(
+        fc => fc.fabric_role === 'SECONDARY'
+    )?.color_clusters || []).map(c => c.id);
+    const secondaryColorClusterIdsKey = secondaryColorClusterIds.join(',');
+    const [secondaryClusters, setSecondaryClusters] = useState([]);
+    useEffect(() => {
+        let cancelled = false;
+        setSecondaryClusters([]);
+        if (secondaryColorClusterIds.length === 0) return undefined;
+        Promise.all(secondaryColorClusterIds.map(id =>
+            adminApi.trimClusters.get(id).then(res => res.data?.data ?? res.data ?? null).catch(() => null)
+        )).then(clusters => { if (!cancelled) setSecondaryClusters(clusters.filter(Boolean)); });
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [secondaryColorClusterIdsKey]);
+
     const pickBom = async (bomId) => {
         setPickedBomId(bomId);
         setPickedBomDetail(null);
@@ -107,7 +128,10 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
                 console.warn('%c⚠ calculate-requirements produced ZERO fabric rows for SOP ' + sop.id +
                     ' — check the BOM brief above: it likely has no fabric_consumptions.', 'color:#b91c1c;font-weight:bold');
             }
-            onDone();
+            if (calcData?.warnings?.length > 0) {
+                console.warn('%c⚠ calculate-requirements warnings for SOP ' + sop.id + ':', 'color:#b91c1c;font-weight:bold', calcData.warnings);
+            }
+            onDone(calcData?.warnings);
         } catch (e) {
             setError(e?.response?.data?.error || e?.response?.data?.message || 'Failed to link and allocate');
             setSubmitting(false);
@@ -241,6 +265,11 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
                                     <option value="">— Select secondary fabric —</option>
                                     {fabricTypes.map(ft => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
                                 </select>
+                                {secondaryColorClusterIds.length > 0 && (
+                                    <div className="mt-2">
+                                        <ClusterMatchPreview clusters={secondaryClusters} sopColors={sop.colors} />
+                                    </div>
+                                )}
                             </div>
                         )}
                     </>)}

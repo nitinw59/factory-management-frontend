@@ -26,8 +26,35 @@ export const buildGridColumns = (sop) =>
         color_number:    c.color_number,
     }));
 
+// A fabric requirement's color isn't always one of the order's own colors: a
+// SECONDARY BOM line resolved via a Color Cluster rule (see BomFormPage.jsx,
+// productionPlanningController.js's resolveEffectiveColorId) lands at that
+// rule's fixed target color instead (e.g. BLACK for dark colors, WHITE for
+// light ones) — which is almost never one of sop.colors. Building columns from
+// sop.colors alone used to drop these rows into an unreachable "orphan" cell
+// with no click handler, so Reserve could never be opened for them. Instead,
+// add one more column for every distinct color that actually shows up in the
+// requirements but isn't already an order color — flagged isClusterColor so
+// the grid can badge it — sourced from that row's own color_name/color_number
+// (already returned by the backend), no extra fetch needed.
+const withClusterColumns = (orderColumns, requirements) => {
+    const orderIds = new Set(orderColumns.map(c => String(c.fabric_color_id)));
+    const extra = new Map(); // color_id -> column
+    requirements.forEach(req => {
+        const id = String(req.fabric_color_id);
+        if (orderIds.has(id) || extra.has(id)) return;
+        extra.set(id, {
+            fabric_color_id: req.fabric_color_id,
+            color_name:      req.color_name,
+            color_number:    req.color_number,
+            isClusterColor:  true,
+        });
+    });
+    return [...orderColumns, ...extra.values()];
+};
+
 export const buildFabricGridModel = (sop, fabricRequirements = []) => {
-    const columns = buildGridColumns(sop);
+    const columns = withClusterColumns(buildGridColumns(sop), fabricRequirements);
     const columnIds = new Set(columns.map(c => String(c.fabric_color_id)));
 
     const rowsByType = new Map();
@@ -46,6 +73,9 @@ export const buildFabricGridModel = (sop, fabricRequirements = []) => {
         if (columnIds.has(String(req.fabric_color_id))) {
             row.cellsByColorId[req.fabric_color_id] = req;
         } else {
+            // Defensive fallback only — every color present on any requirement row
+            // is now a real column (see withClusterColumns above), so this should
+            // stay empty in practice; kept for genuinely malformed data.
             row.orphanCells.push(req);
         }
     });

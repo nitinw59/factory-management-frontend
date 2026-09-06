@@ -17,7 +17,9 @@ export const adminApi = {
     deleteCompanyProfileImage: (kind) =>
         api.delete(`/admin/company-profile/image/${kind}`),
 
-    // Trim substitute clusters (factory_admin only)
+    // Trim substitute clusters — reads open to merchandiser/cutting_manager/store_manager
+    // too (BomFormPage.jsx's Color Cluster picker needs to list them); mutations
+    // (create/update/delete/members) stay factory_admin only — see adminLineRoutes.js.
     trimClusters: {
         list:       (includeInactive = false) => api.get('/admin/trim-clusters', { params: { include_inactive: includeInactive } }),
         get:        (id) => api.get(`/admin/trim-clusters/${id}`),

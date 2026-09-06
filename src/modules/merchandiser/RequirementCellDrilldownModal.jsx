@@ -197,7 +197,7 @@ const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone
 
     const handleRelease = async (rs) => {
         const amount = Number(rs.meters_reserved ?? rs.quantity_reserved ?? 0);
-        if (!window.confirm(`Release this reservation of ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${unit}? The reserved stock will be freed.`)) return;
+        if (!window.confirm(`Release this reservation of ${amount.toLocaleString(undefined, { maximumFractionDigits: 3 })} ${unit}? The reserved stock will be freed.`)) return;
         setReleasingId(rs.id);
         setErr(null);
         try {
@@ -275,7 +275,7 @@ const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone
                         </div>
                         <h2 className="text-base font-black text-slate-800 mt-1 truncate">{rowLabel}</h2>
                         <p className="text-xs text-slate-500 mt-0.5 tabular-nums">
-                            {reserved.toLocaleString(undefined, { maximumFractionDigits: 2 })} / {required.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit} reserved
+                            {reserved.toLocaleString(undefined, { maximumFractionDigits: 3 })} / {required.toLocaleString(undefined, { maximumFractionDigits: 3 })} {unit} reserved
                         </p>
                     </div>
                     <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-full transition shrink-0">
@@ -319,10 +319,10 @@ const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone
                                             )}
                                             <div className="flex-1 min-w-0">
                                                 <p className="font-bold text-slate-800 tabular-nums">
-                                                    {amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
+                                                    {amount.toLocaleString(undefined, { maximumFractionDigits: 3 })} {unit}
                                                     {rollTotal > 0 && (
                                                         <span className="font-normal text-slate-400 ml-1">
-                                                            of {rollTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })} {unit}
+                                                            of {rollTotal.toLocaleString(undefined, { maximumFractionDigits: 3 })} {unit}
                                                         </span>
                                                     )}
                                                 </p>

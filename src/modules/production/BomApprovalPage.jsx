@@ -6,6 +6,7 @@ import {
     X, ThumbsUp, ThumbsDown, Layers, Tag, ShieldCheck, Info, ArrowRight,
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
+import { swatchHex } from '../admin/TrimClustersPage';
 
 // ─── status config ─────────────────────────────────────────────────────────────
 
@@ -251,10 +252,14 @@ const BomDetail = ({ bomId }) => {
                     </p>
                     <div className="flex flex-wrap gap-1.5">
                         {bom.fabric_consumptions.map((fc, j) => (
-                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold" title={fc.comments || undefined}>
-                                {fc.fabric_role ? `${fc.fabric_role} (generic)` : (fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`)}
-                                {fc.consumption_inches ? `: ${fc.consumption_inches}" / pc` : ''}
-                                {fc.comments && <span className="font-normal text-sky-500"> — {fc.comments}</span>}
+                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold inline-flex items-center gap-1.5" title={fc.comments || undefined}>
+                                <span>
+                                    {fc.fabric_role ? `${fc.fabric_role} (generic)` : (fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`)}
+                                    {fc.consumption_inches ? `: ${fc.consumption_inches}" / pc` : ''}
+                                    {fc.wastage_percentage ? ` +${fc.wastage_percentage}% wastage` : ''}
+                                    {fc.comments && <span className="font-normal text-sky-500"> — {fc.comments}</span>}
+                                </span>
+                                <ClusterChip f={fc} />
                             </span>
                         ))}
                     </div>
@@ -386,8 +391,19 @@ const materialChanged = (o, n) => {
     return os !== ns;
 };
 
-const fabricKey     = f => String(f.fabric_type_id);
-const fabricChanged = (o, n) => String(o.consumption_inches) !== String(n.consumption_inches);
+// A fabric consumption line is either a generic role (PRIMARY/SECONDARY,
+// fabric_type_id NULL) or a specific fabric_type_id (role NULL) — never
+// both. Keying on fabric_type_id alone collapsed every generic-role line to
+// the same "null" key, so a BOM with both a PRIMARY and a SECONDARY generic
+// line (the common case) hid one of the two from the diff/review entirely.
+const fabricKey = f => `${f.fabric_role || ''}:${f.fabric_type_id ?? ''}`;
+// A line can have several attached color-cluster rules (see BomFormPage.jsx) —
+// compare the SET of attached cluster ids, order-independent, not one value.
+const clusterIdSetKey = f => (f.color_clusters || []).map(c => c.id).sort((a, b) => a - b).join(',');
+const fabricChanged = (o, n) =>
+    String(o.consumption_inches) !== String(n.consumption_inches) ||
+    String(o.wastage_percentage ?? 0) !== String(n.wastage_percentage ?? 0) ||
+    clusterIdSetKey(o) !== clusterIdSetKey(n);
 
 // Fabric consumption is BOM-level now (see fabricKey/fabricChanged above), not
 // part of a ratio group — only its sizes distinguish one version from another.
@@ -415,6 +431,21 @@ const DiffBadge = ({ type }) => {
 
 // ─── fabric consumption diff chips ────────────────────────────────────────────
 
+// A generic-role line (PRIMARY/SECONDARY) has no fabric_type_id/name to
+// fall back on — label it by role instead of printing "Fabric #null".
+const fabricDisplayName = f =>
+    f.fabric_role
+        ? (f.fabric_role === 'PRIMARY' ? 'Primary Fabric' : 'Secondary Fabric')
+        : (f.fabric_type_name || `Fabric #${f.fabric_type_id}`);
+
+const ClusterChip = ({ f }) => (f.color_clusters || []).map(c => (
+    <span key={c.id} className="inline-flex items-center gap-1 text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5">
+        <span className="w-2 h-2 rounded-full border border-slate-300 shrink-0"
+            style={{ background: swatchHex({ color_name: c.target_color_name, color_number: c.target_color_number }) }} />
+        {c.name} → {c.target_color_name}
+    </span>
+));
+
 const FabricDiffChips = ({ oldFabrics = [], newFabrics = [], isFirstApproval }) => {
     const list = isFirstApproval
         ? newFabrics.map(f => ({ type: 'same', old: f, new: f }))
@@ -427,28 +458,32 @@ const FabricDiffChips = ({ oldFabrics = [], newFabrics = [], isFirstApproval }) 
             <span className="text-[9px] font-bold text-slate-400 uppercase self-center mr-1">Fabric</span>
             {list.map((entry, j) => {
                 const f    = entry.new || entry.old;
-                const name = f.fabric_type_name || `Fabric #${f.fabric_type_id}`;
+                const name = fabricDisplayName(f);
+                const detail = (row) => `${row.consumption_inches || 0}"/pc${row.wastage_percentage ? ` +${row.wastage_percentage}% wastage` : ''}`;
                 if (entry.type === 'same') return (
-                    <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold">
-                        {name}{f.consumption_inches ? `: ${f.consumption_inches}"` : ''}
+                    <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold inline-flex items-center gap-1.5">
+                        {name}: {detail(f)}
+                        <ClusterChip f={f} />
                     </span>
                 );
                 if (entry.type === 'removed') return (
                     <span key={j} className="bg-red-50 text-red-500 border border-red-200 rounded px-2 py-0.5 text-[10px] font-bold line-through">
-                        {name}{entry.old.consumption_inches ? `: ${entry.old.consumption_inches}"` : ''}
+                        {name}: {detail(entry.old)}
                     </span>
                 );
                 if (entry.type === 'added') return (
-                    <span key={j} className="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-2 py-0.5 text-[10px] font-bold">
-                        + {name}{f.consumption_inches ? `: ${f.consumption_inches}"` : ''}
+                    <span key={j} className="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-2 py-0.5 text-[10px] font-bold inline-flex items-center gap-1.5">
+                        + {name}: {detail(f)}
+                        <ClusterChip f={f} />
                     </span>
                 );
                 // changed — show old → new inline
                 return (
                     <span key={j} className="bg-amber-50 text-amber-700 border border-amber-200 rounded px-2 py-0.5 text-[10px] font-bold inline-flex items-center gap-1">
-                        {name}: {entry.old.consumption_inches}"
+                        {name}: {detail(entry.old)}
                         <ArrowRight size={8} className="shrink-0" />
-                        <span className="text-emerald-600">{entry.new.consumption_inches}"</span>
+                        <span className="text-emerald-600">{detail(entry.new)}</span>
+                        <ClusterChip f={entry.new} />
                     </span>
                 );
             })}

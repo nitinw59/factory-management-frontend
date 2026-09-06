@@ -19,6 +19,7 @@
 // both the debug brief and the confirm modal can consume it uniformly.
 
 import { Loader2, RotateCw, X } from 'lucide-react';
+import { ClusterMatchPreview } from './merchandiserShared';
 
 export const flattenReservations = (res) => {
     if (Array.isArray(res)) return res;
@@ -113,7 +114,7 @@ export const logRecalcBrief = (phase, sop, preview) => {
   }
 };
 
-const RecalculateConfirmModal = ({ preview, sopName, onClose, onConfirm, busy, err }) => {
+const RecalculateConfirmModal = ({ preview, sopName, clusterInfo, sopColors, onClose, onConfirm, busy, err }) => {
     const fabReqs      = preview?.fabric_requirements || [];
     const trimReqs     = preview?.trim_requirements   || [];
     const reservations = flattenReservations(preview?.reservations);
@@ -176,6 +177,8 @@ const RecalculateConfirmModal = ({ preview, sopName, onClose, onConfirm, busy, e
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                    {clusterInfo?.length > 0 && <ClusterMatchPreview clusters={clusterInfo} sopColors={sopColors} />}
+
                     <div className="grid grid-cols-4 gap-2">
                         <Tile label="Fabric reqs"  value={fabricCount}      sub={`${Number(totalMeters).toFixed(1)} m`} />
                         <Tile label="Trim reqs"    value={trimCount}        sub={`${Number(totalQty).toLocaleString()} pcs`} />

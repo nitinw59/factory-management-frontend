@@ -37,11 +37,16 @@ const FabricCell = ({ requirement, onClick }) => {
     );
 };
 
+// Defensive fallback only — every color that shows up on any requirement row
+// is now given a real column (see buildFabricGridModel's withClusterColumns),
+// so this should stay empty in practice. If it ever isn't, it's genuinely
+// malformed data (not, e.g., a Color Cluster's target color — those get their
+// own clickable column now), which is why this stays non-interactive.
 const OrphanCell = ({ requirements }) => (
     <td className="border border-slate-100 p-1 align-top">
         <div
             className="w-full min-w-[110px] rounded-lg border border-dashed border-slate-300 bg-slate-100 px-2.5 py-2 text-slate-400"
-            title="Requirement(s) exist for a color no longer on this order"
+            title="Requirement(s) with no recognizable color — data issue, not reachable here"
         >
             <AlertTriangle size={12} />
             <p className="text-[9px] mt-1">{requirements.length} unmapped</p>
@@ -72,6 +77,12 @@ const FabricRequirementsGrid = ({ sop, fabricRequirements, onCellClick }) => {
                             <th key={col.fabric_color_id} className="border border-slate-100 px-2 py-2 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                                 {col.color_name}
                                 {col.color_number && <span className="block font-mono font-normal normal-case text-slate-400">{col.color_number}</span>}
+                                {col.isClusterColor && (
+                                    <span className="block font-normal normal-case text-[9px] text-indigo-500 mt-0.5"
+                                        title="Not one of this order's own colors — resolved here by a Color Cluster rule on the BOM's secondary fabric line">
+                                        via cluster
+                                    </span>
+                                )}
                             </th>
                         ))}
                     </tr>
