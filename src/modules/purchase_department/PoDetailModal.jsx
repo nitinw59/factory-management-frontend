@@ -430,6 +430,30 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
         }
     }, [notesDraft, po.id, po.notes]);
 
+    // PO's own Expected Delivery date — distinct from the "global T&A end date"
+    // tool above (which retargets LINKED requirements' commit dates and refuses
+    // to run when none are linked yet). This edits purchase_orders.expected_delivery_date
+    // itself, always available regardless of linked requirements.
+    const [dateDraft,  setDateDraft]  = useState(toLocalDateISO(po.expected_delivery_date) || '');
+    const [dateSaving, setDateSaving] = useState(false);
+    const [dateError,  setDateError]  = useState(null);
+    useEffect(() => { setDateDraft(toLocalDateISO(po.expected_delivery_date) || ''); }, [po.id, po.expected_delivery_date]);
+
+    const handleSaveExpectedDate = useCallback(async (value) => {
+        const next = value || null;
+        if ((toLocalDateISO(po.expected_delivery_date) || null) === next) return;   // no-op
+        setDateSaving(true);
+        setDateError(null);
+        try {
+            await purchaseDeptApi.updateOrder(po.id, { expected_delivery_date: next });
+            onUpdated?.();
+        } catch (e) {
+            setDateError(e?.response?.data?.error || e.message || 'Failed to save date');
+        } finally {
+            setDateSaving(false);
+        }
+    }, [po.id, po.expected_delivery_date, onUpdated]);
+
     useEffect(() => {
         let cancelled = false;
         setPendingPrsLoading(true);
@@ -796,8 +820,21 @@ export default function PoDetailModal({ po, onClose, onUpdated }) {
                             <p className="text-sm font-bold text-slate-700 mt-0.5">{fmtDate(po.created_at)}</p>
                         </div>
                         <div className="bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
-                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><Calendar size={10} />Expected Delivery</p>
-                            <p className="text-sm font-bold text-slate-700 mt-0.5">{fmtDate(po.expected_delivery_date)}</p>
+                            <div className="flex items-center justify-between gap-1">
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><Calendar size={10} />Expected Delivery</p>
+                                {dateSaving
+                                    ? <Loader2 size={9} className="animate-spin text-slate-400 shrink-0" />
+                                    : dateError
+                                        ? <span title={dateError}><AlertTriangle size={9} className="text-red-500 shrink-0" /></span>
+                                        : null}
+                            </div>
+                            <input
+                                type="date"
+                                value={dateDraft}
+                                onChange={(e) => { setDateDraft(e.target.value); setDateError(null); }}
+                                onBlur={(e) => handleSaveExpectedDate(e.target.value)}
+                                className="text-sm font-bold text-slate-700 mt-0.5 bg-transparent border-0 p-0 outline-none w-full focus:ring-1 focus:ring-violet-300 rounded"
+                            />
                         </div>
                         <div className="bg-orange-50 border border-orange-100 rounded-xl px-3 py-2">
                             <p className="text-[9px] font-bold text-orange-600 uppercase tracking-wider">Total Value</p>

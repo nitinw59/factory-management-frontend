@@ -541,7 +541,7 @@ function App() {
         <Route path="orders" element={<OrdersPage />} />
         <Route path="orders/:id" element={<PurchaseFlowPage />} />
         <Route path="fabric-rolls" element={<FabricRollManagementPage />} />
-        <Route path="trims-ledger" element={<TrimsLedgerPage />} />
+        <Route path="suppliers" element={<SupplierManagementPage />} />
         <Route path="supplier-color-codes" element={<SupplierColorCodesPage />} />
         <Route path="inwards" element={<InwardsPage />} />
         <Route path="grn-invoices-by-date" element={<GrnInvoiceByDatePage />} />

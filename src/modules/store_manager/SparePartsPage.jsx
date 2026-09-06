@@ -331,7 +331,11 @@ const SparePartsPage = () => {
         return spares.filter(s => {
             const matchSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                                 s.part_number.toLowerCase().includes(searchTerm.toLowerCase());
-            const matchCat = filterCategory ? s.category_id === parseInt(filterCategory) : true;
+            // spare_parts.category_id is BIGINT — the pg driver returns those as
+            // strings, not numbers, so comparing against parseInt(filterCategory)
+            // (a number) never matched via strict equality. Normalize both sides
+            // to strings instead.
+            const matchCat = filterCategory ? String(s.category_id) === String(filterCategory) : true;
             return matchSearch && matchCat;
         });
     }, [spares, searchTerm, filterCategory]);

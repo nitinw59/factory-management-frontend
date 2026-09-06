@@ -51,13 +51,6 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
             : Object.entries(sop.size_breakdown || {}).filter(([, v]) => parseInt(v) > 0),
         [combinedSizeMap, sop.size_breakdown]);
 
-    // Use detailed ratio groups when loaded, fall back to list-level data — shown
-    // as informational context on the BOM picker (actual cutting-layout reference),
-    // not something the merchandiser selects here.
-    const ratioGroups = pickedBomDetail?.ratio_groups
-        || bomOptions.find(b => String(b.id) === pickedBomId)?.ratio_groups
-        || [];
-
     // True once the fully-detailed BOM (with its BOM-level fabric_consumptions) has
     // loaded and at least one line is a generic SECONDARY fabric — requires the picker below.
     const needsSecondaryFabric = !!pickedBomDetail?.fabric_consumptions?.some(
@@ -190,7 +183,6 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
                             <div className="space-y-2">
                                 {bomOptions.map(bom => {
                                     const isSelected = pickedBomId === String(bom.id);
-                                    const rgs        = isSelected ? ratioGroups : (bom.ratio_groups || []);
                                     return (
                                         <div key={bom.id} className={`rounded-xl border transition-all ${
                                             isSelected ? 'border-violet-400 bg-violet-50/60 shadow-sm' : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/20'
@@ -215,31 +207,6 @@ const LinkAndAllocateModal = ({ sop, bomOptions, fabricTypes, onClose, onDone, o
                                                             <Eye size={13} />
                                                         </button>
                                                     </div>
-                                                    {isSelected && loadingDetail ? (
-                                                        <div className="flex items-center gap-1.5 mt-1.5 text-[10px] text-slate-400">
-                                                            <Loader2 size={10} className="animate-spin" /> Loading ratio groups…
-                                                        </div>
-                                                    ) : (
-                                                        <div className="flex flex-wrap gap-1 mt-1.5">
-                                                            {rgs.map((rg, i) => {
-                                                                const items = (rg.items || [])
-                                                                    .map(it => `${stdSize(it.size || '')}×${it.number_of_pieces || 1}`)
-                                                                    .filter(Boolean);
-                                                                return (
-                                                                    <span key={i} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
-                                                                        isSelected
-                                                                            ? 'bg-violet-50 text-violet-700 border-violet-200'
-                                                                            : 'bg-slate-50 text-slate-500 border-slate-200'
-                                                                    }`}>
-                                                                        {rg.ratio_group_name || `Group ${i + 1}`}
-                                                                        {items.length > 0 && (
-                                                                            <span className="font-normal text-[8px] ml-1 opacity-70">{items.join(' ')}</span>
-                                                                        )}
-                                                                    </span>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    )}
                                                 </div>
                                             </label>
                                         </div>

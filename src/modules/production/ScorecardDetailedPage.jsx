@@ -154,8 +154,14 @@ export default function ScorecardDetailedPage() {
 
     return (
         <div className="min-h-screen bg-black text-white">
-            {/* Sticky header */}
-            <div className="sticky top-0 z-20 bg-black/95 backdrop-blur border-b border-gray-800 px-6 py-4">
+            {/* Sticky header — z-10, deliberately BELOW the portal layout's own
+                sticky header (z-20 in AdminLayout.jsx/other layouts). This page
+                is also embedded as /admin/dashboard (and similar portal
+                dashboards) inside a layout that has its own sticky nav header;
+                an equal z-index here used to win the stacking tie on scroll
+                (later in DOM order wins ties), burying the portal's nav links
+                underneath this page's own sticky bar. */}
+            <div className="sticky top-0 z-10 bg-black/95 backdrop-blur border-b border-gray-800 px-6 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
                         <div className="flex items-center gap-3 mb-3">

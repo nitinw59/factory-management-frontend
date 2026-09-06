@@ -60,7 +60,6 @@ export function generateBomExcel(bom) {
                 'Ratio Group': rg.ratio_group_name || '',
                 Size: it.size,
                 Pieces: it.number_of_pieces,
-                'Marker Length (in)': rg.marker_length_inches || '',
                 Notes: rg.notes || '',
             });
         });

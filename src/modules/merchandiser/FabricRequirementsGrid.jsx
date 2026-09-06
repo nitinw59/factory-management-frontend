@@ -4,7 +4,8 @@
 // clickable to drill into detail + reserve. Replaces the old
 // ProductionTrackingModal expand-row list for fabric.
 
-import { AlertTriangle } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, Search } from 'lucide-react';
 import { buildFabricGridModel } from './buildRequirementsGridModel';
 import { getFabricCellStatus, CELL_COLOR_CLS, CELL_COLOR_DOT } from './requirementCellStatus';
 import HorizontalScrollFrame from './HorizontalScrollFrame';
@@ -55,6 +56,7 @@ const OrphanCell = ({ requirements }) => (
 );
 
 const FabricRequirementsGrid = ({ sop, fabricRequirements, onCellClick }) => {
+    const [filterText, setFilterText] = useState('');
     const { columns, rows } = buildFabricGridModel(sop, fabricRequirements);
 
     if (rows.length === 0) {
@@ -65,13 +67,25 @@ const FabricRequirementsGrid = ({ sop, fabricRequirements, onCellClick }) => {
         );
     }
 
+    const q = filterText.trim().toLowerCase();
+    const filteredRows = q ? rows.filter(r => (r.fabric_type_name || '').toLowerCase().includes(q)) : rows;
+
     return (
         <HorizontalScrollFrame>
             <table className="border-collapse w-full">
                 <thead>
                     <tr>
-                        <th className="sticky left-0 z-10 bg-white border border-slate-100 px-3 py-2 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider min-w-[160px]">
-                            Fabric Type
+                        <th className="sticky left-0 z-10 bg-white border border-slate-100 px-3 py-1.5 text-left min-w-[160px]">
+                            <div className="relative">
+                                <Search size={11} className="absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-300" />
+                                <input
+                                    type="text"
+                                    value={filterText}
+                                    onChange={e => setFilterText(e.target.value)}
+                                    placeholder="Filter fabric type…"
+                                    className="w-full pl-5 pr-1.5 py-1 text-[10px] font-bold text-slate-600 uppercase tracking-wider placeholder:font-normal placeholder:normal-case placeholder:text-slate-400 bg-slate-50 border border-slate-200 rounded outline-none focus:ring-1 focus:ring-violet-300 focus:border-violet-300"
+                                />
+                            </div>
                         </th>
                         {columns.map(col => (
                             <th key={col.fabric_color_id} className="border border-slate-100 px-2 py-2 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">
@@ -88,7 +102,14 @@ const FabricRequirementsGrid = ({ sop, fabricRequirements, onCellClick }) => {
                     </tr>
                 </thead>
                 <tbody>
-                    {rows.map(row => (
+                    {filteredRows.length === 0 && (
+                        <tr>
+                            <td colSpan={columns.length + 1} className="text-center py-6 text-xs text-slate-400 italic">
+                                No fabric types match "{filterText}".
+                            </td>
+                        </tr>
+                    )}
+                    {filteredRows.map(row => (
                         <tr key={row.rowKey}>
                             <td className="sticky left-0 z-10 bg-white border border-slate-100 px-3 py-2 text-xs font-bold text-slate-700 align-top">
                                 {row.fabric_type_name}

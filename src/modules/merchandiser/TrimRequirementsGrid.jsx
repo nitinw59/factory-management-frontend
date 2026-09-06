@@ -9,7 +9,7 @@
 
 import { Fragment, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Layers } from 'lucide-react';
+import { AlertTriangle, Layers, Search } from 'lucide-react';
 import { buildTrimGridModel, buildTrimBulkFillGroupsByItemId } from './buildRequirementsGridModel';
 import { getTrimCellStatus, CELL_COLOR_CLS, CELL_COLOR_DOT } from './requirementCellStatus';
 import { groupTrimRequirementsByItemId, buildReservedVariantSummary, nameAndNumber } from './trimReservationUtils';
@@ -201,6 +201,7 @@ const DataRowCells = ({ node, columns, unit, onCellClick }) => {
 };
 
 const TrimRequirementsGrid = ({ sop, trimRequirements, onCellClick, onBulkFillGroup }) => {
+    const [filterText, setFilterText] = useState('');
     const { columns, rows } = buildTrimGridModel(sop, trimRequirements);
     const bulkFillByItemId = buildTrimBulkFillGroupsByItemId(trimRequirements);
     const reqsByItemId = groupTrimRequirementsByItemId(trimRequirements);
@@ -213,13 +214,27 @@ const TrimRequirementsGrid = ({ sop, trimRequirements, onCellClick, onBulkFillGr
         );
     }
 
+    const q = filterText.trim().toLowerCase();
+    const filteredRows = q
+        ? rows.filter(r => (r.trim_item_name || '').toLowerCase().includes(q) || (r.item_code || '').toLowerCase().includes(q))
+        : rows;
+
     return (
         <HorizontalScrollFrame>
             <table className="border-collapse w-full">
                 <thead>
                     <tr>
-                        <th className="sticky left-0 z-10 bg-white border border-slate-100 px-3 py-2 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider min-w-[180px]">
-                            Trim Item
+                        <th className="sticky left-0 z-10 bg-white border border-slate-100 px-3 py-1.5 text-left min-w-[180px]">
+                            <div className="relative">
+                                <Search size={11} className="absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-300" />
+                                <input
+                                    type="text"
+                                    value={filterText}
+                                    onChange={e => setFilterText(e.target.value)}
+                                    placeholder="Filter trim item…"
+                                    className="w-full pl-5 pr-1.5 py-1 text-[10px] font-bold text-slate-600 uppercase tracking-wider placeholder:font-normal placeholder:normal-case placeholder:text-slate-400 bg-slate-50 border border-slate-200 rounded outline-none focus:ring-1 focus:ring-violet-300 focus:border-violet-300"
+                                />
+                            </div>
                         </th>
                         {columns.map(col => (
                             <th key={col.fabric_color_id} className="border border-slate-100 px-2 py-2 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">
@@ -233,7 +248,14 @@ const TrimRequirementsGrid = ({ sop, trimRequirements, onCellClick, onBulkFillGr
                     </tr>
                 </thead>
                 <tbody>
-                    {rows.map(row => {
+                    {filteredRows.length === 0 && (
+                        <tr>
+                            <td colSpan={columns.length + 2} className="text-center py-6 text-xs text-slate-400 italic">
+                                No trim items match "{filterText}".
+                            </td>
+                        </tr>
+                    )}
+                    {filteredRows.map(row => {
                         const unit = row.unit_of_measure || 'pcs';
                         const bulkGroup = bulkFillByItemId.get(String(row.trim_item_id));
                         const variantGroups = buildReservedVariantSummary(reqsByItemId.get(String(row.trim_item_id)) || []);

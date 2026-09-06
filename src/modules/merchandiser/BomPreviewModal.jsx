@@ -115,16 +115,6 @@ const BomPreviewModal = ({ bomId, onClose }) => {
                                             <div key={i} className="border border-slate-200 rounded-xl overflow-hidden">
                                                 <div className="flex items-center justify-between bg-slate-50 px-3 py-2">
                                                     <span className="font-bold text-slate-700 text-xs">{rg.ratio_group_name || `Group ${i + 1}`}</span>
-                                                    <div className="flex items-center gap-2">
-                                                        {rg.total_pieces_in_marker > 0 && (
-                                                            <span className="text-[9px] bg-violet-50 text-violet-600 border border-violet-100 px-1.5 py-0.5 rounded font-bold">
-                                                                {rg.total_pieces_in_marker} pcs
-                                                            </span>
-                                                        )}
-                                                        {rg.marker_length_inches && (
-                                                            <span className="text-[9px] text-slate-400">{rg.marker_length_inches}"</span>
-                                                        )}
-                                                    </div>
                                                 </div>
                                                 <div className="flex flex-wrap gap-1.5 p-2.5">
                                                     {(rg.items || []).filter(it => it.size).map((it, j) => (

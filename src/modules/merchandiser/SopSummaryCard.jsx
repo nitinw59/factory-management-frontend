@@ -38,7 +38,6 @@ const SopSummaryCard = ({ sop, salesOrder, bomOptions, fabricTypes, onLink, onUn
             .finally(() => setLoadingReqs(false));
     }, [sop.bom_id, sop.id]);
 
-    const linkedBomDetail = bomOptions.find(b => b.id === sop.bom_id);
     const totalQty = (sop.colors || []).reduce((s, c) => s + (c.quantity || c.total_quantity || 0), 0);
 
     const combinedSizeMap = {};
@@ -235,15 +234,6 @@ const SopSummaryCard = ({ sop, salesOrder, bomOptions, fabricTypes, onLink, onUn
                                         <Eye size={13} />
                                     </button>
                                 </div>
-                                {(linkedBomDetail?.ratio_groups || []).length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                        {linkedBomDetail.ratio_groups.map((rg, i) => (
-                                            <span key={i} className="text-[9px] bg-white text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">
-                                                {rg.ratio_group_name}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
                             </div>
                         </div>
 
