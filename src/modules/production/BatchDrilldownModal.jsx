@@ -208,6 +208,18 @@ const CycleStagesTab = ({ stages, partsPerGarment = 1, primaryPartsPerGarment = 
                 const isPieceMode  = mode === 'PIECE';
                 const isBundleMode = mode === 'BUNDLE';
 
+                // A PIECE-mode stage's tracking table only ever holds rows for the part
+                // types its scope covers — ALL_PARTS stages (e.g. cutting/numbering) get
+                // one row per part per garment (partsPerGarment, e.g. 7), PRIMARY_ONLY
+                // stages (e.g. BF SEWING) get one row per PRIMARY part per garment only
+                // (primaryPartsPerGarment, e.g. 2). Dividing every PIECE-mode stage's raw
+                // counts by the same fixed partsPerGarment — regardless of its own scope —
+                // under-converts a PRIMARY_ONLY stage's totals (e.g. 2780 raw ÷ 7 = 397
+                // instead of ÷ 2 = 1390), even though the underlying data is correct.
+                const pieceGarmentDivisor = stage.processing_scope === 'PRIMARY_ONLY'
+                    ? primaryPartsPerGarment
+                    : partsPerGarment;
+
                 // BUNDLE mode: total_pieces / primary-parts-per-garment = garment count
                 let total, done, breakdownChips;
                 if (isBundleMode) {
@@ -229,7 +241,7 @@ const CycleStagesTab = ({ stages, partsPerGarment = 1, primaryPartsPerGarment = 
                     const approved = Number(stats.approved) || 0;
                     const repaired = Number(stats.repaired) || 0;
                     done = approved + repaired || (status === 'COMPLETED' ? total : 0);
-                    const toGarments = (n) => isPieceMode ? Math.round(n / partsPerGarment) : n;
+                    const toGarments = (n) => isPieceMode ? Math.round(n / pieceGarmentDivisor) : n;
                     breakdownChips = [
                         { label: 'Approved',     count: toGarments(Number(stats.approved    || 0)), cls: 'text-emerald-700 bg-emerald-50 border-emerald-100' },
                         { label: 'Repaired',     count: toGarments(Number(stats.repaired    || 0)), cls: 'text-amber-700   bg-amber-50   border-amber-100'   },
@@ -240,8 +252,8 @@ const CycleStagesTab = ({ stages, partsPerGarment = 1, primaryPartsPerGarment = 
                 }
 
                 // For piece-mode stages, show garment counts on progress bar
-                const displayTotal = isPieceMode ? Math.round(total / partsPerGarment) : total;
-                const displayDone  = isPieceMode ? Math.round(done  / partsPerGarment) : done;
+                const displayTotal = isPieceMode ? Math.round(total / pieceGarmentDivisor) : total;
+                const displayDone  = isPieceMode ? Math.round(done  / pieceGarmentDivisor) : done;
 
                 const startedAt   = prog.started_at   ? new Date(prog.started_at).toLocaleString()   : null;
                 const completedAt = prog.completed_at ? new Date(prog.completed_at).toLocaleString() : null;
@@ -289,7 +301,7 @@ const CycleStagesTab = ({ stages, partsPerGarment = 1, primaryPartsPerGarment = 
                         )}
                         {isPieceMode && total > 0 && (
                             <p className="text-[9px] text-slate-400 mt-2">
-                                Piece-level stage · {partsPerGarment} parts/garment · {total.toLocaleString()} pieces total
+                                Piece-level stage · {pieceGarmentDivisor} part{pieceGarmentDivisor !== 1 ? 's' : ''}/garment · {total.toLocaleString()} pieces total
                             </p>
                         )}
                         {isBundleMode && stats.total_pieces > 0 && (
