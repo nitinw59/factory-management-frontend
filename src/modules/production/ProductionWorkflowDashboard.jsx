@@ -16,13 +16,14 @@ import { fabricStoreApi } from '../../api/fabricStoreApi';
 import { adminApi } from '../../api/adminApi';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+// jsPDF/autoTable/generateSalesOrderPdf are dynamically imported at the two
+// call sites that actually use them (PO print, SO PDF download) instead of
+// here — they're a heavy dependency (~250KB) needed only when a user clicks
+// a "download/print PDF" button, not on every load of this dashboard.
 import FabricIntakeForm from '../accounts/purchase/FabricIntakeForm';
 import BatchDrilldownModal from './BatchDrilldownModal';
 import BatchDispatchModal from '../depatch_portal/BatchDispatchModal';
 import EndBitBatchModal from '../initialisation_portal/EndBitBatchModal';
-import { generateSalesOrderPdf } from '../accounts/sales/salesOrderPdfGenerator';
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
 
@@ -131,14 +132,39 @@ const STAGE_STYLE = {
     NOT_STARTED: 'bg-gray-50    text-gray-400    border-gray-200',
 };
 
-const StagePipelineChip = ({ stage, onClick }) => {
+// Per-batch stage quantity-progress (done/total garments), fetched lazily on
+// first hover rather than bundled into the bulk workflow-data load — a batch
+// can have several chips, so this is cached (and in-flight requests deduped)
+// per batch_id, shared across every chip instance on the page.
+const stageQtyCache = new Map(); // batchId -> Promise<Map<flow_id, {done,total}>>
+const fetchStageQty = (batchId) => {
+    if (!stageQtyCache.has(batchId)) {
+        stageQtyCache.set(batchId, productionManagerApi.getBatchStageQuantities(batchId)
+            .then(res => new Map((res.data || []).map(s => [String(s.flow_id), s])))
+            .catch(() => new Map()));
+    }
+    return stageQtyCache.get(batchId);
+};
+
+const StagePipelineChip = ({ stage, batchId, onClick }) => {
+    const [qty, setQty] = useState(undefined); // undefined = not fetched yet, null = fetched, no data
     const style = STAGE_STYLE[stage.status] || STAGE_STYLE.NOT_STARTED;
     const short = (stage.line_type_name || '???').substring(0, 3).toUpperCase();
     const rs    = stage.roll_summary;
-    const tip   = `${stage.line_type_name} — ${stage.status}${rs ? ` (${rs.completed}/${rs.total_on_line} rolls)` : ''}`;
+
+    const handleMouseEnter = () => {
+        if (qty !== undefined || !batchId) return;
+        fetchStageQty(batchId).then(map => setQty(map.get(String(stage.flow_id)) ?? null));
+    };
+
+    const qtyTip = qty == null ? (qty === undefined ? ' (hover to load pcs…)' : '')
+        : qty.total != null ? ` (${qty.done.toLocaleString()}/${qty.total.toLocaleString()} pcs)` : '';
+    const tip = `${stage.line_type_name} — ${stage.status}${rs ? ` · ${rs.completed}/${rs.total_on_line} rolls` : ''}${qtyTip}`;
+
     return (
         <button
             onClick={(e) => { e.stopPropagation(); onClick(stage); }}
+            onMouseEnter={handleMouseEnter}
             title={tip}
             className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[9px] font-bold hover:opacity-75 transition-opacity ${style}`}
         >
@@ -270,6 +296,7 @@ const BatchNode = ({ data, x, y, onStageClick, onDrilldown, onTrimOrders, onEdit
                     <StagePipelineChip
                         key={stage.flow_id}
                         stage={stage}
+                        batchId={data.batch_id}
                         onClick={(s) => onStageClick(s, data.batch_id)}
                     />
                 ))}
@@ -861,6 +888,7 @@ const SalesOrderDetailsModal = ({ so, onClose, onViewPO }) => {
                 company = cr.data ?? null;
             } catch { company = null; }
 
+            const { generateSalesOrderPdf } = await import('../accounts/sales/salesOrderPdfGenerator');
             const pdfBlob = await generateSalesOrderPdf({
                 so: { ...so, purchase_orders: purchaseOrders },
                 details,
@@ -1417,7 +1445,11 @@ const PurchaseOrderDetailsModal = ({ poId, onClose }) => {
     if (loading) return <Modal title="Loading PO…" onClose={onClose}><Spinner /></Modal>;
     if (!po)     return null;
 
-    const handlePrintPO = () => {
+    const handlePrintPO = async () => {
+        const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+            import('jspdf'),
+            import('jspdf-autotable'),
+        ]);
         const doc = new jsPDF();
         const pw  = doc.internal.pageSize.width;
         doc.setFontSize(22); doc.setFont('helvetica', 'bold');

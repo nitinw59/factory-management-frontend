@@ -67,6 +67,9 @@ export const productionManagerApi = {
   getWorkflowData: () => api.get('/production-manager/production-workflow-data'),
   getBatchDrilldown: (batchId, flowId) => api.get(`/production-manager/batch/${batchId}/drilldown`, { params: flowId != null ? { flowId } : {} }),
   getBatchDrilldownFull: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/drilldown`),
+  // Lightweight sibling of getBatchDrilldownFull — just per-stage done/total
+  // garment counts, for the workflow graph's StagePipelineChip hover.
+  getBatchStageQuantities: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/stage-quantities`),
 
   getCapacityDashboard: (date) => api.get(`/production-manager/capacity-dashboard?date=${date}`),
 
