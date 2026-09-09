@@ -88,11 +88,18 @@ const CreateSalesOrder = () => {
 
           // New: read per-color sizes from colors[].sizes; ignore size_breakdown
           const colors = (prod.colors || []).map(c => {
-            const matchedColor = opts.fabricColors.find(fc =>
-              (c.fabric_color_id && String(fc.id) === String(c.fabric_color_id)) ||
-              fc.name?.toLowerCase() === c.color_name?.toLowerCase() ||
-              fc.number === c.color_number
-            );
+            // Strict priority, not a single .find() with OR'd conditions — two
+            // fabric_color rows can share the same display name (e.g. two
+            // different "GREY" shades, different color_number), and .find()
+            // would silently return whichever one happens to sort first, not
+            // necessarily the one this order actually used. An id match must
+            // win outright over a same-named-but-different row; only fall back
+            // to name/number matching when there's truly no id to go on (older
+            // data saved before the backend returned fabric_color_id).
+            const matchedColor =
+              (c.fabric_color_id != null && opts.fabricColors.find(fc => String(fc.id) === String(c.fabric_color_id))) ||
+              opts.fabricColors.find(fc => fc.name?.toLowerCase() === c.color_name?.toLowerCase()) ||
+              opts.fabricColors.find(fc => fc.color_number === c.color_number);
             const sizes = {};
             (c.sizes || []).forEach(sz => {
               if (Number(sz.quantity) > 0) sizes[String(sz.size_id)] = sz.quantity;
