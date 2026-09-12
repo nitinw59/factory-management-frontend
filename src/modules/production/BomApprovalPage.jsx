@@ -4,9 +4,11 @@ import {
     ChevronDown, ChevronUp, Loader2, RefreshCw,
     Check, AlertCircle, Scissors, Package, Eye, AlertTriangle,
     X, ThumbsUp, ThumbsDown, Layers, Tag, ShieldCheck, Info, ArrowRight,
+    Download,
 } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
 import { swatchHex } from '../admin/TrimClustersPage';
+import { generateBomExcel } from '../merchandiser/bomExcelExport';
 
 // ─── status config ─────────────────────────────────────────────────────────────
 
@@ -33,7 +35,7 @@ const STATUS = {
     },
     ARCHIVED: {
         label: 'Archived', short: 'Archived', icon: Archive,
-        pill: 'bg-gray-100 text-gray-500 border-gray-200',
+        pill: 'bg-gray-100 text-gray-700 border-gray-200',
         border: 'border-l-gray-300', glow: 'ring-gray-200', dot: 'bg-gray-400',
     },
 };
@@ -45,7 +47,7 @@ const TABS = ['ALL', 'PENDING_APPROVAL', 'APPROVED', 'DRAFT', 'REJECTED', 'ARCHI
 const Spinner = ({ size = 20 }) => <Loader2 size={size} className="animate-spin text-violet-500" />;
 
 const StatusPill = ({ status }) => {
-    const cfg = STATUS[status] || { label: status, pill: 'bg-gray-100 text-gray-500 border-gray-200' };
+    const cfg = STATUS[status] || { label: status, pill: 'bg-gray-100 text-gray-700 border-gray-200' };
     const Icon = cfg.icon;
     return (
         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${cfg.pill}`}>
@@ -134,35 +136,55 @@ const RejectBar = ({ bomName, notes, onNotesChange, onConfirm, onCancel, busy })
 
 // ─── BOM detail (existing expanded view) ──────────────────────────────────────
 
-const RatioGroupDetail = ({ rg, idx }) => (
-    <div className="border border-slate-200 rounded-xl overflow-hidden">
-        <div className="flex items-center justify-between bg-slate-50 px-3 py-2">
-            <div className="flex items-center gap-2">
-                <Scissors size={11} className="text-slate-400" />
-                <span className="font-bold text-slate-700 text-xs">{rg.ratio_group_name || `Group ${idx + 1}`}</span>
-            </div>
-            <div className="flex items-center gap-2">
-                {rg.total_pieces_in_marker > 0 && (
-                    <span className="text-[9px] bg-violet-50 text-violet-600 border border-violet-100 px-1.5 py-0.5 rounded font-bold">
-                        {rg.total_pieces_in_marker} pcs/marker
-                    </span>
-                )}
-                {rg.marker_length_inches && (
-                    <span className="text-[9px] text-slate-400 font-medium">{rg.marker_length_inches}" marker</span>
-                )}
-            </div>
-        </div>
-        <div className="p-2.5 space-y-2">
-            {(rg.items || []).filter(it => it.size).length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                    {(rg.items || []).filter(it => it.size).map((it, j) => (
-                        <span key={j} className="bg-violet-50 text-violet-700 border border-violet-100 rounded px-2 py-0.5 text-[10px] font-bold">
-                            {it.size}: {it.number_of_pieces} pcs
-                        </span>
-                    ))}
-                </div>
-            )}
-        </div>
+// One row per (group, size) — group/marker/pcs-per-marker cells span all of
+// that group's size rows via rowSpan, so the grouping reads clearly without
+// falling back to a card-per-group layout.
+const RatioGroupsTable = ({ groups }) => (
+    <div className="border border-slate-200 rounded-xl overflow-hidden overflow-x-auto">
+        <table className="w-full text-xs">
+            <thead>
+                <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                    <th className="text-left px-3 py-2"><Scissors size={10} className="inline mr-1 -mt-0.5" />Ratio Group</th>
+                    <th className="text-left px-2 py-2">Marker</th>
+                    <th className="text-right px-2 py-2">Pcs/Marker</th>
+                    <th className="text-left px-2 py-2">Size</th>
+                    <th className="text-right px-3 py-2">Pieces</th>
+                </tr>
+            </thead>
+            <tbody>
+                {groups.map((rg, i) => {
+                    const items = (rg.items || []).filter(it => it.size);
+                    const rows = items.length > 0 ? items : [null];
+                    return rows.map((it, j) => (
+                        <tr key={`${i}-${j}`} className="border-b border-slate-100 last:border-0">
+                            {j === 0 && (
+                                <>
+                                    <td rowSpan={rows.length} className="px-3 py-2 align-top font-bold text-slate-700 whitespace-nowrap">
+                                        {rg.ratio_group_name || `Group ${i + 1}`}
+                                    </td>
+                                    <td rowSpan={rows.length} className="px-2 py-2 align-top text-slate-600 whitespace-nowrap">
+                                        {rg.marker_length_inches ? `${rg.marker_length_inches}"` : '—'}
+                                    </td>
+                                    <td rowSpan={rows.length} className="px-2 py-2 align-top text-right text-slate-600 whitespace-nowrap">
+                                        {rg.total_pieces_in_marker > 0 ? rg.total_pieces_in_marker : '—'}
+                                    </td>
+                                </>
+                            )}
+                            <td className="px-2 py-2">
+                                {it ? (
+                                    <span className="inline-flex items-center justify-center min-w-[2.5rem] px-2 py-0.5 text-[11px] font-bold rounded border border-violet-100 bg-violet-50 text-violet-700">
+                                        {it.size}
+                                    </span>
+                                ) : <span className="text-slate-500 italic">no sizes</span>}
+                            </td>
+                            <td className="px-3 py-2 text-right font-semibold text-slate-700">
+                                {it ? it.number_of_pieces : '—'}
+                            </td>
+                        </tr>
+                    ));
+                })}
+            </tbody>
+        </table>
     </div>
 );
 
@@ -230,104 +252,121 @@ const BomDetail = ({ bomId }) => {
                     { label: 'Approved by', val: bom.approved_by?.name || '—' },
                 ].map(({ label, val }) => (
                     <div key={label} className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">{label}</p>
+                        <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-0.5">{label}</p>
                         <p className="text-xs font-semibold text-slate-700">{val}</p>
                     </div>
                 ))}
             </div>
             {(bom.ratio_groups || []).length > 0 && (
                 <div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                         <Layers size={10} /> Ratio Groups ({bom.ratio_groups.length})
                     </p>
-                    <div className="space-y-2">
-                        {bom.ratio_groups.map((rg, i) => <RatioGroupDetail key={i} rg={rg} idx={i} />)}
-                    </div>
+                    <RatioGroupsTable groups={bom.ratio_groups} />
                 </div>
             )}
             {(bom.fabric_consumptions || []).length > 0 && (
                 <div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                         <Layers size={10} /> Fabric Consumptions ({bom.fabric_consumptions.length})
                     </p>
-                    <div className="flex flex-wrap gap-1.5">
-                        {bom.fabric_consumptions.map((fc, j) => (
-                            <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold inline-flex items-center gap-1.5" title={fc.comments || undefined}>
-                                <span>
-                                    {fc.fabric_role ? `${fc.fabric_role} (generic)` : (fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`)}
-                                    {fc.consumption_inches ? `: ${fc.consumption_inches}" / pc` : ''}
-                                    {fc.wastage_percentage ? ` +${fc.wastage_percentage}% wastage` : ''}
-                                    {fc.comments && <span className="font-normal text-sky-500"> — {fc.comments}</span>}
-                                </span>
-                                <ClusterChip f={fc} />
-                            </span>
-                        ))}
+                    <div className="border border-slate-200 rounded-xl overflow-hidden overflow-x-auto">
+                        <table className="w-full text-xs">
+                            <thead>
+                                <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                                    <th className="text-left px-3 py-2">Fabric</th>
+                                    <th className="text-right px-2 py-2">Consumption (in/pc)</th>
+                                    <th className="text-right px-2 py-2">Wastage %</th>
+                                    <th className="text-left px-2 py-2">Color Cluster</th>
+                                    <th className="text-left px-3 py-2">Comments</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {bom.fabric_consumptions.map((fc, j) => (
+                                    <tr key={j} className="border-b border-slate-100 last:border-0">
+                                        <td className="px-3 py-2 font-semibold text-slate-700">
+                                            {fc.fabric_role ? `${fc.fabric_role} (generic)` : (fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`)}
+                                        </td>
+                                        <td className="px-2 py-2 text-right text-slate-700">{fc.consumption_inches ?? '—'}</td>
+                                        <td className="px-2 py-2 text-right text-slate-700">{fc.wastage_percentage || 0}%</td>
+                                        <td className="px-2 py-2">
+                                            {(fc.color_clusters || []).length > 0
+                                                ? <div className="flex flex-wrap gap-1"><ClusterChip f={fc} /></div>
+                                                : <span className="text-slate-500">—</span>}
+                                        </td>
+                                        <td className="px-3 py-2 text-slate-600">{fc.comments || '—'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             )}
             {(bom.material_consumptions || []).length > 0 && (
                 <div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                         <Tag size={10} /> Materials & Trims ({bom.material_consumptions.length})
                         {(() => {
                             const unknown = bom.material_consumptions.filter(mc => !materialCost(mc)).length;
                             return unknown > 0 ? (
-                                <span className="font-normal normal-case text-amber-500">
+                                <span className="font-normal normal-case text-amber-600">
                                     · cost unknown for {unknown}
                                 </span>
                             ) : null;
                         })()}
                     </p>
-                    <div className="space-y-3">
-                        {materialsByStage.map(group => (
-                            <div key={group.key}>
-                                <p className={`text-[9px] font-bold uppercase tracking-wider mb-1.5 ${group.key === 'unassigned' ? 'text-amber-600' : 'text-violet-500'}`}>
-                                    {group.label} <span className="font-normal normal-case text-slate-400">· {group.materials.length}</span>
-                                </p>
-                                <div className="grid grid-cols-2 gap-2">
-                                    {group.materials.map((mc, i) => (
-                                        <div key={i} onClick={() => setSelectedTrim(mc)}
-                                            className="border border-slate-200 rounded-xl px-3 py-2 cursor-pointer hover:bg-slate-50 hover:border-slate-300 transition-colors">
-                                            <div className="flex items-center justify-between gap-1 mb-0.5">
-                                                <span className="font-semibold text-slate-700 text-xs truncate">
-                                                    {mc.trim_item_name || `Trim #${mc.trim_item_id}`}
-                                                </span>
-                                                {mc.unit_of_measure && (
-                                                    <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold shrink-0">
-                                                        {mc.unit_of_measure}
-                                                    </span>
-                                                )}
-                                            </div>
-                                            {mc.placement_description && (
-                                                <p className="text-[9px] text-slate-400 truncate">📍 {mc.placement_description}</p>
-                                            )}
-                                            <div className="flex items-center justify-between gap-2 mt-0.5">
-                                                <p className="text-[10px] text-slate-600 font-bold">
-                                                    {mc.calculation_type === 'FIXED'
-                                                        ? `${mc.fixed_quantity} ${mc.unit_of_measure || 'unit'} fixed`
-                                                        : `Per size · ${(mc.size_consumptions || []).length} sizes`}
-                                                </p>
-                                                {(() => {
-                                                    const c = materialCost(mc);
-                                                    if (!c) return <span className="text-[9px] text-slate-300 italic shrink-0">cost unknown</span>;
-                                                    return (
-                                                        <span className="text-[10px] font-bold text-emerald-600 shrink-0">
-                                                            {c.total != null ? fmtCost(c.total) : `${fmtCost(c.min)}–${fmtCost(c.max)}`}
-                                                        </span>
-                                                    );
-                                                })()}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        ))}
+                    <div className="border border-slate-200 rounded-xl overflow-hidden overflow-x-auto">
+                        <table className="w-full text-xs">
+                            <thead>
+                                <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                                    <th className="text-left px-3 py-2">Trim Item</th>
+                                    <th className="text-left px-2 py-2">UOM</th>
+                                    <th className="text-left px-2 py-2">Placement</th>
+                                    <th className="text-left px-2 py-2">Qty</th>
+                                    <th className="text-right px-3 py-2">Est. Cost</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {materialsByStage.map(group => (
+                                    <React.Fragment key={group.key}>
+                                        <tr>
+                                            <td colSpan={5} className={`px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider ${group.key === 'unassigned' ? 'bg-amber-50 text-amber-700' : 'bg-violet-50 text-violet-700'}`}>
+                                                {group.label} · {group.materials.length}
+                                            </td>
+                                        </tr>
+                                        {group.materials.map((mc, i) => {
+                                            const c = materialCost(mc);
+                                            return (
+                                                <tr key={i} onClick={() => setSelectedTrim(mc)}
+                                                    className="border-b border-slate-100 last:border-0 cursor-pointer hover:bg-slate-50 transition-colors">
+                                                    <td className="px-3 py-2 font-semibold text-slate-700">
+                                                        {mc.trim_item_name || `Trim #${mc.trim_item_id}`}
+                                                    </td>
+                                                    <td className="px-2 py-2 text-slate-600">{mc.unit_of_measure || '—'}</td>
+                                                    <td className="px-2 py-2 text-slate-600">{mc.placement_description || '—'}</td>
+                                                    <td className="px-2 py-2 text-slate-600 whitespace-nowrap">
+                                                        {mc.calculation_type === 'FIXED'
+                                                            ? `${mc.fixed_quantity} ${mc.unit_of_measure || 'unit'} fixed`
+                                                            : `Per size · ${(mc.size_consumptions || []).length} sizes`}
+                                                    </td>
+                                                    <td className="px-3 py-2 text-right font-bold whitespace-nowrap">
+                                                        {c
+                                                            ? <span className="text-emerald-600">{c.total != null ? fmtCost(c.total) : `${fmtCost(c.min)}–${fmtCost(c.max)}`}</span>
+                                                            : <span className="text-slate-500 italic font-normal">cost unknown</span>}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </React.Fragment>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             )}
             <div className="border-t border-slate-100 pt-2">
                 <button onClick={loadHistory}
-                    className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 hover:text-slate-600 transition-colors">
+                    className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600 hover:text-slate-800 transition-colors">
                     <Eye size={10} />
                     {showHistory ? 'Hide history' : 'Show status history'}
                     {historyLoading && <Loader2 size={10} className="animate-spin ml-1" />}
@@ -335,18 +374,18 @@ const BomDetail = ({ bomId }) => {
                 {showHistory && !historyLoading && history !== null && (
                     <div className="mt-2 space-y-1.5">
                         {history.length === 0 ? (
-                            <p className="text-[10px] text-slate-400 italic">No history entries.</p>
+                            <p className="text-[10px] text-slate-600 italic">No history entries.</p>
                         ) : history.map((h, i) => (
                             <div key={i} className="flex items-start gap-2 text-[10px]">
-                                <span className="w-1.5 h-1.5 rounded-full bg-slate-300 mt-1 shrink-0" />
+                                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 mt-1 shrink-0" />
                                 <div className="flex-1 min-w-0">
                                     <span className="font-bold text-slate-600">
                                         {h.from_status ? `${h.from_status} → ` : ''}{h.to_status}
                                     </span>
-                                    {h.changed_by_name && <span className="text-slate-400 ml-1">by {h.changed_by_name}</span>}
+                                    {h.changed_by_name && <span className="text-slate-600 ml-1">by {h.changed_by_name}</span>}
                                     {h.notes && <p className="text-slate-500 mt-0.5 italic truncate">{h.notes}</p>}
                                 </div>
-                                <span className="text-slate-300 shrink-0">
+                                <span className="text-slate-600 shrink-0">
                                     {h.changed_at ? new Date(h.changed_at).toLocaleDateString() : ''}
                                 </span>
                             </div>
@@ -446,127 +485,139 @@ const ClusterChip = ({ f }) => (f.color_clusters || []).map(c => (
     </span>
 ));
 
-const FabricDiffChips = ({ oldFabrics = [], newFabrics = [], isFirstApproval }) => {
+// Diff rows share one background convention: the row/group status picks the
+// bg-* half of DIFF_STYLE (border/badge only matter at the card granularity
+// this used to render at) so a changed/added/removed line reads at a glance
+// even collapsed into a plain table row.
+const diffRowBg = (type, isFirstApproval) => (isFirstApproval || type === 'same') ? '' : DIFF_STYLE[type].row.split(' ')[0];
+
+const FabricDiffTable = ({ oldFabrics = [], newFabrics = [], isFirstApproval }) => {
     const list = isFirstApproval
         ? newFabrics.map(f => ({ type: 'same', old: f, new: f }))
         : diffByKey(oldFabrics, newFabrics, fabricKey, fabricChanged);
 
     if (list.length === 0) return null;
+    const detail = (row) => `${row.consumption_inches || 0}"/pc${row.wastage_percentage ? ` +${row.wastage_percentage}% wastage` : ''}`;
 
     return (
-        <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-100">
-            <span className="text-[9px] font-bold text-slate-400 uppercase self-center mr-1">Fabric</span>
-            {list.map((entry, j) => {
-                const f    = entry.new || entry.old;
-                const name = fabricDisplayName(f);
-                const detail = (row) => `${row.consumption_inches || 0}"/pc${row.wastage_percentage ? ` +${row.wastage_percentage}% wastage` : ''}`;
-                if (entry.type === 'same') return (
-                    <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold inline-flex items-center gap-1.5">
-                        {name}: {detail(f)}
-                        <ClusterChip f={f} />
-                    </span>
-                );
-                if (entry.type === 'removed') return (
-                    <span key={j} className="bg-red-50 text-red-500 border border-red-200 rounded px-2 py-0.5 text-[10px] font-bold line-through">
-                        {name}: {detail(entry.old)}
-                    </span>
-                );
-                if (entry.type === 'added') return (
-                    <span key={j} className="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-2 py-0.5 text-[10px] font-bold inline-flex items-center gap-1.5">
-                        + {name}: {detail(f)}
-                        <ClusterChip f={f} />
-                    </span>
-                );
-                // changed — show old → new inline
-                return (
-                    <span key={j} className="bg-amber-50 text-amber-700 border border-amber-200 rounded px-2 py-0.5 text-[10px] font-bold inline-flex items-center gap-1">
-                        {name}: {detail(entry.old)}
-                        <ArrowRight size={8} className="shrink-0" />
-                        <span className="text-emerald-600">{detail(entry.new)}</span>
-                        <ClusterChip f={entry.new} />
-                    </span>
-                );
-            })}
+        <div className="border border-slate-200 rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-xs">
+                <thead>
+                    <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                        <th className="text-left px-3 py-2">Fabric</th>
+                        <th className="text-left px-2 py-2">Consumption / Wastage</th>
+                        <th className="text-left px-2 py-2">Color Cluster</th>
+                        {!isFirstApproval && <th className="text-right px-3 py-2">Status</th>}
+                    </tr>
+                </thead>
+                <tbody>
+                    {list.map((entry, j) => {
+                        const f = entry.new || entry.old;
+                        const name = fabricDisplayName(f);
+                        return (
+                            <tr key={j} className={`border-b border-slate-100 last:border-0 ${diffRowBg(entry.type, isFirstApproval)}`}>
+                                <td className="px-3 py-2 font-semibold text-slate-700">{name}</td>
+                                <td className="px-2 py-2 text-slate-700">
+                                    {entry.type === 'changed' && !isFirstApproval ? (
+                                        <span className="inline-flex items-center gap-1.5">
+                                            <span className="text-red-600 line-through">{detail(entry.old)}</span>
+                                            <ArrowRight size={9} className="text-slate-500 shrink-0" />
+                                            <span className="text-emerald-700 font-bold">{detail(entry.new)}</span>
+                                        </span>
+                                    ) : entry.type === 'removed' ? (
+                                        <span className="text-red-600 line-through">{detail(entry.old)}</span>
+                                    ) : detail(f)}
+                                </td>
+                                <td className="px-2 py-2">
+                                    <div className="flex flex-wrap gap-1"><ClusterChip f={entry.type === 'removed' ? entry.old : (entry.new || f)} /></div>
+                                </td>
+                                {!isFirstApproval && <td className="px-3 py-2 text-right"><DiffBadge type={entry.type} /></td>}
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
         </div>
     );
 };
 
-// ─── ratio group diff row ─────────────────────────────────────────────────────
+// ─── ratio group diff table ────────────────────────────────────────────────────
 
-const RatioGroupDiffRow = ({ entry, isFirstApproval }) => {
-    const rg = entry.new || entry.old;
-    const s  = isFirstApproval ? DIFF_STYLE.same : DIFF_STYLE[entry.type];
+const RatioGroupDiffTable = ({ rgDiff, isFirstApproval }) => (
+    <div className="border border-slate-200 rounded-xl overflow-hidden overflow-x-auto">
+        <table className="w-full text-xs">
+            <thead>
+                <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                    <th className="text-left px-3 py-2"><Scissors size={10} className="inline mr-1 -mt-0.5" />Ratio Group</th>
+                    <th className="text-left px-2 py-2">Marker</th>
+                    <th className="text-right px-2 py-2">Pcs/Marker</th>
+                    <th className="text-left px-2 py-2">Size</th>
+                    <th className="text-right px-2 py-2">Pieces</th>
+                    {!isFirstApproval && <th className="text-right px-3 py-2">Status</th>}
+                </tr>
+            </thead>
+            <tbody>
+                {rgDiff.map((entry, i) => {
+                    const rg = entry.new || entry.old;
+                    const sizeDiff = isFirstApproval
+                        ? (rg.items || []).map(it => ({ type: 'same', old: it, new: it }))
+                        : diffByKey(
+                            entry.old?.items ?? [],
+                            entry.new?.items ?? [],
+                            it => it.size,
+                            (o, n) => String(o.number_of_pieces) !== String(n.number_of_pieces)
+                          );
+                    const rows = sizeDiff.length > 0 ? sizeDiff : [null];
+                    const rowBg = diffRowBg(entry.type, isFirstApproval);
+                    return rows.map((sd, j) => (
+                        <tr key={`${i}-${j}`} className={`border-b border-slate-100 last:border-0 ${rowBg}`}>
+                            {j === 0 && (
+                                <>
+                                    <td rowSpan={rows.length} className="px-3 py-2 align-top font-bold text-slate-700 whitespace-nowrap">
+                                        {rg.ratio_group_name || 'Unnamed Group'}
+                                    </td>
+                                    <td rowSpan={rows.length} className="px-2 py-2 align-top text-slate-600 whitespace-nowrap">
+                                        {rg.marker_length_inches ? `${rg.marker_length_inches}"` : '—'}
+                                    </td>
+                                    <td rowSpan={rows.length} className="px-2 py-2 align-top text-right text-slate-600 whitespace-nowrap">
+                                        {rg.total_pieces_in_marker > 0 ? rg.total_pieces_in_marker : '—'}
+                                    </td>
+                                </>
+                            )}
+                            <td className="px-2 py-2">
+                                {sd ? (
+                                    <span className={`inline-flex items-center justify-center min-w-[2.5rem] px-2 py-0.5 text-[11px] font-bold rounded border ${
+                                        sd.type === 'removed' ? 'border-red-200 bg-red-50 text-red-600 line-through'
+                                        : sd.type === 'added' ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                        : 'border-violet-100 bg-violet-50 text-violet-700'
+                                    }`}>
+                                        {(sd.new || sd.old).size}
+                                    </span>
+                                ) : <span className="text-slate-500 italic">no sizes</span>}
+                            </td>
+                            <td className="px-2 py-2 text-right font-semibold text-slate-700">
+                                {!sd ? '—' : sd.type === 'changed' && !isFirstApproval ? (
+                                    <span className="inline-flex items-center gap-1">
+                                        <span className="text-red-600 line-through">{sd.old.number_of_pieces}</span>
+                                        <ArrowRight size={8} className="text-slate-500 shrink-0" />
+                                        <span className="text-emerald-700">{sd.new.number_of_pieces}</span>
+                                    </span>
+                                ) : (sd.new || sd.old).number_of_pieces}
+                            </td>
+                            {!isFirstApproval && j === 0 && (
+                                <td rowSpan={rows.length} className="px-3 py-2 text-right align-top"><DiffBadge type={entry.type} /></td>
+                            )}
+                        </tr>
+                    ));
+                })}
+            </tbody>
+        </table>
+    </div>
+);
 
-    const sizeDiff = isFirstApproval
-        ? (rg.items || []).map(i => ({ type: 'same', old: i, new: i }))
-        : diffByKey(
-            entry.old?.items ?? [],
-            entry.new?.items ?? [],
-            i => i.size,
-            (o, n) => String(o.number_of_pieces) !== String(n.number_of_pieces)
-          );
+// ─── material diff table ───────────────────────────────────────────────────────
 
-    return (
-        <div className={`border rounded-xl overflow-hidden ${s.row}`}>
-            <div className="flex items-center justify-between px-3 py-2">
-                <div className="flex items-center gap-2">
-                    <Scissors size={11} className="text-slate-400" />
-                    <span className="font-bold text-slate-700 text-xs">{rg.ratio_group_name || 'Unnamed Group'}</span>
-                    {rg.marker_length_inches && (
-                        <span className="text-[9px] text-slate-400 font-medium">{rg.marker_length_inches}" marker</span>
-                    )}
-                </div>
-                <div className="flex items-center gap-2">
-                    {rg.total_pieces_in_marker > 0 && (
-                        <span className="text-[9px] bg-violet-50 text-violet-600 border border-violet-100 px-1.5 py-0.5 rounded font-bold">
-                            {rg.total_pieces_in_marker} pcs/marker
-                        </span>
-                    )}
-                    {!isFirstApproval && <DiffBadge type={entry.type} />}
-                </div>
-            </div>
-            <div className="px-3 pb-2.5 space-y-1.5">
-                {sizeDiff.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                        {sizeDiff.map((sd, j) => {
-                            const item = sd.new || sd.old;
-                            if (sd.type === 'same') return (
-                                <span key={j} className="bg-violet-50 text-violet-700 border border-violet-100 rounded px-2 py-0.5 text-[10px] font-bold">
-                                    {item.size}: {item.number_of_pieces} pcs
-                                </span>
-                            );
-                            if (sd.type === 'removed') return (
-                                <span key={j} className="bg-red-50 text-red-500 border border-red-200 rounded px-2 py-0.5 text-[10px] font-bold line-through">
-                                    {sd.old.size}: {sd.old.number_of_pieces} pcs
-                                </span>
-                            );
-                            if (sd.type === 'added') return (
-                                <span key={j} className="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-2 py-0.5 text-[10px] font-bold">
-                                    + {item.size}: {item.number_of_pieces} pcs
-                                </span>
-                            );
-                            // changed
-                            return (
-                                <span key={j} className="bg-amber-50 text-amber-700 border border-amber-200 rounded px-2 py-0.5 text-[10px] font-bold inline-flex items-center gap-1">
-                                    {item.size}: {sd.old.number_of_pieces}
-                                    <ArrowRight size={8} className="shrink-0" />
-                                    <span className="text-emerald-600">{sd.new.number_of_pieces}</span> pcs
-                                </span>
-                            );
-                        })}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-
-// ─── material diff row ────────────────────────────────────────────────────────
-
-const MaterialDiffRow = ({ entry, isFirstApproval, onClick }) => {
-    const item = entry.new || entry.old;
-    const s    = isFirstApproval ? DIFF_STYLE.same : DIFF_STYLE[entry.type];
-
+const MaterialDiffTable = ({ matDiff, isFirstApproval, onSelect }) => {
     const qtyStr = m => {
         if (!m) return '—';
         if (m.calculation_type === 'FIXED') return `${m.fixed_quantity} ${m.unit_of_measure || 'unit'} (fixed)`;
@@ -579,38 +630,50 @@ const MaterialDiffRow = ({ entry, isFirstApproval, onClick }) => {
     };
 
     return (
-        <div onClick={onClick} className={`border rounded-xl px-3 py-2 cursor-pointer hover:brightness-95 transition-[filter] ${s.row}`}>
-            <div className="flex items-center justify-between gap-1 mb-0.5">
-                <span className="font-semibold text-slate-700 text-xs truncate">
-                    {item.trim_item_name || `Trim #${item.trim_item_id}`}
-                    {item.stage_name && <span className="font-normal text-slate-400"> · {item.stage_name}</span>}
-                </span>
-                <div className="flex items-center gap-1.5 shrink-0">
-                    {item.unit_of_measure && (
-                        <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-bold">
-                            {item.unit_of_measure}
-                        </span>
-                    )}
-                    {!isFirstApproval && <DiffBadge type={entry.type} />}
-                </div>
-            </div>
-            {item.placement_description && (
-                <p className="text-[9px] text-slate-400 truncate">📍 {item.placement_description}</p>
-            )}
-            {entry.type === 'changed' && !isFirstApproval ? (
-                <div className="flex items-center gap-1.5 text-[10px] mt-0.5">
-                    <span className="text-red-500 line-through">{qtyStr(entry.old)}</span>
-                    <ArrowRight size={9} className="text-slate-400 shrink-0" />
-                    <span className="text-emerald-600 font-bold">{qtyStr(entry.new)}</span>
-                </div>
-            ) : (
-                <p className="text-[10px] text-slate-600 mt-0.5">{qtyStr(item)}</p>
-            )}
-            {costStr(item) ? (
-                <p className="text-[10px] font-bold text-emerald-600 mt-0.5">{costStr(item)}</p>
-            ) : (
-                <p className="text-[9px] text-slate-300 italic mt-0.5">cost unknown</p>
-            )}
+        <div className="border border-slate-200 rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-xs">
+                <thead>
+                    <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                        <th className="text-left px-3 py-2">Trim Item</th>
+                        <th className="text-left px-2 py-2">UOM</th>
+                        <th className="text-left px-2 py-2">Placement</th>
+                        <th className="text-left px-2 py-2">Qty</th>
+                        <th className="text-right px-2 py-2">Est. Cost</th>
+                        {!isFirstApproval && <th className="text-right px-3 py-2">Status</th>}
+                    </tr>
+                </thead>
+                <tbody>
+                    {matDiff.map((entry, i) => {
+                        const item = entry.new || entry.old;
+                        return (
+                            <tr key={i} onClick={() => onSelect(item)}
+                                className={`border-b border-slate-100 last:border-0 cursor-pointer hover:brightness-95 transition-[filter] ${diffRowBg(entry.type, isFirstApproval)}`}>
+                                <td className="px-3 py-2 font-semibold text-slate-700">
+                                    {item.trim_item_name || `Trim #${item.trim_item_id}`}
+                                    {item.stage_name && <span className="font-normal text-slate-600"> · {item.stage_name}</span>}
+                                </td>
+                                <td className="px-2 py-2 text-slate-600">{item.unit_of_measure || '—'}</td>
+                                <td className="px-2 py-2 text-slate-600">{item.placement_description || '—'}</td>
+                                <td className="px-2 py-2 text-slate-600 whitespace-nowrap">
+                                    {entry.type === 'changed' && !isFirstApproval ? (
+                                        <span className="inline-flex items-center gap-1.5">
+                                            <span className="text-red-600 line-through">{qtyStr(entry.old)}</span>
+                                            <ArrowRight size={9} className="text-slate-500 shrink-0" />
+                                            <span className="text-emerald-700 font-bold">{qtyStr(entry.new)}</span>
+                                        </span>
+                                    ) : qtyStr(item)}
+                                </td>
+                                <td className="px-2 py-2 text-right font-bold whitespace-nowrap">
+                                    {costStr(item)
+                                        ? <span className="text-emerald-600">{costStr(item)}</span>
+                                        : <span className="text-slate-500 italic font-normal">cost unknown</span>}
+                                </td>
+                                {!isFirstApproval && <td className="px-3 py-2 text-right"><DiffBadge type={entry.type} /></td>}
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
         </div>
     );
 };
@@ -681,17 +744,17 @@ const TrimDetailModal = ({ mc, onClose }) => {
                 <div className="flex-1 overflow-y-auto p-5 space-y-4">
                     <div className="grid grid-cols-3 gap-3">
                         <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Calculation</p>
+                            <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-0.5">Calculation</p>
                             <p className="text-xs font-semibold text-slate-700">{mc.calculation_type === 'FIXED' ? 'Fixed quantity' : 'Per size'}</p>
                         </div>
                         <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Wastage</p>
+                            <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-0.5">Wastage</p>
                             <p className="text-xs font-semibold text-slate-700">{mc.wastage_percentage || '0'}%</p>
                         </div>
                         <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Avg. Unit Cost</p>
+                            <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-0.5">Avg. Unit Cost</p>
                             <p className="text-xs font-semibold text-slate-700">
-                                {mc.avg_unit_cost != null ? `${fmtCost(mc.avg_unit_cost)} / ${mc.unit_of_measure || 'unit'}` : <span className="text-slate-300 italic font-normal">unknown</span>}
+                                {mc.avg_unit_cost != null ? `${fmtCost(mc.avg_unit_cost)} / ${mc.unit_of_measure || 'unit'}` : <span className="text-slate-600 italic font-normal">unknown</span>}
                             </p>
                         </div>
                     </div>
@@ -699,30 +762,30 @@ const TrimDetailModal = ({ mc, onClose }) => {
                     {mc.calculation_type === 'FIXED' ? (
                         <div className="border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
                             <div>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Fixed Quantity</p>
+                                <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-0.5">Fixed Quantity</p>
                                 <p className="text-sm font-bold text-slate-700">{mc.fixed_quantity} {mc.unit_of_measure || 'unit'}</p>
                             </div>
                             {fixedEff != null && (
                                 <div className="text-right">
-                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Effective (w/ wastage)</p>
+                                    <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-0.5">Effective (w/ wastage)</p>
                                     <p className="text-sm font-bold text-violet-600">{fixedEff.toFixed(2)} {mc.unit_of_measure || 'unit'}</p>
                                 </div>
                             )}
                             <div className="text-right">
-                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Est. Cost</p>
+                                <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-0.5">Est. Cost</p>
                                 <p className="text-sm font-bold text-emerald-600">
-                                    {cost?.total != null ? fmtCost(cost.total) : <span className="text-slate-300 italic font-normal text-xs">unknown</span>}
+                                    {cost?.total != null ? fmtCost(cost.total) : <span className="text-slate-600 italic font-normal text-xs">unknown</span>}
                                 </p>
                             </div>
                         </div>
                     ) : (
                         <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2">
                                 Per-size Breakdown ({(mc.size_consumptions || []).length})
                             </p>
                             <table className="w-full text-xs">
                                 <thead>
-                                    <tr className="text-slate-400 font-bold border-b border-slate-100">
+                                    <tr className="text-slate-600 font-bold border-b border-slate-100">
                                         <th className="text-left pb-1.5">Product Size</th>
                                         <th className="text-left pb-1.5 px-2">Trim Variant Size</th>
                                         <th className="text-right pb-1.5">Qty</th>
@@ -741,7 +804,7 @@ const TrimDetailModal = ({ mc, onClose }) => {
                                                         {sc.size}
                                                     </span>
                                                 </td>
-                                                <td className="py-1.5 px-2 text-slate-600">{sc.target_variant_size || <span className="text-slate-300 italic">same as product</span>}</td>
+                                                <td className="py-1.5 px-2 text-slate-600">{sc.target_variant_size || <span className="text-slate-600 italic">same as product</span>}</td>
                                                 <td className="py-1.5 text-right font-semibold text-slate-700">{sc.quantity ?? '—'}</td>
                                                 <td className="py-1.5 pl-2 text-right text-slate-500">{eff != null ? eff.toFixed(2) : '—'}</td>
                                                 <td className="py-1.5 pl-2 text-right font-semibold text-emerald-600">{sizeCost != null ? fmtCost(sizeCost) : '—'}</td>
@@ -755,7 +818,7 @@ const TrimDetailModal = ({ mc, onClose }) => {
 
                     {!loadingSizes && variantSizes.length > 0 && (
                         <div className="pt-1 border-t border-slate-100">
-                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Available Trim Variant Sizes</p>
+                            <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">Available Trim Variant Sizes</p>
                             <div className="flex flex-wrap gap-1.5">
                                 {variantSizes.map(vs => (
                                     <span key={vs} className="bg-slate-50 text-slate-600 border border-slate-200 rounded px-2 py-0.5 text-[10px] font-bold">
@@ -777,7 +840,7 @@ const ChangesTab = ({ currBom, prevBom }) => {
     const [selectedTrim, setSelectedTrim] = useState(null);
 
     if (!currBom) return (
-        <p className="text-sm text-slate-400 text-center py-12">No BOM data available.</p>
+        <p className="text-sm text-slate-600 text-center py-12">No BOM data available.</p>
     );
 
     const isFirst  = !prevBom;
@@ -797,7 +860,7 @@ const ChangesTab = ({ currBom, prevBom }) => {
                 </div>
             ) : changes === 0 ? (
                 <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
-                    <CheckCircle size={13} className="text-slate-400 shrink-0" />
+                    <CheckCircle size={13} className="text-slate-500 shrink-0" />
                     <p className="text-xs text-slate-600">No structural changes detected from the last approved version.</p>
                 </div>
             ) : (
@@ -805,30 +868,26 @@ const ChangesTab = ({ currBom, prevBom }) => {
                     <Eye size={13} className="text-violet-500 shrink-0" />
                     <p className="text-xs text-violet-700">
                         <strong>{changes} change{changes !== 1 ? 's' : ''}</strong> detected from the last approved version.
-                        <span className="ml-1 text-violet-500">Green = added · Red = removed · Orange = changed</span>
+                        <span className="ml-1 text-violet-600">Green = added · Red = removed · Orange = changed</span>
                     </p>
                 </div>
             )}
 
             {rgDiff.length > 0 && (
                 <section>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                         <Scissors size={10} /> Ratio Groups ({rgDiff.length})
                     </p>
-                    <div className="space-y-2">
-                        {rgDiff.map((entry, i) => (
-                            <RatioGroupDiffRow key={i} entry={entry} isFirstApproval={isFirst} />
-                        ))}
-                    </div>
+                    <RatioGroupDiffTable rgDiff={rgDiff} isFirstApproval={isFirst} />
                 </section>
             )}
 
             {fabDiff.length > 0 && (
                 <section>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                         <Layers size={10} /> Fabric Consumptions ({fabDiff.length})
                     </p>
-                    <FabricDiffChips
+                    <FabricDiffTable
                         oldFabrics={prevBom?.fabric_consumptions ?? []}
                         newFabrics={currBom.fabric_consumptions ?? []}
                         isFirstApproval={isFirst}
@@ -838,20 +897,16 @@ const ChangesTab = ({ currBom, prevBom }) => {
 
             {matDiff.length > 0 && (
                 <section>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                         <Tag size={10} /> Materials & Trims ({matDiff.length})
                     </p>
-                    <div className="grid grid-cols-2 gap-2">
-                        {matDiff.map((entry, i) => (
-                            <MaterialDiffRow key={i} entry={entry} isFirstApproval={isFirst}
-                                onClick={() => setSelectedTrim(entry.new || entry.old)} />
-                        ))}
-                    </div>
+                    <MaterialDiffTable matDiff={matDiff} isFirstApproval={isFirst}
+                        onSelect={(item) => setSelectedTrim(item)} />
                 </section>
             )}
 
             {rgDiff.length === 0 && matDiff.length === 0 && fabDiff.length === 0 && (
-                <p className="text-sm text-slate-400 italic text-center py-8">No BOM content defined.</p>
+                <p className="text-sm text-slate-600 italic text-center py-8">No BOM content defined.</p>
             )}
             {selectedTrim && <TrimDetailModal mc={selectedTrim} onClose={() => setSelectedTrim(null)} />}
         </div>
@@ -862,11 +917,11 @@ const ChangesTab = ({ currBom, prevBom }) => {
 
 const ImpactTab = ({ impact }) => {
     if (!impact) return (
-        <p className="text-sm text-slate-400 text-center py-12">Impact data unavailable.</p>
+        <p className="text-sm text-slate-600 text-center py-12">Impact data unavailable.</p>
     );
 
     if (impact.affected_orders_count === 0) return (
-        <div className="flex flex-col items-center py-12 gap-3 text-slate-400">
+        <div className="flex flex-col items-center py-12 gap-3 text-slate-600">
             <CheckCircle size={36} strokeWidth={1.5} className="text-emerald-400" />
             <p className="font-bold text-base text-slate-600">No Planning Impact</p>
             <p className="text-xs text-center max-w-xs">
@@ -927,7 +982,7 @@ const ImpactTab = ({ impact }) => {
 
             {/* Per-order breakdown */}
             <div className="space-y-2">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Affected Sales Orders</p>
+                <p className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Affected Sales Orders</p>
                 {orders.map(order => (
                     <div key={order.sales_order_id} className="border border-slate-200 rounded-xl px-4 py-3 bg-white">
                         <div className="flex items-start justify-between gap-2 mb-2">
@@ -1020,7 +1075,7 @@ const BomApprovalModal = ({ bom, onClose, onApproved }) => {
                         </div>
                         <p className="text-xs text-slate-500">
                             <span className="font-semibold text-slate-700">{bom.bom_name}</span>
-                            {bom.product?.name && <span className="ml-1.5 text-slate-400">· {bom.product.name}</span>}
+                            {bom.product?.name && <span className="ml-1.5 text-slate-600">· {bom.product.name}</span>}
                         </p>
                     </div>
                     <button onClick={onClose}
@@ -1105,8 +1160,8 @@ const BomApprovalModal = ({ bom, onClose, onApproved }) => {
                         </span>
                     </label>
                     <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                            Approval notes <span className="font-normal normal-case text-slate-300">(optional)</span>
+                        <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">
+                            Approval notes <span className="font-normal normal-case text-slate-600">(optional)</span>
                         </label>
                         <textarea
                             value={approveNotes}
@@ -1175,6 +1230,26 @@ const BomCard = ({ bom, onApproved, onRejected, onArchived }) => {
     const [rejectNotes,       setRejectNotes]       = useState('');
     const [busy,              setBusy]              = useState(false);
     const [localStatus,       setLocalStatus]       = useState(bom.status);
+    const [downloading,       setDownloading]       = useState(false);
+    const [downloadErr,       setDownloadErr]       = useState(null);
+
+    // Full BOM detail (ratio groups / fabric consumptions / materials, each its
+    // own sheet — materials additionally broken down by production stage within
+    // that sheet) — same workbook shape as the merchandiser BOM dashboard/SOP
+    // toolbar downloads, see bomExcelExport.js.
+    const handleDownload = async (e) => {
+        e.stopPropagation();
+        setDownloading(true);
+        setDownloadErr(null);
+        try {
+            const res = await bomApi.getById(bom.id);
+            generateBomExcel(res.data?.data ?? res.data);
+        } catch (err) {
+            setDownloadErr(err?.response?.data?.error || 'Failed to download BOM.');
+        } finally {
+            setDownloading(false);
+        }
+    };
 
     const act = async (type) => {
         setBusy(true);
@@ -1227,11 +1302,21 @@ const BomCard = ({ bom, onApproved, onRejected, onArchived }) => {
                         <div className="flex items-center gap-2 shrink-0">
                             {localStatus === 'PENDING_APPROVAL' && <ChangeCountBadge bomId={bom.id} />}
                             <StatusPill status={localStatus} />
+                            <button onClick={handleDownload} disabled={downloading}
+                                title="Download BOM (Excel, grouped by requirement type)"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors disabled:opacity-50">
+                                {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                            </button>
                             {expanded
                                 ? <ChevronUp size={14} className="text-slate-400" />
                                 : <ChevronDown size={14} className="text-slate-400" />}
                         </div>
                     </div>
+                    {downloadErr && (
+                        <p className="flex items-center gap-1 text-[10px] text-red-500 mb-2">
+                            <AlertCircle size={10} /> {downloadErr}
+                        </p>
+                    )}
                     <div className="flex items-center gap-3 text-[10px] text-slate-500">
                         <span className="flex items-center gap-1">
                             <Layers size={9} />
@@ -1449,7 +1534,7 @@ export default function BomApprovalPage() {
                                 </span>
                             )}
                         </div>
-                        <p className="text-xs text-slate-400">Review and approve Bills of Materials submitted by the merchandising team.</p>
+                        <p className="text-xs text-slate-600">Review and approve Bills of Materials submitted by the merchandising team.</p>
                     </div>
                     <button onClick={fetchBoms} disabled={loading}
                         className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-50">
@@ -1505,7 +1590,7 @@ export default function BomApprovalPage() {
                         <AlertCircle size={16} /> {error}
                     </div>
                 ) : filtered.length === 0 ? (
-                    <div className="flex flex-col items-center py-24 gap-3 text-slate-400">
+                    <div className="flex flex-col items-center py-24 gap-3 text-slate-600">
                         <FileText size={44} strokeWidth={1} />
                         <p className="font-bold text-lg">
                             {search ? 'No BOMs match your search.' : 'No BOMs in this view.'}

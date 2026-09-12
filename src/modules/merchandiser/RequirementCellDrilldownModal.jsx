@@ -12,7 +12,7 @@ import { AlertCircle, Loader2, RotateCw, ShoppingCart, Trash2, X } from 'lucide-
 import { planningApi } from '../../api/planningApi';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { getFabricCellStatus, getTrimCellStatus, CELL_COLOR_CLS, CELL_COLOR_DOT } from './requirementCellStatus';
-import { deriveTrimReservations } from './trimReservationUtils';
+import { deriveTrimReservations, nameAndNumber } from './trimReservationUtils';
 import ReserveFulfillModal from './ReserveFulfillModal';
 
 // Builds the `item` shape ReserveFulfillModal/reservation-list rendering expects,
@@ -41,6 +41,10 @@ const buildFabricReserveItem = (req) => {
 export const buildTrimReserveItem = (req) => {
     const quantity_required = Number(req.quantity_required || 0);
     const quantity_reserved = Number(req.quantity_reserved || 0);
+    // How much of the reservation has already been drawn down into production —
+    // this is the hard floor a new reservation total can never drop below (the
+    // backend enforces the same floor; see ReserveFulfillModal's trimConsumed).
+    const quantity_consumed = Number(req.quantity_fulfilled || 0);
     const unit = req.unit_of_measure || 'pcs';
     const exactVariantId = req.stock_suggestion?.exact_variant?.id ?? null;
 
@@ -61,14 +65,23 @@ export const buildTrimReserveItem = (req) => {
     return {
         req_id: req.id,
         type: 'trim',
-        title: `${req.trim_item_name}${req.color_name ? ' – ' + req.color_name : ''}${req.color_number ? ` · ${req.color_number}` : ''}${req.target_variant_size ? ` · Sz ${req.target_variant_size}` : ''}`,
+        // Name only — no color concatenated in. The requested color is
+        // exposed separately below so callers can highlight it as its own
+        // badge rather than burying it in a dashed-together string.
+        title: `${req.trim_item_name}${req.target_variant_size ? ` · Sz ${req.target_variant_size}` : ''}`,
         subtitle: `${quantity_required.toLocaleString()} ${unit} required${quantity_reserved > 0 ? ` · Reserved ${quantity_reserved.toLocaleString()} ${unit}` : ''}`,
+        color_name: req.is_color_agnostic ? null : (req.color_name ?? null),
+        color_number: req.is_color_agnostic ? null : (req.color_number ?? null),
+        is_color_agnostic: !!req.is_color_agnostic,
         unit,
         quantity_required,
         quantity_reserved,
+        quantity_consumed,
         inStock: !!req.is_fulfilled,
         exact_variant_id: exactVariantId,
         exact_variant_stock: req.stock_suggestion?.exact_variant?.in_stock ?? null,
+        exact_variant_color_name: req.stock_suggestion?.exact_variant?.color_name ?? req.color_name ?? null,
+        exact_variant_color_number: req.stock_suggestion?.exact_variant?.color_number ?? req.color_number ?? null,
         substitutes,
         reservations: derivedReservations,
     };
@@ -122,8 +135,8 @@ const CalculationBreakdown = ({ type, breakdown, unit }) => {
             {breakdown.calculation_type === 'FIXED' ? (
                 <div className="border border-slate-200 rounded-xl p-3 text-xs space-y-1.5">
                     <div className="flex items-center justify-between">
-                        <span className="text-slate-500">{breakdown.scope === 'agnostic' ? 'Total garments' : 'Finalized quantity'}</span>
-                        <span className="font-bold text-slate-800">{Number(breakdown.total_garments ?? breakdown.finalized_quantity ?? 0).toLocaleString()}</span>
+                        <span className="text-slate-500">{breakdown.scope === 'agnostic' ? 'Total garments' : 'Finalized quantity (garments)'}</span>
+                        <span className="font-bold text-slate-800">{Number(breakdown.total_garments ?? breakdown.finalized_quantity ?? 0).toLocaleString()} pcs</span>
                     </div>
                     <div className="flex items-center justify-between">
                         <span className="text-slate-500">Per garment</span>
@@ -173,6 +186,7 @@ const CalculationBreakdown = ({ type, breakdown, unit }) => {
 const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone }) => {
     const [showReserve,   setShowReserve]   = useState(false);
     const [releasingId,   setReleasingId]   = useState(null);
+    const [reducingId,    setReducingId]    = useState(null);
     const [recalcing,     setRecalcing]     = useState(false);
     const [raising,       setRaising]       = useState(false);
     const [showRaiseForm, setShowRaiseForm] = useState(false);
@@ -193,7 +207,13 @@ const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone
 
     const rowLabel = isFabric
         ? `${requirement.fabric_type_name}${requirement.color_name ? ' – ' + requirement.color_name : (requirement.is_color_agnostic ? ' – All colors' : '')}`
-        : `${requirement.trim_item_name}${requirement.color_name ? ' – ' + requirement.color_name : (requirement.is_color_agnostic ? ' – All colors' : '')}${requirement.target_variant_size ? ` · Sz ${requirement.target_variant_size}` : ''}`;
+        : `${requirement.trim_item_name}${requirement.target_variant_size ? ` · Sz ${requirement.target_variant_size}` : ''}`;
+    // Trim variant color gets its own badge on the right of the header instead
+    // of being concatenated into the name — always paired with its color
+    // number, never name alone.
+    const trimColorLabel = !isFabric
+        ? (requirement.is_color_agnostic ? 'All colors' : nameAndNumber(requirement.color_name, requirement.color_number))
+        : null;
 
     const handleRelease = async (rs) => {
         const amount = Number(rs.meters_reserved ?? rs.quantity_reserved ?? 0);
@@ -208,6 +228,32 @@ const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone
             setErr(e?.response?.data?.error || e?.response?.data?.message || 'Failed to release reservation.');
         } finally {
             setReleasingId(null);
+        }
+    };
+
+    // A trim reservation with anything consumed can never be released outright
+    // (the backend refuses — that stock has already left for production), but
+    // it CAN be shrunk down to exactly what's consumed, freeing the unconsumed
+    // remainder back to stock. Mirrors ReserveFulfillModal's trimConsumed floor.
+    const handleReduceToConsumed = async (rs) => {
+        const consumed = Number(rs.quantity_consumed ?? 0);
+        const freed = Number(rs.quantity_reserved ?? 0) - consumed;
+        if (!window.confirm(
+            `Reduce this reservation to ${consumed.toLocaleString(undefined, { maximumFractionDigits: 3 })} ${unit} (the amount already consumed)? `
+            + `${freed.toLocaleString(undefined, { maximumFractionDigits: 3 })} ${unit} unconsumed will be freed back to stock.`
+        )) return;
+        setReducingId(rs.id);
+        setErr(null);
+        try {
+            await planningApi.reserveTrim(requirement.id, {
+                quantity_reserved: consumed,
+                trim_item_variant_id: rs.trim_item_variant_id,
+            });
+            onDone();
+        } catch (e) {
+            setErr(e?.response?.data?.error || e?.response?.data?.message || 'Failed to reduce reservation.');
+        } finally {
+            setReducingId(null);
         }
     };
 
@@ -273,7 +319,14 @@ const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone
                                 <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">Fulfilled</span>
                             )}
                         </div>
-                        <h2 className="text-base font-black text-slate-800 mt-1 truncate">{rowLabel}</h2>
+                        <div className="flex items-center justify-between gap-2 mt-1">
+                            <h2 className="text-base font-black text-slate-800 truncate">{rowLabel}</h2>
+                            {trimColorLabel && (
+                                <span className="shrink-0 text-[11px] font-black text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full">
+                                    {trimColorLabel}
+                                </span>
+                            )}
+                        </div>
                         <p className="text-xs text-slate-500 mt-0.5 tabular-nums">
                             {reserved.toLocaleString(undefined, { maximumFractionDigits: 3 })} / {required.toLocaleString(undefined, { maximumFractionDigits: 3 })} {unit} reserved
                         </p>
@@ -310,6 +363,8 @@ const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone
                                     const rollTotal = Number(rs.roll_total_meters ?? rs.roll_total ?? 0);
                                     const rollStatus = rs.roll_status || rs.status;
                                     const rollId = rs.fabric_roll_id ?? rs.trim_item_variant_id ?? rs.roll_id;
+                                    const consumed = !isFabric ? Number(rs.quantity_consumed ?? 0) : 0;
+                                    const canReduce = !isFabric && consumed > 0 && consumed < Number(rs.quantity_reserved ?? 0);
                                     return (
                                         <div key={rs.id} className="flex items-center gap-3 px-3 py-2.5 text-xs">
                                             {rollId != null && (
@@ -337,15 +392,28 @@ const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone
                                                     {String(rollStatus).replace(/_/g, ' ')}
                                                 </span>
                                             )}
-                                            <button
-                                                onClick={() => handleRelease(rs)}
-                                                disabled={releasingId != null}
-                                                title="Release this reservation — frees the reserved stock"
-                                                className="shrink-0 flex items-center gap-1 text-[10px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-2 py-1 rounded-md transition disabled:opacity-40 disabled:cursor-not-allowed"
-                                            >
-                                                {releasingId === rs.id ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
-                                                Release
-                                            </button>
+                                            <div className="shrink-0 flex flex-col items-stretch gap-1">
+                                                {canReduce && (
+                                                    <button
+                                                        onClick={() => handleReduceToConsumed(rs)}
+                                                        disabled={releasingId != null || reducingId != null}
+                                                        title={`Shrink reservation to the ${consumed.toLocaleString(undefined, { maximumFractionDigits: 3 })} ${unit} already consumed — frees the rest back to stock`}
+                                                        className="flex items-center gap-1 text-[10px] font-bold text-amber-700 hover:text-white hover:bg-amber-600 border border-amber-200 hover:border-amber-600 px-2 py-1 rounded-md transition disabled:opacity-40 disabled:cursor-not-allowed"
+                                                    >
+                                                        {reducingId === rs.id ? <Loader2 size={11} className="animate-spin" /> : <RotateCw size={11} />}
+                                                        Reduce to consumed
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => handleRelease(rs)}
+                                                    disabled={releasingId != null || reducingId != null || consumed > 0}
+                                                    title={consumed > 0 ? 'Already partially consumed — reduce to consumed instead, or release once nothing is consumed' : 'Release this reservation — frees the reserved stock'}
+                                                    className="flex items-center gap-1 text-[10px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-2 py-1 rounded-md transition disabled:opacity-40 disabled:cursor-not-allowed"
+                                                >
+                                                    {releasingId === rs.id ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                                                    Release
+                                                </button>
+                                            </div>
                                         </div>
                                     );
                                 })}

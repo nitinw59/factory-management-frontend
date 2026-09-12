@@ -391,6 +391,11 @@ const RollsTab = ({ rolls }) => {
                             className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors"
                         >
                             <div className="flex items-center gap-3">
+                                {roll.roll_sequence != null && (
+                                    <span className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold" title="Add order">
+                                        {roll.roll_sequence}
+                                    </span>
+                                )}
                                 <span className="font-mono font-bold text-slate-700 text-sm">
                                     Roll #{roll.roll_code ?? rollId}
                                 </span>
@@ -411,6 +416,7 @@ const RollsTab = ({ rolls }) => {
                         {isOpen && (
                             <div className="px-4 py-3 bg-white grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                                 {[
+                                    { label: 'Add Order',    value: roll.roll_sequence ?? '—' },
                                     { label: 'Meters',       value: `${roll.meters ?? roll.meter ?? '—'}m` },
                                     { label: 'Lays',         value: roll.lays ?? '—' },
                                     { label: 'End Bits',     value: roll.end_bits   ?? '—' },

@@ -67,6 +67,7 @@ const TrimReservationsPage = () => {
 
     // Release operation state — per reservation id
     const [releasingId, setReleasingId] = useState(null);
+    const [reducingId,  setReducingId]  = useState(null);
     const [rowErrors,   setRowErrors]   = useState({});
     const [toast,       setToast]       = useState(null);
 
@@ -132,6 +133,7 @@ const TrimReservationsPage = () => {
                         seen.set(r.sales_order_product_id, {
                             id: r.sales_order_product_id,
                             product: r.product_name || `SOP #${r.sales_order_product_id}`,
+                            fabric_type: r.fabric_type_name || '',
                             fabric_color: r.fabric_color_name || '',
                         });
                     }
@@ -195,6 +197,39 @@ const TrimReservationsPage = () => {
             setToast({ kind: 'error', message: err });
         } finally {
             setReleasingId(null);
+        }
+    };
+
+    // A reservation with quantity_consumed > 0 can never be released outright
+    // (the backend refuses — stock has already left for production), but it
+    // CAN be shrunk down to exactly what's consumed, freeing whatever's left
+    // unconsumed back to the pool. This is that action.
+    const handleReduceToConsumed = async (reservation, variant, variantUom) => {
+        const consumed = Number(reservation.quantity_consumed || 0);
+        const freed = Number(reservation.quantity_reserved || 0) - consumed;
+        if (!reservation.requirement_id || !variant?.trim_item_variant_id) {
+            setToast({ kind: 'error', message: 'Missing requirement/variant reference — cannot reduce.' });
+            return;
+        }
+        if (!window.confirm(
+            `Reduce this reservation to ${fmtNum(consumed)} ${variantUom || 'pcs'} (the amount already consumed for ${reservation.sales_order_code || 'this SO'})?`
+            + `\n\n${fmtNum(freed)} ${variantUom || 'pcs'} unconsumed will be freed back to stock.`
+        )) return;
+        setReducingId(reservation.id);
+        setRowErrors(prev => { const n = { ...prev }; delete n[reservation.id]; return n; });
+        try {
+            await planningApi.reserveTrim(reservation.requirement_id, {
+                quantity_reserved: consumed,
+                trim_item_variant_id: variant.trim_item_variant_id,
+            });
+            setToast({ kind: 'success', message: `Reduced to ${fmtNum(consumed)} ${variantUom || 'pcs'} · ${fmtNum(freed)} freed back to stock.` });
+            await fetchReservations();
+        } catch (e) {
+            const err = e?.response?.data?.error || e?.message || 'Reduce failed.';
+            setRowErrors(prev => ({ ...prev, [reservation.id]: err }));
+            setToast({ kind: 'error', message: err });
+        } finally {
+            setReducingId(null);
         }
     };
 
@@ -276,7 +311,7 @@ const TrimReservationsPage = () => {
                             <option value="">All Products</option>
                             {sopOptions.map(o => (
                                 <option key={o.id} value={o.id}>
-                                    {o.product}{o.fabric_color ? ` · ${o.fabric_color}` : ''}
+                                    {o.product}{o.fabric_type ? ` · ${o.fabric_type}` : ''}{o.fabric_color ? ` · ${o.fabric_color}` : ''}
                                 </option>
                             ))}
                         </select>
@@ -405,6 +440,9 @@ const TrimReservationsPage = () => {
                                                         {variant.reservations.map(r => {
                                                             const rowErr = rowErrors[r.id];
                                                             const releasing = releasingId === r.id;
+                                                            const reducing  = reducingId  === r.id;
+                                                            const consumed  = Number(r.quantity_consumed || 0);
+                                                            const canReduce = consumed > 0 && consumed < Number(r.quantity_reserved || 0);
                                                             return (
                                                                 <div key={r.id} className="flex items-start gap-3 bg-white border border-slate-100 rounded-lg px-3 py-2 text-xs">
                                                                     <div className="flex-1 min-w-0">
@@ -419,6 +457,7 @@ const TrimReservationsPage = () => {
                                                                         </div>
                                                                         <div className="text-slate-600 mt-0.5">
                                                                             {r.product_name || `SOP #${r.sales_order_product_id}`}
+                                                                            {r.fabric_type_name && <span className="text-slate-500 font-semibold"> · {r.fabric_type_name}</span>}
                                                                             {r.fabric_color_name && <span className="text-slate-400"> · {r.fabric_color_name}{r.fabric_color_number ? ` (${r.fabric_color_number})` : ''}</span>}
                                                                         </div>
                                                                         <div className="text-[11px] text-slate-400 mt-0.5">
@@ -439,18 +478,34 @@ const TrimReservationsPage = () => {
                                                                             </p>
                                                                         )}
                                                                     </div>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleRelease(r, group.uom)}
-                                                                        disabled={releasing || Number(r.quantity_consumed || 0) > 0}
-                                                                        className="shrink-0 flex items-center gap-1 text-[11px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-2 py-1 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                                                                        title={Number(r.quantity_consumed || 0) > 0 ? 'Already partially consumed — cannot release' : 'Release this reservation'}
-                                                                    >
-                                                                        {releasing
-                                                                            ? <Loader2 size={11} className="animate-spin" />
-                                                                            : <Trash2 size={11} />}
-                                                                        Release
-                                                                    </button>
+                                                                    <div className="shrink-0 flex flex-col items-stretch gap-1">
+                                                                        {canReduce && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleReduceToConsumed(r, variant, group.uom)}
+                                                                                disabled={reducing || releasing}
+                                                                                className="flex items-center gap-1 text-[11px] font-bold text-amber-700 hover:text-white hover:bg-amber-600 border border-amber-200 hover:border-amber-600 px-2 py-1 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                                title={`Shrink reservation to the ${fmtNum(consumed)} ${group.uom || 'pcs'} already consumed — frees the rest back to stock`}
+                                                                            >
+                                                                                {reducing
+                                                                                    ? <Loader2 size={11} className="animate-spin" />
+                                                                                    : <RotateCw size={11} />}
+                                                                                Reduce to consumed
+                                                                            </button>
+                                                                        )}
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleRelease(r, group.uom)}
+                                                                            disabled={releasing || reducing || consumed > 0}
+                                                                            className="flex items-center gap-1 text-[11px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-2 py-1 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                            title={consumed > 0 ? 'Already partially consumed — reduce to consumed instead, or release once nothing is consumed' : 'Release this reservation'}
+                                                                        >
+                                                                            {releasing
+                                                                                ? <Loader2 size={11} className="animate-spin" />
+                                                                                : <Trash2 size={11} />}
+                                                                            Release
+                                                                        </button>
+                                                                    </div>
                                                                 </div>
                                                             );
                                                         })}

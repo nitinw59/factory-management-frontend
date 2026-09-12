@@ -204,8 +204,8 @@ const BomDetailModal = ({ bomId, onClose, onEdit, onDuplicate }) => {
             XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ratioRows), 'Ratio Groups');
         }
 
-        const safeName = (bom.bom_name || `BOM-${bom.id}`).trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-');
-        XLSX.writeFile(wb, `${safeName}.xlsx`);
+        const safeName = (bom.bom_name || `${bom.id}`).trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-');
+        XLSX.writeFile(wb, `BOM-${safeName}.xlsx`);
     };
 
     return (

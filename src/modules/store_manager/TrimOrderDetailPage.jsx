@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, Link } from 'react-router-dom';
 import {
     LuPackage, LuTriangleAlert, LuRefreshCw,
-    LuReplace, LuArrowLeft, LuListOrdered, LuCircleCheck, LuWand,
-    LuTrash2, LuFileText, LuBookOpen, LuScissors, LuTag, LuPrinter, LuDownload, LuX,
+    LuArrowLeft, LuListOrdered, LuCircleCheck, LuWand, LuTrash2,
+    LuFileText, LuBookOpen, LuScissors, LuTag, LuPrinter, LuDownload, LuX,
     LuSend, LuUndo2, LuChevronDown, LuChevronsDownUp, LuChevronsUpDown, LuLock, LuLockOpen
 } from 'react-icons/lu';
 import { Loader2, Info } from 'lucide-react';
@@ -16,18 +16,10 @@ import { downloadHandoverById } from '../trim_kits/handoverSlip';
 import ExchangePanel from '../trim_kits/ExchangePanel';
 import { trimLossApi } from '../../api/trimLossApi';
 import { caseStatusOf } from '../trim_loss/trimLossStatusConfig';
+import { effectiveStockOf, reservedOf } from './trimOrderCellStatus';
+import TrimOrderItemsGrid from './TrimOrderItemsGrid';
+import TrimOrderItemDrilldownModal from './TrimOrderItemDrilldownModal';
 const Spinner = () => <div className="flex justify-center items-center p-12"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
-
-// Aggregate cutting rolls' "28: 5, 30: 5" size strings into { size: totalCutForSize }.
-// Shared by the BOM reconciliation block (PER_SIZE derivation) so the parse lives in one place.
-const parseSizeCutMap = (cutting = []) => {
-    const map = {};
-    (cutting || []).forEach(c => (c.sizes || '').split(',').forEach(part => {
-        const [sz, qty] = part.trim().split(':').map(s => s.trim());
-        if (sz && qty) map[sz] = (map[sz] || 0) + Number(qty);
-    }));
-    return map;
-};
 
 // --- Barcode Print/Download Modal ---
 const BarcodePrintModal = ({ isOpen, onClose, batchId }) => {
@@ -379,161 +371,6 @@ const ReferenceDataModal = ({ isOpen, onClose, data = { bom: [], cutting: [] }, 
     );
 };
 
-// --- Fulfillment Modal ---
-const FulfillmentModal = ({ item, sopId, onClose, onSubmit, apiError }) => {
-    const fulfillmentOptions = [
-        ...(item.available_stock > 0 ? [{ ...item, id: item.trim_item_variant_id, is_substitute: false }] : []),
-        ...(item.substitutes || []).map(sub => ({ ...sub, id: sub.substitute_variant_id, is_substitute: true }))
-    ];
-
-    const remainingRequired = item.quantity_required - item.quantity_fulfilled;
-    const [selectedVariantId, setSelectedVariantId] = useState(fulfillmentOptions[0]?.id || '');
-    const [quantity, setQuantity] = useState(remainingRequired);
-
-    const [reservationInfo, setReservationInfo] = useState(null);
-    const [reservationLoading, setReservationLoading] = useState(false);
-    const [usageOpen, setUsageOpen] = useState(false);
-
-    useEffect(() => {
-        if (!selectedVariantId) { setReservationInfo(null); return; }
-        const params = { trim_item_variant_id: selectedVariantId };
-        if (sopId) params.sales_order_product_id = sopId;
-        setReservationLoading(true);
-        storeManagerApi.getTrimReservations(params)
-            .then(res => {
-                const body    = res.data?.data ?? res.data ?? {};
-                const variant = body.groups?.[0]?.variants?.[0] ?? null;
-                const info = variant ? {
-                    reserved: Number(variant.total_reserved || 0),
-                    active:   Number(variant.total_active   || 0),
-                    consumed: Number(variant.total_reserved || 0) - Number(variant.total_active || 0),
-                    scopedToSop: !!sopId,
-                } : null;
-                setReservationInfo(info);
-            })
-            .catch(() => setReservationInfo(null))
-            .finally(() => setReservationLoading(false));
-    }, [sopId, selectedVariantId]);
-
-    const selectedOption = fulfillmentOptions.find(opt => opt.id === selectedVariantId);
-    const maxAllowed = selectedOption ? Math.min(remainingRequired, selectedOption.available_stock) : 0;
-
-    const [validationErr, setValidationErr] = useState(null);
-    const handleSubmit = () => {
-        if (!selectedOption) { setValidationErr("Please select an item to fulfill with."); return; }
-        if (isNaN(quantity) || quantity <= 0) { setValidationErr("Invalid quantity. Please enter a number greater than 0."); return; }
-        if (quantity > maxAllowed) { setValidationErr(`Quantity cannot exceed available stock (${selectedOption.available_stock}) or remaining required (${remainingRequired}).`); return; }
-        setValidationErr(null);
-        onSubmit({
-            orderItemId: item.id,
-            quantityToFulfill: quantity,
-            fulfillingVariantId: selectedVariantId
-        });
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-70 z-50 flex justify-center items-center p-4 transition-opacity duration-300">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
-                <div className="p-6 border-b">
-                    <h3 className="text-xl font-bold text-gray-800">Fulfill Order Item</h3>
-                    <p className="text-sm text-gray-500">Required: <strong>{item.item_name} - {item.color_name} - {item.color_number}{item.variant_size ? ` - ${item.variant_size}` : ''}</strong></p>
-                </div>
-                <div className="p-6 space-y-5 bg-gray-50">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Select Item to Use for Fulfillment</label>
-                        <div className="space-y-3">
-                            {fulfillmentOptions.map(option => (
-                                <label key={option.id} htmlFor={`variant-${option.id}`} className={`flex items-center p-4 border-2 rounded-lg cursor-pointer transition-all ${selectedVariantId === option.id ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-300'}`}>
-                                    <input type="radio" id={`variant-${option.id}`} name="fulfillment-variant" value={option.id} checked={selectedVariantId === option.id} onChange={() => setSelectedVariantId(option.id)} className="h-4 w-4 text-blue-600 focus:ring-blue-500" />
-                                    <div className="ml-4 flex-1">
-                                        <div className="flex justify-between items-center mb-1">
-                                            <span className="font-bold text-gray-900 text-sm">{option.item_name}</span>
-                                            {option.is_substitute && (
-                                                <span className="text-[10px] font-extrabold text-purple-600 bg-purple-100 px-2 py-0.5 rounded flex items-center"><LuReplace className="mr-1"/>SUBSTITUTE</span>
-                                            )}
-                                        </div>
-                                        <div className="flex justify-between text-xs text-gray-600 font-medium">
-                                            <span>
-                                                {option.color_name}
-                                                {option.color_number && <span className="ml-1.5 text-[10px] font-mono text-gray-400">{option.color_number}</span>}
-                                                {option.variant_size && <span className="ml-1.5 text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded">{option.variant_size}</span>}
-                                            </span>
-                                            <span className="bg-gray-100 px-2 rounded">Stock: {option.available_stock}</span>
-                                        </div>
-                                    </div>
-                                </label>
-                            ))}
-                        </div>
-                    </div>
-                    {/* Reservation status for selected variant */}
-                    {selectedVariantId && (
-                        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs">
-                            <p className="font-bold text-blue-700 mb-1.5 uppercase tracking-wider text-[10px]">
-                                Buyer reservation for this variant
-                                {reservationInfo && !reservationInfo.scopedToSop && (
-                                    <span className="ml-1.5 normal-case font-normal text-blue-400">(all orders combined)</span>
-                                )}
-                            </p>
-                            {reservationLoading ? (
-                                <p className="text-blue-400 flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Checking…</p>
-                            ) : reservationInfo ? (
-                                <div className="flex items-center gap-4">
-                                    <span className="text-slate-600"><span className="font-bold text-blue-800">{reservationInfo.reserved.toLocaleString('en-IN')}</span> reserved</span>
-                                    <span className="text-slate-600">
-                                        <button
-                                            type="button"
-                                            onClick={() => setUsageOpen(true)}
-                                            disabled={reservationInfo.consumed <= 0}
-                                            className="font-bold text-orange-700 hover:underline disabled:no-underline disabled:cursor-default disabled:text-orange-700"
-                                            title={reservationInfo.consumed > 0 ? 'View batches this reservation was used against' : undefined}
-                                        >
-                                            {reservationInfo.consumed.toLocaleString('en-IN')}
-                                        </button> already used
-                                    </span>
-                                    <span className="text-slate-600"><span className={`font-bold ${reservationInfo.active > 0 ? 'text-emerald-700' : 'text-red-600'}`}>{reservationInfo.active.toLocaleString('en-IN')}</span> available to allocate</span>
-                                </div>
-                            ) : (
-                                <p className="text-amber-700 flex items-center gap-1"><LuTriangleAlert size={11} /> No reservation found — ask buyer to reserve first.</p>
-                            )}
-                        </div>
-                    )}
-                    <div>
-                        <label htmlFor="fulfill-quantity" className="block text-sm font-medium text-gray-700 mb-1">Quantity to Fulfill (Remaining: {remainingRequired})</label>
-                        <input type="number" id="fulfill-quantity" value={quantity} onChange={e => setQuantity(parseInt(e.target.value, 10) || 0)} className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none font-bold" min="1" max={maxAllowed} />
-                    </div>
-                    {apiError && (
-                        <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 text-sm text-red-700">
-                            <p className="font-semibold flex items-center gap-1.5"><LuTriangleAlert size={14} /> {apiError.message}</p>
-                            {apiError.sopId && apiError.trimId && (
-                                <p className="mt-1 text-xs text-red-600">Ask buyer to reserve the required trim stock before placing this order.</p>
-                            )}
-                        </div>
-                    )}
-                </div>
-                <div className="px-6 py-4 bg-white border-t space-y-3">
-                    {validationErr && (
-                        <p className="text-sm text-red-600 flex items-center gap-1.5 font-medium">
-                            <LuTriangleAlert size={14} /> {validationErr}
-                        </p>
-                    )}
-                    <div className="flex justify-end space-x-3">
-                        <button onClick={onClose} className="px-5 py-2.5 bg-gray-100 text-gray-800 rounded-lg font-bold hover:bg-gray-200 transition-colors">Cancel</button>
-                        <button onClick={handleSubmit} className="px-5 py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Confirm Fulfillment</button>
-                    </div>
-                </div>
-            </div>
-            {usageOpen && (
-                <ReservationUsageModal
-                    sopId={sopId}
-                    variantIds={[selectedVariantId]}
-                    title={`${item.item_name}${item.color_name ? ` — ${item.color_name}` : ''}`}
-                    onClose={() => setUsageOpen(false)}
-                />
-            )}
-        </div>
-    );
-};
-
 // --- Reservation Usage Modal ---
 // Breaks a buyer reservation's "already used" total down by the production batch /
 // trim order that actually drew against it. Backend endpoint TBD — see storeManagerApi.
@@ -645,31 +482,6 @@ const Toast = ({ kind, message, onDismiss }) => {
     );
 };
 
-// Raw stock (available_stock / main_store_stock) minus reservations. Defensive — works on
-// items, substitute entries, and ad-hoc variant-like objects. Falls back to raw when reservation
-// data isn't present on that particular variant.
-const effectiveStockOf = (v) => {
-    if (!v) return 0;
-    const raw = Number(v.available_stock ?? v.main_store_stock ?? v.in_stock ?? 0);
-    const res = Number(v.quantity_reserved ?? 0);
-    return Math.max(0, raw - res);
-};
-const reservedOf = (v) => Number(v?.quantity_reserved ?? 0);
-
-const intentDisplay = (decision, fulfillingVariant) => {
-    if (decision === 'exact')        return { key: 'exact',        label: 'Exact match',                                                       color: 'blue',   order: 0 };
-    if (decision === 'fulfilled')    return { key: 'fulfilled',    label: 'Already fulfilled',                                                 color: 'green',  order: 4 };
-    if (decision === 'insufficient') return { key: 'insufficient', label: 'Cannot fulfill',                                                    color: 'red',    order: 3 };
-    // substitute — one bucket per substitute variant id
-    const v = fulfillingVariant || {};
-    return {
-        key:   `substitute:${v.id || 'unknown'}`,
-        label: `Substitute with ${v.color_name || 'variant'}${v.color_number ? ` ${v.color_number}` : ''}`,
-        color: 'purple',
-        order: 1,
-    };
-};
-
 const FORCE_CLOSE_ROLES = ['store_manager', 'factory_admin'];
 
 const TrimOrderDetailPage = () => {
@@ -684,7 +496,7 @@ const TrimOrderDetailPage = () => {
     const [error, setError] = useState(null);
 
     // Modals state
-    const [modalState, setModalState] = useState({ isOpen: false, item: null });
+    const [drilldownState, setDrilldownState] = useState({ isOpen: false, cellItems: null, rowGroupName: null });
     const [fulfillErr, setFulfillErr] = useState(null);
     const [refModalOpen, setRefModalOpen] = useState(false);
     const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
@@ -712,40 +524,34 @@ const TrimOrderDetailPage = () => {
     const [refData, setRefData] = useState({ bom: [], cutting: [] });
     const [refDataLoaded, setRefDataLoaded] = useState(false);
 
-    // Reservation info for the currently selected trim item
-    const [trimReservation, setTrimReservation] = useState(null);
-    const [trimResLoading, setTrimResLoading] = useState(false);
     const [usageModal, setUsageModal] = useState(null); // { variantIds, title } | null
 
-    // Master-detail + intent grouping
-    const [selectedTrimName, setSelectedTrimName] = useState(null);
-    const [statusFilter,     setStatusFilter]     = useState('all');   // 'all' | 'ready' | 'sub' | 'insufficient' | 'fulfilled'
-    const [search,           setSearch]           = useState('');
-    const [overrides,        setOverrides]        = useState({});      // { [itemId]: { fulfilling_variant_id, fulfilling_variant, quantity_to_fulfill, decision } }
-    const [popoverAnchor,    setPopoverAnchor]    = useState(null);    // { itemId, rect: DOMRect } | null
-    const [bulkBusyKey,      setBulkBusyKey]      = useState(null);
-    const popoverRef = useRef(null);
+    // Grid + overrides
+    const [statusFilter, setStatusFilter] = useState('all');   // 'all' | 'ready' | 'sub' | 'insufficient' | 'fulfilled'
+    const [overrides,    setOverrides]    = useState({});      // { [itemId]: { fulfilling_variant_id, fulfilling_variant, quantity_to_fulfill, decision } }
+    const [bulkBusyKey,  setBulkBusyKey]  = useState(null);     // trimItemGroups row name currently bulk-fulfilling
 
-    // Close popover on Esc, outside click, and any scroll/resize (fixed-positioned, so it can't follow content).
-    useEffect(() => {
-        if (!popoverAnchor) return undefined;
-        const onKey = (e) => { if (e.key === 'Escape') setPopoverAnchor(null); };
-        const onScroll = () => setPopoverAnchor(null);
-        const onResize = () => setPopoverAnchor(null);
-        const onDocMouseDown = (e) => {
-            if (popoverRef.current && !popoverRef.current.contains(e.target)) setPopoverAnchor(null);
-        };
-        document.addEventListener('keydown', onKey);
-        window.addEventListener('scroll', onScroll, true);
-        window.addEventListener('resize', onResize);
-        document.addEventListener('mousedown', onDocMouseDown);
-        return () => {
-            document.removeEventListener('keydown', onKey);
-            window.removeEventListener('scroll', onScroll, true);
-            window.removeEventListener('resize', onResize);
-            document.removeEventListener('mousedown', onDocMouseDown);
-        };
-    }, [popoverAnchor]);
+    // Buyer-reservation numbers for every variant on this order, prefetched once
+    // (and refreshed alongside fetchDetails) instead of fetched per selection —
+    // both the grid's row hover-popover and the drilldown modal read from this.
+    const [reservationsByVariantId, setReservationsByVariantId] = useState(new Map());
+    const fetchReservations = useCallback(async () => {
+        if (!orderInfo?.sopId) { setReservationsByVariantId(new Map()); return; }
+        try {
+            const res = await storeManagerApi.getTrimReservations({ sales_order_product_id: orderInfo.sopId });
+            const body = res.data?.data ?? res.data ?? {};
+            const map = new Map();
+            (body.groups || []).forEach(g => (g.variants || []).forEach(v => {
+                const reserved = Number(v.total_reserved || 0);
+                const active   = Number(v.total_active   || 0);
+                map.set(String(v.trim_item_variant_id ?? v.id), { reserved, active, consumed: reserved - active });
+            }));
+            setReservationsByVariantId(map);
+        } catch (err) {
+            setReservationsByVariantId(new Map());
+        }
+    }, [orderInfo?.sopId]);
+    useEffect(() => { fetchReservations(); }, [fetchReservations]);
 
     const fetchRefData = useCallback(async () => {
         setRefDataLoaded(false);
@@ -900,6 +706,7 @@ const TrimOrderDetailPage = () => {
             const res = await storeManagerApi.autoFulfillOrder(orderId);
             showToast('success', res.data.message || 'Auto-fulfill complete.');
             fetchDetails();
+            fetchReservations();
         } catch (err) {
             showToast('error', `Failed: ${err.response?.data?.error || 'Server error'}`);
             if (err.response?.status === 409) fetchDetails(); // kit locked for pickup / already issued
@@ -916,6 +723,7 @@ const TrimOrderDetailPage = () => {
             const res = await storeManagerApi.autoFulfillSubstitutes(orderId);
             showToast('success', res.data.message || 'Substitute auto-fulfill complete.');
             fetchDetails();
+            fetchReservations();
         } catch (err) {
             showToast('error', `Failed: ${err.response?.data?.error || 'Server error'}`);
             if (err.response?.status === 409) fetchDetails(); // kit locked for pickup / already issued
@@ -961,11 +769,9 @@ const TrimOrderDetailPage = () => {
         });
     }, [items, getEffectivePlan]);
 
-    // Apply status filter + search on the left pane
+    // Apply status filter (the grid does its own name filtering)
     const visibleTrimItemGroups = useMemo(() => {
-        const q = search.trim().toLowerCase();
         return trimItemGroups.filter(g => {
-            if (q && !g.name.toLowerCase().includes(q)) return false;
             if (statusFilter === 'all')          return true;
             if (g.total === 0)                   return false;
             // A trim item matches a status only when EVERY variant is in that state.
@@ -976,94 +782,7 @@ const TrimOrderDetailPage = () => {
             if (statusFilter === 'handed')       return g.handedOver          === g.total;
             return true;
         });
-    }, [trimItemGroups, search, statusFilter]);
-
-    // Auto-select the first trim item when data lands or when the current selection disappears
-    useEffect(() => {
-        if (!visibleTrimItemGroups.length) { if (selectedTrimName) setSelectedTrimName(null); return; }
-        if (!selectedTrimName || !visibleTrimItemGroups.some(g => g.name === selectedTrimName)) {
-            setSelectedTrimName(visibleTrimItemGroups[0].name);
-        }
-    }, [visibleTrimItemGroups, selectedTrimName]);
-
-    // Fetch reservation summary whenever the selected trim group or SOP changes.
-    // Filters by sales_order_product_id + each trim_item_variant_id in the group; no trim_item_id needed.
-    const selectedTrimGroup = trimItemGroups.find(g => g.name === selectedTrimName) || null;
-    useEffect(() => {
-        const sopId = orderInfo?.sopId;
-        if (!sopId || !selectedTrimGroup) {
-            setTrimReservation(null);
-            return;
-        }
-        const variantIds = new Set(selectedTrimGroup.items.map(it => String(it.trim_item_variant_id)));
-        setTrimResLoading(true);
-        storeManagerApi.getTrimReservations({ sales_order_product_id: sopId })
-            .then(res => {
-                const body = res.data?.data ?? res.data ?? {};
-                let reserved = 0, active = 0;
-                (body.groups || []).forEach(g =>
-                    (g.variants || []).forEach(v => {
-                        if (variantIds.has(String(v.trim_item_variant_id))) {
-                            reserved += Number(v.total_reserved || 0);
-                            active   += Number(v.total_active   || 0);
-                        }
-                    })
-                );
-                const info = reserved > 0 ? { reserved, active, consumed: reserved - active } : null;
-                setTrimReservation(info);
-            })
-            .catch(() => setTrimReservation(null))
-            .finally(() => setTrimResLoading(false));
-    }, [selectedTrimGroup?.name, orderInfo?.sopId]);
-    const intentGroups = useMemo(() => {
-        if (!selectedTrimGroup) return [];
-        const groups = new Map();
-        selectedTrimGroup.items.forEach(it => {
-            const plan    = getEffectivePlan(it);
-            const display = intentDisplay(plan.decision, plan.fulfilling_variant);
-            if (!groups.has(display.key)) {
-                groups.set(display.key, { ...display, fulfilling_variant: plan.fulfilling_variant, rows: [] });
-            }
-            groups.get(display.key).rows.push({ item: it, plan });
-        });
-        return [...groups.values()].sort((a, b) => {
-            if (a.order !== b.order) return a.order - b.order;
-            const sumA = a.rows.reduce((s, r) => s + (r.plan.quantity_to_fulfill || 0), 0);
-            const sumB = b.rows.reduce((s, r) => s + (r.plan.quantity_to_fulfill || 0), 0);
-            return sumB - sumA;
-        });
-    }, [selectedTrimGroup, getEffectivePlan]);
-
-    // Fulfilled quantity aggregated by the color actually used — scoped to the currently selected trim item.
-    // Surfaces "X pcs fulfilled with BLACK", "Y with WHITE" inside the right pane.
-    const fulfilledByColor = useMemo(() => {
-        if (!selectedTrimGroup) return [];
-        const map = new Map();
-        selectedTrimGroup.items.forEach(it => {
-            (it.fulfillment_log || []).forEach(log => {
-                const colorNum  = log.fulfilled_color_number ?? log.color_number ?? log.fulfilling_color_number ?? null;
-                const colorName = log.fulfilled_color_name   ?? log.color_name   ?? log.fulfilling_color_name   ?? null;
-                const variantId = log.fulfilled_variant_id   ?? log.fulfilling_variant_id ?? log.variant_id ?? null;
-                const qty       = Number(log.quantity_fulfilled ?? log.quantity ?? log.qty ?? 0);
-                const key       = String(colorNum ?? colorName ?? `var-${variantId ?? 'unknown'}`);
-                const variantKey = String(variantId ?? colorNum ?? colorName ?? key);
-                if (!map.has(key)) {
-                    map.set(key, {
-                        color_number: colorNum,
-                        color_name:   colorName || 'Unknown',
-                        total_qty:    0,
-                        variants:     new Set(),
-                    });
-                }
-                const e = map.get(key);
-                e.total_qty += qty;
-                e.variants.add(variantKey);
-            });
-        });
-        return [...map.values()]
-            .map(e => ({ ...e, variant_count: e.variants.size }))
-            .sort((a, b) => b.total_qty - a.total_qty);
-    }, [selectedTrimGroup]);
+    }, [trimItemGroups, statusFilter]);
 
     // Order-wide progress
     const overallProgress = useMemo(() => {
@@ -1110,7 +829,6 @@ const TrimOrderDetailPage = () => {
                 decision,
             },
         }));
-        setPopoverAnchor(null);
     };
 
     const handleResetOverride = (itemId) => {
@@ -1120,14 +838,17 @@ const TrimOrderDetailPage = () => {
             delete next[itemId];
             return next;
         });
-        setPopoverAnchor(null);
     };
 
-    // Bulk fulfill every row in one intent group, committing each row's effective plan.
+    // Bulk fulfill every actionable item in one trim-item row (both exact and
+    // substitute decisions together — the grid has one "Allocate" action per
+    // row now, not one per intent bucket), committing each item's effective plan.
     const handleBulkFulfillGroup = async (group) => {
         if (isClosed) return;
-        const fulfillable = group.rows.filter(r => r.plan.decision !== 'fulfilled' && r.plan.fulfilling_variant_id && r.plan.quantity_to_fulfill > 0);
-        if (fulfillable.length === 0) { showToast('error', 'Nothing to fulfill in this group.'); return; }
+        const fulfillable = group.items
+            .map(it => ({ item: it, plan: getEffectivePlan(it) }))
+            .filter(({ plan }) => plan.decision !== 'fulfilled' && plan.fulfilling_variant_id && plan.quantity_to_fulfill > 0);
+        if (fulfillable.length === 0) { showToast('error', 'Nothing to fulfill for this trim item.'); return; }
 
         // Detect rows whose planned qty exceeds the net-of-reservations stock of the variant
         // they're pulling from. Surface them so the user explicitly confirms the over-allocation.
@@ -1143,7 +864,7 @@ const TrimOrderDetailPage = () => {
             return { item, plan, fulfillingVar, net, res, dipsBy };
         }).filter(Boolean);
 
-        const lines = [`Allocate stock for ${fulfillable.length} variant${fulfillable.length === 1 ? '' : 's'} — ${group.label}?`];
+        const lines = [`Allocate stock for ${fulfillable.length} variant${fulfillable.length === 1 ? '' : 's'} — ${group.name}?`];
         if (overReserved.length > 0) {
             lines.push('');
             lines.push(`⚠ ${overReserved.length} row${overReserved.length === 1 ? '' : 's'} will dip into stock reserved for other plan requirements:`);
@@ -1157,8 +878,8 @@ const TrimOrderDetailPage = () => {
         }
         if (!window.confirm(lines.join('\n'))) return;
         // Set `isFulfillingAll` so the page-level spinner check (`isLoading && !isFulfillingAll`)
-        // stays false during fetchDetails — keeps the master-detail mounted and preserves scroll.
-        setBulkBusyKey(group.key);
+        // stays false during fetchDetails — keeps the grid mounted and preserves scroll.
+        setBulkBusyKey(group.name);
         setIsFulfillingAll(true);
         let failures = 0;
         try {
@@ -1181,14 +902,15 @@ const TrimOrderDetailPage = () => {
                 return next;
             });
             if (failures > 0) showToast('error', `Completed with ${failures} failure${failures === 1 ? '' : 's'} — some rows blocked by missing reservations.`);
-            await fetchDetails();
+            await Promise.all([fetchDetails(), fetchReservations()]);
         } finally {
             setBulkBusyKey(null);
             setIsFulfillingAll(false);
         }
     };
 
-    const handleFulfillClick = (item) => { if (isClosed) return; setModalState({ isOpen: true, item: item }); };
+    const handleCellClick = (cellItems, rowGroupName) => setDrilldownState({ isOpen: true, cellItems, rowGroupName });
+    const closeDrilldown = () => { setDrilldownState({ isOpen: false, cellItems: null, rowGroupName: null }); setFulfillErr(null); };
 
     const handleFulfillmentSubmit = async (fulfillmentData) => {
         if (isClosed) return;
@@ -1196,8 +918,8 @@ const TrimOrderDetailPage = () => {
         setFulfillErr(null);
         try {
             await storeManagerApi.fulfillWithVariant(fulfillmentData);
-            setModalState({ isOpen: false, item: null });
-            await fetchDetails();
+            closeDrilldown();
+            await Promise.all([fetchDetails(), fetchReservations()]);
         } catch (err) {
             const d = err?.response?.data || {};
             setFulfillErr({
@@ -1218,6 +940,7 @@ const TrimOrderDetailPage = () => {
             await storeManagerApi.revertFulfillment(logId);
             showToast('success', 'Fulfillment allocation reverted.');
             fetchDetails();
+            fetchReservations();
         } catch (err) {
             showToast('error', `Failed to revert: ${err.response?.data?.error || 'Server error'}`);
             if (err.response?.status === 409) fetchDetails();
@@ -1730,8 +1453,7 @@ const TrimOrderDetailPage = () => {
                         </div>
                     </div>
 
-
-                    {/* Master-detail body */}
+                    {/* Order requirements — pivot grid, rows = trim items, columns = colors */}
                     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                         <div className="flex items-center justify-between gap-3 flex-wrap p-4 border-b border-gray-100 bg-gray-50/50">
                             <h3 className="text-base font-bold text-gray-800 flex items-center">
@@ -1758,7 +1480,28 @@ const TrimOrderDetailPage = () => {
                             </div>
                         </div>
 
-                        <div className="relative grid grid-cols-1 lg:grid-cols-12 gap-0 h-[75vh]">
+                        {/* Status filter chips */}
+                        <div className="flex flex-wrap gap-1 px-4 py-2.5 border-b border-gray-100 bg-white">
+                            {[
+                                { key: 'all',          label: 'All',          color: 'gray'   },
+                                { key: 'ready',        label: 'Ready',        color: 'blue'   },
+                                { key: 'sub',          label: 'Substitute',   color: 'purple' },
+                                { key: 'insufficient', label: 'Insufficient', color: 'red'    },
+                                { key: 'fulfilled',    label: 'Fulfilled',    color: 'green'  },
+                                { key: 'handed',       label: 'Handed over',  color: 'teal'   },
+                            ].map(opt => {
+                                const active = statusFilter === opt.key;
+                                const cs = STATUS_STYLES[opt.color];
+                                return (
+                                    <button key={opt.key} onClick={() => setStatusFilter(opt.key)}
+                                        className={`text-[10px] font-bold px-2 py-1 rounded-md border transition-colors ${active ? `${cs.bg} ${cs.text} ${cs.border}` : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}>
+                                        {opt.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        <div className="relative p-4">
                             {(isFulfillingAll || isReverting) && (
                                 <div className="absolute inset-0 z-20 bg-white/60 backdrop-blur-[1px] flex items-center justify-center">
                                     <div className="bg-white px-6 py-3 rounded-xl shadow-lg border flex items-center font-bold text-blue-700">
@@ -1766,437 +1509,57 @@ const TrimOrderDetailPage = () => {
                                     </div>
                                 </div>
                             )}
-
-                            {/* LEFT PANE — trim item cards */}
-                            <div className="lg:col-span-4 lg:border-r border-gray-200 flex flex-col overflow-hidden">
-                                {/* sticky search + filter */}
-                                <div className="shrink-0 p-3 border-b border-gray-100 space-y-2 bg-white">
-                                    <div className="relative">
-                                        <input type="search" placeholder="Search trim items…"
-                                            value={search} onChange={e => setSearch(e.target.value)}
-                                            className="w-full pl-3 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
-                                    </div>
-                                    <div className="flex flex-wrap gap-1">
-                                        {[
-                                            { key: 'all',          label: 'All',          color: 'gray'   },
-                                            { key: 'ready',        label: 'Ready',        color: 'blue'   },
-                                            { key: 'sub',          label: 'Substitute',   color: 'purple' },
-                                            { key: 'insufficient', label: 'Insufficient', color: 'red'    },
-                                            { key: 'fulfilled',    label: 'Fulfilled',    color: 'green'  },
-                                            { key: 'handed',       label: 'Handed over',  color: 'teal'   },
-                                        ].map(opt => {
-                                            const active = statusFilter === opt.key;
-                                            const cs = STATUS_STYLES[opt.color];
-                                            return (
-                                                <button key={opt.key} onClick={() => setStatusFilter(opt.key)}
-                                                    className={`text-[10px] font-bold px-2 py-1 rounded-md border transition-colors ${active ? `${cs.bg} ${cs.text} ${cs.border}` : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}>
-                                                    {opt.label}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                                {/* scrollable cards list */}
-                                <div className="pane-scroll flex-1 overflow-y-auto p-2 space-y-1.5">
-                                    {visibleTrimItemGroups.length === 0 ? (
-                                        <p className="text-center text-xs text-gray-400 italic py-8">
-                                            {items.length === 0 ? 'No items in this order.' : 'No trim items match the filter.'}
-                                        </p>
-                                    ) : visibleTrimItemGroups.map(group => {
-                                        const isSel = selectedTrimName === group.name;
-                                        const c = group.counts;
-                                        return (
-                                            <button key={group.name} onClick={() => setSelectedTrimName(group.name)}
-                                                className={`w-full text-left p-3 rounded-lg border transition ${isSel ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-300' : 'border-gray-200 bg-white hover:border-blue-200'}`}>
-                                                <div className="flex items-start justify-between gap-2 mb-1.5">
-                                                    <p className="text-sm font-bold text-gray-800 truncate">{group.name}</p>
-                                                    <div className="flex items-center gap-1 shrink-0">
-                                                        {group.handedOver > 0 && (
-                                                            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded" title={`${group.handedOver} of ${group.total} variant(s) handed over on a signed slip`}>
-                                                                <LuFileText className="h-2.5 w-2.5" /> {group.handedOver}
-                                                            </span>
-                                                        )}
-                                                        <span className="text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded">
-                                                            {group.total}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                                {/* Legend: green = allocated (done) · blue = ready to allocate · purple = via substitute · red = missing/short */}
-                                                <div className="flex h-1.5 rounded-full overflow-hidden bg-gray-100 mb-1.5">
-                                                    {c.fulfilled    > 0 && <div className="bg-green-500"   style={{ width: `${(c.fulfilled    / group.total) * 100}%` }} />}
-                                                    {c.exact        > 0 && <div className="bg-blue-500"    style={{ width: `${(c.exact        / group.total) * 100}%` }} />}
-                                                    {c.substitute   > 0 && <div className="bg-purple-500"  style={{ width: `${(c.substitute   / group.total) * 100}%` }} />}
-                                                    {c.insufficient > 0 && <div className="bg-red-500"     style={{ width: `${(c.insufficient / group.total) * 100}%` }} />}
-                                                </div>
-                                                <div className="flex flex-wrap gap-1.5 text-[10px] font-bold">
-                                                    {c.exact        > 0 && <span className="text-blue-700">{c.exact} ready</span>}
-                                                    {c.substitute   > 0 && <span className="text-purple-700">{c.substitute} sub</span>}
-                                                    {c.insufficient > 0 && <span className="text-red-700">{c.insufficient} short</span>}
-                                                    {c.fulfilled    > 0 && <span className="text-green-700">{c.fulfilled} done</span>}
-                                                </div>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-
-                            {/* RIGHT PANE — intent groups for the selected trim item */}
-                            <div className="pane-scroll lg:col-span-8 overflow-y-auto">
-                                {!selectedTrimGroup ? (
-                                    <div className="flex items-center justify-center h-full text-gray-400 italic p-8">
-                                        Pick a trim item on the left to see fulfillment plans.
-                                    </div>
-                                ) : (
-                                    <>
-                                        <div className="p-4 border-b border-gray-100 bg-gray-50/40">
-                                            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Trim item</p>
-                                            <h4 className="text-base font-extrabold text-gray-800">{selectedTrimGroup.name}</h4>
-                                            <p className="text-xs text-gray-500 mt-0.5">
-                                                {selectedTrimGroup.total} variant{selectedTrimGroup.total === 1 ? '' : 's'}
-                                                {' · '}{selectedTrimGroup.counts.fulfilled} fulfilled
-                                                {' · '}{selectedTrimGroup.counts.exact + selectedTrimGroup.counts.substitute} actionable
-                                                {selectedTrimGroup.counts.insufficient > 0 && <span className="text-red-600 font-bold"> · {selectedTrimGroup.counts.insufficient} blocked</span>}
-                                            </p>
-                                            <button
-                                                onClick={() => handleRecomputeTrim(selectedTrimGroup)}
-                                                disabled={recomputeBlocked || isFulfillingAll || isReverting}
-                                                title={recomputeBlocked
-                                                    ? `Recompute is locked while the order is ${orderInfo?.status}`
-                                                    : 'Re-run the BOM × cut-pieces calculation for this trim item and reconcile its lines & missing items'}
-                                                className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 px-3 py-1.5 rounded-lg shadow-sm transition">
-                                                {recomputingId === selectedTrimGroup.name
-                                                    ? <Loader2 className="animate-spin h-3.5 w-3.5" />
-                                                    : <LuRefreshCw className="h-3.5 w-3.5" />}
-                                                Re-verify calculation
-                                            </button>
-                                            {/* Unified stats + BOM cards */}
-                                            {(() => {
-                                                const totalRequired  = selectedTrimGroup.items.reduce((s, it) => s + Number(it.quantity_required  || 0), 0);
-                                                const totalFulfilled = selectedTrimGroup.items.reduce((s, it) => s + Number(it.quantity_fulfilled || 0), 0);
-                                                const remaining      = Math.max(0, totalRequired - totalFulfilled);
-                                                const pct            = totalRequired > 0 ? Math.round((totalFulfilled / totalRequired) * 100) : 0;
-
-                                                // Each order item carries trim_item_id directly — use it to match BOM entries by ID (reliable, name-independent)
-                                                const groupItemIds = new Set(
-                                                    selectedTrimGroup.items.map(it => String(it.trim_item_id)).filter(Boolean)
-                                                );
-                                                const idMatchResult = refData.bom.find(b => groupItemIds.has(String(b.trim_item_id)));
-                                                const bomEntry = refDataLoaded ? idMatchResult : undefined;
-                                                const totalCut   = refData.cutting.reduce((s, c) => s + Number(c.total_cut || 0), 0);
-                                                const wastage    = bomEntry ? parseFloat(bomEntry.wastage_percentage || 0) : 0;
-                                                const wasteFactor = 1 + wastage / 100;
-                                                const calcType   = bomEntry?.calculation_type || 'FIXED';
-                                                // quantity_per_piece is null on PER_SIZE rows — parseFloat gives NaN, which passes `!= null`.
-                                                const qtyPerPcRaw = bomEntry ? parseFloat(bomEntry.quantity_per_piece) : NaN;
-                                                const qtyPerPc    = Number.isFinite(qtyPerPcRaw) ? qtyPerPcRaw : null;
-
-                                                // Cut quantities aggregated by size (used for PER_SIZE BOM derivation)
-                                                const sizeCutMap = parseSizeCutMap(refData.cutting);
-
-                                                let bomDerived = null;
-                                                let bomFormula = null;
-                                                if (bomEntry && totalCut > 0) {
-                                                    if (calcType === 'PER_SIZE' && (bomEntry.size_consumptions || []).length > 0) {
-                                                        const raw = (bomEntry.size_consumptions || []).reduce((sum, sc) => {
-                                                            const cut = sizeCutMap[String(sc.size)] || 0;
-                                                            return sum + sc.quantity * cut;
-                                                        }, 0);
-                                                        bomDerived = Math.round(raw * wasteFactor);
-                                                        bomFormula = `Σ(size qty × cut) × ${wasteFactor.toFixed(4)}`;
-                                                    } else if (calcType === 'FIXED' && qtyPerPc != null) {
-                                                        bomDerived = Math.round(qtyPerPc * totalCut * wasteFactor);
-                                                        bomFormula = `${qtyPerPc.toFixed(4)} × ${totalCut.toLocaleString()} × ${wasteFactor.toFixed(4)}`;
-                                                    }
-                                                }
-
-                                                const variance = bomDerived != null ? totalRequired - bomDerived : null;
-                                                const pctOff   = (bomDerived && variance != null) ? Math.abs(Math.round((variance / bomDerived) * 100)) : 0;
-                                                const isMatch  = variance != null && Math.abs(variance) <= 1;
-                                                const isOver   = variance != null && variance > 0;
-
-                                                return (
-                                                    <div className="mt-3 space-y-2">
-                                                        {/* Row 1 — order quantities */}
-                                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                                                            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
-                                                                <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Required</p>
-                                                                <p className="text-base font-extrabold text-gray-900 tabular-nums">{totalRequired.toLocaleString()}</p>
-                                                            </div>
-                                                            <div className="bg-white border border-emerald-200 rounded-lg px-3 py-2">
-                                                                <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-600">Fulfilled</p>
-                                                                <p className="text-base font-extrabold text-emerald-700 tabular-nums">{totalFulfilled.toLocaleString()}</p>
-                                                                <p className="text-[10px] text-gray-500">{pct}% of required</p>
-                                                            </div>
-                                                            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
-                                                                <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Remaining</p>
-                                                                <p className={`text-base font-extrabold tabular-nums ${remaining > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{remaining.toLocaleString()}</p>
-                                                            </div>
-                                                            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
-                                                                <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Variants done</p>
-                                                                <p className="text-base font-extrabold text-gray-900 tabular-nums">{selectedTrimGroup.counts.fulfilled} <span className="text-xs font-bold text-gray-400">/ {selectedTrimGroup.total}</span></p>
-                                                            </div>
-                                                        </div>
-
-                                                        {/* Row 2 — BOM calculation */}
-                                                        {!refDataLoaded ? null : !bomEntry ? (
-                                                            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 flex items-center gap-2">
-                                                                <LuTriangleAlert className="h-4 w-4 text-red-500 shrink-0" />
-                                                                <div>
-                                                                    <p className="text-xs font-bold text-red-700">No BOM entry for this trim item</p>
-                                                                    <p className="text-[10px] text-red-500 mt-0.5">Required quantities cannot be verified against BOM. Add this item to the product BOM.</p>
-                                                                </div>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                                                                <div className="bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
-                                                                    <p className="text-[9px] font-bold uppercase tracking-wider text-violet-500">BOM Qty / Pc</p>
-                                                                    {calcType === 'PER_SIZE'
-                                                                        ? <p className="text-sm font-bold text-violet-700">Per Size</p>
-                                                                        : <p className="text-base font-extrabold text-violet-800 tabular-nums font-mono">{qtyPerPc != null ? qtyPerPc.toFixed(4) : '—'}</p>
-                                                                    }
-                                                                    {wastage > 0 && <p className="text-[9px] text-violet-400">+{wastage}% wastage</p>}
-                                                                </div>
-                                                                <div className="bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
-                                                                    <p className="text-[9px] font-bold uppercase tracking-wider text-violet-500">Total Cut</p>
-                                                                    <p className="text-base font-extrabold text-violet-800 tabular-nums">{totalCut > 0 ? totalCut.toLocaleString() : <span className="text-gray-400 text-sm font-sans">—</span>}</p>
-                                                                    {calcType === 'PER_SIZE' && Object.keys(sizeCutMap).length > 0 && (
-                                                                        <p className="text-[9px] text-violet-400">{Object.keys(sizeCutMap).length} sizes</p>
-                                                                    )}
-                                                                </div>
-                                                                <div className="bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
-                                                                    <p className="text-[9px] font-bold uppercase tracking-wider text-violet-500">BOM Derived</p>
-                                                                    <p className="text-base font-extrabold text-violet-800 tabular-nums">{bomDerived != null ? bomDerived.toLocaleString() : <span className="text-gray-400 text-sm font-sans">—</span>}</p>
-                                                                    {bomFormula && <p className="text-[9px] text-violet-400 font-mono truncate" title={bomFormula}>{bomFormula}</p>}
-                                                                </div>
-                                                                <div className={`rounded-lg px-3 py-2 border ${variance == null ? 'bg-gray-50 border-gray-200' : isMatch ? 'bg-emerald-50 border-emerald-200' : isOver ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'}`}>
-                                                                    <p className={`text-[9px] font-bold uppercase tracking-wider ${variance == null ? 'text-gray-400' : isMatch ? 'text-emerald-600' : isOver ? 'text-amber-600' : 'text-red-600'}`}>Variance</p>
-                                                                    {variance == null
-                                                                        ? <p className="text-sm font-bold text-gray-400">No cut data</p>
-                                                                        : isMatch
-                                                                            ? <p className="text-base font-extrabold text-emerald-700">✓ Exact</p>
-                                                                            : <p className={`text-base font-extrabold tabular-nums ${isOver ? 'text-amber-700' : 'text-red-700'}`}>{isOver ? '+' : ''}{variance.toLocaleString()} <span className="text-xs">({pctOff}%)</span></p>
-                                                                    }
-                                                                    {variance != null && !isMatch && <p className={`text-[9px] ${isOver ? 'text-amber-500' : 'text-red-500'}`}>{isOver ? 'ordered extra' : 'short vs BOM'}</p>}
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })()}
-
-                                            {/* Buyer reservation status for this trim item */}
-                                            {orderInfo?.sopId && (
-                                                <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
-                                                    <p className="text-[9px] font-bold uppercase tracking-wider text-blue-600 mb-1.5">Buyer reservation · this trim item</p>
-                                                    {trimResLoading ? (
-                                                        <p className="text-xs text-blue-400 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Checking…</p>
-                                                    ) : trimReservation ? (
-                                                        <div className="grid grid-cols-3 gap-2">
-                                                            <div className="bg-white border border-blue-100 rounded-lg px-2 py-1.5 text-center">
-                                                                <p className="text-[9px] font-bold uppercase tracking-wider text-blue-500">Reserved</p>
-                                                                <p className="text-base font-extrabold text-blue-800 tabular-nums">{trimReservation.reserved.toLocaleString('en-IN')}</p>
-                                                            </div>
-                                                            <div className="bg-white border border-orange-100 rounded-lg px-2 py-1.5 text-center">
-                                                                <p className="text-[9px] font-bold uppercase tracking-wider text-orange-500">Already used</p>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setUsageModal({
-                                                                        variantIds: selectedTrimGroup.items.map(it => it.trim_item_variant_id).filter(Boolean),
-                                                                        title: selectedTrimGroup.name,
-                                                                    })}
-                                                                    disabled={trimReservation.consumed <= 0}
-                                                                    className="text-base font-extrabold text-orange-700 tabular-nums hover:underline disabled:no-underline disabled:cursor-default"
-                                                                    title={trimReservation.consumed > 0 ? 'View batches this reservation was used against' : undefined}
-                                                                >
-                                                                    {trimReservation.consumed.toLocaleString('en-IN')}
-                                                                </button>
-                                                            </div>
-                                                            <div className={`bg-white rounded-lg px-2 py-1.5 text-center border ${trimReservation.active > 0 ? 'border-emerald-100' : 'border-red-100'}`}>
-                                                                <p className={`text-[9px] font-bold uppercase tracking-wider ${trimReservation.active > 0 ? 'text-emerald-600' : 'text-red-500'}`}>Allocatable</p>
-                                                                <p className={`text-base font-extrabold tabular-nums ${trimReservation.active > 0 ? 'text-emerald-700' : 'text-red-600'}`}>{trimReservation.active.toLocaleString('en-IN')}</p>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <p className="text-xs text-amber-700 flex items-center gap-1.5">
-                                                            <LuTriangleAlert size={12} /> No reservation found — ask buyer to reserve before allocating.
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            )}
-
-                                            {/* Per-trim-item "fulfilled by color" breakdown */}
-                                            {fulfilledByColor.length > 0 && (
-                                                <div className="mt-3">
-                                                    <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
-                                                        Fulfilled by color · this trim item
-                                                    </p>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {fulfilledByColor.map(c => (
-                                                            <div key={c.color_number || c.color_name}
-                                                                className="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1">
-                                                                <span className="text-xs font-extrabold text-emerald-800">{c.color_name}</span>
-                                                                {c.color_number && (
-                                                                    <span className="text-[9px] font-mono text-emerald-500">{c.color_number}</span>
-                                                                )}
-                                                                <span className="text-emerald-300">·</span>
-                                                                <span className="text-xs font-bold text-gray-800 tabular-nums">{c.total_qty.toLocaleString()}</span>
-                                                                <span className="text-[9px] text-gray-500">pcs</span>
-                                                                <span className="text-emerald-300">·</span>
-                                                                <span className="text-[9px] font-bold text-emerald-700">{c.variant_count} var</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        <div className="p-4 space-y-3">
-                                            {intentGroups.length === 0 && (
-                                                <p className="text-center text-xs text-gray-400 italic py-8">No variants on this trim item.</p>
-                                            )}
-                                            {intentGroups.map(group => {
-                                                const cs = STATUS_STYLES[group.color] || STATUS_STYLES.gray;
-                                                const isFulfilledGroup = group.key === 'fulfilled';
-                                                const fulfillable = group.rows.filter(r => r.plan.decision !== 'fulfilled' && r.plan.fulfilling_variant_id && r.plan.quantity_to_fulfill > 0);
-                                                // For Already Fulfilled, sum the actual fulfilled quantity; for everything else, sum the planned qty.
-                                                const totalQty    = isFulfilledGroup
-                                                    ? group.rows.reduce((s, r) => s + Number(r.item.quantity_fulfilled || 0), 0)
-                                                    : group.rows.reduce((s, r) => s + (r.plan.quantity_to_fulfill || 0), 0);
-                                                const totalShort  = group.rows.reduce((s, r) => s + (r.plan.shortfall || 0), 0);
-                                                const isBusy      = bulkBusyKey === group.key;
-                                                return (
-                                                    <div key={group.key} className={`rounded-xl border-2 ${cs.border} ${cs.bg} overflow-hidden`}>
-                                                        <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-white/70 border-b border-current/10">
-                                                            <div className="min-w-0">
-                                                                <p className={`text-sm font-extrabold ${cs.text} truncate`}>{group.label}</p>
-                                                                <p className="text-[10px] text-gray-600">
-                                                                    {group.rows.length} variant{group.rows.length === 1 ? '' : 's'}
-                                                                    {' · '}
-                                                                    {isFulfilledGroup ? `${totalQty.toLocaleString()} pcs fulfilled` : `${totalQty} pcs`}
-                                                                    {totalShort > 0 && <span className="text-red-600 font-bold"> · {totalShort} short</span>}
-                                                                </p>
-                                                            </div>
-                                                            {!isClosed && fulfillable.length > 0 && group.key !== 'fulfilled' && group.key !== 'insufficient' && (
-                                                                <button onClick={() => handleBulkFulfillGroup(group)}
-                                                                    disabled={isBusy || isFulfillingAll || isReverting}
-                                                                    className={`flex items-center gap-1.5 text-xs font-bold text-white ${group.color === 'blue' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-purple-600 hover:bg-purple-700'} disabled:opacity-50 px-3 py-1.5 rounded-lg shadow-sm transition`}>
-                                                                    {isBusy ? <Loader2 className="animate-spin h-3.5 w-3.5"/> : <LuPackage className="h-3.5 w-3.5"/>}
-                                                                    Allocate {fulfillable.length}
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                        <div className="p-3 flex flex-wrap gap-1.5">
-                                                            {group.rows.map(({ item, plan }) => {
-                                                                const isOverridden = !!overrides[item.id];
-                                                                const isOpen = popoverAnchor?.itemId === item.id;
-                                                                const remaining = Math.max(0, item.quantity_required - item.quantity_fulfilled);
-                                                                const isFulfilledRow = plan.decision === 'fulfilled';
-                                                                // Does this row's planned allocation dip into reserved stock of its fulfilling variant?
-                                                                const fulfillingVar = !plan.fulfilling_variant_id ? null
-                                                                    : (String(plan.fulfilling_variant_id) === String(item.trim_item_variant_id)
-                                                                        ? item
-                                                                        : (item.substitutes || []).find(s => String(s.substitute_variant_id || s.id) === String(plan.fulfilling_variant_id)));
-                                                                const fulfillingNet = effectiveStockOf(fulfillingVar);
-                                                                const fulfillingRes = reservedOf(fulfillingVar);
-                                                                const overReserved  = !isFulfilledRow && fulfillingRes > 0 && plan.quantity_to_fulfill > fulfillingNet;
-                                                                return (
-                                                                    <button
-                                                                        key={item.id}
-                                                                        onClick={(e) => {
-                                                                            if (isFulfilledRow || isClosed) return;
-                                                                            if (isOpen) { setPopoverAnchor(null); return; }
-                                                                            const rect = e.currentTarget.getBoundingClientRect();
-                                                                            setPopoverAnchor({ itemId: item.id, rect: { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height } });
-                                                                        }}
-                                                                        disabled={isFulfilledRow || isClosed}
-                                                                        title={isClosed
-                                                                            ? 'Order is closed — fulfillment is locked'
-                                                                            : isFulfilledRow
-                                                                                ? `Fulfilled · ${item.quantity_fulfilled} pcs`
-                                                                                : overReserved
-                                                                                    ? `Planned ${plan.quantity_to_fulfill} but only ${fulfillingNet} net after ${fulfillingRes} reserved`
-                                                                                    : 'Click to override the planned variant'}
-                                                                        className={`group inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-bold transition ${isFulfilledRow ? 'bg-green-50 text-green-700 border-green-200 cursor-default' : 'bg-white text-gray-800 border-gray-200 hover:border-blue-300'} ${isOverridden ? 'ring-1 ring-amber-300' : ''} ${overReserved ? 'ring-1 ring-amber-400 bg-amber-50' : ''} ${isOpen ? 'ring-2 ring-blue-400' : ''}`}>
-                                                                        <span className={isFulfilledRow ? 'text-green-700' : 'text-gray-500'}>{item.color_name || 'AGNOSTIC'}</span>
-                                                                        <span className="text-[9px] text-gray-400 font-mono">{item.color_number}</span>
-                                                                        <span className="text-gray-300">·</span>
-                                                                        {isFulfilledRow ? (
-                                                                            <span className="font-mono">✓ {Number(item.quantity_fulfilled || 0).toLocaleString()}</span>
-                                                                        ) : (
-                                                                            <span className="font-mono">{plan.quantity_to_fulfill || 0}/{remaining}</span>
-                                                                        )}
-                                                                        {plan.shortfall > 0 && <span className="text-red-600 ml-0.5">−{plan.shortfall}</span>}
-                                                                        {overReserved && <span className="text-amber-700 ml-0.5" title="Allocates beyond net-of-reserved stock">⚠</span>}
-                                                                        {isOverridden && <span className="text-amber-700 ml-0.5">★</span>}
-                                                                        {!isFulfilledRow && <span className="text-gray-400 ml-0.5">⌄</span>}
-                                                                    </button>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-
-                                            {/* Per-trim-item fulfillment history (collapsible) */}
-                                            {selectedTrimGroup.items.some(it => (it.fulfillment_log || []).length > 0) && (
-                                                <details className="bg-gray-50 border border-gray-200 rounded-xl">
-                                                    <summary className="px-4 py-2.5 cursor-pointer text-xs font-bold uppercase tracking-wider text-gray-500 hover:text-gray-700">
-                                                        Fulfillment history
-                                                    </summary>
-                                                    <div className="p-3 space-y-2 border-t border-gray-100">
-                                                        {selectedTrimGroup.items.filter(it => (it.fulfillment_log || []).length > 0).map(it => (
-                                                            <div key={it.id} className="bg-white border border-gray-200 rounded-lg p-2.5">
-                                                                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
-                                                                    {it.color_name} {it.color_number} · {it.quantity_fulfilled} / {it.quantity_required}
-                                                                </p>
-                                                                <div className="space-y-1">
-                                                                    {it.fulfillment_log.map(log => {
-                                                                        const isIssued = !!log.issue_id;
-                                                                        return (
-                                                                        <div key={log.id} className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded text-[11px]">
-                                                                            <span className="truncate">
-                                                                                <span className="bg-gray-200 text-gray-700 px-1 rounded mr-1">{log.quantity_fulfilled}×</span>
-                                                                                {log.fulfilled_color_name} {log.fulfilled_color_number}
-                                                                                {log.used_substitute && <span className="text-purple-600 font-bold ml-1.5 bg-purple-50 px-1 rounded">sub</span>}
-                                                                            </span>
-                                                                            {isIssued ? (
-                                                                                <span
-                                                                                    className="text-green-700 font-bold bg-green-50 border border-green-200 px-1.5 py-0.5 rounded whitespace-nowrap"
-                                                                                    title="Custody transferred — this allocation went out on a signed issue slip and can no longer be reverted"
-                                                                                >
-                                                                                    handed over{log.issue_number ? ` · ${log.issue_number}` : ''}
-                                                                                </span>
-                                                                            ) : (
-                                                                            <button
-                                                                                onClick={() => handleRevertFulfillment(log.id)}
-                                                                                disabled={isClosed}
-                                                                                className={`p-1 rounded transition-colors ${isClosed ? 'text-gray-300 cursor-not-allowed' : 'text-red-400 hover:text-white hover:bg-red-500'}`}
-                                                                                title={isClosed ? 'Order is closed — fulfillment is locked' : 'Undo this allocation (no stock moves)'}>
-                                                                                <LuTrash2 size={11} />
-                                                                            </button>
-                                                                            )}
-                                                                        </div>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </details>
-                                            )}
-                                        </div>
-                                    </>
-                                )}
-                            </div>
+                            {visibleTrimItemGroups.length === 0 ? (
+                                <p className="text-center text-sm text-gray-400 italic py-10">
+                                    {items.length === 0 ? 'No items in this order.' : 'No trim items match the filter.'}
+                                </p>
+                            ) : (
+                                <TrimOrderItemsGrid
+                                    trimItemGroups={visibleTrimItemGroups}
+                                    getEffectivePlan={getEffectivePlan}
+                                    overrides={overrides}
+                                    refData={refData}
+                                    refDataLoaded={refDataLoaded}
+                                    reservationsByVariantId={reservationsByVariantId}
+                                    onOpenUsage={(variantIds, title) => setUsageModal({ variantIds, title })}
+                                    onCellClick={handleCellClick}
+                                    onRowBulkFulfill={handleBulkFulfillGroup}
+                                    onRowRecompute={handleRecomputeTrim}
+                                    recomputeBlocked={recomputeBlocked}
+                                    recomputingId={recomputingId}
+                                    rowBusyKey={bulkBusyKey}
+                                    isClosed={isClosed}
+                                    actionsDisabled={isFulfillingAll || isReverting}
+                                />
+                            )}
                         </div>
                     </div>
                 </main>
             )}
-            
-            {/* Existing Fulfillment Modal */}
-            {modalState.isOpen && (
-                <FulfillmentModal item={modalState.item} sopId={orderInfo?.sopId} onClose={() => { setModalState({ isOpen: false, item: null }); setFulfillErr(null); }} onSubmit={handleFulfillmentSubmit} apiError={fulfillErr} />
-            )}
+
+            {drilldownState.isOpen && (() => {
+                const rowItems = trimItemGroups.find(g => g.name === drilldownState.rowGroupName)?.items || drilldownState.cellItems;
+                return (
+                    <TrimOrderItemDrilldownModal
+                        cellItems={drilldownState.cellItems}
+                        rowGroupName={drilldownState.rowGroupName}
+                        rowItems={rowItems}
+                        refData={refData}
+                        refDataLoaded={refDataLoaded}
+                        reservationsByVariantId={reservationsByVariantId}
+                        overrides={overrides}
+                        getEffectivePlan={getEffectivePlan}
+                        isClosed={isClosed}
+                        apiError={fulfillErr}
+                        onClose={closeDrilldown}
+                        onSaveOverride={handlePickOverride}
+                        onResetOverride={handleResetOverride}
+                        onConfirmFulfill={handleFulfillmentSubmit}
+                        onOpenUsage={(variantIds, title) => setUsageModal({ variantIds, title })}
+                        onRevertFulfillment={handleRevertFulfillment}
+                    />
+                );
+            })()}
 
             <ReferenceDataModal isOpen={refModalOpen} onClose={() => setRefModalOpen(false)} data={refData} loading={!refDataLoaded} />
             <BarcodePrintModal isOpen={barcodeModalOpen} onClose={() => setBarcodeModalOpen(false)} batchId={orderInfo?.batchId} />
@@ -2451,108 +1814,6 @@ const TrimOrderDetailPage = () => {
 
             <Toast kind={toast?.kind} message={toast?.message} onDismiss={() => setToast(null)} />
 
-            {/* Portal-rendered override popover — escapes intent-card overflow-hidden and right-pane overflow-auto */}
-            {popoverAnchor && (() => {
-                const item = items.find(it => it.id === popoverAnchor.itemId);
-                if (!item) return null;
-                const plan         = getEffectivePlan(item);
-                const isOverridden = !!overrides[item.id];
-                const altSubs      = item.substitutes || [];
-                const exactStock     = Number(item.available_stock || 0);
-                const exactReserved  = reservedOf(item);
-                const exactEffective = effectiveStockOf(item);
-                const exactAvail     = exactStock > 0;
-                const remaining      = Math.max(0, item.quantity_required - item.quantity_fulfilled);
-                // Position: prefer below the chip; flip above when popover would clip viewport.
-                const POPOVER_W = 288;        // w-72
-                const POPOVER_H_EST = 280;    // safe upper bound for estimate
-                const vw = window.innerWidth;
-                const vh = window.innerHeight;
-                const wantBelow  = popoverAnchor.rect.bottom + 4 + POPOVER_H_EST < vh;
-                const top   = wantBelow ? popoverAnchor.rect.bottom + 4 : Math.max(8, popoverAnchor.rect.top - POPOVER_H_EST - 4);
-                const left  = Math.min(Math.max(8, popoverAnchor.rect.left), vw - POPOVER_W - 8);
-                return createPortal(
-                    <div
-                        ref={popoverRef}
-                        style={{ position: 'fixed', top, left, width: POPOVER_W }}
-                        className="z-[1000] bg-white border border-gray-200 rounded-lg shadow-2xl p-2 space-y-1"
-                        onMouseDown={e => e.stopPropagation()}
-                    >
-                        <div className="flex items-baseline justify-between gap-2 px-1 py-0.5">
-                            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">
-                                Override variant · {item.color_name} {item.color_number}
-                            </p>
-                            <p className="text-[9px] text-gray-400">need {remaining}</p>
-                        </div>
-                        {/* Exact option */}
-                        <button
-                            onClick={() => handlePickOverride(item, { __isExact: true })}
-                            disabled={!exactAvail}
-                            title={exactReserved > 0 ? `Raw ${exactStock} · ${exactReserved} reserved → ${exactEffective} net` : `Raw ${exactStock}`}
-                            className={`w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded text-[11px] hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed ${plan.decision === 'exact' ? 'bg-blue-50' : ''}`}
-                        >
-                            <span className="flex items-center gap-1 min-w-0">
-                                <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-blue-100 text-blue-700">Exact</span>
-                                <span className="font-bold text-gray-800 truncate">{item.color_name} {item.color_number}</span>
-                                {exactEffective < remaining && (
-                                    <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-amber-100 text-amber-700">⚠ over</span>
-                                )}
-                            </span>
-                            <span className="flex items-baseline gap-1.5 shrink-0 font-mono">
-                                <span className={exactAvail ? 'text-gray-700' : 'text-gray-400'}>{exactStock}</span>
-                                {exactReserved > 0 && (
-                                    <span className={`text-[9px] ${exactEffective < remaining ? 'text-amber-700 font-bold' : 'text-emerald-700'}`}>
-                                        net {exactEffective}
-                                    </span>
-                                )}
-                            </span>
-                        </button>
-                        {/* Substitute options */}
-                        {altSubs.length === 0 ? (
-                            <p className="px-2 py-1 text-[10px] text-gray-400 italic">No substitutes available.</p>
-                        ) : altSubs.map(sub => {
-                            const subId      = sub.substitute_variant_id || sub.id;
-                            const subRaw     = Number(sub.available_stock || 0);
-                            const subRes     = reservedOf(sub);
-                            const subNet     = effectiveStockOf(sub);
-                            const isCurrent  = String(plan.fulfilling_variant_id) === String(subId);
-                            const isOverRes  = subNet < remaining && subRaw > 0;
-                            return (
-                                <button
-                                    key={subId}
-                                    onClick={() => handlePickOverride(item, sub)}
-                                    disabled={subRaw <= 0}
-                                    title={subRes > 0 ? `Raw ${subRaw} · ${subRes} reserved → ${subNet} net` : `Raw ${subRaw}`}
-                                    className={`w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded text-[11px] hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed ${isCurrent ? 'bg-purple-50' : ''}`}
-                                >
-                                    <span className="flex items-center gap-1 min-w-0">
-                                        <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-purple-100 text-purple-700">Sub</span>
-                                        <span className="font-bold text-gray-800 truncate">{sub.color_name} {sub.color_number}</span>
-                                        {isOverRes && (
-                                            <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-amber-100 text-amber-700">⚠ over</span>
-                                        )}
-                                    </span>
-                                    <span className="flex items-baseline gap-1.5 shrink-0 font-mono">
-                                        <span className={subRaw > 0 ? 'text-gray-700' : 'text-gray-400'}>{subRaw}</span>
-                                        {subRes > 0 && (
-                                            <span className={`text-[9px] ${isOverRes ? 'text-amber-700 font-bold' : 'text-emerald-700'}`}>
-                                                net {subNet}
-                                            </span>
-                                        )}
-                                    </span>
-                                </button>
-                            );
-                        })}
-                        <div className="flex items-center justify-between gap-2 px-2 pt-1 mt-1 border-t border-gray-100">
-                            {isOverridden ? (
-                                <button onClick={() => handleResetOverride(item.id)} className="text-[10px] text-amber-700 font-bold hover:underline">Reset to plan</button>
-                            ) : <span />}
-                            <button onClick={() => { setPopoverAnchor(null); handleFulfillClick(item); }} className="text-[10px] text-blue-600 font-bold hover:underline">Open full dialog…</button>
-                        </div>
-                    </div>,
-                    document.body
-                );
-            })()}
 
         </div>
     );

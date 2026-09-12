@@ -4,9 +4,10 @@
 // Invoked by RequirementCellDrilldownModal for the requirement behind whichever
 // grid cell the user clicked.
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Loader2, Search, CheckCircle2, Link2, X } from 'lucide-react';
 import { planningApi } from '../../api/planningApi';
+import { nameAndNumber } from './trimReservationUtils';
 
 // Buyer reservations may not exceed the calculated requirement by more than this —
 // caps accidental over-reservation while still allowing a small rounding buffer.
@@ -17,10 +18,66 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
     const [err,      setErr]      = useState(null);
 
     // ── Trim: 'exact' | substitute_variant_id string ────────────────────────
-    const [sourceId, setSourceId] = useState('exact');
-    const [trimQty,  setTrimQty]  = useState(() =>
-        String(Math.max(0, (item.quantity_required || 0) - (item.quantity_reserved || 0)))
+    // Default to whichever variant already carries the biggest existing
+    // reservation, not blindly 'exact' — the exact-match variant is often the
+    // one with zero stock (that's *why* a substitute was used), so opening on
+    // 'exact' would default the quantity field for a row nobody is using.
+    const [sourceId, setSourceId] = useState(() => {
+        if (item.type !== 'trim' || !(item.reservations || []).length) return 'exact';
+        const top = [...item.reservations].sort((a, b) => Number(b.quantity_reserved || 0) - Number(a.quantity_reserved || 0))[0];
+        if (!top || String(top.trim_item_variant_id) === String(item.exact_variant_id)) return 'exact';
+        const topId = String(top.trim_item_variant_id);
+        // Only default onto it if it's actually selectable in the "Reserve From" list.
+        const isListedSubstitute = (item.substitutes || []).some(s => String(s.substitute_variant_id) === topId);
+        return isListedSubstitute ? topId : 'exact';
+    });
+
+    // The reservation row (if any) already sitting against the *currently
+    // selected* source variant — a requirement can be split across more than
+    // one variant (e.g. partial exact match + a substitute topping up the
+    // rest), each tracked as its own plan_trim_reservations row.
+    const sourceVariantId = sourceId === 'exact' ? item.exact_variant_id : parseInt(sourceId, 10);
+    const existingSourceReservation = useMemo(
+        () => (item.reservations || []).find(rs => String(rs.trim_item_variant_id) === String(sourceVariantId)) || null,
+        [item, sourceVariantId]
     );
+    const sourceReserved = Number(existingSourceReservation?.quantity_reserved ?? 0);
+    const sourceConsumed = Number(existingSourceReservation?.quantity_consumed ?? 0);
+    // Reservations already sitting against every OTHER variant of this
+    // requirement — needed so we don't double-count them when figuring out
+    // how much this row alone needs to reach the requirement.
+    const otherVariantsReserved = Math.max(0, (item.quantity_reserved || 0) - sourceReserved);
+
+    // NOTE: the backend (reserveTrim) treats this field as THIS ROW's new
+    // ABSOLUTE total, not an amount to add on top of what's already reserved
+    // on it — it upserts plan_trim_reservations.quantity_reserved directly to
+    // whatever is sent. Default to the absolute total (on this row) that,
+    // together with every other variant's reservation, fully covers the
+    // requirement — not just the outstanding shortfall, since sending the
+    // shortfall alone reads to the backend as *lowering* the row's total,
+    // which it rejects once anything has been consumed from it.
+    const [trimQty,  setTrimQty]  = useState(() =>
+        String(Math.min(
+            Math.max((item.quantity_required || 0) - otherVariantsReserved, sourceReserved),
+            Math.max(0, (item.quantity_required || 0) * (1 + RESERVE_OVER_LIMIT_PCT) - otherVariantsReserved)
+        ))
+    );
+    // Whichever source is picked, keep the quantity field defaulted for THAT
+    // row — switching from a substitute that's already carrying a reservation
+    // to a fresh/different variant (or back) changes the floor and ceiling
+    // entirely, so a value left over from the previous source can easily land
+    // outside the new one's bounds (as happened here: 'exact' defaulted to 63
+    // for an unreserved row, then switching to the substitute — which already
+    // had 71 consumed — kept that stale 63 and tripped the 71 floor).
+    useEffect(() => {
+        if (item.type !== 'trim') return;
+        setTrimQty(String(Math.min(
+            Math.max((item.quantity_required || 0) - otherVariantsReserved, sourceReserved),
+            Math.max(0, (item.quantity_required || 0) * (1 + RESERVE_OVER_LIMIT_PCT) - otherVariantsReserved)
+        )));
+        // Only re-derive when the user switches source — not on every keystroke.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sourceId]);
 
     // ── Fabric: per-roll selection map { [roll_id]: meters_string } ──────────
     const [rollSearch, setRollSearch] = useState('');
@@ -66,11 +123,19 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
     }, [item, sourceId]);
     const trimQtyNum  = parseFloat(trimQty) || 0;
     const trimNeeded  = Math.max(0, (item.quantity_required || 0) - (item.quantity_reserved || 0));
-    // Hard cap: total reserved (existing + this action) may not exceed required +10%.
-    const trimMaxReservable = Math.max(0, (item.quantity_required || 0) * (1 + RESERVE_OVER_LIMIT_PCT) - (item.quantity_reserved || 0));
-    const trimOverStock = item.type === 'trim' && trimQtyNum > trimAvailable;
-    const trimOverCap   = item.type === 'trim' && trimQtyNum > trimMaxReservable + 0.001;
-    const trimOver       = trimOverStock || trimOverCap;
+    // trimQty is THIS ROW's new ABSOLUTE total (see note above), so both bounds
+    // are this-row-absolute too: floored by what this specific variant's
+    // reservation has already had consumed off it, and capped so that this
+    // row plus every other variant's reservation stays within required +10%.
+    const trimConsumed      = sourceConsumed;
+    const trimMaxReservable = Math.max(0, (item.quantity_required || 0) * (1 + RESERVE_OVER_LIMIT_PCT) - otherVariantsReserved);
+    // How much THIS row alone needs to carry for the requirement to be fully
+    // covered, given what every other variant's reservation already carries.
+    const trimRowTarget     = Math.max(0, (item.quantity_required || 0) - otherVariantsReserved);
+    const trimOverStock     = item.type === 'trim' && trimQtyNum > trimAvailable;
+    const trimOverCap       = item.type === 'trim' && trimQtyNum > trimMaxReservable + 0.001;
+    const trimUnderConsumed = item.type === 'trim' && trimQtyNum < trimConsumed - 0.001;
+    const trimOver          = trimOverStock || trimOverCap || trimUnderConsumed;
 
     // ── Fabric: which rolls have been over-reserved past their free meters? ──
     const fabricOverRolls = useMemo(() => {
@@ -126,6 +191,11 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
             } else if (item.type === 'trim') {
                 const q = parseFloat(trimQty);
                 if (!q || q <= 0) { setErr('Enter a quantity greater than 0'); setBusy(false); return; }
+                if (q < trimConsumed - 0.001) {
+                    setErr(`Cannot set the reservation total below the ${trimConsumed.toLocaleString()} ${item.unit} already consumed.`);
+                    setBusy(false);
+                    return;
+                }
                 if (q > trimAvailable) {
                     setErr(`Only ${trimAvailable.toLocaleString()} ${item.unit} available from the selected source.`);
                     setBusy(false);
@@ -154,7 +224,14 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                         {item.type === 'fabric' ? 'Reserve Fabric Rolls' : 'Fulfil Trim Requirement'}
                     </p>
-                    <p className="text-sm font-bold text-slate-800 mt-0.5">{item.title}</p>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                        <p className="text-sm font-bold text-slate-800 truncate">{item.title}</p>
+                        {item.type === 'trim' && (
+                            <span className="shrink-0 text-[11px] font-black text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full">
+                                {item.is_color_agnostic ? 'All colors' : nameAndNumber(item.color_name, item.color_number)}
+                            </span>
+                        )}
+                    </div>
                     <p className="text-xs text-slate-500 mt-0.5">{item.subtitle}</p>
                 </div>
 
@@ -319,7 +396,7 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
 
                     {/* ── TRIM ──────────────────────────────────────────────── */}
                     {item.type === 'trim' && (<>
-                        <div className="grid grid-cols-3 gap-2 text-center bg-slate-50 rounded-xl p-3">
+                        <div className={`grid ${trimConsumed > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-2 text-center bg-slate-50 rounded-xl p-3`}>
                             <div>
                                 <p className="text-[8px] font-bold text-slate-400 uppercase">Required</p>
                                 <p className="text-sm font-bold text-slate-700">{item.quantity_required.toLocaleString()} {item.unit}</p>
@@ -328,6 +405,12 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                                 <p className="text-[8px] font-bold text-slate-400 uppercase">Reserved</p>
                                 <p className="text-sm font-bold text-slate-700">{item.quantity_reserved.toLocaleString()} {item.unit}</p>
                             </div>
+                            {trimConsumed > 0 && (
+                                <div>
+                                    <p className="text-[8px] font-bold text-slate-400 uppercase">Consumed</p>
+                                    <p className="text-sm font-bold text-slate-700">{trimConsumed.toLocaleString()} {item.unit}</p>
+                                </div>
+                            )}
                             <div>
                                 <p className="text-[8px] font-bold text-slate-400 uppercase">Still Needed</p>
                                 <p className={`text-sm font-bold ${item.inStock ? 'text-emerald-600' : 'text-red-500'}`}>
@@ -346,8 +429,12 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                                     {sourceId === 'exact' && <span className="w-1.5 h-1.5 bg-white rounded-full" />}
                                 </span>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-bold text-slate-700 truncate">{item.title}</p>
-                                    <p className="text-[10px] text-slate-400">Exact match</p>
+                                    <p className="truncate">
+                                        <span className="text-[11px] font-black text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full">
+                                            {nameAndNumber(item.exact_variant_color_name, item.exact_variant_color_number)}
+                                        </span>
+                                    </p>
+                                    <p className="text-[10px] text-slate-400 mt-1">Exact match</p>
                                 </div>
                                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${(item.exact_variant_stock ?? 0) > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'}`}>
                                     {item.exact_variant_stock != null ? `${item.exact_variant_stock.toLocaleString()} in stock` : 'Unknown'}
@@ -366,10 +453,12 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                                             {sourceId === sid && <span className="w-1.5 h-1.5 bg-white rounded-full" />}
                                         </span>
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-xs font-bold text-slate-700 truncate">
-                                                {s.item_name}{s.color_name ? ` – ${s.color_name}` : ''}{s.color_number ? ` (${s.color_number})` : ''}
+                                            <p className="truncate">
+                                                <span className="text-[11px] font-black text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full">
+                                                    {nameAndNumber(s.color_name, s.color_number)}
+                                                </span>
                                             </p>
-                                            <p className="text-[10px] text-slate-400">Substitute</p>
+                                            <p className="text-[10px] text-slate-400 mt-1">Substitute</p>
                                         </div>
                                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.in_stock > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
                                             {s.in_stock != null ? `${s.in_stock.toLocaleString()} in stock` : '—'}
@@ -382,19 +471,23 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                         <div>
                             <div className="flex items-center justify-between mb-1">
                                 <label className="text-[9px] font-bold text-slate-400 uppercase">
-                                    Quantity to Reserve ({item.unit})
+                                    New Reservation Total ({item.unit})
                                 </label>
                                 <div className="flex items-center gap-1.5">
                                     {trimNeeded > 0 && (
                                         <button
                                             type="button"
-                                            onClick={() => setTrimQty(String(Math.min(trimNeeded, Number.isFinite(trimAvailable) ? trimAvailable : trimNeeded)))}
+                                            onClick={() => setTrimQty(String(Math.min(
+                                                trimRowTarget,
+                                                trimMaxReservable,
+                                                Number.isFinite(trimAvailable) ? Math.max(trimAvailable, trimConsumed) : Infinity
+                                            )))}
                                             className="text-[9px] font-bold text-violet-600 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-full px-2 py-0.5 transition-colors"
                                         >
-                                            Fill needed ({trimNeeded.toLocaleString()})
+                                            Fill required ({trimRowTarget.toLocaleString()})
                                         </button>
                                     )}
-                                    {Number.isFinite(trimAvailable) && trimAvailable > 0 && trimAvailable < trimNeeded && (
+                                    {Number.isFinite(trimAvailable) && trimAvailable > trimConsumed && trimAvailable < trimRowTarget && (
                                         <button
                                             type="button"
                                             onClick={() => setTrimQty(String(trimAvailable))}
@@ -406,27 +499,33 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                                 </div>
                             </div>
                             <input
-                                type="number" min={0} step="any"
+                                type="number" min={trimConsumed} step="any"
                                 value={trimQty} onChange={e => setTrimQty(e.target.value)}
-                                placeholder={`0 – ${trimNeeded.toLocaleString()} ${item.unit}`}
+                                placeholder={`${trimConsumed} – ${trimMaxReservable.toLocaleString()} ${item.unit}`}
                                 className={`w-full text-sm border rounded-lg px-3 py-2 focus:outline-none ${trimOver ? 'border-red-300 focus:border-red-400 bg-red-50/40' : 'border-slate-200 focus:border-violet-400'}`}
                             />
                             <p className="text-[10px] text-slate-400 mt-1">
-                                Up to {trimNeeded.toLocaleString()} {item.unit} needed
+                                This replaces the total reserved for this requirement — {trimNeeded.toLocaleString()} {item.unit} still needed on top of the {item.quantity_reserved.toLocaleString()} already reserved
                                 {Number.isFinite(trimAvailable) && (trimAvailable >= trimNeeded
                                     ? <span className="text-emerald-600"> · enough in stock</span>
                                     : <span className="text-amber-600"> · only {trimAvailable.toLocaleString()} in stock</span>
                                 )}
-                                {' · '}max {trimMaxReservable.toLocaleString()} reservable (required +{RESERVE_OVER_LIMIT_PCT * 100}%)
+                                {' · '}max total {trimMaxReservable.toLocaleString()} (required +{RESERVE_OVER_LIMIT_PCT * 100}%)
+                                {trimConsumed > 0 && <> · min {trimConsumed.toLocaleString()} (already consumed)</>}
                             </p>
-                            {trimOverStock && (
+                            {trimUnderConsumed && (
                                 <p className="text-[11px] text-red-600 mt-1 font-semibold">
-                                    Cannot reserve {trimQtyNum.toLocaleString()} {item.unit} — only {trimAvailable.toLocaleString()} available from the selected source.
+                                    Cannot set the total below {trimConsumed.toLocaleString()} {item.unit} — that much has already been consumed.
                                 </p>
                             )}
-                            {!trimOverStock && trimOverCap && (
+                            {!trimUnderConsumed && trimOverStock && (
                                 <p className="text-[11px] text-red-600 mt-1 font-semibold">
-                                    Cannot reserve {trimQtyNum.toLocaleString()} {item.unit} — max reservable is {trimMaxReservable.toLocaleString()} {item.unit} (required +{RESERVE_OVER_LIMIT_PCT * 100}%).
+                                    Cannot set the total to {trimQtyNum.toLocaleString()} {item.unit} — only {trimAvailable.toLocaleString()} available from the selected source.
+                                </p>
+                            )}
+                            {!trimUnderConsumed && !trimOverStock && trimOverCap && (
+                                <p className="text-[11px] text-red-600 mt-1 font-semibold">
+                                    Cannot set the total to {trimQtyNum.toLocaleString()} {item.unit} — max reservable is {trimMaxReservable.toLocaleString()} {item.unit} (required +{RESERVE_OVER_LIMIT_PCT * 100}%).
                                 </p>
                             )}
                         </div>
@@ -441,7 +540,9 @@ const ReserveFulfillModal = ({ item, onClose, onDone }) => {
                     </button>
                     <button onClick={handleConfirm}
                         disabled={busy || trimOver || fabricOver}
-                        title={trimOverStock
+                        title={trimUnderConsumed
+                            ? `Total can't drop below the ${trimConsumed.toLocaleString()} ${item.unit} already consumed.`
+                            : trimOverStock
                             ? `Quantity exceeds the ${trimAvailable.toLocaleString()} ${item.unit} available from this source.`
                             : trimOverCap
                                 ? `Quantity exceeds the max reservable of ${trimMaxReservable.toLocaleString()} ${item.unit} (required +${RESERVE_OVER_LIMIT_PCT * 100}%).`

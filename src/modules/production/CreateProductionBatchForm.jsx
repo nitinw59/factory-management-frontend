@@ -77,7 +77,13 @@ const RollGroup = ({ groupKey, rolls, selectedRolls, onToggleRoll, colorDot, isI
             </div>
             {isOpen && (
                 <div className="p-2 bg-white grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {rolls.map(roll => (
+                    {rolls.map(roll => {
+                        // Position in the current selection order — this is the same
+                        // order sent to the backend as roll_sequence on save (array
+                        // order === add order), so the badge previews the number the
+                        // roll will actually get.
+                        const seq = selectedRolls.indexOf(roll.id) + 1;
+                        return (
                         <label
                             key={roll.id}
                             className={`flex items-center p-2 border rounded cursor-pointer transition-colors ${
@@ -91,7 +97,12 @@ const RollGroup = ({ groupKey, rolls, selectedRolls, onToggleRoll, colorDot, isI
                                 className={`h-4 w-4 rounded focus:ring-blue-500 ${isInterlining ? 'text-slate-600' : 'text-blue-600'}`}
                             />
                             <div className="ml-3 flex flex-col min-w-0">
-                                <span className="text-sm font-medium text-gray-700 truncate">
+                                <span className="text-sm font-medium text-gray-700 truncate flex items-center gap-1.5">
+                                    {seq > 0 && (
+                                        <span className="shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold">
+                                            {seq}
+                                        </span>
+                                    )}
                                     {roll.type || roll.fabric_type} – {roll.color || roll.color_name || roll.fabric_color || 'Generic'}
                                 </span>
                                 <span className="text-xs text-gray-500">
@@ -99,7 +110,8 @@ const RollGroup = ({ groupKey, rolls, selectedRolls, onToggleRoll, colorDot, isI
                                 </span>
                             </div>
                         </label>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
         </div>
@@ -236,6 +248,16 @@ const CreateProductionBatchForm = () => {
     const [lineId,          setLineId]          = useState('');
     const [layerLength,     setLayerLength]     = useState('');
     const [notes,           setNotes]           = useState('');
+    // MODE_1 (default): each roll's cut-piece numbering resets independently.
+    // MODE_2: numbering is one continuous count across every roll in the
+    // batch, ordered by roll add-order — see cuttingPortalController.js's
+    // recomputeGlobalPieceSequencing.
+    const [pieceSequencingMode, setPieceSequencingMode] = useState('MODE_1');
+    // The mode as loaded from the batch, so we can tell a genuine change from
+    // just re-selecting the same option — only an actual change triggers the
+    // backend's immediate resequence of already-cut rolls (and the blocking
+    // overlay below), not every save.
+    const [originalPieceSequencingMode, setOriginalPieceSequencingMode] = useState('MODE_1');
     const [plannedCutQty,   setPlannedCutQty]   = useState('');
     const [sopContext,      setSopContext]       = useState(null);
     const [ratiosAutoFilled, setRatiosAutoFilled] = useState(false);
@@ -305,6 +327,11 @@ const CreateProductionBatchForm = () => {
                     setProductId(String(batchDetails.product_id || ''));
                     setLineId(String(batchDetails.assigned_production_line_id || ''));
                     setLayerLength(batchDetails.length_of_layer_inches || '');
+                    {
+                        const loadedMode = batchDetails.piece_sequencing_mode === 'MODE_2' ? 'MODE_2' : 'MODE_1';
+                        setPieceSequencingMode(loadedMode);
+                        setOriginalPieceSequencingMode(loadedMode);
+                    }
                     setNotes(batchDetails.notes || '');
                     setSelectedTemplateId(
                         batchDetails.interlining_template_id
@@ -371,6 +398,7 @@ const CreateProductionBatchForm = () => {
 
                     setLayerLength('');
                     setNotes('');
+                    setPieceSequencingMode('MODE_1');
                     setSelectedTemplateId('');
                     setInterliningConfirmed(false);
                     // Seed selection from ?prefillFabricRollId=<id> when arriving from the
@@ -511,6 +539,7 @@ const CreateProductionBatchForm = () => {
                     assigned_production_line_id: lineId ? parseInt(lineId, 10) : null,
                     length_of_layer_inches:      layerLength ? parseFloat(layerLength) : null,
                     notes:                       notes || null,
+                    piece_sequencing_mode:       pieceSequencingMode,
                     size_ratios: sizeRatios
                         .map(r => ({ ...r, ratio: parseInt(r.ratio, 10) }))
                         .filter(r => !isNaN(r.ratio) && r.ratio > 0),
@@ -527,6 +556,7 @@ const CreateProductionBatchForm = () => {
                     product_id:               productId,
                     length_of_layer_inches:   layerLength || null,
                     notes:                    (notes || '') + metaNotes,
+                    piece_sequencing_mode:    pieceSequencingMode,
                     interlining_template_id:  selectedTemplateId || null,
                     interlining_requirements: interliningRequirements.map(req => ({
                         interlining_color_id: req.id,
@@ -548,9 +578,33 @@ const CreateProductionBatchForm = () => {
     if (isLoading) return <Spinner />;
 
     const totalRatio = sizeRatios.reduce((s, r) => s + (parseInt(r.ratio) || 0), 0);
+    // True only for an actual mode change on an existing batch — this is what
+    // makes updateBatch's backend resequence already-cut rolls immediately
+    // (see productionBatchController.js Step 4b), which is the one save that
+    // can meaningfully take longer than a normal field edit.
+    const isModeChanging = isEditMode && pieceSequencingMode !== originalPieceSequencingMode;
 
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
+            {/* Blocking overlay — only for an actual mode change, since that's
+                the one save the backend can spend real time on (it walks and
+                rewrites every already-cut piece/garment row). There's no
+                step-by-step progress to report honestly (it's one request/
+                transaction, not a background job), so this is an indeterminate
+                spinner with a clear "don't leave" message rather than a faked
+                percentage. */}
+            {isSaving && isModeChanging && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div className="bg-white rounded-lg shadow-xl px-8 py-6 flex flex-col items-center max-w-sm text-center">
+                        <Loader2 className="h-8 w-8 text-blue-600 animate-spin mb-3" />
+                        <p className="font-semibold text-gray-800">Resequencing piece numbering…</p>
+                        <p className="text-sm text-gray-500 mt-1">
+                            Switching numbering mode is renumbering every already-cut piece for this batch. Please don't close or navigate away.
+                        </p>
+                    </div>
+                </div>
+            )}
+
             <Link to={returnPath} className="text-sm text-blue-600 hover:underline flex items-center mb-4">
                 <ArrowLeft className="mr-2 h-4 w-4" /> {returnLabel}
             </Link>
@@ -641,6 +695,20 @@ const CreateProductionBatchForm = () => {
                                             onChange={e => setLayerLength(e.target.value)}
                                             className="mt-1 p-2 w-full border rounded-md"
                                         />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium">Piece Numbering Mode</label>
+                                        <select
+                                            value={pieceSequencingMode}
+                                            onChange={e => setPieceSequencingMode(e.target.value)}
+                                            className="mt-1 p-2 w-full border rounded-md"
+                                        >
+                                            <option value="MODE_1">Mode 1 — per-roll numbering (default)</option>
+                                            <option value="MODE_2">Mode 2 — continuous numbering across rolls</option>
+                                        </select>
+                                        <p className="text-xs text-gray-400 mt-1">
+                                            Mode 2 renumbers piece sequences across every cut roll, ordered by when each roll was added to the batch.
+                                        </p>
                                     </div>
                                     <div className="md:col-span-2">
                                         <label className="block text-sm font-medium">Notes</label>
