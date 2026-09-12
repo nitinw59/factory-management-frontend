@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams, Link, useLocation } from 'reac
 import {
     Package, Ruler, Layers, ArrowLeft, Loader2,
     ChevronDown, ChevronRight, Hash,
-    Scissors, CheckCircle, AlertTriangle, Calendar, Tag,
+    Scissors, CheckCircle, AlertTriangle, Calendar, Tag, X, GripVertical,
 } from 'lucide-react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { initializationPortalApi } from '../../api/initializationPortalApi';
@@ -265,6 +265,10 @@ const CreateProductionBatchForm = () => {
     const [sizeRatios, setSizeRatios] = useState([]);
 
     const [selectedShellRolls, setSelectedShellRolls] = useState([]);
+    // Roll id currently being dragged in the "Selected — in add order" panel,
+    // so the dragged card can be visually dimmed and drop targets highlighted.
+    const [draggedRollId, setDraggedRollId] = useState(null);
+    const [dragOverRollId, setDragOverRollId] = useState(null);
 
     const [interliningTemplates,  setInterliningTemplates]  = useState([]);
     const [selectedTemplateId,    setSelectedTemplateId]    = useState('');
@@ -471,6 +475,16 @@ const CreateProductionBatchForm = () => {
         (options.availableRolls || []).filter(r => selectedShellRolls.includes(r.id)),
     [selectedShellRolls, options.availableRolls]);
 
+    // Same rolls as selectedShellDetails, but in add order (selectedShellRolls'
+    // own array order) rather than availableRolls' order — this is the order
+    // sent to the backend as roll_sequence on save, so it's what the
+    // "Selected" panel below should actually display.
+    const selectedShellRollsOrdered = useMemo(() =>
+        selectedShellRolls
+            .map(id => (options.availableRolls || []).find(r => r.id === id))
+            .filter(Boolean),
+    [selectedShellRolls, options.availableRolls]);
+
     const interliningRequirements = useMemo(() => {
         if (!selectedTemplate || !layerLength || !selectedShellDetails.length) return [];
         const totalRatio = sizeRatios.reduce((s, r) => s + (parseInt(r.ratio) || 0), 0);
@@ -513,6 +527,35 @@ const CreateProductionBatchForm = () => {
         setSelectedShellRolls(prev =>
             prev.includes(rollId) ? prev.filter(id => id !== rollId) : [...prev, rollId]
         );
+
+    // Drag-and-drop reordering of the "Selected — in add order" panel.
+    // selectedShellRolls' own array order IS the add order sent to the
+    // backend as roll_sequence, so dropping a roll onto another position
+    // just moves it there directly — no separate "sequence" field to sync.
+    const handleSelectedRollDragStart = (rollId) => setDraggedRollId(rollId);
+
+    const handleSelectedRollDragOver = (e, rollId) => {
+        e.preventDefault(); // required to allow a drop
+        if (rollId !== draggedRollId) setDragOverRollId(rollId);
+    };
+
+    const handleSelectedRollDrop = (targetRollId) => {
+        setSelectedShellRolls(prev => {
+            if (draggedRollId == null || draggedRollId === targetRollId) return prev;
+            const next = prev.filter(id => id !== draggedRollId);
+            const targetIndex = next.indexOf(targetRollId);
+            if (targetIndex === -1) return prev;
+            next.splice(targetIndex, 0, draggedRollId);
+            return next;
+        });
+        setDraggedRollId(null);
+        setDragOverRollId(null);
+    };
+
+    const handleSelectedRollDragEnd = () => {
+        setDraggedRollId(null);
+        setDragOverRollId(null);
+    };
 
     // ── Submit (payload unchanged) ────────────────────────────────────────
     const handleSubmit = async (e) => {
@@ -799,6 +842,60 @@ const CreateProductionBatchForm = () => {
                                                 : <AlertTriangle size={11} />}
                                         </div>
                                     ))}
+                                </div>
+                            )}
+
+                            {/* Selected rolls — separated from the browse/search list below and
+                                shown in add order, since that's the order roll_sequence (and, under
+                                MODE_2, the piece numbering itself) will actually use. */}
+                            {selectedShellRollsOrdered.length > 0 && (
+                                <div className="border border-blue-200 rounded-md bg-blue-50/40 p-3">
+                                    <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide mb-2 flex items-center justify-between">
+                                        <span>Selected — in add order ({selectedShellRollsOrdered.length})</span>
+                                        <span className="normal-case font-normal text-blue-400 flex items-center gap-1">
+                                            <GripVertical size={12} /> drag to reorder
+                                        </span>
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                        {selectedShellRollsOrdered.map((roll, idx) => (
+                                            <div
+                                                key={roll.id}
+                                                draggable
+                                                onDragStart={() => handleSelectedRollDragStart(roll.id)}
+                                                onDragOver={(e) => handleSelectedRollDragOver(e, roll.id)}
+                                                onDrop={() => handleSelectedRollDrop(roll.id)}
+                                                onDragEnd={handleSelectedRollDragEnd}
+                                                className={`flex items-center p-2 border rounded bg-white cursor-grab active:cursor-grabbing transition-opacity ${
+                                                    draggedRollId === roll.id
+                                                        ? 'opacity-40 border-blue-100'
+                                                        : dragOverRollId === roll.id
+                                                        ? 'border-blue-400 ring-2 ring-blue-200'
+                                                        : 'border-blue-100'
+                                                }`}
+                                            >
+                                                <GripVertical size={14} className="text-gray-300 mr-1 shrink-0" />
+                                                <span className="shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold mr-2">
+                                                    {idx + 1}
+                                                </span>
+                                                <div className="flex flex-col min-w-0 flex-1">
+                                                    <span className="text-sm font-medium text-gray-700 truncate">
+                                                        {roll.type || roll.fabric_type} – {roll.color || roll.color_name || roll.fabric_color || 'Generic'}
+                                                    </span>
+                                                    <span className="text-xs text-gray-500">
+                                                        Roll #{roll.id}{roll.bale_no ? ` · ${roll.bale_no}` : ''} · {roll.meter} {roll.uom === 'yard' ? 'yd' : 'm'}
+                                                    </span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleShellSelection(roll.id)}
+                                                    className="ml-2 shrink-0 text-gray-400 hover:text-red-600 transition-colors"
+                                                    title="Remove"
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
 

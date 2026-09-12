@@ -363,6 +363,15 @@ const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll, onFinalizeC
     const allRollsCut = (batch.rolls?.length > 0) && batch.rolls.every(r => r.is_cut);
     const [ratiosOpen, setRatiosOpen] = useState(isPending);
 
+    // MODE_2 batches number pieces continuously across rolls in roll_sequence
+    // (add-order) — so that order is meaningful there and worth surfacing.
+    // MODE_1 numbers each roll independently, so roll_sequence carries no
+    // special meaning and the badge would just be noise.
+    const isMode2 = batch.piece_sequencing_mode === 'MODE_2';
+    const displayRolls = isMode2
+        ? [...(batch.rolls || [])].sort((a, b) => (a.roll_sequence ?? 0) - (b.roll_sequence ?? 0))
+        : (batch.rolls || []);
+
     const displayNotes = batch.notes && !batch.notes.trim().startsWith('[System') ? batch.notes.trim() : null;
 
     // Pastel Status Styling
@@ -491,10 +500,15 @@ const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll, onFinalizeC
                         </p>
                         
                         <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                            {(batch.rolls || []).map((roll) => (
+                            {displayRolls.map((roll) => (
                                 <div key={roll.id} className={`bg-white p-2.5 rounded-lg border shadow-sm flex items-center justify-between transition-colors ${roll.is_cut ? 'border-emerald-100' : 'border-slate-100 hover:border-indigo-100'}`}>
                                     <div className="flex flex-col min-w-0 pr-2">
                                         <div className="flex items-center gap-1.5">
+                                            {isMode2 && roll.roll_sequence != null && (
+                                                <span className="shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-[9px] font-bold" title="Add order">
+                                                    {roll.roll_sequence}
+                                                </span>
+                                            )}
                                             <span className="font-bold text-slate-700 text-xs font-mono">R-{Number(roll.id)%1000}</span>
                                             <span className="text-[10px] text-slate-400 px-1.5 rounded bg-slate-50 border border-slate-100">{roll.meter}m</span>
                                         </div>

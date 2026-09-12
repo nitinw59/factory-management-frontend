@@ -629,6 +629,7 @@ const BatchCuttingDetailsPage = () => {
                      <table className="min-w-full">
                         <thead className="bg-gray-100 text-xs text-gray-600 uppercase tracking-wider">
                             <tr>
+                                <th className="py-3 px-4 text-center">Seq</th>
                                 <th className="py-3 px-4 text-left">Roll ID</th>
                                 <th className="py-3 px-4 text-left">Color</th>
                                 <th className="py-3 px-4 text-left">Type</th>
@@ -644,7 +645,9 @@ const BatchCuttingDetailsPage = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200 text-sm">
-                            {(details.rolls || []).map(roll => {
+                            {[...(details.rolls || [])]
+                                .sort((a, b) => (a.roll_sequence ?? 0) - (b.roll_sequence ?? 0))
+                                .map(roll => {
                                 const rollCutsBySize = (roll.cuts || []).reduce((acc, cut) => {
                                     if (acc[cut.size] === undefined) {
                                         acc[cut.size] = parseInt(cut.quantity_cut || 0);
@@ -654,6 +657,13 @@ const BatchCuttingDetailsPage = () => {
                                 const rollTotalPieces = Object.values(rollCutsBySize).reduce((sum, qty) => sum + qty, 0);
                                 return (
                                     <tr key={roll.id} className="hover:bg-gray-50">
+                                        <td className="py-3 px-4 text-center">
+                                            {roll.roll_sequence != null && (
+                                                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold" title="Add order">
+                                                    {roll.roll_sequence}
+                                                </span>
+                                            )}
+                                        </td>
                                         <td className="py-3 px-4 font-medium">{formatRollId(roll.roll_identifier)}</td>
                                         <td className="py-3 px-4">{roll.color_name || 'N/A'}({roll.color_number || 'N/A'})</td>
                                         <td className="py-3 px-4">{roll.type_name || 'N/A'}</td>
@@ -676,7 +686,7 @@ const BatchCuttingDetailsPage = () => {
                         </tbody>
                         <tfoot className="bg-gray-100 border-t-2 border-gray-300">
                              <tr className="font-bold text-gray-700">
-                                 <td colSpan="3" className="py-3 px-4 text-right uppercase text-xs">Total:</td>
+                                 <td colSpan="4" className="py-3 px-4 text-right uppercase text-xs">Total:</td>
                                  <td className="py-3 px-4 text-right text-gray-900 border-l border-gray-300">{summaryStats.totalMeters.toFixed(2)}</td>
                                  <td className="py-3 px-4 text-right text-red-600">{summaryStats.totalShortage.toFixed(2)}</td>
                                  <td className="py-3 px-4 text-right text-purple-600">{summaryStats.totalEndBits.toFixed(2)}</td>
@@ -710,20 +720,31 @@ const BatchCuttingDetailsPage = () => {
                     </div>
                     
                     <div className="p-4 bg-slate-50 space-y-6">
-                        {Object.entries(bundlesByRoll).map(([rollId, rollBundles]) => {
+                        {Object.entries(bundlesByRoll)
+                            .sort(([rollIdA], [rollIdB]) => {
+                                const seqA = details.rolls?.find(r => r.id.toString() === rollIdA)?.roll_sequence ?? 0;
+                                const seqB = details.rolls?.find(r => r.id.toString() === rollIdB)?.roll_sequence ?? 0;
+                                return seqA - seqB;
+                            })
+                            .map(([rollId, rollBundles]) => {
                             // Find roll info for header
                             const rollInfo = details.rolls?.find(r => r.id.toString() === rollId);
                             const rollName = rollInfo ? formatRollId(rollInfo.roll_identifier) : `Roll #${rollId}`;
-                            
+
                             return (
                                 <div key={rollId} className="space-y-3">
                                     <h4 className="font-bold text-slate-600 flex items-center border-b border-slate-200 pb-2">
                                         <span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded text-xs mr-2 border border-slate-300">
                                             Roll Source
                                         </span>
+                                        {rollInfo?.roll_sequence != null && (
+                                            <span className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold mr-2" title="Add order">
+                                                {rollInfo.roll_sequence}
+                                            </span>
+                                        )}
                                         {rollName}
                                     </h4>
-                                    
+
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                         {rollBundles.map(bundle => (
                                             <BundleCard key={bundle.id} bundle={bundle} />
