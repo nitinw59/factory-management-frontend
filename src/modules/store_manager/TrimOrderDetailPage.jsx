@@ -512,9 +512,15 @@ const TrimOrderDetailPage = () => {
     const closeBlockedByIssued = orderInfo?.status === 'ISSUED';
 
     // Per-trim recompute — backend rejects (409) these states; disable the button to match.
+    // PARTIALLY_ISSUED is NOT in this list on purpose: custody transfer is
+    // tracked per allocation (trim_fulfillment_log.issue_id), not per order,
+    // so a trim item with no issued line yet is still safe to recompute even
+    // while other trims on the order have already gone out — the backend
+    // enforces the finer-grained per-trim check and skips/rejects only the
+    // ones that actually have an issued line.
     const [recomputingId, setRecomputingId] = useState(null);
     const [recomputingAll, setRecomputingAll] = useState(false);
-    const recomputeBlocked = ['CLOSED', 'READY_FOR_PICKUP', 'ISSUED', 'PARTIALLY_ISSUED'].includes(orderInfo?.status);
+    const recomputeBlocked = ['CLOSED', 'READY_FOR_PICKUP', 'ISSUED'].includes(orderInfo?.status);
 
     // Toast
     const [toast, setToast] = useState(null);
@@ -1013,7 +1019,9 @@ const TrimOrderDetailPage = () => {
     // e.g. a BOM line that only exists after the BOM got approved post-order-creation.
     const handleRecomputeAll = async () => {
         if (recomputeBlocked) return;   // defensive; the button is also disabled
-        if (!window.confirm("Re-verify this entire order against the batch's current BOM/recipe? This can add newly-required trims and update quantities on existing lines.")) return;
+        const confirmMsg = "Re-verify this entire order against the batch's current BOM/recipe? This can add newly-required trims and update quantities on existing lines."
+            + (orderInfo?.status === 'PARTIALLY_ISSUED' ? ' Trims already issued to the loader will be left untouched.' : '');
+        if (!window.confirm(confirmMsg)) return;
         setRecomputingAll(true);
         setIsFulfillingAll(true);       // overlay spinner; preserves scroll position
         try {
@@ -1026,16 +1034,23 @@ const TrimOrderDetailPage = () => {
             const keptNames = (data.results || [])
                 .filter(r => r.kept_with_fulfillment > 0)
                 .map(r => nameByTrimId.get(String(r.trim_item_id)) || `Trim #${r.trim_item_id}`);
+            // Already-issued trims the backend deliberately left untouched — the
+            // order can be PARTIALLY_ISSUED and still recompute everything else.
+            const skippedNames = (data.skipped_issued_trim_ids || [])
+                .map(id => nameByTrimId.get(String(id)) || `Trim #${id}`);
+            const skippedNote = skippedNames.length > 0
+                ? ` · skipped (already issued): ${[...new Set(skippedNames)].join(', ')}`
+                : '';
 
             if (keptNames.length > 0) {
-                showToast('error', `Needs manual review — no longer required at the fulfilled quantity: ${[...new Set(keptNames)].join(', ')}.`);
+                showToast('error', `Needs manual review — no longer required at the fulfilled quantity: ${[...new Set(keptNames)].join(', ')}.${skippedNote}`);
             } else {
                 const parts = [];
                 if (t.inserted) parts.push(`${t.inserted} added`);
                 if (t.updated)  parts.push(`${t.updated} updated`);
                 if (t.deleted)  parts.push(`${t.deleted} removed`);
                 const missing = (t.missing_added || t.missing_removed) ? ` · missing +${t.missing_added || 0}/-${t.missing_removed || 0}` : '';
-                showToast('success', `Recomputed ${data.trims_recomputed} trim item(s): ${parts.join(', ') || 'no changes'}${missing}. Status: ${data.order_status}.`);
+                showToast('success', `Recomputed ${data.trims_recomputed} trim item(s): ${parts.join(', ') || 'no changes'}${missing}${skippedNote}. Status: ${data.order_status}.`);
             }
 
             await Promise.all([fetchDetails(), fetchRefData()]);
@@ -1266,7 +1281,7 @@ const TrimOrderDetailPage = () => {
                                 disabled={recomputeBlocked || isFulfillingAll || isReverting}
                                 title={recomputeBlocked
                                     ? `Recompute is locked while the order is ${orderInfo?.status}`
-                                    : "Re-run the BOM × cut-pieces calculation for every trim item on this order — picks up newly-required trims too (e.g. after a BOM gets approved)"}
+                                    : "Re-run the BOM × cut-pieces calculation for every trim item on this order — picks up newly-required trims too (e.g. after a BOM gets approved). Trims already issued to the loader are skipped automatically."}
                                 className="px-5 py-2.5 bg-white text-violet-700 hover:bg-violet-600 hover:text-white border border-violet-200 hover:border-violet-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {recomputingAll ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LuRefreshCw className="mr-2 h-5 w-5" />}
