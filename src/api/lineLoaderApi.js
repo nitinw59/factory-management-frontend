@@ -21,8 +21,16 @@ export const lineLoaderApi = {
    * @param {number} data.lineId - The ID of the production line to assign.
    */
   assignLineAndLogRolls: (data) => api.post('/line-loader/assign-line', data),
-  
+
+  /**
+   * MODE_2 equivalent: assigns a SIZE (across every roll that carries it) to
+   * a production line, instead of a set of rolls.
+   * @param {object} data - { batchId, cycleFlowId, lineId, selectedSizes }
+   */
+  assignLineAndLogSizes: (data) => api.post('/line-loader/assign-line-sizes', data),
+
   getRollsForBatch: (batchId, cycleFlowId) => api.get(`/line-loader/batch/${batchId}/rolls`, { params: { cycle_flow_id: cycleFlowId } }),
+  getSizesForBatch: (batchId, cycleFlowId) => api.get(`/line-loader/batch/${batchId}/sizes`, { params: { cycle_flow_id: cycleFlowId } }),
   checkLineWip: (lineId) => api.get(`/line-loader/check-wip/${lineId}`),
   getAllActiveLineWip: () => api.get('/line-loader/active-lines-wip'),
   checkAndCompleteStage: (batchId, productionLineId) => api.post(`/line-loader/batch/${batchId}/stage/${productionLineId}/check-complete`),

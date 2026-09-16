@@ -8,7 +8,7 @@ import {
     Hammer, Loader2, Menu, ChevronDown, ChevronRight, CheckCircle2,
     Square, CheckSquare, XCircle, ArrowLeft, Package, Send, AlertCircle, Zap,
     LogOut, FileText, ThumbsUp, LayoutGrid, History, ChevronLeft, BarChart2,
-    ShieldAlert, ShieldCheck, RefreshCw,
+    ShieldAlert, ShieldCheck, RefreshCw, Ruler,
 } from 'lucide-react';
 
 const PART_FILTER_LS_KEY = 'ws-part-filter';
@@ -422,6 +422,51 @@ const checkEntityStatus = (entity) => {
     return { total_cut, total_processed, pending_alter, isComplete, total_validated, total_rejected, total_repaired, previously_rejected };
 };
 
+// Regroups the roll-first hierarchy (roll -> parts_details -> size_details ->
+// pieces) into a size-first one (size -> parts_details -> roll_details ->
+// pieces). For MODE_2 batches a size's piece_sequence runs continuously
+// across every roll in the batch — browsing roll-first fragments that
+// continuity into arbitrary-looking, non-1-starting ranges per roll,
+// whereas grouping by size first shows the size as the one continuous unit
+// it actually is, with roll only as the physical sub-label a checker needs
+// to know which roll to pick a piece from.
+const groupPiecesBySize = (rolls = []) => {
+    const sizeMap = new Map(); // size -> Map(partId -> { part_id, part_name, roll_details: [] })
+    rolls.forEach(roll => {
+        (roll.parts_details || []).forEach(part => {
+            (part.size_details || []).forEach(sizeDetail => {
+                if (!sizeMap.has(sizeDetail.size)) sizeMap.set(sizeDetail.size, new Map());
+                const partsForSize = sizeMap.get(sizeDetail.size);
+                if (!partsForSize.has(part.part_id)) {
+                    partsForSize.set(part.part_id, { part_id: part.part_id, part_name: part.part_name, roll_details: [] });
+                }
+                partsForSize.get(part.part_id).roll_details.push({ roll_id: roll.roll_id, pieces: sizeDetail.pieces });
+            });
+        });
+    });
+    return [...sizeMap.entries()]
+        .sort(([a], [b]) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0) || String(a).localeCompare(String(b)))
+        .map(([size, partsMap]) => ({ size, parts_details: [...partsMap.values()] }));
+};
+
+// Same idea for BUNDLE mode — batch.bundles is already flat, just regroup the
+// key order from roll-first to size-first (each bundle already carries its
+// own roll_id/bundle_code, so no restructuring of the bundle itself needed).
+const groupBundlesBySize = (bundles = []) => {
+    const sizeMap = new Map(); // size -> Map(partName -> bundles[])
+    bundles.forEach(bundle => {
+        const size = bundle.size ?? 'Unknown';
+        const partName = bundle.part_name || 'Mixed';
+        if (!sizeMap.has(size)) sizeMap.set(size, new Map());
+        const partsForSize = sizeMap.get(size);
+        if (!partsForSize.has(partName)) partsForSize.set(partName, []);
+        partsForSize.get(partName).push(bundle);
+    });
+    return [...sizeMap.entries()]
+        .sort(([a], [b]) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0) || String(a).localeCompare(String(b)))
+        .map(([size, partsMap]) => ({ size, parts: Object.fromEntries(partsMap) }));
+};
+
 // High-Contrast Industrial Palette
 const getPieceColorClass = (status, isSelected) => {
     if (isSelected) return "bg-indigo-600 border-indigo-600 text-white shadow-[0_0_20px_rgba(79,70,229,0.8)] transform scale-105 z-10";
@@ -618,7 +663,15 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
         const selectedPiecesList = pieces.filter(p => selectedIds.has(p.id));
         let payloads = [];
 
-        if (itemInfo.isRollInspect) {
+        // BUNDLE-mode lines (e.g. Preparation) upsert per bundle_id — any view
+        // whose selection can span MORE THAN ONE bundle (whole-roll inspect,
+        // whole-size inspect — both aggregate across many bundles) must send
+        // one payload per bundle, not one payload with a single (often
+        // missing) bundleId. A single-bundle inspect already has a real
+        // itemInfo.bundle_id and doesn't need grouping.
+        const needsPerBundleGrouping = itemInfo.isRollInspect || (itemInfo.isBundle && !itemInfo.bundle_id);
+
+        if (needsPerBundleGrouping) {
             const grouped = selectedPiecesList.reduce((acc, p) => {
                 const key = p.bundle_id ? `b_${p.bundle_id}` : `p_${p.part_id}_s_${p.size}`;
                 if (!acc[key]) {
@@ -1099,6 +1152,66 @@ const PartAccordion = ({ batch, roll, part, setModalState, allowMultiple }) => {
     );
 };
 
+// Size-first counterpart to PartAccordion — same shape, roll and size
+// swapped: rows are labeled "Roll #X" instead of "Size X", since within one
+// size section it's the roll that varies, not the size.
+const PartAccordionBySize = ({ batch, size, part, setModalState, allowMultiple }) => {
+    const [isOpen, setIsOpen] = useState(false);
+
+    const allPieces = part.roll_details.reduce((acc, r) => {
+        return [...acc, ...r.pieces.map(p => ({ ...p, _displayGroup: `Roll #${r.roll_id}` }))];
+    }, []);
+
+    const status = checkEntityStatus({ pieces: allPieces });
+
+    const handleBulkInspect = (e) => {
+        e.stopPropagation();
+        setModalState({ type: 'validate', isBundle: false, batchId: batch.batch_id, batchCode: batch.batch_code, size, partId: part.part_id, partName: part.part_name, pieces: allPieces, titleOverride: `Bulk Inspect: ${part.part_name} · Size ${size}`, allowMultiple });
+    };
+
+    const handleBulkRepair = (e) => {
+        e.stopPropagation();
+        setModalState({ type: 'validate', forceRepairMode: true, isBundle: false, batchId: batch.batch_id, batchCode: batch.batch_code, size, partId: part.part_id, partName: part.part_name, pieces: allPieces, titleOverride: `Bulk Fix: ${part.part_name} · Size ${size}` });
+    };
+
+    return (
+        <div className="bg-white border-2 border-slate-200 rounded-2xl mb-4 shadow-sm overflow-hidden transition-all">
+            <div className="p-5 flex flex-col md:flex-row md:justify-between md:items-center bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => setIsOpen(!isOpen)}>
+                <div className="flex items-center mb-3 md:mb-0">
+                    {isOpen ? <ChevronDown className="w-6 h-6 mr-4 text-slate-500" /> : <ChevronRight className="w-6 h-6 mr-4 text-slate-500" />}
+                    <Component className="w-6 h-6 mr-3 text-indigo-500" />
+                    <h4 className="font-black text-slate-800 text-xl tracking-tight uppercase">{part.part_name}</h4>
+                    <span className="ml-5 text-xs font-bold text-slate-500 bg-slate-200 px-3 py-1.5 rounded-lg uppercase tracking-widest">{status.total_processed} / {status.total_cut} Processed</span>
+                </div>
+                <div className="flex items-center space-x-3 ml-12 md:ml-0">
+                    {status.pending_alter > 0 && (
+                        <button onClick={handleBulkRepair} className="px-4 py-2 text-sm bg-amber-100 text-amber-900 border border-amber-200 rounded-xl hover:bg-amber-200 font-black shadow-sm flex items-center active:scale-95"><Hammer className="w-4 h-4 mr-2"/> Fix Rework ({status.pending_alter})</button>
+                    )}
+                    {!status.isComplete ? (
+                        <button onClick={handleBulkInspect} className="px-6 py-2 text-sm bg-slate-800 text-white rounded-xl hover:bg-black font-black shadow-md active:scale-95 flex items-center transition-all">Bulk Inspect <ChevronRight className="w-4 h-4 ml-1" /></button>
+                    ) : (
+                        <button onClick={handleBulkInspect} className="px-4 py-2 text-sm bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl font-black flex items-center shadow-sm hover:bg-emerald-100 hover:border-emerald-400 active:scale-95 transition-all"><Check className="w-4 h-4 mr-2"/> Validated</button>
+                    )}
+                </div>
+            </div>
+            {isOpen && (
+                <div className="p-5 bg-white border-t-2 border-slate-100 space-y-4">
+                    {part.roll_details.map(r => {
+                        const rollPieces = r.pieces.map(p => ({ ...p, _displayGroup: `Roll #${r.roll_id}` }));
+                        return (
+                            <ValidationProgressRow
+                                key={r.roll_id} label={`Roll #${r.roll_id}`} icon={Layers} entity={{ pieces: rollPieces }}
+                                onInspect={() => setModalState({ type: 'validate', isBundle: false, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: r.roll_id, partId: part.part_id, partName: part.part_name, size, pieces: rollPieces, allowMultiple })}
+                                onRepair={() => setModalState({ type: 'validate', forceRepairMode: true, isBundle: false, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: r.roll_id, partId: part.part_id, partName: part.part_name, size, pieces: rollPieces })}
+                            />
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
+
 // ============================================================================
 // DYNAMIC PROGRESS ROWS
 // ============================================================================
@@ -1526,6 +1639,16 @@ const UniversalWorkstationDashboard = () => {
     const toggleBundlePart = (key) => setOpenBundleParts(prev => {
         const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next;
     });
+    // Grouping per batch — defaults to "by size" for MODE_2 (piece_sequence
+    // runs continuously across rolls there, so size is the natural unit) and
+    // "by roll" for MODE_1, but a checker can flip either one manually.
+    // { [batchId]: 'roll' | 'size' } — only set once a batch's default is overridden.
+    const [viewModeOverrides, setViewModeOverrides] = useState({});
+    const getViewMode = (batch) => viewModeOverrides[batch.batch_id]
+        ?? (batch.piece_sequencing_mode === 'MODE_2' ? 'size' : 'roll');
+    const toggleViewMode = (batch) => setViewModeOverrides(prev => ({
+        ...prev, [batch.batch_id]: getViewMode(batch) === 'roll' ? 'size' : 'roll',
+    }));
     const [showNav,     setShowNav]     = useState(false);
     const [showHistory, setShowHistory] = useState(false);
     const [stats,                setStats]                = useState(null);
@@ -1688,6 +1811,25 @@ const UniversalWorkstationDashboard = () => {
                 } else if (prevState.isRollInspect) {
                     if (batch.bundles) freshPieces = batch.bundles.filter(b => b.roll_id === prevState.rollId).flatMap(b => b.pieces.map(p => ({...p, _displayGroup: `${b.part_name} | Size ${b.size}`})));
                     else if (batch.rolls) freshPieces = batch.rolls.find(r => r.roll_id === prevState.rollId)?.parts_details.flatMap(pt => pt.size_details.flatMap(sz => sz.pieces.map(p => ({...p, part_id: pt.part_id, size: sz.size, _displayGroup: `${pt.part_name} | Size ${sz.size}`})))) || [];
+                } else if (prevState.size != null && prevState.rollId == null) {
+                    // Size-first views (Mode 2) — scoped to one size across
+                    // every roll, optionally narrowed to one part when
+                    // partId is set (a per-roll row within a size still sets
+                    // rollId and is handled by the fallback below instead).
+                    if (batch.bundles) {
+                        freshPieces = batch.bundles
+                            .filter(b => b.size === prevState.size && (prevState.partId ? b.part_id === prevState.partId : true))
+                            .flatMap(b => b.pieces.map(p => ({ ...p, bundle_id: b.bundle_id, part_id: b.part_id, size: b.size, _displayGroup: `${b.part_name || 'Mixed'} | Roll #${b.roll_id}` })));
+                    } else if (batch.rolls) {
+                        freshPieces = batch.rolls.flatMap(r =>
+                            r.parts_details
+                                .filter(pt => prevState.partId ? pt.part_id === prevState.partId : true)
+                                .flatMap(pt => pt.size_details
+                                    .filter(sz => sz.size === prevState.size)
+                                    .flatMap(sz => sz.pieces.map(p => ({ ...p, part_id: pt.part_id, size: sz.size, _displayGroup: `${pt.part_name} | Roll #${r.roll_id}` })))
+                                )
+                        );
+                    }
                 } else {
                     const partDetails = batch.rolls?.find(r => r.roll_id === prevState.rollId)?.parts_details?.find(p => p.part_id === prevState.partId);
                     const sizeDetails = partDetails?.size_details?.filter(sz => prevState.size ? sz.size === prevState.size : true) || [];
@@ -1968,14 +2110,90 @@ const UniversalWorkstationDashboard = () => {
                                                     </div>
                                                 )}
                                             </div>
-                                            <div onClick={e => e.stopPropagation()}>
+                                            <div onClick={e => e.stopPropagation()} className="flex items-center gap-2">
+                                                {batch.piece_sequencing_mode === 'MODE_2' && (
+                                                    <button
+                                                        onClick={() => toggleViewMode(batch)}
+                                                        title={getViewMode(batch) === 'size'
+                                                            ? 'Mode 2: piece numbering runs continuously across rolls per size — switch to grouping by roll instead'
+                                                            : 'Switch back to grouping by size (recommended for Mode 2)'}
+                                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-black uppercase tracking-widest rounded-lg border-2 border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors"
+                                                    >
+                                                        {getViewMode(batch) === 'size' ? <Ruler className="w-3.5 h-3.5" /> : <Layers className="w-3.5 h-3.5" />}
+                                                        By {getViewMode(batch) === 'size' ? 'Size' : 'Roll'}
+                                                    </button>
+                                                )}
                                                 <StageCompletionHandoff batchId={batch.batch_id} lineId={headerInfo.line_id} onBatchComplete={() => fetchQueue()} />
                                             </div>
                                         </div>
 
-                                        {openBatchId === batch.batch_id && (
+                                        {openBatchId === batch.batch_id && (() => {
+                                            const viewMode = getViewMode(batch);
+                                            return (
                                             <div className="p-6 md:p-10 bg-slate-100">
-                                                {isBundleMode && batch.bundles && batch.bundles.length > 0 ? (() => {
+                                                {isBundleMode && viewMode === 'size' && batch.bundles && batch.bundles.length > 0 ? (
+                                                    groupBundlesBySize(batch.bundles).map(sizeGroup => {
+                                                        const allSizePieces = Object.values(sizeGroup.parts).flatMap(bundles =>
+                                                            bundles.flatMap(b => b.pieces.map(p => ({ ...p, bundle_id: b.bundle_id, part_id: b.part_id, size: b.size, _displayGroup: `${b.part_name || 'Mixed'} | Roll #${b.roll_id}` })))
+                                                        );
+                                                        const sizeStatus = checkEntityStatus({ pieces: allSizePieces });
+                                                        return (
+                                                            <div key={sizeGroup.size} className="mb-3 last:mb-0 border-l-[6px] border-violet-500 bg-white rounded-r-xl p-3 md:p-4 shadow-sm border-y border-r border-slate-200">
+                                                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 pb-2 border-b-2 border-slate-200 gap-3">
+                                                                    <h3 className="font-black text-black flex items-center text-base uppercase tracking-widest bg-slate-100 px-3 py-1.5 rounded-lg w-max border border-slate-300">
+                                                                        <Ruler className="w-4 h-4 mr-2 text-violet-600" /> SIZE {sizeGroup.size}
+                                                                    </h3>
+                                                                    {allowRoll && !sizeStatus.isComplete && (
+                                                                        <button onClick={() => setModalState({ type: 'validate', isBundle: true, isRollInspect: false, batchId: batch.batch_id, batchCode: batch.batch_code, size: sizeGroup.size, partName: 'ALL PARTS', pieces: allSizePieces, titleOverride: `Bulk Inspect: Size ${sizeGroup.size}`, allowMultiple })} className="px-4 py-2 bg-black hover:bg-slate-800 text-white text-sm font-black rounded-lg shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
+                                                                            <CheckCircle2 className="w-4 h-4 mr-2 text-amber-400" /> INSPECT WHOLE SIZE
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                                {Object.entries(sizeGroup.parts).filter(([partName]) => isPartVisible(partName)).map(([partName, bundles]) => {
+                                                                    const partKey = `size-${sizeGroup.size}::${partName}`;
+                                                                    const isPartOpen = openBundleParts.has(partKey);
+                                                                    const allPartPieces = bundles.flatMap(b => b.pieces);
+                                                                    const ps = checkEntityStatus({ pieces: allPartPieces });
+                                                                    return (
+                                                                        <div key={partName} className="mb-2 last:mb-0 border border-slate-200 rounded-xl overflow-hidden">
+                                                                            <button type="button" onClick={() => toggleBundlePart(partKey)}
+                                                                                className="w-full bg-slate-50 hover:bg-slate-100 px-3 py-2 flex items-center justify-between transition text-left">
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <ChevronRight size={14} className={`text-slate-400 transition-transform shrink-0 ${isPartOpen ? 'rotate-90' : ''}`} />
+                                                                                    <Component className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                                                                    <span className="font-black text-slate-800 text-xs uppercase tracking-tight">{partName}</span>
+                                                                                    <span className="text-[10px] text-slate-400 font-semibold">{bundles.length} bundle{bundles.length !== 1 ? 's' : ''}</span>
+                                                                                </div>
+                                                                                <div className="flex items-center gap-2 text-xs font-semibold">
+                                                                                    {ps.total_validated > 0 && <span className="text-emerald-600">{ps.total_validated} approved</span>}
+                                                                                    {ps.total_repaired > 0 && <span className="text-teal-600">{ps.total_repaired} repaired</span>}
+                                                                                    {ps.pending_alter  > 0 && <span className="text-amber-600">{ps.pending_alter} rework</span>}
+                                                                                    {ps.total_rejected > 0 && <span className="text-red-600">{ps.total_rejected} rejected</span>}
+                                                                                    <span className="text-slate-400 font-normal">{ps.total_processed}/{ps.total_cut}</span>
+                                                                                    {ps.isComplete && <Check className="w-3.5 h-3.5 text-emerald-500" />}
+                                                                                </div>
+                                                                            </button>
+                                                                            {isPartOpen && (
+                                                                                <div className="p-2 space-y-1 bg-white border-t border-slate-100">
+                                                                                    {bundles.map(bundle => (
+                                                                                        <ValidationProgressRow key={bundle.bundle_id} label={`Roll #${bundle.roll_id}`} subLabel={`Bundle ${bundle.bundle_code}`} icon={Layers} entity={bundle}
+                                                                                            canApproveBundle={allowBundle}
+                                                                                            onQuickApprove={(entity) => handleQuickBulkApprove(entity, batch.batch_id, bundle.roll_id)}
+                                                                                            onInspect={() => setModalState({ type: 'validate', isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, allowMultiple, ...bundle, pieces: bundle.pieces.map(p => ({ ...p, _displayGroup: `${partName} | Roll #${bundle.roll_id}` })) })}
+                                                                                            onRepair={() => setModalState({ type: 'validate', forceRepairMode: true, isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, ...bundle })}
+                                                                                        />
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        );
+                                                    })
+                                                ) : null}
+
+                                                {isBundleMode && viewMode === 'roll' && batch.bundles && batch.bundles.length > 0 ? (() => {
                                                     const groupedBundles = batch.bundles.reduce((acc, bundle) => {
                                                         const rId = bundle.roll_id || 'Unknown';
                                                         const pName = bundle.part_name || 'Mixed';
@@ -2048,7 +2266,33 @@ const UniversalWorkstationDashboard = () => {
                                                     });
                                                 })() : null}
 
-                                                {!isBundleMode && batch.rolls && batch.rolls.length > 0 ? (
+                                                {!isBundleMode && viewMode === 'size' && batch.rolls && batch.rolls.length > 0 ? (
+                                                    groupPiecesBySize(batch.rolls).map(sizeGroup => {
+                                                        const allSizePieces = sizeGroup.parts_details.flatMap(pt => pt.roll_details.flatMap(r => r.pieces.map(p => ({ ...p, part_id: pt.part_id, _displayGroup: `${pt.part_name} | Roll #${r.roll_id}` }))));
+                                                        const sizeStatus = checkEntityStatus({ pieces: allSizePieces });
+                                                        return (
+                                                            <div key={sizeGroup.size} className="mb-3 last:mb-0 border-l-[6px] border-violet-500 bg-white rounded-r-xl p-3 md:p-4 shadow-sm border-y border-r border-slate-200">
+                                                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 pb-2 border-b-2 border-slate-200 gap-3">
+                                                                    <h3 className="font-black text-black flex items-center text-base uppercase tracking-widest bg-slate-100 px-3 py-1.5 rounded-lg w-max border border-slate-300">
+                                                                        <Ruler className="w-4 h-4 mr-2 text-violet-600" /> SIZE {sizeGroup.size}
+                                                                    </h3>
+                                                                    {allowRoll && !sizeStatus.isComplete && (
+                                                                        <button onClick={() => {
+                                                                            setModalState({ type: 'validate', isBundle: false, isRollInspect: false, batchId: batch.batch_id, batchCode: batch.batch_code, size: sizeGroup.size, partName: 'ALL PARTS', pieces: allSizePieces, titleOverride: `Bulk Inspect: Size ${sizeGroup.size}`, allowMultiple });
+                                                                        }} className="px-4 py-2 bg-black hover:bg-slate-800 text-white text-sm font-black rounded-lg shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
+                                                                            <CheckCircle2 className="w-4 h-4 mr-2 text-amber-400" /> INSPECT WHOLE SIZE
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                                {sizeGroup.parts_details.filter(p => isPartVisible(p.part_name)).map(part => (
+                                                                    <PartAccordionBySize key={part.part_id} batch={batch} size={sizeGroup.size} part={part} setModalState={setModalState} allowMultiple={allowMultiple} />
+                                                                ))}
+                                                            </div>
+                                                        );
+                                                    })
+                                                ) : null}
+
+                                                {!isBundleMode && viewMode === 'roll' && batch.rolls && batch.rolls.length > 0 ? (
                                                     batch.rolls.map(roll => (
                                                         <div key={roll.roll_id} className="mb-3 last:mb-0 border-l-[6px] border-indigo-500 bg-white rounded-r-xl p-3 md:p-4 shadow-sm border-y border-r border-slate-200">
                                                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 pb-2 border-b-2 border-slate-200 gap-3">
@@ -2074,7 +2318,8 @@ const UniversalWorkstationDashboard = () => {
                                                     ))
                                                 ) : null}
                                             </div>
-                                        )}
+                                            );
+                                        })()}
                                     </div>
                                 );
                             })}

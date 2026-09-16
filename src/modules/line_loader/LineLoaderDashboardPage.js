@@ -313,6 +313,214 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
 };
 
 // ============================================================================
+// SIZE SELECTION MODAL — MODE_2's dispatch unit is a SIZE (spanning every
+// roll that carries it), not a roll. Mirrors LineSelectionModal's line →
+// selection → confirm flow.
+// ============================================================================
+// readySizes: array of { size, rolls_completed, rolls_expected }
+const SizeSelectionModal = ({ batchId, cycleFlow, currentLineId, readySizes = [], onClose, onSave, wipMap }) => {
+    const [step, setStep] = useState('line');
+    const [lines, setLines] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [selectedLine, setSelectedLine] = useState(currentLineId ? String(currentLineId) : '');
+    const [selectedSizes, setSelectedSizes] = useState(() => new Set(readySizes.map(s => String(s.size))));
+
+    useEffect(() => {
+        const init = async () => {
+            try {
+                const linesRes = await lineLoaderApi.getLinesByType(cycleFlow.line_type_id);
+                setLines(linesRes.data || []);
+            } catch (err) {
+                console.error('SizeSelectionModal init failed', err);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        init();
+    }, [cycleFlow.line_type_id]);
+
+    const selectedLineObj = lines.find(l => String(l.id) === String(selectedLine));
+    const selectedLineName = selectedLineObj?.name || '';
+    const isSelectedLineJobWork = selectedLineObj?.is_job_work === true;
+    const lineWip = selectedLine ? wipMap[String(selectedLine)] : null;
+    const isAlreadyOnThisLine = String(selectedLine) === String(currentLineId);
+    const isWipBlocked = lineWip?.isAtCapacity && !isAlreadyOnThisLine;
+
+    const selectedSizeObjects = readySizes.filter(s => selectedSizes.has(String(s.size)));
+    const selectedCount = selectedSizeObjects.length;
+
+    const toggleSize = (size) => setSelectedSizes(prev => {
+        const next = new Set(prev);
+        if (next.has(String(size))) next.delete(String(size)); else next.add(String(size));
+        return next;
+    });
+
+    const toggleAll = () => {
+        if (selectedSizes.size === readySizes.length) setSelectedSizes(new Set());
+        else setSelectedSizes(new Set(readySizes.map(s => String(s.size))));
+    };
+
+    const handleFinalConfirm = async () => {
+        await onSave({
+            batchId,
+            cycleFlowId: cycleFlow.id,
+            lineId: selectedLine,
+            selectedSizes: selectedSizeObjects.map(s => s.size),
+        });
+    };
+
+    if (isLoading) return <Spinner />;
+
+    // ── Step 1: Line ────────────────────────────────────────────────────────
+    if (step === 'line') return (
+        <div className="p-2">
+            <h3 className="text-base font-black mb-4 text-slate-800 flex items-center gap-2">
+                Assign Stage:
+                <span className="px-2.5 py-1 bg-blue-100 text-blue-800 rounded-lg text-sm uppercase tracking-wide">{cycleFlow.line_type_name}</span>
+                <span className="px-2.5 py-1 bg-violet-100 text-violet-800 rounded-lg text-sm font-black">{readySizes.length} size{readySizes.length !== 1 ? 's' : ''} ready</span>
+            </h3>
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-5">
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Choose Production Line</label>
+                <select value={selectedLine} onChange={e => setSelectedLine(e.target.value)}
+                    className={`w-full p-3 border-2 rounded-xl bg-white focus:ring-4 outline-none font-bold text-slate-700 transition-all cursor-pointer shadow-sm appearance-none
+                        ${isWipBlocked ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-50' : 'border-slate-300 focus:border-blue-500 focus:ring-blue-50'}`}>
+                    <option value="">-- Select line --</option>
+                    {lines.map(line => {
+                        const wip = wipMap[String(line.id)];
+                        const label = line.is_job_work ? `${line.name}  [External]` : line.name;
+                        return <option key={line.id} value={line.id}>{wip ? `${label}  (WIP: ${wip.currentWip}/${wip.wipLimit})` : label}</option>;
+                    })}
+                </select>
+                {selectedLine && lineWip && (
+                    <div className={`mt-2 flex items-center text-xs font-bold px-2.5 py-1.5 rounded-md border w-fit ${isWipBlocked ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                        {isWipBlocked ? <AlertTriangle size={12} className="mr-1.5" /> : <CheckCircle2 size={12} className="mr-1.5" />}
+                        Line Load: {lineWip.currentWip} / {lineWip.wipLimit} batches
+                        {isWipBlocked && <span className="ml-2 bg-rose-200 text-rose-800 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-widest">At Limit</span>}
+                        {lineWip.isAtCapacity && isAlreadyOnThisLine && <span className="ml-2 bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-widest">Existing — Bypassed</span>}
+                    </div>
+                )}
+                {isSelectedLineJobWork && (
+                    <div className="mt-3 flex items-start gap-2.5 bg-amber-50 border border-amber-300 rounded-xl px-3.5 py-3">
+                        <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-xs font-black text-amber-800 uppercase tracking-widest">External — Job Work Line</p>
+                            <p className="text-[11px] text-amber-700 mt-0.5 font-medium">
+                                Garments on this line go to an external vendor. The Production Manager must raise a challan after assignment.
+                            </p>
+                        </div>
+                    </div>
+                )}
+            </div>
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+                <button onClick={onClose} className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-bold text-sm active:scale-95">Cancel</button>
+                <button onClick={() => setStep('sizes')} disabled={!selectedLine || isWipBlocked}
+                    className="px-6 py-3 bg-slate-800 text-white rounded-xl hover:bg-slate-900 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed shadow-md font-bold text-sm active:scale-95">
+                    Select Sizes →
+                </button>
+            </div>
+        </div>
+    );
+
+    // ── Step 2: Size selection ──────────────────────────────────────────────
+    if (step === 'sizes') return (
+        <div className="p-2">
+            <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-black text-slate-800">
+                    Select Sizes <span className="text-sm font-bold text-slate-500">→ {selectedLineName}</span>
+                </h3>
+                <button onClick={toggleAll} className="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 px-3 py-2 rounded-xl active:scale-95">
+                    {selectedSizes.size === readySizes.length ? 'Deselect All' : 'Select All'}
+                </button>
+            </div>
+            <div className="max-h-[45vh] overflow-y-auto space-y-2 pr-1">
+                {readySizes.length === 0 ? (
+                    <div className="bg-slate-50 rounded-xl p-8 border-2 border-dashed border-slate-200 text-center">
+                        <p className="text-sm font-bold text-slate-500">No sizes ready for this stage yet — a size becomes ready once it's complete on every roll that carries it.</p>
+                    </div>
+                ) : readySizes.map(sz => {
+                    const isSelected = selectedSizes.has(String(sz.size));
+                    return (
+                        <div key={sz.size} onClick={() => toggleSize(sz.size)}
+                            className={`flex justify-between items-center p-3.5 rounded-xl border-2 cursor-pointer transition-all select-none
+                                ${isSelected ? 'bg-violet-50 border-violet-500 ring-2 ring-violet-500/20' : 'bg-white border-slate-200 hover:border-violet-300'}`}>
+                            <div className="flex items-center gap-3">
+                                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isSelected ? 'bg-violet-600 border-violet-600' : 'border-slate-300'}`}>
+                                    {isSelected && <CheckCircle2 size={12} className="text-white" />}
+                                </div>
+                                <span className={`font-black text-sm block ${isSelected ? 'text-violet-900' : 'text-slate-800'}`}>Size {sz.size}</span>
+                            </div>
+                            {sz.rolls_expected != null && (
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-md border bg-emerald-50 text-emerald-700 border-emerald-200">
+                                    {sz.rolls_completed}/{sz.rolls_expected} rolls done
+                                </span>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+            <div className="flex justify-between items-center pt-4 mt-3 border-t border-slate-200">
+                <span className="text-sm font-bold text-slate-500">{selectedCount} size{selectedCount !== 1 ? 's' : ''} selected</span>
+                <div className="flex gap-3">
+                    <button onClick={() => setStep('line')} className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-bold text-sm flex items-center active:scale-95">
+                        <ArrowLeft size={14} className="mr-1.5" /> Back
+                    </button>
+                    <button onClick={() => setStep('confirm')} disabled={selectedCount === 0}
+                        className="px-6 py-3 bg-slate-800 text-white rounded-xl hover:bg-slate-900 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed shadow-md font-bold text-sm active:scale-95">
+                        Review →
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+
+    // ── Step 3: Confirm ─────────────────────────────────────────────────────
+    return (
+        <div className="p-2">
+            {isSelectedLineJobWork ? (
+                <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 text-center mb-5">
+                    <h4 className="text-amber-900 font-black text-lg mb-1">Confirm Dispatch — External Line</h4>
+                    <p className="text-amber-700 font-medium text-sm">These sizes will be assigned to an external job-work line. The Production Manager must raise a challan before garments leave the factory.</p>
+                </div>
+            ) : (
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-5 text-center mb-5">
+                    <h4 className="text-blue-900 font-black text-lg mb-1">Confirm Dispatch</h4>
+                    <p className="text-blue-700 font-medium text-sm">Each size moves across every roll that carries it, together, onto the selected line.</p>
+                </div>
+            )}
+            <div className="grid grid-cols-2 gap-3 mb-5">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Target Line</span>
+                    <span className="text-base font-black text-slate-800">{selectedLineName}</span>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Payload</span>
+                    <span className="text-base font-black text-violet-600">{selectedCount} Size{selectedCount !== 1 ? 's' : ''}</span>
+                </div>
+            </div>
+            <div className="mb-5">
+                <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Sizes to Dispatch</h5>
+                <div className="max-h-[30vh] overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 bg-white shadow-inner">
+                    {selectedSizeObjects.map(sz => (
+                        <div key={sz.size} className="p-3 text-sm flex justify-between items-center">
+                            <span className="font-bold text-slate-800">Size {sz.size}</span>
+                            {sz.rolls_expected != null && <span className="text-xs text-slate-500">{sz.rolls_completed}/{sz.rolls_expected} rolls</span>}
+                        </div>
+                    ))}
+                </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+                <button onClick={() => setStep('sizes')} className="px-5 py-3 bg-white border-2 border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-bold text-sm flex items-center active:scale-95">
+                    <ArrowLeft size={16} className="mr-2" /> Back
+                </button>
+                <button onClick={handleFinalConfirm} className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-md font-bold text-sm flex items-center active:scale-95">
+                    <CheckCircle2 size={18} className="mr-2" /> Confirm & Dispatch
+                </button>
+            </div>
+        </div>
+    );
+};
+
+// ============================================================================
 // BATCH INFO BANNER  (shared by StageDetailModal + ChangeLineModal)
 // ============================================================================
 const BatchInfoBanner = ({ batch, activeStage }) => {
@@ -567,7 +775,8 @@ const RollRow = ({ roll, badge, badgeClass }) => (
     </div>
 );
 
-const StageDetailModal = ({ batch, stage, progress, onClose, onAssign, onChangeLine, readyRolls }) => {
+const StageDetailModal = ({ batch, stage, progress, onClose, onAssign, onAssignSizes, onChangeLine, readyRolls, readySizes = [] }) => {
+    const isMode2 = batch?.piece_sequencing_mode === 'MODE_2';
     const wipRolls = progress?.wip_roll_ids ?? [];
     const completedRolls = progress?.completed_roll_ids ?? [];
     const dispatchedRolls = progress?.dispatched_roll_ids ?? [];
@@ -596,11 +805,20 @@ const StageDetailModal = ({ batch, stage, progress, onClose, onAssign, onChangeL
             </div>
 
             {/* Assign action */}
-            {readyRolls.length > 0 && onAssign && (
-                <button onClick={onAssign}
-                    className="w-full py-3 mb-5 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-700 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest">
-                    <Zap size={16} /> Assign {readyRolls.length} Roll{readyRolls.length !== 1 ? 's' : ''} to Line
-                </button>
+            {isMode2 ? (
+                readySizes.length > 0 && onAssignSizes && (
+                    <button onClick={onAssignSizes}
+                        className="w-full py-3 mb-5 bg-violet-700 text-white font-black rounded-xl hover:bg-violet-800 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest">
+                        <Zap size={16} /> Assign {readySizes.length} Size{readySizes.length !== 1 ? 's' : ''} to Line
+                    </button>
+                )
+            ) : (
+                readyRolls.length > 0 && onAssign && (
+                    <button onClick={onAssign}
+                        className="w-full py-3 mb-5 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-700 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest">
+                        <Zap size={16} /> Assign {readyRolls.length} Roll{readyRolls.length !== 1 ? 's' : ''} to Line
+                    </button>
+                )
             )}
 
             {/* Summary chips */}
@@ -610,6 +828,20 @@ const StageDetailModal = ({ batch, stage, progress, onClose, onAssign, onChangeL
                     <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">Completed: {summary.completed ?? completedRolls.length}</span>
                     <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">Forwarded: {summary.dispatched_forward ?? dispatchedRolls.length}</span>
                     <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 border border-slate-200">Total on Line: {summary.total_on_line ?? wipRolls.length + completedRolls.length}</span>
+                </div>
+            )}
+
+            {/* MODE_2 ready-sizes strip — informational; the Assign button above handles dispatch */}
+            {isMode2 && readySizes.length > 0 && (
+                <div className="mb-5">
+                    <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Sizes Ready to Forward</h5>
+                    <div className="flex flex-wrap gap-2">
+                        {readySizes.map(sz => (
+                            <span key={sz.size} className="text-xs font-black px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 border border-violet-200">
+                                Size {sz.size} · {sz.rolls_completed}/{sz.rolls_expected} rolls
+                            </span>
+                        ))}
+                    </div>
                 </div>
             )}
 
@@ -651,15 +883,21 @@ const StageDetailModal = ({ batch, stage, progress, onClose, onAssign, onChangeL
 // ============================================================================
 // STAGE NODE
 // ============================================================================
-const StageNode = ({ stage, progress, totalRolls, readyRolls, processingMode, wipMap, isFirst, onActivate, onCheckComplete, isCheckingComplete }) => {
-    const summary = progress?.roll_summary;
-    const completedIds   = progress?.completed_roll_ids  ?? [];
-    const dispatchedIds  = progress?.dispatched_roll_ids ?? [];
-    const rollsCompleted = summary?.completed         ?? completedIds.length;
-    const rollsDispatched = summary?.dispatched_forward ?? dispatchedIds.length;
+const StageNode = ({ stage, progress, totalRolls, readyRolls, totalSizes, readySizes, isMode2, processingMode, wipMap, isFirst, onActivate, onCheckComplete, isCheckingComplete }) => {
+    // MODE_1: roll is the unit (all its sizes together). MODE_2: size is the
+    // unit (spanning every roll that carries it). Same shape (roll_summary /
+    // size_summary), different source — everything below picks one based on
+    // the batch's piece_sequencing_mode.
+    const summary = isMode2 ? progress?.size_summary : progress?.roll_summary;
+    const completedIds   = isMode2 ? [] : (progress?.completed_roll_ids  ?? []);
+    const dispatchedIds  = isMode2 ? [] : (progress?.dispatched_roll_ids ?? []);
+    const unitsCompleted  = summary?.completed          ?? completedIds.length;
+    const unitsDispatched = summary?.dispatched_forward ?? dispatchedIds.length;
+    const totalUnits = isMode2 ? totalSizes : totalRolls;
+    const readyCount = isMode2 ? readySizes : readyRolls;
     const isComplete = progress?.status === 'COMPLETED';
     const isActive = !isComplete && !!progress;
-    const canActivate = isFirst || processingMode === 'SERIALIZED' || readyRolls > 0;
+    const canActivate = isFirst || processingMode === 'SERIALIZED' || readyCount > 0;
 
     let state;
     if (isComplete) state = 'COMPLETE';
@@ -667,8 +905,8 @@ const StageNode = ({ stage, progress, totalRolls, readyRolls, processingMode, wi
     else if (canActivate) state = 'ACTIVATABLE';
     else state = 'LOCKED';
 
-    const pctCompleted = totalRolls > 0 ? (rollsCompleted / totalRolls) * 100 : 0;
-    const pctDispatched = totalRolls > 0 ? (rollsDispatched / totalRolls) * 100 : 0;
+    const pctCompleted = totalUnits > 0 ? (unitsCompleted / totalUnits) * 100 : 0;
+    const pctDispatched = totalUnits > 0 ? (unitsDispatched / totalUnits) * 100 : 0;
 
     const lineWip = progress?.line_id ? wipMap[String(progress.line_id)] : null;
 
@@ -731,18 +969,18 @@ const StageNode = ({ stage, progress, totalRolls, readyRolls, processingMode, wi
                 {/* Progress bar: green=completed, blue=dispatched-forward, grey=remaining */}
                 <div>
                     <div className="flex justify-between items-center mb-1">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Rolls</span>
-                        <span className="text-[10px] font-black text-slate-700">{rollsCompleted}/{totalRolls} done</span>
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{isMode2 ? 'Sizes' : 'Rolls'}</span>
+                        <span className="text-[10px] font-black text-slate-700">{unitsCompleted}/{totalUnits} done</span>
                     </div>
                     <div className="h-2 bg-slate-200 rounded-full overflow-hidden flex">
                         <div className={`h-full ${state === 'COMPLETE' ? 'bg-emerald-500' : 'bg-emerald-400'} transition-all`} style={{ width: `${pctCompleted}%` }} />
                         <div className="h-full bg-blue-300 transition-all" style={{ width: `${pctDispatched}%` }} />
                     </div>
-                    {rollsCompleted > 0 && rollsDispatched < rollsCompleted && (
-                        <span className="text-[10px] text-amber-600 font-bold mt-0.5 block">{rollsCompleted - rollsDispatched} ready to forward</span>
+                    {unitsCompleted > 0 && unitsDispatched < unitsCompleted && (
+                        <span className="text-[10px] text-amber-600 font-bold mt-0.5 block">{unitsCompleted - unitsDispatched} ready to forward</span>
                     )}
-                    {rollsDispatched > 0 && (
-                        <span className="text-[10px] text-blue-500 font-bold mt-0.5 block">{rollsDispatched} forwarded</span>
+                    {unitsDispatched > 0 && (
+                        <span className="text-[10px] text-blue-500 font-bold mt-0.5 block">{unitsDispatched} forwarded</span>
                     )}
                 </div>
 
@@ -770,12 +1008,15 @@ const StageNode = ({ stage, progress, totalRolls, readyRolls, processingMode, wi
                 {/* CTA hint */}
                 {state === 'ACTIVATABLE' && (
                     <div className="flex items-center text-[10px] font-black text-amber-700 mt-1">
-                        <Zap size={10} className="mr-1" /> {readyRolls} roll{readyRolls !== 1 ? 's' : ''} ready — tap to activate
+                        <Zap size={10} className="mr-1" />
+                        {isMode2
+                            ? `${readyCount} size${readyCount !== 1 ? 's' : ''} ready — tap to activate`
+                            : `${readyCount} roll${readyCount !== 1 ? 's' : ''} ready — tap to activate`}
                     </div>
                 )}
                 {state === 'ACTIVE' && (
                     <div className="flex items-center text-[10px] font-black text-blue-600 mt-1">
-                        <Loader size={10} className="mr-1 animate-spin" /> In progress — tap to add rolls
+                        <Loader size={10} className="mr-1 animate-spin" /> In progress — tap to add {isMode2 ? 'sizes' : 'rolls'}
                     </div>
                 )}
 
@@ -800,12 +1041,12 @@ const StageNode = ({ stage, progress, totalRolls, readyRolls, processingMode, wi
 // ============================================================================
 // CONNECTOR BETWEEN STAGES
 // ============================================================================
-const StageConnector = ({ readyRolls }) => (
+const StageConnector = ({ readyCount }) => (
     <div className="flex flex-col items-center justify-center shrink-0 gap-1 px-1">
-        <ArrowRight size={20} className={readyRolls > 0 ? 'text-amber-500' : 'text-slate-300'} />
-        {readyRolls > 0 && (
+        <ArrowRight size={20} className={readyCount > 0 ? 'text-amber-500' : 'text-slate-300'} />
+        {readyCount > 0 && (
             <span className="text-[10px] font-black bg-amber-400 text-black px-2 py-0.5 rounded-full whitespace-nowrap">
-                {readyRolls} ready
+                {readyCount} ready
             </span>
         )}
     </div>
@@ -852,9 +1093,11 @@ const CompletionNode = ({ type, summary, loading }) => {
 // ============================================================================
 // BATCH PIPELINE CARD
 // ============================================================================
-const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
+const BatchPipelineCard = ({ batch, wipMap, onAssign, onAssignSizes, onRefresh }) => {
+    const isMode2 = batch?.piece_sequencing_mode === 'MODE_2';
     const [modalData, setModalData] = useState(null);
-    const [detailData, setDetailData] = useState(null); // { stage, progress, readyRolls }
+    const [sizeModalData, setSizeModalData] = useState(null);
+    const [detailData, setDetailData] = useState(null); // { stage, progress, readyRolls, readySizes }
     const [changeLineData, setChangeLineData] = useState(null); // { stage, progress }
     const [checkingStageId, setCheckingStageId] = useState(null);
 
@@ -878,11 +1121,29 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
         return completed.filter(r => !dispatchedSet.has(String(r.roll_id)));
     };
 
+    // MODE_2 equivalent: returns array of SIZE objects { size, rolls_completed,
+    // rolls_expected } ready to be dispatched to stage[i] — a size becomes
+    // ready once it's complete on every roll that carries it at the previous
+    // stage, and stays "ready" (not yet dispatched forward) until acted on.
+    const getReadySizes = (stageIndex) => {
+        // Stage 0 has no previous stage to wait on — every batch size is
+        // immediately eligible, mirroring all_roll_ids for the roll path.
+        if (stageIndex === 0) return (batch.all_sizes || []).map(size => ({ size, rolls_completed: null, rolls_expected: null }));
+        const prevStage = cycleFlow[stageIndex - 1];
+        const prevProgress = progressMap[prevStage.id];
+        if (!prevProgress) return [];
+        const ready = prevProgress.ready_sizes ?? [];
+        const dispatched = prevProgress.dispatched_sizes ?? [];
+        const dispatchedSet = new Set(dispatched.map(String));
+        return ready.filter(s => !dispatchedSet.has(String(s.size)));
+    };
+
     const handleOpenDetail = (stageIndex) => {
         const cf = cycleFlow[stageIndex];
         const progress = progressMap[cf.id] ?? null;
         const readyRolls = getReadyRolls(stageIndex);
-        setDetailData({ stage: cf, progress, readyRolls, stageIndex, batch });
+        const readySizes = getReadySizes(stageIndex);
+        setDetailData({ stage: cf, progress, readyRolls, readySizes, stageIndex, batch });
     };
 
     const handleActivate = (stageIndex) => {
@@ -893,9 +1154,22 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
         setModalData({ cycleFlow: cf, currentLineId: progress?.line_id ?? null, readyRolls, allStages: cycleFlow });
     };
 
+    const handleActivateSizes = (stageIndex) => {
+        const cf = cycleFlow[stageIndex];
+        const progress = progressMap[cf.id];
+        const readySizes = getReadySizes(stageIndex);
+        setDetailData(null);
+        setSizeModalData({ cycleFlow: cf, currentLineId: progress?.line_id ?? null, readySizes });
+    };
+
     const handleSave = async (data) => {
         await onAssign(data);
         setModalData(null);
+    };
+
+    const handleSaveSizes = async (data) => {
+        await onAssignSizes(data);
+        setSizeModalData(null);
     };
 
     const handleOpenChangeLine = (stageIndex) => {
@@ -1007,14 +1281,19 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                     <div className="flex items-center gap-0 min-w-max">
                         {cycleFlow.map((stage, i) => {
                             const readyRolls = getReadyRolls(i);
+                            const readySizes = getReadySizes(i);
+                            const readyCount = isMode2 ? readySizes.length : readyRolls.length;
                             return (
                                 <React.Fragment key={stage.id}>
-                                    {i > 0 && <StageConnector readyRolls={readyRolls.length} />}
+                                    {i > 0 && <StageConnector readyCount={readyCount} />}
                                     <StageNode
                                         stage={stage}
                                         progress={progressMap[stage.id] ?? null}
                                         totalRolls={batch.total_rolls || 0}
                                         readyRolls={readyRolls.length}
+                                        totalSizes={batch.total_sizes || 0}
+                                        readySizes={readySizes.length}
+                                        isMode2={isMode2}
                                         processingMode={stage.processing_mode}
                                         wipMap={wipMap}
                                         isFirst={i === 0}
@@ -1027,7 +1306,7 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                         })}
                         {cycleFlow.length > 0 && (
                             <>
-                                <StageConnector readyRolls={0} />
+                                <StageConnector readyCount={0} />
                                 <div className="flex flex-col gap-2">
                                     <CompletionNode type="approved" summary={batch.garment_summary} loading={false} />
                                     <CompletionNode type="rejected" summary={batch.garment_summary} loading={false} />
@@ -1066,14 +1345,16 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                         stage={detailData.stage}
                         progress={detailData.progress}
                         readyRolls={detailData.readyRolls}
+                        readySizes={detailData.readySizes}
                         onClose={() => setDetailData(null)}
                         onAssign={detailData.readyRolls.length > 0 && detailData.stageIndex !== 0 ? () => handleActivate(detailData.stageIndex) : null}
+                        onAssignSizes={detailData.readySizes.length > 0 && detailData.stageIndex !== 0 ? () => handleActivateSizes(detailData.stageIndex) : null}
                         onChangeLine={detailData.progress ? () => handleOpenChangeLine(detailData.stageIndex) : null}
                     />
                 </Modal>
             )}
 
-            {/* Line assignment modal */}
+            {/* Line assignment modal — MODE_1: rolls */}
             {modalData && (
                 <Modal title="" onClose={() => setModalData(null)}>
                     <LineSelectionModal
@@ -1085,6 +1366,21 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onRefresh }) => {
                         onClose={() => setModalData(null)}
                         onSave={handleSave}
                         allStages={modalData.allStages}
+                    />
+                </Modal>
+            )}
+
+            {/* Line assignment modal — MODE_2: sizes (across all rolls) */}
+            {sizeModalData && (
+                <Modal title="" onClose={() => setSizeModalData(null)}>
+                    <SizeSelectionModal
+                        batchId={batch.batch_id}
+                        cycleFlow={sizeModalData.cycleFlow}
+                        currentLineId={sizeModalData.currentLineId}
+                        readySizes={sizeModalData.readySizes}
+                        wipMap={wipMap}
+                        onClose={() => setSizeModalData(null)}
+                        onSave={handleSaveSizes}
                     />
                 </Modal>
             )}
