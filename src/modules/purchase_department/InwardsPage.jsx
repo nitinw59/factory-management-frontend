@@ -3,9 +3,10 @@ import { useSearchParams } from 'react-router-dom';
 import {
     Loader2, Search, X, FileText, CheckCircle2, XCircle,
     Clock, Package, Scissors, Wrench, Tag, ExternalLink,
-    AlertTriangle, Inbox, Plus, User, ChevronDown, Pencil, RefreshCw,
+    AlertTriangle, Inbox, Plus, User, ChevronDown, Pencil, RefreshCw, Printer,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
+import { adminApi } from '../../api/adminApi';
 import { useAuth } from '../../context/AuthContext';
 import { IMAGE_BASE_URL } from '../../utils/api';
 import { storeManagerApi } from '../../api/storeManagerApi';
@@ -13,6 +14,12 @@ import StandaloneInwardModal from './StandaloneInwardModal';
 import InwardCreateModal from './InwardCreateModal';
 import InwardReviewModal from './InwardReviewModal';
 import { uomLabel, describeEditBlock, seedSnapshotFromInward } from './inwardShared';
+import { downloadFabricInwardChallanPdf } from './fabricInwardChallanPdfGenerator';
+
+// A row can carry mixed item types (rare, but the schema allows it) — the
+// Print Challan action only makes sense, and only appears, when at least one
+// line on the receipt is actually fabric.
+const hasFabricItems = (row) => (row.items || []).some(it => (it.item_type || 'trim') === 'fabric');
 
 // The staged re-approval backend described in
 // docs/purchase-department/edit-inward-backend-spec.md has shipped (verified
@@ -125,12 +132,13 @@ function RejectModal({ inward, onConfirm, onClose }) {
 
 // ── Inward Detail Modal ───────────────────────────────────────────────────────
 
-function InwardDetailModal({ inward, canApprove, canEditRow, onApprove, onReject, onEdit, onClose }) {
+function InwardDetailModal({ inward, canApprove, canEditRow, onApprove, onReject, onEdit, onClose, onPrintChallan, printingChallan }) {
     const isPending      = inward.approval_status === 'PENDING_APPROVAL';
     const isApproved     = inward.approval_status === 'APPROVED';
     const isRejected     = inward.approval_status === 'REJECTED';
     const isPendingUpdate = inward.approval_status === 'PENDING_UPDATE';
     const [busyApprove, setBusyApprove] = useState(false);
+    const canPrintChallan = hasFabricItems(inward);
 
     // Not reachable until the backend spec ships — see docs/purchase-department/
     // edit-inward-backend-spec.md §4. Fetched lazily only while viewing a
@@ -403,12 +411,24 @@ function InwardDetailModal({ inward, canApprove, canEditRow, onApprove, onReject
                 <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-slate-100">
                     {isPending && canApprove ? (
                         <>
-                            <button
-                                onClick={() => onReject()}
-                                className="flex items-center gap-1.5 text-xs font-bold text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-200 hover:border-rose-600 px-3 py-1.5 rounded-lg transition"
-                            >
-                                <XCircle size={12} /> Reject
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => onReject()}
+                                    className="flex items-center gap-1.5 text-xs font-bold text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-200 hover:border-rose-600 px-3 py-1.5 rounded-lg transition"
+                                >
+                                    <XCircle size={12} /> Reject
+                                </button>
+                                {canPrintChallan && (
+                                    <button
+                                        onClick={onPrintChallan}
+                                        disabled={printingChallan}
+                                        className="flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-orange-600 border border-slate-200 hover:border-orange-200 px-3 py-1.5 rounded-lg transition disabled:opacity-40"
+                                    >
+                                        {printingChallan ? <Loader2 size={12} className="animate-spin" /> : <Printer size={12} />}
+                                        Print Challan
+                                    </button>
+                                )}
+                            </div>
                             <div className="flex items-center gap-2">
                                 {canEditRow && (
                                     <button onClick={onEdit} className="flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-orange-600 border border-slate-200 hover:border-orange-200 px-3 py-1.5 rounded-lg transition">
@@ -430,6 +450,16 @@ function InwardDetailModal({ inward, canApprove, canEditRow, onApprove, onReject
                         </>
                     ) : (
                         <div className="flex items-center justify-end gap-2 ml-auto">
+                            {canPrintChallan && (
+                                <button
+                                    onClick={onPrintChallan}
+                                    disabled={printingChallan}
+                                    className="flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-orange-600 border border-slate-200 hover:border-orange-200 px-3 py-1.5 rounded-lg transition disabled:opacity-40"
+                                >
+                                    {printingChallan ? <Loader2 size={12} className="animate-spin" /> : <Printer size={12} />}
+                                    Print Challan
+                                </button>
+                            )}
                             {canEditRow && !isPendingUpdate && (isApproved ? EDIT_APPROVED_INWARD_ENABLED : true) && (
                                 <button onClick={onEdit} className="flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-orange-600 border border-slate-200 hover:border-orange-200 px-3 py-1.5 rounded-lg transition">
                                     <Pencil size={12} /> Edit
@@ -530,6 +560,7 @@ export default function InwardsPage({ lockedItemType = null, title, subtitle }) 
     const [detail,      setDetail]      = useState(null);  // inward row being viewed
     const [rejectTarget, setRejectTarget] = useState(null); // inward row being rejected
     const [busyId,      setBusyId]      = useState(null);
+    const [printingId,  setPrintingId]  = useState(null); // inward row currently generating its challan PDF
     const [showCreate,  setShowCreate]  = useState(false);
     const [toast,       setToast]       = useState(null);
 
@@ -644,6 +675,24 @@ export default function InwardsPage({ lockedItemType = null, title, subtitle }) 
     // Edit entry point — standalone/CUSTOM rows edit in-place; PO-linked rows
     // need the PO's item catalogue + other inwards loaded first, same as
     // StandaloneInwardModal.handleLoadPo does for the "against a PO" create flow.
+    // Print Challan — the fabric store's paper "Fabric Inward Challan" as a
+    // generated PDF, from whatever's actually recorded on this row (rolls
+    // while pending are pulled from pending_rolls, same as the detail modal).
+    // Available at any approval status — a store manager may want it printed
+    // for the receiving desk before purchase-manager approval even lands.
+    const handlePrintChallan = useCallback(async (row) => {
+        setPrintingId(row.id);
+        try {
+            const cr = await adminApi.getCompanyProfile().catch(() => null);
+            const company = cr?.data?.data ?? cr?.data ?? null;
+            await downloadFabricInwardChallanPdf({ inward: row, company });
+        } catch (e) {
+            showToast(e?.response?.data?.error || e.message || 'Failed to generate the challan PDF.');
+        } finally {
+            setPrintingId(null);
+        }
+    }, [showToast]);
+
     const openEdit = useCallback(async (row) => {
         if (row.po_code) {
             setPoEditLoading(true);
@@ -877,6 +926,17 @@ export default function InwardsPage({ lockedItemType = null, title, subtitle }) 
                                                     >
                                                         <FileText size={11} /> Details
                                                     </button>
+                                                    {hasFabricItems(row) && (
+                                                        <button
+                                                            onClick={() => handlePrintChallan(row)}
+                                                            disabled={printingId === row.id}
+                                                            title="Generate the Fabric Inward Challan PDF for this receipt"
+                                                            className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-orange-600 border border-slate-200 hover:border-orange-200 px-2.5 py-1 rounded-lg transition disabled:opacity-40"
+                                                        >
+                                                            {printingId === row.id ? <Loader2 size={11} className="animate-spin" /> : <Printer size={11} />}
+                                                            Print Challan
+                                                        </button>
+                                                    )}
                                                     {canEdit(row) && (
                                                         <button
                                                             onClick={() => editIsLive(row) && openEdit(row)}
@@ -933,6 +993,8 @@ export default function InwardsPage({ lockedItemType = null, title, subtitle }) 
                     onReject={() => { setRejectTarget(detail); }}
                     onEdit={() => { setDetail(null); openEdit(detail); }}
                     onClose={() => setDetail(null)}
+                    onPrintChallan={() => handlePrintChallan(detail)}
+                    printingChallan={printingId === detail.id}
                 />
             )}
 

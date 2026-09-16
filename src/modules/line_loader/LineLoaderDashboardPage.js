@@ -531,6 +531,27 @@ const ChangeLineModal = ({ batch, batchId, cycleFlow, currentLineId, currentLine
 // ============================================================================
 // STAGE DETAIL MODAL
 // ============================================================================
+// A roll's sizes can now clear (and advance) independently of each other —
+// size_progress.completed/total tells a supervisor "3 of 5 sizes done here"
+// even while the roll as a whole still shows WIP; present < total means some
+// sizes haven't even arrived from the previous stage yet (still in transit,
+// not just slow).
+const SizeProgressBadge = ({ sizeProgress }) => {
+    if (!sizeProgress || sizeProgress.total <= 1) return null;
+    const { present, completed, total } = sizeProgress;
+    const arriving = present < total;
+    return (
+        <span
+            className="text-[10px] font-bold text-violet-600 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full"
+            title={arriving
+                ? `${completed} of ${total} sizes done — ${total - present} still arriving from the previous stage`
+                : `${completed} of ${total} sizes done`}
+        >
+            {completed}/{total} sizes{arriving ? ' · arriving' : ''}
+        </span>
+    );
+};
+
 const RollRow = ({ roll, badge, badgeClass }) => (
     <div className="flex justify-between items-center p-3 text-sm border-b border-slate-100 last:border-0">
         <div>
@@ -538,6 +559,7 @@ const RollRow = ({ roll, badge, badgeClass }) => (
             <span className="text-xs text-slate-500">{roll.fabric_type} · {roll.color_name} · {roll.color_number}</span>
         </div>
         <div className="flex items-center gap-2">
+            <SizeProgressBadge sizeProgress={roll.size_progress} />
             {roll.primary_pieces_cut > 0 && <span className="text-[10px] text-slate-400 font-bold">{roll.primary_pieces_cut} pcs</span>}
             <span className="font-mono font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-md text-xs">{roll.meter}m</span>
             <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${badgeClass}`}>{badge}</span>
