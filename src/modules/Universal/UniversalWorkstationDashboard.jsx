@@ -8,8 +8,14 @@ import {
     Hammer, Loader2, Menu, ChevronDown, ChevronRight, CheckCircle2,
     Square, CheckSquare, XCircle, ArrowLeft, Package, Send, AlertCircle, Zap,
     LogOut, FileText, ThumbsUp, LayoutGrid, History, ChevronLeft, BarChart2,
-    ShieldAlert, ShieldCheck, RefreshCw, Ruler,
+    ShieldAlert, ShieldCheck, RefreshCw, Ruler, Lock,
 } from 'lucide-react';
+
+// TEMPORARY FIX: hardcoded supervisor override password to un-reject a
+// QC_REJECTED piece straight to REPAIRED. Replace with a real
+// role-gated/backend-verified check before this goes to more than a
+// handful of trusted supervisors.
+const REJECT_UNLOCK_PASSWORD = 'RAJESH2026';
 
 const PART_FILTER_LS_KEY = 'ws-part-filter';
 const STATS_REFRESH_MS   = 60_000;
@@ -473,7 +479,7 @@ const getPieceColorClass = (status, isSelected) => {
     switch(status) {
         case 'APPROVED': return "bg-slate-800 border-slate-700 text-emerald-500 opacity-60 cursor-not-allowed shadow-[inset_0_0_10px_rgba(16,185,129,0.2)]";
         case 'REPAIRED': return "bg-slate-800 border-slate-700 text-teal-400 opacity-60 cursor-not-allowed";
-        case 'QC_REJECTED': return "bg-rose-950 border-rose-900 text-rose-400 opacity-60 cursor-not-allowed shadow-[inset_0_0_10px_rgba(225,29,72,0.3)]";
+        case 'QC_REJECTED': return "bg-rose-950 border-rose-900 text-rose-400 opacity-70 shadow-[inset_0_0_10px_rgba(225,29,72,0.3)]";
         case 'PREVIOUSLY_REJECTED': return "bg-slate-200 border-slate-300 text-slate-400 opacity-30 cursor-not-allowed line-through";
         case 'NEEDS_REWORK': return "bg-amber-400 border-amber-500 text-amber-900 shadow-md cursor-not-allowed opacity-80"; 
         case 'PENDING':
@@ -636,6 +642,28 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
         try {
             await onRepairSubmit({ pieceIds: Array.from(selectedIds), status, defectCodeIds });
             setSelectedIds(new Set()); setIntendedAction(null); setDefectSearch(''); setSelectedCategory(null); setSelectedDefectIds(new Set());
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    // TEMPORARY FIX: a QC_REJECTED piece is normally a terminal, locked
+    // state with no repair path. This lets a supervisor who knows the
+    // override password force one piece back to REPAIRED (resolves its
+    // defect + flips its tracking-table status) by reusing the same
+    // approveAlteredPieces endpoint the normal rework flow already uses.
+    const handleUnlockRejectedPiece = async (piece) => {
+        const password = window.prompt('Supervisor password required to unlock this rejected piece:');
+        if (password === null) return; // cancelled
+        if (password !== REJECT_UNLOCK_PASSWORD) {
+            alert('Incorrect password.');
+            return;
+        }
+        setIsSubmitting(true);
+        try {
+            await onRepairSubmit({ pieceIds: [piece.id], status: 'APPROVED', defectCodeIds: [] });
+        } catch {
+            // onRepairSubmit (handleApproveAlterSubmit) already shows an alert on failure
         } finally {
             setIsSubmitting(false);
         }
@@ -947,6 +975,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                         {groupPieces.map(piece => {
                                             const isSelected = selectedIds.has(piece.id);
                                             const isRework = piece.qc_status === 'NEEDS_REWORK';
+                                            const isRejected = piece.qc_status === 'QC_REJECTED';
                                             const selClass = isRework
                                                 ? 'bg-amber-500 border-amber-600 text-white shadow-[0_0_20px_rgba(245,158,11,0.8)] transform scale-105 z-10'
                                                 : getPieceColorClass(piece.qc_status, true);
@@ -955,12 +984,14 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                                 : getPieceColorClass(piece.qc_status, false);
                                             return (
                                                 <button key={piece.id}
-                                                    disabled={piece.qc_status !== 'PENDING' && piece.qc_status && piece.qc_status !== 'NEEDS_REWORK'}
-                                                    onClick={() => togglePiece(piece)}
-                                                    className={`relative aspect-square rounded-2xl border-4 font-mono font-black text-3xl flex items-center justify-center transition-all active:scale-95 ${isSelected ? selClass : unselClass}`}>
+                                                    disabled={!isRejected && piece.qc_status !== 'PENDING' && piece.qc_status && piece.qc_status !== 'NEEDS_REWORK'}
+                                                    onClick={() => isRejected ? handleUnlockRejectedPiece(piece) : togglePiece(piece)}
+                                                    title={isRejected ? 'Rejected — click to unlock with supervisor password' : undefined}
+                                                    className={`relative aspect-square rounded-2xl border-4 font-mono font-black text-3xl flex items-center justify-center transition-all active:scale-95 ${isRejected ? 'cursor-pointer hover:border-rose-600' : ''} ${isSelected ? selClass : unselClass}`}>
                                                     {piece.piece_sequence}
                                                     {isSelected && <Check className={`absolute top-2 right-2 w-8 h-8 rounded-full p-1 shadow-md ${isRework ? 'bg-amber-700 text-white' : 'bg-indigo-500 text-white'}`} strokeWidth={4} />}
                                                     {!isSelected && isRework && <Hammer className="absolute top-2 right-2 w-6 h-6 text-amber-700" />}
+                                                    {isRejected && <Lock className="absolute top-2 right-2 w-6 h-6 text-rose-400" />}
                                                 </button>
                                             );
                                         })}

@@ -1663,6 +1663,15 @@ const LineLoaderDashboardPage = () => {
         }
     };
 
+    const handleAssignSizes = async (data) => {
+        try {
+            await lineLoaderApi.assignLineAndLogSizes(data);
+            await fetchData();
+        } catch (err) {
+            alert(err.response?.data?.error || 'Failed to assign size. Please try again.');
+        }
+    };
+
     return (
         <div className="p-6 md:p-8 bg-slate-100 min-h-screen font-inter text-slate-800">
             <header className="mb-8 flex items-center justify-between">
@@ -1693,7 +1702,7 @@ const LineLoaderDashboardPage = () => {
             ) : (
                 <div className="space-y-6">
                     {allBatches.map(batch => (
-                        <BatchPipelineCard key={batch.batch_id} batch={batch} wipMap={wipMap} onAssign={handleAssign} onRefresh={fetchData} />
+                        <BatchPipelineCard key={batch.batch_id} batch={batch} wipMap={wipMap} onAssign={handleAssign} onAssignSizes={handleAssignSizes} onRefresh={fetchData} />
                     ))}
                 </div>
             )}
