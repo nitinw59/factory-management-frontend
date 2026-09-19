@@ -124,7 +124,13 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
     const set = (k, v) => setForm(p => {
         const next = { ...p, [k]: v };
         if (k === 'type') next.uom = v === 'fabric' ? 'meter' : 'pcs';
-        if (k === 'trim_item_id') next.trim_item_variant_id = '';
+        if (k === 'trim_item_id') {
+            next.trim_item_variant_id = '';
+            // Default UOM from the trim item's own master record (trim_items.unit_of_measure)
+            // instead of always falling back to 'pcs' — still hand-editable afterward below.
+            const trimItem = trimItems.find(t => String(t.id) === String(v));
+            next.uom = trimItem?.unit_of_measure || 'pcs';
+        }
         return next;
     });
 
@@ -281,9 +287,18 @@ function ItemEditor({ poId, item = null, onCancel, onSaved }) {
                 </div>
                 <div>
                     <label className="text-[9px] font-bold text-slate-400 uppercase">UOM</label>
-                    <input type="text" value={form.uom}
-                        onChange={e => set('uom', e.target.value)}
-                        className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400" />
+                    {isFabric ? (
+                        <select value={form.uom} onChange={e => set('uom', e.target.value)}
+                            className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400 bg-white">
+                            <option value="meter">Meter</option>
+                            <option value="yard">Yard</option>
+                        </select>
+                    ) : (
+                        <input type="text" value={form.uom}
+                            onChange={e => set('uom', e.target.value)}
+                            title={isTrim ? 'Defaults from the trim item\'s own UOM — editable if this PO line needs a different unit.' : undefined}
+                            className="w-full mt-0.5 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-orange-400" />
+                    )}
                 </div>
                 <div>
                     <label className="text-[9px] font-bold text-slate-400 uppercase">Unit Price *</label>

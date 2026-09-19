@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
     Loader2, Search, X, FileText, CheckCircle2, XCircle,
     Clock, Package, Scissors, Wrench, Tag, ExternalLink,
-    AlertTriangle, Inbox, Plus, User, ChevronDown, Pencil, RefreshCw, Printer,
+    AlertTriangle, Inbox, Plus, User, ChevronDown, Pencil, RefreshCw, Printer, Download,
 } from 'lucide-react';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { adminApi } from '../../api/adminApi';
@@ -15,6 +15,7 @@ import InwardCreateModal from './InwardCreateModal';
 import InwardReviewModal from './InwardReviewModal';
 import { uomLabel, describeEditBlock, seedSnapshotFromInward } from './inwardShared';
 import { downloadFabricInwardChallanPdf } from './fabricInwardChallanPdfGenerator';
+import { generatePoPdf } from './poPdfGenerator';
 
 // A row can carry mixed item types (rare, but the schema allows it) — the
 // Print Challan action only makes sense, and only appears, when at least one
@@ -561,6 +562,7 @@ export default function InwardsPage({ lockedItemType = null, title, subtitle }) 
     const [rejectTarget, setRejectTarget] = useState(null); // inward row being rejected
     const [busyId,      setBusyId]      = useState(null);
     const [printingId,  setPrintingId]  = useState(null); // inward row currently generating its challan PDF
+    const [downloadingPoId, setDownloadingPoId] = useState(null); // inward row currently generating its PO detail PDF
     const [showCreate,  setShowCreate]  = useState(false);
     const [toast,       setToast]       = useState(null);
 
@@ -690,6 +692,43 @@ export default function InwardsPage({ lockedItemType = null, title, subtitle }) 
             showToast(e?.response?.data?.error || e.message || 'Failed to generate the challan PDF.');
         } finally {
             setPrintingId(null);
+        }
+    }, [showToast]);
+
+    // Download PO Details — the full purchase order (every line item, every
+    // requirement, supplier/company header) as a PDF, reusing the same
+    // generator the Purchase Department's own PO detail screen uses to
+    // create/save a PO document. This is a plain client-side download only —
+    // unlike that screen's "Generate PO Document" action, it does not also
+    // save a new numbered version to the PO's document history, since this
+    // button exists purely so a fabric-store user can pull the PO's full
+    // details from an inward row without navigating to Purchase Department.
+    const handleDownloadPoDetails = useCallback(async (row) => {
+        if (!row.purchase_order_id) return;
+        setDownloadingPoId(row.id);
+        try {
+            const [poRes, companyRes] = await Promise.all([
+                purchaseDeptApi.getOrderById(row.purchase_order_id),
+                adminApi.getCompanyProfile().catch(() => null),
+            ]);
+            const po = poRes.data?.data ?? poRes.data;
+            if (!po) throw new Error('Could not load this PO.');
+            const company = companyRes?.data?.data ?? companyRes?.data ?? null;
+
+            const pdfBlob = await generatePoPdf({ po, company });
+            const safeCode = (po.po_code || `PO-${po.id}`).replace(/[^A-Za-z0-9._-]/g, '_');
+            const url = URL.createObjectURL(pdfBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${safeCode}-details.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (e) {
+            showToast(e?.response?.data?.error || e.message || 'Failed to generate the PO details PDF.');
+        } finally {
+            setDownloadingPoId(null);
         }
     }, [showToast]);
 
@@ -935,6 +974,17 @@ export default function InwardsPage({ lockedItemType = null, title, subtitle }) 
                                                         >
                                                             {printingId === row.id ? <Loader2 size={11} className="animate-spin" /> : <Printer size={11} />}
                                                             Print Challan
+                                                        </button>
+                                                    )}
+                                                    {row.purchase_order_id && (
+                                                        <button
+                                                            onClick={() => handleDownloadPoDetails(row)}
+                                                            disabled={downloadingPoId === row.id}
+                                                            title="Download the full Purchase Order details as a PDF"
+                                                            className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-orange-600 border border-slate-200 hover:border-orange-200 px-2.5 py-1 rounded-lg transition disabled:opacity-40"
+                                                        >
+                                                            {downloadingPoId === row.id ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                                                            PO Details
                                                         </button>
                                                     )}
                                                     {canEdit(row) && (
