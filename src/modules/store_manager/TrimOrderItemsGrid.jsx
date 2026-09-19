@@ -19,6 +19,7 @@ import { buildTrimOrderGridModel } from './buildTrimOrderGridModel';
 import { getTrimOrderItemCellStatus, CELL_COLOR_CLS, CELL_COLOR_DOT } from './trimOrderCellStatus';
 import { computeBomVariance } from './trimOrderBomVariance';
 import HorizontalScrollFrame from '../merchandiser/HorizontalScrollFrame';
+import { nameAndNumber } from '../merchandiser/trimReservationUtils';
 
 // Fulfilled quantity aggregated by the color it was actually fulfilled WITH
 // (not the requested color) — surfaces "42 pcs fulfilled with BLACK, 10 with
@@ -157,6 +158,23 @@ const RowSummaryPopover = ({ label, itemCode, items, refData, refDataLoaded, res
 
 const EmptyCell = () => <td className="border border-slate-100 bg-slate-50/40 p-2 align-top" />;
 
+// Compact "fulfilled with COLOR" line for one cell — the color(s) actually
+// drawn against this cell's requirement, which can differ from the cell's
+// own column color when a substitute was used. Shows the biggest contributor
+// plus a "+N" for the rest rather than the full breakdown (that's what the
+// row-label hover popover is for) — cell space is tight.
+const FulfilledWithLine = ({ items }) => {
+    const byColor = computeFulfilledByColor(items);
+    if (byColor.length === 0) return null;
+    const top = byColor[0];
+    return (
+        <p className="text-[9px] font-bold text-emerald-700 mt-0.5 truncate"
+           title={byColor.map(c => `${nameAndNumber(c.color_name, c.color_number)}: ${c.total_qty.toLocaleString()}`).join(', ')}>
+            ✓ {nameAndNumber(top.color_name, top.color_number)}{byColor.length > 1 ? ` +${byColor.length - 1}` : ''}
+        </p>
+    );
+};
+
 const OrderItemCell = ({ item, plan, isOverridden, onClick }) => {
     const status = getTrimOrderItemCellStatus(item, plan);
     const required  = Number(item.quantity_required || 0);
@@ -183,6 +201,7 @@ const OrderItemCell = ({ item, plan, isOverridden, onClick }) => {
                         : <>{(plan.quantity_to_fulfill || 0).toLocaleString()}<span className="opacity-50">/{required.toLocaleString()}</span></>}
                 </p>
                 <p className="text-[9px] opacity-70 truncate">{status.label}</p>
+                <FulfilledWithLine items={[item]} />
             </button>
         </td>
     );
@@ -205,6 +224,7 @@ const MultiSizeCell = ({ items, getEffectivePlan, onClick }) => {
                     <span className="text-[8px] font-bold uppercase tracking-wide opacity-70">×{items.length} sizes</span>
                 </div>
                 <p className="text-xs font-bold mt-1 tabular-nums">{fulfilled.toLocaleString()}<span className="opacity-50">/{required.toLocaleString()}</span></p>
+                <FulfilledWithLine items={items} />
             </button>
         </td>
     );
@@ -252,7 +272,7 @@ const TrimOrderItemsGrid = ({
                 <table className="border-collapse w-full">
                     <thead>
                         <tr>
-                            <th className="sticky left-0 z-10 bg-white border border-indigo-100 px-3 py-1.5 text-left min-w-[190px]">
+                            <th className="sticky top-0 left-0 z-20 bg-white border border-indigo-100 px-3 py-1.5 text-left min-w-[190px] shadow-[0_1px_0_0_#e0e7ff]">
                                 <div className="relative">
                                     <Search size={11} className="absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-300" />
                                     <input
@@ -265,12 +285,17 @@ const TrimOrderItemsGrid = ({
                                 </div>
                             </th>
                             {columns.map(col => (
-                                <th key={col.colorKey} className="border border-indigo-100 px-2 py-2 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                    {col.color_name}
-                                    {col.color_number && <span className="block font-mono font-normal normal-case text-slate-400">{col.color_number}</span>}
+                                <th key={col.colorKey} className="sticky top-0 z-10 bg-white border border-indigo-100 px-2 py-2 text-center shadow-[0_1px_0_0_#e0e7ff]">
+                                    <span className={`inline-block text-[11px] font-black px-2 py-0.5 rounded-full whitespace-nowrap ${
+                                        col.color_number
+                                            ? 'text-indigo-700 bg-indigo-100'
+                                            : 'text-slate-500 bg-slate-100'
+                                    }`}>
+                                        {nameAndNumber(col.color_name, col.color_number)}
+                                    </span>
                                 </th>
                             ))}
-                            <th className="border border-indigo-100 px-2 py-2 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider w-28">
+                            <th className="sticky top-0 z-10 bg-white border border-indigo-100 px-2 py-2 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider w-28 shadow-[0_1px_0_0_#e0e7ff]">
                                 Actions
                             </th>
                         </tr>

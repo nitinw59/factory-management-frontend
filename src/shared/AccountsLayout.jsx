@@ -1,6 +1,14 @@
 // src/shared/AccountsLayout.jsx
-import { Outlet, Link, useLocation } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import MatrixBrand from './MatrixBrand';
 import ReportBugButton from './ReportBugButton';
+import NotificationBell from './NotificationBell';
+import {
+    LuLayoutDashboard, LuShoppingCart, LuPackageCheck, LuFileText, LuPackageX,
+    LuBoxes, LuChevronDown, LuMenu, LuX, LuLogOut,
+} from 'react-icons/lu';
 
 const SALES_NAV = [
     { to: '/accounts/sales/orders', label: 'Sales Orders' },
@@ -9,141 +17,165 @@ const SALES_NAV = [
 
 const PURCHASE_NAV = [
     { to: '/accounts/purchase/orders',               label: 'Orders'         },
+    { to: '/accounts/purchase/inwards',              label: 'Inwards'        },
     { to: '/accounts/purchase/invoices',             label: 'Invoices'       },
     { to: '/accounts/fabric-rolls',                  label: 'Fabric Rolls'   },
     { to: '/accounts/purchase/trims-ledger',         label: 'Trims Ledger'   },
     { to: '/accounts/purchase/supplier-color-codes', label: 'Supplier Codes' },
 ];
 
-const JOB_WORK_NAV = [
-    { to: '/accounts/job-work', label: 'Job Work Challans' },
+const SINGLE_NAV = [
+    { to: '/accounts/job-work',         icon: LuFileText,        label: 'Job Work' },
+    { to: '/trim-loss',                 icon: LuPackageX,        label: 'Trim Loss' },
+    { to: '/accounts/asset-management', icon: LuBoxes,           label: 'Asset' },
 ];
 
-const TRIM_LOSS_NAV = [
-    { to: '/trim-loss', label: 'Register' },
-];
+const linkClass = ({ isActive }) =>
+    `flex items-center gap-1.5 text-sm font-medium transition-colors ${isActive ? 'text-indigo-600' : 'text-gray-600 hover:text-indigo-600'}`;
 
-const ASSET_NAV = [
-    { to: '/accounts/asset-management', label: 'Asset Management' },
-];
+const mobileLinkClass = ({ isActive }) =>
+    `flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-gray-50'}`;
 
-const AccountsLayout = () => {
-    const { pathname } = useLocation();
+const NavDropdown = ({ title, icon: Icon, items, active }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const ref = useRef(null);
 
-    const activeClass = (to) => {
-        const isActive = pathname === to || pathname.startsWith(to + '/');
-        if (!isActive) return 'text-gray-600 hover:bg-gray-50';
-        return to.startsWith('/accounts/sales')
-            ? 'bg-indigo-50 text-indigo-700 border border-indigo-100'
-            : 'bg-orange-50 text-orange-700 border border-orange-100';
-    };
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (ref.current && !ref.current.contains(event.target)) setIsOpen(false);
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     return (
-        <div className="flex flex-col h-screen bg-gray-100">
-            <header className="bg-white shadow-sm border-b border-gray-200 flex-shrink-0">
-                <div className="flex items-center gap-3 px-6 h-14">
-                <div className="flex items-center gap-3 overflow-x-auto flex-1 min-w-0">
-                    <Link
-                        to="/accounts/production-workflow"
-                        className="flex items-center gap-1.5 text-sm font-semibold text-gray-400 hover:text-gray-600 transition-colors"
+        <div className="relative" ref={ref}>
+            <button
+                onClick={() => setIsOpen((o) => !o)}
+                className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${active ? 'text-indigo-600' : 'text-gray-600 hover:text-indigo-600'}`}
+            >
+                <Icon size={15} /> {title}
+                <LuChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {isOpen && (
+                <div
+                    className="absolute left-0 mt-2 w-52 bg-white rounded-lg shadow-lg border border-gray-100 py-1 z-30"
+                    onClick={() => setIsOpen(false)}
+                >
+                    {items.map(({ to, label }) => (
+                        <NavLink
+                            key={to}
+                            to={to}
+                            className={({ isActive }) =>
+                                `block px-4 py-2 text-sm transition-colors ${isActive ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`
+                            }
+                        >
+                            {label}
+                        </NavLink>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const AccountsLayout = () => {
+    const { user, logout } = useAuth();
+    const navigate = useNavigate();
+    const { pathname } = useLocation();
+    const [mobileOpen, setMobileOpen] = useState(false);
+
+    const handleLogout = () => { logout(); navigate('/login'); };
+    const closeMobile = () => setMobileOpen(false);
+
+    const isGroupActive = (items) => items.some(({ to }) => pathname === to || pathname.startsWith(to + '/'));
+
+    return (
+        <div className="flex flex-col h-screen bg-gray-50 font-sans">
+            <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-20 flex-shrink-0">
+                <div className="px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-6 min-w-0">
+                        <MatrixBrand portal="Accounts Portal" />
+
+                        <nav className="hidden md:flex items-center gap-5">
+                            <NavLink to="/accounts/production-workflow" className={linkClass}>
+                                <LuLayoutDashboard size={15} /> Dashboard
+                            </NavLink>
+
+                            <NavDropdown title="Sales" icon={LuShoppingCart} items={SALES_NAV} active={isGroupActive(SALES_NAV)} />
+                            <NavDropdown title="Purchase" icon={LuPackageCheck} items={PURCHASE_NAV} active={isGroupActive(PURCHASE_NAV)} />
+
+                            {SINGLE_NAV.map(({ to, icon: Icon, label }) => (
+                                <NavLink key={to} to={to} className={linkClass}>
+                                    <Icon size={15} /> {label}
+                                </NavLink>
+                            ))}
+                        </nav>
+                    </div>
+
+                    <div className="hidden md:flex items-center gap-4 shrink-0">
+                        {user && <span className="text-sm font-medium text-gray-700">Welcome, {user.name}</span>}
+                        <ReportBugButton />
+                        <NotificationBell />
+                        <button
+                            onClick={handleLogout}
+                            className="flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-rose-600 transition-colors bg-gray-50 hover:bg-rose-50 px-3 py-1.5 rounded-lg"
+                        >
+                            <LuLogOut size={15} /> Logout
+                        </button>
+                    </div>
+
+                    <button
+                        onClick={() => setMobileOpen((o) => !o)}
+                        className="md:hidden p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
                     >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="15 18 9 12 15 6"/>
-                        </svg>
-                        Production
-                    </Link>
+                        {mobileOpen ? <LuX size={22} /> : <LuMenu size={22} />}
+                    </button>
+                </div>
 
-                    <span className="w-px h-5 bg-gray-200" />
+                {mobileOpen && (
+                    <div className="md:hidden border-t border-gray-200 bg-white px-4 py-4 flex flex-col gap-1 max-h-[calc(100vh-56px)] overflow-y-auto">
+                        <NavLink to="/accounts/production-workflow" onClick={closeMobile} className={mobileLinkClass}>
+                            <LuLayoutDashboard size={16} /> Dashboard
+                        </NavLink>
 
-                    <span className="font-black text-lg text-indigo-600 tracking-tight">Accounts</span>
-
-                    <span className="w-px h-5 bg-gray-200 mx-1" />
-
-                    {/* Sales group */}
-                    <span className="text-xs font-bold uppercase tracking-widest text-indigo-400 shrink-0">Sales</span>
-                    <nav className="flex items-center gap-1">
+                        <div className="px-4 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Sales</div>
                         {SALES_NAV.map(({ to, label }) => (
-                            <Link
-                                key={to}
-                                to={to}
-                                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${activeClass(to)}`}
-                            >
+                            <NavLink key={to} to={to} onClick={closeMobile} className={mobileLinkClass}>
                                 {label}
-                            </Link>
+                            </NavLink>
                         ))}
-                    </nav>
 
-                    <span className="w-px h-5 bg-gray-200 mx-1" />
-
-                    {/* Purchase group */}
-                    <span className="text-xs font-bold uppercase tracking-widest text-orange-400 shrink-0">Purchase</span>
-                    <nav className="flex items-center gap-1">
+                        <div className="px-4 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Purchase</div>
                         {PURCHASE_NAV.map(({ to, label }) => (
-                            <Link
-                                key={to}
-                                to={to}
-                                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${activeClass(to)}`}
-                            >
+                            <NavLink key={to} to={to} onClick={closeMobile} className={mobileLinkClass}>
                                 {label}
-                            </Link>
+                            </NavLink>
                         ))}
-                    </nav>
 
-                    <span className="w-px h-5 bg-gray-200 mx-1" />
-
-                    {/* Job Work group */}
-                    <span className="text-xs font-bold uppercase tracking-widest text-amber-500 shrink-0">Job Work</span>
-                    <nav className="flex items-center gap-1">
-                        {JOB_WORK_NAV.map(({ to, label }) => (
-                            <Link
-                                key={to}
-                                to={to}
-                                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${activeClass(to)}`}
-                            >
-                                {label}
-                            </Link>
+                        <div className="px-4 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">More</div>
+                        {SINGLE_NAV.map(({ to, icon: Icon, label }) => (
+                            <NavLink key={to} to={to} onClick={closeMobile} className={mobileLinkClass}>
+                                <Icon size={16} /> {label}
+                            </NavLink>
                         ))}
-                    </nav>
 
-                    <span className="w-px h-5 bg-gray-200 mx-1" />
-
-                    {/* Trim Loss group */}
-                    <span className="text-xs font-bold uppercase tracking-widest text-rose-400 shrink-0">Trim Loss</span>
-                    <nav className="flex items-center gap-1">
-                        {TRIM_LOSS_NAV.map(({ to, label }) => (
-                            <Link
-                                key={to}
-                                to={to}
-                                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${activeClass(to)}`}
-                            >
-                                {label}
-                            </Link>
-                        ))}
-                    </nav>
-
-                    <span className="w-px h-5 bg-gray-200 mx-1" />
-
-                    {/* Asset group */}
-                    <span className="text-xs font-bold uppercase tracking-widest text-emerald-500 shrink-0">Asset</span>
-                    <nav className="flex items-center gap-1">
-                        {ASSET_NAV.map(({ to, label }) => (
-                            <Link
-                                key={to}
-                                to={to}
-                                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${activeClass(to)}`}
-                            >
-                                {label}
-                            </Link>
-                        ))}
-                    </nav>
-                </div>
-                <div className="shrink-0 pl-3 border-l border-gray-200">
-                    <ReportBugButton />
-                </div>
-                </div>
+                        <div className="border-t border-gray-100 mt-2 pt-3 flex items-center gap-3 px-4">
+                            <ReportBugButton />
+                            <NotificationBell />
+                        </div>
+                        {user && <div className="px-4 pt-2 text-sm text-gray-500">Welcome, {user.name}</div>}
+                        <button
+                            onClick={() => { closeMobile(); handleLogout(); }}
+                            className="flex items-center justify-center gap-2 w-full text-sm font-medium text-rose-600 hover:bg-rose-50 px-4 py-2.5 rounded-lg mt-1"
+                        >
+                            <LuLogOut size={16} /> Logout
+                        </button>
+                    </div>
+                )}
             </header>
 
-            <main className="flex-1 overflow-y-auto p-8">
+            <main className="flex-1 overflow-y-auto p-6 sm:p-8">
                 <Outlet />
             </main>
         </div>

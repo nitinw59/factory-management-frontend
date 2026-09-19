@@ -3,6 +3,8 @@ import { productionManagerApi } from '../../api/productionManagerApi';
 import { hrApi } from '../../api/hrApi';
 import { LuRefreshCw, LuClock, LuIndianRupee } from 'react-icons/lu';
 import TypeScorecardCard from './TypeScorecardCard';
+import DailyOutputByLineTypeCard from './DailyOutputByLineTypeCard';
+import WorkstationLiveScorecard from './WorkstationLiveScorecard';
 
 const REFRESH_SECONDS = 900; // 15 minutes
 const STORAGE_KEY      = 'scorecard_detailed_selected_line_type';
@@ -47,6 +49,12 @@ export default function ScorecardDetailedPage() {
     const [monthlyTarget, setMonthlyTarget] = useState(null);
     const [savingMonthlyTarget, setSavingMonthlyTarget] = useState(false);
 
+    // Daily output by line type — by_day series per line type id, and the
+    // live per-workstation scorecard. Both refresh on the same cycle as
+    // everything else on this page.
+    const [dailySeriesByType, setDailySeriesByType] = useState(null);
+    const [workstationRows,   setWorkstationRows]   = useState(null);
+
     const [loading,     setLoading]     = useState(false);
     const [lastRefresh, setLastRefresh] = useState(null);
     const [countdown,   setCountdown]   = useState(REFRESH_SECONDS);
@@ -80,7 +88,7 @@ export default function ScorecardDetailedPage() {
         setLoading(true);
         const { startDate: sd, endDate: ed } = getMonthRange(selectedMonth);
         try {
-            const [rangeRes, salaryRes, monthlyTargetRes] = await Promise.allSettled([
+            const [rangeRes, salaryRes, monthlyTargetRes, dailyByTypeRes, workstationRes] = await Promise.allSettled([
                 productionManagerApi.getRangeSummary({
                     start_date: sd, end_date: ed, line_type_id: selectedLineTypeId,
                 }),
@@ -88,12 +96,26 @@ export default function ScorecardDetailedPage() {
                 productionManagerApi.getMonthlyTarget({
                     line_type_id: selectedLineTypeId, month: selectedMonth,
                 }),
+                // One range-summary call per line type (a handful, system-wide) —
+                // reuses the same endpoint the card above already calls, just for
+                // every type instead of only the selected one, so the "by day ×
+                // line type" grid doesn't need its own backend endpoint.
+                Promise.all(lineTypes.map(t =>
+                    productionManagerApi.getRangeSummary({ start_date: sd, end_date: ed, line_type_id: t.id })
+                        .then(res => [t.id, res.data?.by_day || []])
+                        .catch(() => [t.id, []])
+                )),
+                productionManagerApi.getWorkstationLiveScorecard(),
             ]);
 
             setRangeSummary(rangeRes.status === 'fulfilled' ? rangeRes.value.data : null);
             setSalaryData(salaryRes.status === 'fulfilled' ? salaryRes.value.data : null);
             setSalaryFailed(salaryRes.status !== 'fulfilled');
             setMonthlyTarget(monthlyTargetRes.status === 'fulfilled' ? monthlyTargetRes.value.data : null);
+            setDailySeriesByType(
+                dailyByTypeRes.status === 'fulfilled' ? Object.fromEntries(dailyByTypeRes.value) : null
+            );
+            setWorkstationRows(workstationRes.status === 'fulfilled' ? workstationRes.value.data : null);
 
             setLastRefresh(new Date());
             countdownRef.current = REFRESH_SECONDS;
@@ -103,7 +125,7 @@ export default function ScorecardDetailedPage() {
         } finally {
             setLoading(false);
         }
-    }, [selectedLineTypeId, selectedMonth]);
+    }, [selectedLineTypeId, selectedMonth, lineTypes]);
 
     useEffect(() => {
         loadData();
@@ -274,6 +296,20 @@ export default function ScorecardDetailedPage() {
                         onSaveMonthlyTarget={handleSaveMonthlyTarget}
                         savingMonthlyTarget={savingMonthlyTarget}
                     />
+                )}
+
+                {/* Daily output, every production line type side by side */}
+                {(!loading || dailySeriesByType) && (
+                    <DailyOutputByLineTypeCard
+                        lineTypes={lineTypes}
+                        seriesByType={dailySeriesByType}
+                        loading={loading}
+                    />
+                )}
+
+                {/* Live per-workstation scorecard */}
+                {(!loading || workstationRows) && (
+                    <WorkstationLiveScorecard rows={workstationRows} loading={loading} />
                 )}
             </div>
         </div>

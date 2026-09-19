@@ -65,6 +65,9 @@ export const productionManagerApi = {
 
 // WORKFLOW FUNCTIONS
   getWorkflowData: () => api.get('/production-manager/production-workflow-data'),
+  // Bulk per-batch totals (fabric assigned, pieces dispatched) not on the main
+  // workflow payload — built for the Excel export, one row per batch.
+  getWorkflowBatchTotals: () => api.get('/production-manager/production-workflow-batch-totals'),
   getBatchDrilldown: (batchId, flowId) => api.get(`/production-manager/batch/${batchId}/drilldown`, { params: flowId != null ? { flowId } : {} }),
   getBatchDrilldownFull: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/drilldown`),
   // Lightweight sibling of getBatchDrilldownFull — just per-stage done/total
@@ -91,6 +94,9 @@ export const productionManagerApi = {
     // Monthly line-type target — admin-set figure, separate from the Production Manager's daily targets
     getMonthlyTarget: (params) => api.get('/production-manager/production-targets/monthly-target', { params }),
     setMonthlyTarget: (data)   => api.put('/production-manager/production-targets/monthly-target', data),
+
+    // Live per-workstation scorecard (today's output + this-hour checked, one row per active workstation)
+    getWorkstationLiveScorecard: () => api.get('/production-manager/workstation-live-scorecard'),
 
     // Line output (hourly breakdown + defects per line)
     getLineOutput: (params) => api.get('/production-manager/line-output', { params }),

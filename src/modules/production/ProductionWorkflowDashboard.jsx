@@ -21,6 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 // here — they're a heavy dependency (~250KB) needed only when a user clicks
 // a "download/print PDF" button, not on every load of this dashboard.
 import FabricIntakeForm from '../accounts/purchase/FabricIntakeForm';
+import { generateProductionWorkflowExcel } from './productionWorkflowExcelExport';
 import BatchDrilldownModal from './BatchDrilldownModal';
 import BatchDispatchModal from '../depatch_portal/BatchDispatchModal';
 import EndBitBatchModal from '../initialisation_portal/EndBitBatchModal';
@@ -2538,6 +2539,7 @@ const ProductionWorkflowDashboard = () => {
     const [detailsSop,     setDetailsSop]       = useState(null);
     const [inwardPO, setInwardPO]               = useState(null);
     const [trimOrdersBatch, setTrimOrdersBatch] = useState(null);
+    const [exporting, setExporting]             = useState(false);
 
     const fetchData = async () => {
         setLoading(true);
@@ -2604,6 +2606,17 @@ const ProductionWorkflowDashboard = () => {
     const handleInward      = (po) => setInwardPO({ ...po, id: po.po_id });
     const handleTrimOrders  = (batchId) => setTrimOrdersBatch(batchId);
     const handleEditBatch   = (batchId) => navigate(`${basePath}/batches/edit/${batchId}`);
+    const handleExportExcel = async () => {
+        setExporting(true);
+        try {
+            await generateProductionWorkflowExcel(filteredData);
+        } catch (err) {
+            console.error('Failed to export workflow Excel', err);
+            alert('Failed to generate the Excel export. Please try again.');
+        } finally {
+            setExporting(false);
+        }
+    };
 
     return (
         <div className="h-screen bg-slate-50 overflow-hidden flex flex-col">
@@ -2652,6 +2665,14 @@ const ProductionWorkflowDashboard = () => {
                         </div>
 
                         <div className="ml-auto flex items-center gap-2">
+                            <button
+                                onClick={handleExportExcel}
+                                disabled={exporting}
+                                className="flex items-center gap-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs px-3 py-2 rounded-lg shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                                {exporting ? 'Exporting…' : 'Download Excel'}
+                            </button>
                             {canManage && (
                                 <button
                                     onClick={() => navigate('/accounts/sales/new')}

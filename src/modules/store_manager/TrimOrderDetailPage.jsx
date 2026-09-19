@@ -1172,35 +1172,48 @@ const TrimOrderDetailPage = () => {
 
     return (
         <div className="p-6 bg-gray-50 min-h-screen">
-            <header className="mb-6">
-                <Link to="/store-manager/trim-orders" className="text-sm text-blue-600 hover:underline flex items-center mb-4 font-semibold">
-                    <LuArrowLeft className="mr-2" /> Back to All Orders
+            <header className="mb-3">
+                <Link to="/store-manager/trim-orders" className="text-xs text-blue-600 hover:underline flex items-center mb-1.5 font-semibold w-fit">
+                    <LuArrowLeft className="mr-1 h-3.5 w-3.5" /> Back to All Orders
                 </Link>
-                
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
-                    <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
-                        <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-1">
-                                <h1 className="text-2xl font-extrabold text-gray-900">
+
+                <div className="bg-white px-3 py-2.5 rounded-lg shadow-sm border border-gray-200">
+                    <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <h1 className="text-base font-extrabold text-gray-900 leading-tight">
                                     Batch #{orderInfo?.batchId ?? '—'}
                                     {orderInfo?.batch_code && (
-                                        <span className="ml-2 text-lg font-bold text-gray-500">({orderInfo.batch_code})</span>
+                                        <span className="ml-1.5 text-sm font-bold text-gray-500">({orderInfo.batch_code})</span>
                                     )}
                                     {orderInfo?.batch_index != null && (
-                                        <span className="ml-2 text-sm font-bold text-gray-400">#{orderInfo.batch_index}</span>
+                                        <span className="ml-1 text-xs font-bold text-gray-400">#{orderInfo.batch_index}</span>
                                     )}
                                 </h1>
                                 {orderInfo?.status && (
-                                    <span className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full border ${kitStatusOf(orderInfo.status).badge}`}>
+                                    <span className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full border ${kitStatusOf(orderInfo.status).badge}`}>
                                         {kitStatusOf(orderInfo.status).label}
                                     </span>
+                                )}
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Trim Order #{orderId}</span>
+                                {orderInfo?.productName && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setProductModalOpen(true)}
+                                        className="group flex items-center gap-1 text-left"
+                                        title="View product details"
+                                    >
+                                        <LuPackage className="h-3 w-3 text-indigo-500 shrink-0" />
+                                        <span className="text-xs font-bold text-gray-700 group-hover:text-indigo-700 group-hover:underline transition-colors">{orderInfo.productName}</span>
+                                        <Info className="h-3 w-3 text-gray-400 group-hover:text-indigo-500 transition-colors" />
+                                    </button>
                                 )}
                             </div>
 
                             {isClosed && (
-                                <div className="mb-3 flex items-start gap-2 bg-gray-100 border border-gray-300 rounded-lg px-3 py-2">
-                                    <LuLock className="h-4 w-4 text-gray-500 shrink-0 mt-0.5" />
-                                    <div className="text-xs text-gray-600">
+                                <div className="mt-1.5 flex items-start gap-1.5 bg-gray-100 border border-gray-300 rounded-md px-2 py-1">
+                                    <LuLock className="h-3.5 w-3.5 text-gray-500 shrink-0 mt-0.5" />
+                                    <div className="text-[11px] text-gray-600">
                                         <p className="font-bold text-gray-700">This order is closed — fulfillment is locked.</p>
                                         {orderInfo.forceCloseReason && <p className="mt-0.5 italic">“{orderInfo.forceCloseReason}”</p>}
                                         {(orderInfo.forceClosedByName || orderInfo.forceClosedAt) && (
@@ -1213,67 +1226,45 @@ const TrimOrderDetailPage = () => {
                                     </div>
                                 </div>
                             )}
-
-                            {orderInfo?.productName && (
-                                <button
-                                    type="button"
-                                    onClick={() => setProductModalOpen(true)}
-                                    className="group flex items-center gap-2 mb-3 text-left"
-                                    title="View product details"
-                                >
-                                    <LuPackage className="h-4 w-4 text-indigo-500 shrink-0" />
-                                    <span className="text-base font-bold text-gray-800 group-hover:text-indigo-700 group-hover:underline transition-colors">{orderInfo.productName}</span>
-                                    <Info className="h-3.5 w-3.5 text-gray-400 group-hover:text-indigo-500 transition-colors" />
-                                </button>
-                            )}
-
-                            {orderInfo && (
-                                <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-600 bg-gray-50 border border-gray-100 p-3 rounded-lg inline-flex">
-                                    <div className="flex items-center">
-                                        <span className="font-bold text-gray-400 uppercase text-[10px] tracking-wider mr-2">Trim Order:</span>
-                                        <span className="font-semibold text-gray-800">#{orderId}</span>
-                                    </div>
-                                </div>
-                            )}
                         </div>
-                        
-                        <div className="flex flex-col sm:flex-row items-end gap-3 shrink-0 mt-2 md:mt-0">
+
+                        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                             {canForceClose && (isClosed ? (
                                 <button
                                     onClick={handleForceOpen}
                                     disabled={closeBusy}
-                                    className="px-5 py-2.5 bg-emerald-600 text-white hover:bg-emerald-700 border border-emerald-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center disabled:opacity-50"
+                                    className="px-2.5 py-1 bg-emerald-600 text-white hover:bg-emerald-700 border border-emerald-600 rounded-md text-xs font-bold transition-all shadow-sm flex items-center disabled:opacity-50"
                                     title="Re-open the order and restore its previous status"
                                 >
-                                    {closeBusy ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LuLockOpen className="mr-2 h-5 w-5" />} Re-open
+                                    {closeBusy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <LuLockOpen className="mr-1 h-3.5 w-3.5" />} Re-open
                                 </button>
                             ) : !closeBlockedByIssued && (
                                 <button
                                     onClick={() => { setCloseReason(''); setCloseModalOpen(true); }}
                                     disabled={closeBusy}
-                                    className="px-5 py-2.5 bg-white text-red-600 hover:bg-red-600 hover:text-white border border-red-200 hover:border-red-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center disabled:opacity-50"
+                                    className="px-2.5 py-1 bg-white text-red-600 hover:bg-red-600 hover:text-white border border-red-200 hover:border-red-600 rounded-md text-xs font-bold transition-all shadow-sm flex items-center disabled:opacity-50"
                                     title="Force-close this order and lock fulfillment"
                                 >
-                                    <LuLock className="mr-2 h-5 w-5" /> Close
+                                    <LuLock className="mr-1 h-3.5 w-3.5" /> Close
                                 </button>
                             ))}
                             {!isClosed && (orderInfo?.status === 'READY_FOR_PICKUP' ? (
                                 <button
                                     onClick={handleUnmarkReady}
                                     disabled={kitBusy}
-                                    className="px-5 py-2.5 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white border border-amber-200 hover:border-amber-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center disabled:opacity-50"
+                                    className="px-2.5 py-1 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white border border-amber-200 hover:border-amber-600 rounded-md text-xs font-bold transition-all shadow-sm flex items-center disabled:opacity-50"
                                     title="Pull the kit back to adjust allocations — loaders can no longer sign it"
                                 >
-                                    <LuUndo2 className="mr-2 h-5 w-5" /> Pull Back Kit
+                                    <LuUndo2 className="mr-1 h-3.5 w-3.5" /> Pull Back Kit
                                 </button>
                             ) : orderInfo?.status !== 'ISSUED' && (
                                 <button
                                     onClick={() => { setReviewOpen({}); setMarkReadyOpen(true); }}
                                     disabled={kitBusy || !canMarkReady}
-                                    className="px-5 py-2.5 bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="px-2.5 py-1 bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 rounded-md text-xs font-bold transition-all shadow-sm flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
                                     title={canMarkReady ? 'Review the kit, then notify loaders it is ready for pickup' : 'Pick at least one item before marking the kit ready'}
                                 >
-                                    <LuSend className="mr-2 h-5 w-5" /> Mark Kit Ready
+                                    <LuSend className="mr-1 h-3.5 w-3.5" /> Mark Kit Ready
                                 </button>
                             ))}
                             <button
@@ -1282,34 +1273,33 @@ const TrimOrderDetailPage = () => {
                                 title={recomputeBlocked
                                     ? `Recompute is locked while the order is ${orderInfo?.status}`
                                     : "Re-run the BOM × cut-pieces calculation for every trim item on this order — picks up newly-required trims too (e.g. after a BOM gets approved). Trims already issued to the loader are skipped automatically."}
-                                className="px-5 py-2.5 bg-white text-violet-700 hover:bg-violet-600 hover:text-white border border-violet-200 hover:border-violet-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="px-2.5 py-1 bg-white text-violet-700 hover:bg-violet-600 hover:text-white border border-violet-200 hover:border-violet-600 rounded-md text-xs font-bold transition-all shadow-sm flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                {recomputingAll ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LuRefreshCw className="mr-2 h-5 w-5" />}
+                                {recomputingAll ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <LuRefreshCw className="mr-1 h-3.5 w-3.5" />}
                                 Recompute All
                             </button>
-                            {/* ✅ NEW BUTTON: Opens Reference Modal */}
                             <button
                                 onClick={() => setRefModalOpen(true)}
-                                className="px-5 py-2.5 bg-white text-gray-700 hover:bg-gray-100 border border-gray-300 hover:border-gray-400 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center"
+                                className="px-2.5 py-1 bg-white text-gray-700 hover:bg-gray-100 border border-gray-300 hover:border-gray-400 rounded-md text-xs font-bold transition-all shadow-sm flex items-center"
                             >
-                                <Info className="mr-2 h-5 w-5 text-gray-500" />
-                                View Ref &amp; BOM
+                                <Info className="mr-1 h-3.5 w-3.5 text-gray-500" />
+                                Ref &amp; BOM
                             </button>
 
                             <Link
                                 to={`/store-manager/trim-orders/${orderId}/summary`}
-                                className="px-5 py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-100 hover:border-indigo-600 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center group"
+                                className="px-2.5 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-100 hover:border-indigo-600 rounded-md text-xs font-bold transition-all shadow-sm flex items-center group"
                             >
-                                <LuFileText className="mr-2 h-5 w-5 text-indigo-500 group-hover:text-indigo-200 transition-colors" />
-                                View Order Summary
+                                <LuFileText className="mr-1 h-3.5 w-3.5 text-indigo-500 group-hover:text-indigo-200 transition-colors" />
+                                Summary
                             </Link>
                             {orderInfo?.batchId && (
                                 <button
                                     onClick={() => setBarcodeModalOpen(true)}
-                                    className="px-5 py-2.5 bg-white text-gray-700 hover:bg-gray-100 border border-gray-300 hover:border-gray-400 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center"
+                                    className="px-2.5 py-1 bg-white text-gray-700 hover:bg-gray-100 border border-gray-300 hover:border-gray-400 rounded-md text-xs font-bold transition-all shadow-sm flex items-center"
                                 >
-                                    <LuPrinter className="mr-2 h-5 w-5 text-gray-500" />
-                                    Print Barcodes
+                                    <LuPrinter className="mr-1 h-3.5 w-3.5 text-gray-500" />
+                                    Barcodes
                                 </button>
                             )}
                         </div>
