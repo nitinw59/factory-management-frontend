@@ -21,4 +21,10 @@ export const fabricStoreApi = {
     getInStockFabricRolls: () => api.get('/fabric-store/fabric-rolls/in-stock'),
     updateFabricRoll: (rollId, data) => api.put(`/fabric-store/fabric-roll/${rollId}`, data),
     deleteFabricRoll: (rollId) => api.delete(`/fabric-store/fabric-roll/${rollId}`),
+
+    // Return notes — sends IN_STOCK rolls back to the supplier (immediate
+    // effect, whole-roll, one supplier per note). See fabricStoreController.js.
+    createReturnNote: (data) => api.post('/fabric-store/return-notes', data),
+    getReturnNotes: () => api.get('/fabric-store/return-notes'),
+    getReturnNoteById: (id) => api.get(`/fabric-store/return-notes/${id}`),
 };

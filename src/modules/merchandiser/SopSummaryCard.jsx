@@ -14,6 +14,7 @@ import { planningApi } from '../../api/planningApi';
 import { stdSize } from '../../utils/sizeUtils';
 import { dedupeColorsById } from './merchandiserShared';
 import LinkAndAllocateModal from './LinkAndAllocateModal';
+import { useAuth } from '../../context/AuthContext';
 
 const READINESS_CFG = {
     in_planning:          { label: 'In Planning',  cls: 'bg-amber-50  text-amber-600  border-amber-200',   icon: null },
@@ -22,6 +23,11 @@ const READINESS_CFG = {
 };
 
 const SopSummaryCard = ({ sop, salesOrder, bomOptions, fabricTypes, onLink, onUnlink, onPreview, isLinking, onReadinessChange, onOpenWorkspace }) => {
+    const { user } = useAuth();
+    // BOM linking is a merchandising decision — restricted here to match the
+    // backend's own checkRole(['merchandiser', 'factory_admin']) on the
+    // link-bom/unlink-bom routes (this is UX only; the route is the real gate).
+    const canManageBom = user?.role === 'merchandiser' || user?.role === 'factory_admin';
     const [showLinkModal,    setShowLinkModal]    = useState(false);
     const [expandedColorId,  setExpandedColorId]  = useState(null);
     const [confirmUnlink,    setConfirmUnlink]    = useState(false);
@@ -237,7 +243,7 @@ const SopSummaryCard = ({ sop, salesOrder, bomOptions, fabricTypes, onLink, onUn
                             </div>
                         </div>
 
-                        {isLinking ? (
+                        {!canManageBom ? null : isLinking ? (
                             <Loader2 size={14} className="animate-spin text-slate-400 shrink-0 mt-0.5" />
                         ) : !confirmUnlink ? (
                             <button onClick={() => setConfirmUnlink(true)} className="text-[10px] text-slate-400 hover:text-red-600 flex items-center gap-1 hover:bg-red-50 px-2 py-1 rounded-lg transition-colors shrink-0">
@@ -251,7 +257,7 @@ const SopSummaryCard = ({ sop, salesOrder, bomOptions, fabricTypes, onLink, onUn
                             </div>
                         )}
                     </div>
-                ) : (
+                ) : canManageBom ? (
                     <button
                         onClick={() => setShowLinkModal(true)}
                         disabled={isLinking}
@@ -260,6 +266,10 @@ const SopSummaryCard = ({ sop, salesOrder, bomOptions, fabricTypes, onLink, onUn
                         {isLinking ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
                         Link a BOM
                     </button>
+                ) : (
+                    <div className="w-full flex items-center justify-center gap-2 text-sm font-bold text-slate-400 bg-slate-50 border border-slate-200 border-dashed px-3 py-2.5 rounded-xl">
+                        No BOM linked
+                    </div>
                 )}
             </div>
 

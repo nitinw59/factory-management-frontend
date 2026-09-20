@@ -3,11 +3,15 @@ import {
     Loader2, RefreshCw, Pencil, Trash2, X,
     AlertCircle, ChevronDown, ChevronRight, Search,
     Package, Layers, AlertTriangle, CheckCircle2, FileDown,
-    Eye, EyeOff,
+    Eye, EyeOff, Undo2, Download,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { storeManagerApi } from '../../../api/storeManagerApi';
 import { fabricStoreApi } from '../../../api/fabricStoreApi';
+import { useAuth } from '../../../context/AuthContext';
+import { adminApi } from '../../../api/adminApi';
+import CreateReturnNoteModal from './CreateReturnNoteModal';
+import { downloadFabricReturnNotePdf } from '../../purchase_department/fabricReturnNotePdfGenerator';
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -612,11 +616,29 @@ const RequirementsTab = ({ requirements }) => {
 
 // ─── ALL ROLLS TAB ────────────────────────────────────────────────────────────
 
-const RollsTable = ({ rolls, onEdit }) => (
+// selectedIds/onToggleRow/onToggleAll are optional — every caller either
+// supplies all three (return-note selection enabled) or none (read-only,
+// e.g. inside a modal preview) so the checkbox column simply doesn't render.
+const RollsTable = ({ rolls, onEdit, selectedIds, onToggleRow, onToggleAll }) => {
+    const selectionEnabled = !!(selectedIds && onToggleRow && onToggleAll);
+    const allChecked = selectionEnabled && rolls.length > 0 && rolls.every(r => selectedIds.has(r.roll_id));
+    const someChecked = selectionEnabled && !allChecked && rolls.some(r => selectedIds.has(r.roll_id));
+    return (
     <div className="overflow-x-auto">
         <table className="w-full text-xs">
             <thead className="bg-slate-50 border-b border-slate-100">
                 <tr>
+                    {selectionEnabled && (
+                        <th className="px-3 py-2 w-8">
+                            <input
+                                type="checkbox"
+                                checked={allChecked}
+                                ref={el => { if (el) el.indeterminate = someChecked; }}
+                                onChange={() => onToggleAll(rolls)}
+                                className="rounded border-slate-300"
+                            />
+                        </th>
+                    )}
                     <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Roll</th>
                     <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Bale No.</th>
                     <th className="text-right px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Meters</th>
@@ -625,12 +647,22 @@ const RollsTable = ({ rolls, onEdit }) => (
                     <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Supplier</th>
                     <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">PO</th>
                     <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">SO</th>
-                    <th className="px-4 py-2 w-8" />
+                    {onEdit && <th className="px-4 py-2 w-8" />}
                 </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
                 {rolls.map(r => (
                     <tr key={r.roll_id} className="hover:bg-slate-50 transition-colors group">
+                        {selectionEnabled && (
+                            <td className="px-3 py-2.5">
+                                <input
+                                    type="checkbox"
+                                    checked={selectedIds.has(r.roll_id)}
+                                    onChange={() => onToggleRow(r.roll_id)}
+                                    className="rounded border-slate-300"
+                                />
+                            </td>
+                        )}
                         <td className="px-4 py-2.5 font-mono font-bold text-indigo-600">R-{r.roll_id}</td>
                         <td className="px-4 py-2.5 font-mono text-slate-600">{r.bale_no || '—'}</td>
                         <td className="px-4 py-2.5 text-right font-bold text-slate-800">
@@ -647,18 +679,21 @@ const RollsTable = ({ rolls, onEdit }) => (
                         <td className="px-4 py-2.5">
                             {r.so_number ? <span className="font-mono bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">{r.so_number}</span> : <span className="text-slate-300">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right">
-                            <button onClick={() => onEdit(r)}
-                                className="p-1 text-slate-300 hover:text-indigo-600 rounded transition-colors opacity-0 group-hover:opacity-100">
-                                <Pencil size={12} />
-                            </button>
-                        </td>
+                        {onEdit && (
+                            <td className="px-4 py-2.5 text-right">
+                                <button onClick={() => onEdit(r)}
+                                    className="p-1 text-slate-300 hover:text-indigo-600 rounded transition-colors opacity-0 group-hover:opacity-100">
+                                    <Pencil size={12} />
+                                </button>
+                            </td>
+                        )}
                     </tr>
                 ))}
             </tbody>
         </table>
     </div>
-);
+    );
+};
 
 const exportToXlsx = (rolls) => {
     const ts = new Date().toLocaleDateString('en', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -758,9 +793,28 @@ const exportToXlsx = (rolls) => {
 };
 
 const AllRollsTab = ({ rolls, colors, onRefresh }) => {
+    const { user } = useAuth();
+    const canReturn = user?.role === 'purchase_manager' || user?.role === 'factory_admin';
     const [search,   setSearch]   = useState('');
     const [editRoll, setEditRoll] = useState(null);
     const [expanded, setExpanded] = useState(new Set());
+    // Selection persists across the type/color accordion groups below, not
+    // per-RollsTable-instance, so a return note can span multiple groups.
+    const [selectedIds, setSelectedIds] = useState(new Set());
+    const [showReturnModal, setShowReturnModal] = useState(false);
+
+    const toggleRow = (rollId) => setSelectedIds(prev => {
+        const next = new Set(prev);
+        next.has(rollId) ? next.delete(rollId) : next.add(rollId);
+        return next;
+    });
+    const toggleAllInGroup = (groupRolls) => setSelectedIds(prev => {
+        const next = new Set(prev);
+        const allSelected = groupRolls.every(r => next.has(r.roll_id));
+        groupRolls.forEach(r => allSelected ? next.delete(r.roll_id) : next.add(r.roll_id));
+        return next;
+    });
+    const selectedRolls = rolls.filter(r => selectedIds.has(r.roll_id));
 
     const q = search.toLowerCase().trim();
     const filtered = q
@@ -819,6 +873,19 @@ const AllRollsTab = ({ rolls, colors, onRefresh }) => {
                         className="w-full text-xs pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-400" />
                 </div>
                 <span className="text-xs text-slate-400 mr-auto">{filtered.length} roll{filtered.length !== 1 ? 's' : ''}</span>
+                {canReturn && selectedIds.size > 0 && (
+                    <span className="text-xs font-bold text-rose-600">{selectedIds.size} selected</span>
+                )}
+                {canReturn && (
+                    <button
+                        onClick={() => setShowReturnModal(true)}
+                        disabled={selectedIds.size === 0}
+                        className="flex items-center gap-1.5 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Return the selected rolls to their supplier"
+                    >
+                        <Undo2 size={13} /> Create Return Note
+                    </button>
+                )}
                 <button
                     onClick={() => exportToXlsx(filtered)}
                     className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-2 rounded-lg transition-colors"
@@ -872,7 +939,13 @@ const AllRollsTab = ({ rolls, colors, onRefresh }) => {
                                         </button>
 
                                         {isOpen && (
-                                            <RollsTable rolls={colorGroup.rolls} onEdit={setEditRoll} />
+                                            <RollsTable
+                                                rolls={colorGroup.rolls}
+                                                onEdit={setEditRoll}
+                                                selectedIds={canReturn ? selectedIds : undefined}
+                                                onToggleRow={canReturn ? toggleRow : undefined}
+                                                onToggleAll={canReturn ? toggleAllInGroup : undefined}
+                                            />
                                         )}
                                     </div>
                                 );
@@ -891,7 +964,113 @@ const AllRollsTab = ({ rolls, colors, onRefresh }) => {
                     onClose={() => setEditRoll(null)}
                 />
             )}
+
+            {showReturnModal && (
+                <CreateReturnNoteModal
+                    rolls={selectedRolls}
+                    onClose={() => setShowReturnModal(false)}
+                    onCreated={() => { setShowReturnModal(false); setSelectedIds(new Set()); onRefresh(); }}
+                />
+            )}
         </>
+    );
+};
+
+const ReturnNotesTab = () => {
+    const [notes,       setNotes]       = useState([]);
+    const [loading,     setLoading]     = useState(true);
+    const [err,         setErr]         = useState(null);
+    const [downloadingId, setDownloadingId] = useState(null);
+
+    const load = useCallback(async () => {
+        setLoading(true);
+        setErr(null);
+        try {
+            const res = await fabricStoreApi.getReturnNotes();
+            setNotes(res.data?.data ?? res.data ?? []);
+        } catch (e) {
+            setErr(e?.response?.data?.error || 'Failed to load return notes');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    const handleDownload = async (id) => {
+        setDownloadingId(id);
+        try {
+            const [detailRes, companyRes] = await Promise.all([
+                fabricStoreApi.getReturnNoteById(id),
+                adminApi.getCompanyProfile().catch(() => null),
+            ]);
+            const returnNote = detailRes.data?.data ?? detailRes.data;
+            const company = companyRes?.data?.data ?? companyRes?.data ?? null;
+            await downloadFabricReturnNotePdf({ returnNote, company });
+        } catch (e) {
+            setErr(e?.response?.data?.error || e.message || 'Failed to generate the return note PDF.');
+        } finally {
+            setDownloadingId(null);
+        }
+    };
+
+    if (loading) return <Spinner />;
+    if (err) return <Err msg={err} />;
+
+    if (notes.length === 0) {
+        return (
+            <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+                <Undo2 size={36} className="mb-3 opacity-30" />
+                <p className="text-sm">No return notes yet</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+            <table className="w-full text-xs">
+                <thead className="bg-slate-50 border-b border-slate-100">
+                    <tr>
+                        <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Return Note</th>
+                        <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
+                        <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Supplier</th>
+                        <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">PO</th>
+                        <th className="text-right px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Rolls</th>
+                        <th className="text-right px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Meters</th>
+                        <th className="text-left px-4 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Returned By</th>
+                        <th className="px-4 py-2 w-24" />
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                    {notes.map(n => (
+                        <tr key={n.id} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-4 py-2.5 font-mono font-bold text-rose-600">{n.return_note_number}</td>
+                            <td className="px-4 py-2.5 text-slate-500">
+                                {n.created_at ? new Date(n.created_at).toLocaleDateString('en', { month: 'short', day: 'numeric', year: '2-digit' }) : '—'}
+                            </td>
+                            <td className="px-4 py-2.5 text-slate-600">{n.supplier_name || '—'}</td>
+                            <td className="px-4 py-2.5">
+                                {n.po_code ? <span className="font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{n.po_code}</span> : <span className="text-slate-300">—</span>}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-bold text-slate-800">{n.total_rolls}</td>
+                            <td className="px-4 py-2.5 text-right font-bold text-slate-800">{fmt(n.total_meters)} m</td>
+                            <td className="px-4 py-2.5 text-slate-500">{n.returned_by_name || '—'}</td>
+                            <td className="px-4 py-2.5 text-right">
+                                <button
+                                    onClick={() => handleDownload(n.id)}
+                                    disabled={downloadingId === n.id}
+                                    title="Download the Fabric Return Note PDF"
+                                    className="flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-rose-600 border border-slate-200 hover:border-rose-200 px-2 py-1 rounded-lg transition disabled:opacity-40 ml-auto"
+                                >
+                                    {downloadingId === n.id ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                                    PDF
+                                </button>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
     );
 };
 
@@ -947,6 +1126,7 @@ const FabricRollManagementPage = () => {
         { key: 'pool',         label: 'Inventory Pool', count: pool.length },
         { key: 'requirements', label: 'Requirements',   count: requirements.length },
         { key: 'rolls',        label: 'All Rolls',      count: allRolls.length },
+        { key: 'returns',      label: 'Return Notes',   count: 0 },
     ];
 
     const openReqs = requirements.filter(r => r.status !== 'FULLY_RESERVED').length;
@@ -1025,6 +1205,7 @@ const FabricRollManagementPage = () => {
                                 ? <Spinner />
                                 : <AllRollsTab rolls={allRolls} colors={colors} onRefresh={loadRolls} />
                         )}
+                        {tab === 'returns'      && <ReturnNotesTab />}
                     </>
                 )}
             </div>

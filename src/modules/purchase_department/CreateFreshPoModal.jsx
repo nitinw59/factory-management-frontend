@@ -190,6 +190,10 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                 // Switching the parent item: clear every variant choice underneath.
                 next.lines = g.lines.map(ln => ({ ...ln, trim_item_variant_id: '' }));
                 if (value) ensureVariants(value);
+                // Default UOM from the trim item's own master record instead of
+                // always leaving it at 'pcs' — still hand-editable via UomSelect.
+                const trimItem = trimItems.find(t => String(t.id) === String(value));
+                next.uom = trimItem?.unit_of_measure || 'pcs';
             }
             return next;
         }));

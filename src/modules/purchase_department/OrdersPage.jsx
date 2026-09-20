@@ -17,6 +17,18 @@ const STATUS_CFG = {
     CANCELLED:   { cls: 'bg-slate-100 text-slate-500 border-slate-200',   label: 'Cancelled'  },
 };
 
+// GRN-lifecycle filter — matches order.computed_status from getAllPurchaseOrders
+// (derived server-side from purchase_inwards, not the raw PO status enum, since
+// PARTIAL_RECEIPT is a manual/optional status nobody's required to set). Both
+// class strings are written out literally (not built via string manipulation)
+// so Tailwind's static scan can find and generate them.
+const GRN_FILTER_CFG = {
+    PENDING:       { label: 'Pending',       cls: 'bg-amber-100 text-amber-700 border-amber-200',    activeCls: 'bg-amber-600 text-white border-amber-600' },
+    GRN_GENERATED: { label: 'GRN Generated', cls: 'bg-blue-100 text-blue-700 border-blue-200',        activeCls: 'bg-blue-600 text-white border-blue-600' },
+    PARTIAL_GRN:   { label: 'Partial GRN',   cls: 'bg-orange-100 text-orange-700 border-orange-200',  activeCls: 'bg-orange-600 text-white border-orange-600' },
+    COMPLETE:      { label: 'Complete',      cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', activeCls: 'bg-emerald-600 text-white border-emerald-600' },
+};
+
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en', { dateStyle: 'medium' }) : '—';
 
 const OrdersPage = () => {
@@ -34,6 +46,7 @@ const OrdersPage = () => {
     const [showFreshPo,       setShowFreshPo]       = useState(false);
     const [completedExpanded, setCompletedExpanded] = useState(false);
     const [search,            setSearch]            = useState('');
+    const [grnFilter,         setGrnFilter]         = useState(null); // null = all, else one of GRN_FILTER_CFG's keys
     // Inward flow: 'create' shows InwardCreateModal, 'review' shows InwardReviewModal,
     // and inwardCtx carries everything both modals need + the form snapshot so we
     // can preserve state if the user clicks Back from review.
@@ -171,13 +184,15 @@ const OrdersPage = () => {
 
     const filtered = useMemo(() => {
         const q = search.trim().toLowerCase();
-        if (!q) return orders;
-        return orders.filter(o => [
+        let list = orders;
+        if (grnFilter) list = list.filter(o => o.computed_status === grnFilter);
+        if (!q) return list;
+        return list.filter(o => [
             o.po_code, o.order_number, o.buyer_po_number,
             o.supplier_name, o.customer_name, o.created_by_name,
             String(o.id),
         ].some(v => (v || '').toString().toLowerCase().includes(q)));
-    }, [orders, search]);
+    }, [orders, search, grnFilter]);
 
     const pending   = filtered.filter(o => o.status !== 'COMPLETED' && o.status !== 'CANCELLED');
     const completed = filtered.filter(o => o.status === 'COMPLETED' || o.status === 'CANCELLED');
@@ -626,6 +641,29 @@ const OrdersPage = () => {
                         Clear
                     </button>
                 )}
+            </div>
+
+            {/* GRN-lifecycle filter */}
+            <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                    onClick={() => setGrnFilter(null)}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-full border transition-colors ${
+                        !grnFilter ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                    }`}
+                >
+                    All
+                </button>
+                {Object.entries(GRN_FILTER_CFG).map(([key, cfg]) => (
+                    <button
+                        key={key}
+                        onClick={() => setGrnFilter(f => f === key ? null : key)}
+                        className={`text-xs font-bold px-3 py-1.5 rounded-full border transition-colors ${
+                            grnFilter === key ? cfg.activeCls : `${cfg.cls} opacity-70 hover:opacity-100`
+                        }`}
+                    >
+                        {cfg.label}
+                    </button>
+                ))}
             </div>
 
             {err && (

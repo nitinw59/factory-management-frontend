@@ -15,6 +15,7 @@ import { generateBomExcel } from './bomExcelExport';
 import { generateFabricRequirementsPdf } from './fabricRequirementsPdfGenerator';
 import { generateTrimRequirementsExcel } from './trimRequirementsExcelExport';
 import { useSecondaryFabricInfo } from './merchandiserShared';
+import { useAuth } from '../../context/AuthContext';
 
 const ToolbarButton = ({ icon: Icon, label, onClick, disabled, busy, title, tone = 'slate' }) => {
     const toneCls = {
@@ -48,6 +49,10 @@ const downloadBlob = (blob, filename) => {
 };
 
 const SopHeaderToolbar = ({ sop, sopReqs, bomOptions, fabricTypes, salesOrder, onLinkBom, onPreviewBom, onRefresh }) => {
+    const { user } = useAuth();
+    // Matches SopSummaryCard's own gate and the backend's checkRole(['merchandiser', 'factory_admin'])
+    // on the link-bom/unlink-bom routes — UX only, the route is the real enforcement.
+    const canManageBom = user?.role === 'merchandiser' || user?.role === 'factory_admin';
     const [showLinkModal,     setShowLinkModal]     = useState(false);
     const [downloadingBom,    setDownloadingBom]    = useState(false);
     const [downloadingPdf,    setDownloadingPdf]    = useState(false);
@@ -150,12 +155,14 @@ const SopHeaderToolbar = ({ sop, sopReqs, bomOptions, fabricTypes, salesOrder, o
     return (
         <>
             <div className="flex flex-wrap items-center gap-1.5">
-                <ToolbarButton
-                    icon={Link2}
-                    tone="violet"
-                    label={sop.bom_id ? 'Change BOM' : 'Link BOM'}
-                    onClick={() => setShowLinkModal(true)}
-                />
+                {canManageBom && (
+                    <ToolbarButton
+                        icon={Link2}
+                        tone="violet"
+                        label={sop.bom_id ? 'Change BOM' : 'Link BOM'}
+                        onClick={() => setShowLinkModal(true)}
+                    />
+                )}
                 <ToolbarButton
                     icon={Download}
                     label="Download BOM (Excel)"
