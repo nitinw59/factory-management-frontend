@@ -1,9 +1,16 @@
-// One row per active workstation — today's approved+repaired output and this
-// hour's checked count for whoever's logged in there. Same definition as the
-// individual checker's own live stat bar (getCheckerStats), just laid out for
-// every workstation at once so an admin can scan the whole factory floor.
+// One row per active workstation — today's approved / repaired / rework /
+// rejected breakdown and this hour's checked count for whoever's logged in
+// there. Same definition as the individual checker's own live stat bar
+// (getCheckerStats), just laid out for every workstation at once so an admin
+// can scan the whole factory floor. Pushed live: the parent page re-fetches
+// this data whenever a QC_LIVE_EVENT websocket broadcast arrives (see
+// useLiveQcSocket / utils/liveQc.js), not on a fixed poll timer.
 
-export default function WorkstationLiveScorecard({ rows, loading }) {
+const fmtCount = (n, cls) =>
+    n == null ? <span className="text-sm text-gray-700">—</span>
+              : <span className={`text-sm font-black tabular-nums ${n > 0 ? cls : 'text-gray-600'}`}>{n.toLocaleString()}</span>;
+
+export default function WorkstationLiveScorecard({ rows, loading, live }) {
     if (loading && !rows) {
         return (
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 text-center text-gray-600">
@@ -26,8 +33,15 @@ export default function WorkstationLiveScorecard({ rows, loading }) {
             <div className="px-6 py-5 border-b border-gray-800">
                 <div className="flex items-center justify-between flex-wrap gap-4">
                     <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-widest font-bold mb-1">
+                        <p className="text-xs text-gray-500 uppercase tracking-widest font-bold mb-1 flex items-center gap-1.5">
                             Live Scorecard — By Workstation
+                            <span
+                                className={`inline-flex items-center gap-1 normal-case tracking-normal font-bold px-1.5 py-0.5 rounded ${live ? 'text-emerald-400' : 'text-gray-600'}`}
+                                title={live ? 'Live — updates instantly on every check-in' : 'Reconnecting…'}
+                            >
+                                <span className={`h-1.5 w-1.5 rounded-full ${live ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'}`} />
+                                {live ? 'Live' : 'Offline'}
+                            </span>
                         </p>
                         <h2 className="text-xl font-black text-white">Today's Output</h2>
                     </div>
@@ -48,6 +62,10 @@ export default function WorkstationLiveScorecard({ rows, loading }) {
                             <th className="px-4 py-3 font-bold">Operator</th>
                             <th className="px-4 py-3 font-bold">Line</th>
                             <th className="px-4 py-3 font-bold">Line Type</th>
+                            <th className="px-4 py-3 font-bold text-right">Approved</th>
+                            <th className="px-4 py-3 font-bold text-right">Repaired</th>
+                            <th className="px-4 py-3 font-bold text-right">Rework</th>
+                            <th className="px-4 py-3 font-bold text-right">Rejected</th>
                             <th className="px-4 py-3 font-bold text-right">Today</th>
                             <th className="px-6 py-3 font-bold text-right">This Hour</th>
                         </tr>
@@ -72,6 +90,10 @@ export default function WorkstationLiveScorecard({ rows, loading }) {
                                     <td className="px-4 py-2.5 text-sm text-gray-500 whitespace-nowrap">
                                         {w.line_type_name || '—'}
                                     </td>
+                                    <td className="px-4 py-2.5 text-right tabular-nums">{fmtCount(w.today_approved, 'text-emerald-400')}</td>
+                                    <td className="px-4 py-2.5 text-right tabular-nums">{fmtCount(w.today_repaired, 'text-amber-400')}</td>
+                                    <td className="px-4 py-2.5 text-right tabular-nums">{fmtCount(w.today_rework, 'text-orange-400')}</td>
+                                    <td className="px-4 py-2.5 text-right tabular-nums">{fmtCount(w.today_rejected, 'text-red-400')}</td>
                                     <td className="px-4 py-2.5 text-right tabular-nums">
                                         {noOutput ? (
                                             <span className="text-sm text-gray-700">—</span>
