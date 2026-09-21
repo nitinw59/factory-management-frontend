@@ -328,7 +328,7 @@ export default function WorkstationLiveScorecard() {
                                             className={`flex items-center gap-2 px-1.5 py-1 rounded-lg text-xs cursor-move select-none ${dragRowId === id ? 'bg-gray-700' : 'hover:bg-gray-800'}`}
                                         >
                                             <GripVertical size={12} className="text-gray-600 shrink-0" />
-                                            <span className="text-gray-300 truncate">{w.workstation_name}</span>
+                                            <span className="text-gray-300 truncate">{w.user_name || 'Unassigned'}</span>
                                         </div>
                                     );
                                 })}
