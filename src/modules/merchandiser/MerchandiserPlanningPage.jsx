@@ -9,6 +9,14 @@
 // ReadinessStageModal (all centered modals), and WorkspaceDrawer — a
 // full-screen requirements grid, scoped to just Fabric or just Trim — for
 // the two nodes that need the room.
+//
+// Multiple orders can be expanded at once — either by click, or automatically
+// as they scroll into view (see OrderTrailGroup's IntersectionObserver). So
+// order detail is a per-order cache (orderDetails[orderId]), not a single
+// slot, and every stage overlay carries the orderId it belongs to (captured
+// at the moment its node was clicked) so a mutation refreshes the right
+// order's cache — sop.id alone doesn't say which order it came from once more
+// than one can be expanded.
 
 import { useState, useEffect, useCallback } from 'react';
 import { planningApi } from '../../api/planningApi';
@@ -26,20 +34,20 @@ const MerchandiserPlanningPage = () => {
     const [loadingForm, setLoadingForm] = useState(true);
     const [formErr,     setFormErr]     = useState(null);
 
-    const [expandedOrderId, setExpandedOrderId] = useState(null);
-    const [orderDetail,     setOrderDetail]     = useState(null);
-    const [loadingOrder,    setLoadingOrder]    = useState(false);
+    const [expandedOrderIds, setExpandedOrderIds] = useState(() => new Set());
+    const [orderDetails,     setOrderDetails]     = useState({}); // { [orderId]: detail }
+    const [loadingOrderIds,  setLoadingOrderIds]  = useState(() => new Set());
 
     const [searchQ,      setSearchQ]      = useState('');
     const [filterStatus, setFilterStatus] = useState('ALL');
     const [needsBomOnly, setNeedsBomOnly] = useState(false);
 
     const [previewBomId,      setPreviewBomId]      = useState(null);
-    const [workspaceTarget,   setWorkspaceTarget]   = useState(null); // { sopId, scope: 'fabric'|'trim' } | null
-    const [orderOverlaySopId,       setOrderOverlaySopId]       = useState(null); // sopId | null
-    const [bomStageSopId,           setBomStageSopId]           = useState(null); // sopId | null
-    const [requirementsStageSopId,  setRequirementsStageSopId]  = useState(null); // sopId | null
-    const [readinessStageSopId,     setReadinessStageSopId]     = useState(null); // sopId | null
+    const [workspaceTarget,   setWorkspaceTarget]   = useState(null); // { sopId, orderId, scope: 'fabric'|'trim' } | null
+    const [orderOverlay,      setOrderOverlay]      = useState(null); // { sopId, orderId } | null
+    const [bomStage,          setBomStage]          = useState(null); // { sopId, orderId } | null
+    const [requirementsStage, setRequirementsStage] = useState(null); // { sopId, orderId } | null
+    const [readinessStage,    setReadinessStage]    = useState(null); // { sopId, orderId } | null
 
     // For the Secondary Fabric picker in LinkAndAllocateModal — only needed when a BOM has
     // a generic SECONDARY fabric line, but cheap enough to load once up front.
@@ -55,55 +63,74 @@ const MerchandiserPlanningPage = () => {
             .catch(e  => console.error('Failed to load fabric types', e));
     }, []);
 
+    // Refetches one order's own detail (and the sidebar-summary formData) —
+    // used both for the initial expand fetch and to re-sync after a mutation.
     const refreshOrder = useCallback(async (orderId) => {
-        const [detailRes, fdRes] = await Promise.all([
-            planningApi.getOrderDetail(orderId),
-            planningApi.getFormData(),
-        ]);
-        setOrderDetail(detailRes.data?.data ?? detailRes.data);
-        setFormData(fdRes.data?.data ?? fdRes.data);
+        setLoadingOrderIds(prev => new Set(prev).add(orderId));
+        try {
+            const [detailRes, fdRes] = await Promise.all([
+                planningApi.getOrderDetail(orderId),
+                planningApi.getFormData(),
+            ]);
+            setOrderDetails(prev => ({ ...prev, [orderId]: detailRes.data?.data ?? detailRes.data }));
+            setFormData(fdRes.data?.data ?? fdRes.data);
+        } catch (e) {
+            console.error('Order detail fetch failed', e);
+        } finally {
+            setLoadingOrderIds(prev => { const next = new Set(prev); next.delete(orderId); return next; });
+        }
+    }, []);
+
+    // Idempotent — expanding an already-expanded (or already-loading) order is
+    // a no-op, so both the click handler and the scroll-triggered auto-expand
+    // can call this freely without double-fetching.
+    const expandOrder = useCallback((orderId) => {
+        setExpandedOrderIds(prev => {
+            if (prev.has(orderId)) return prev;
+            const next = new Set(prev).add(orderId);
+            return next;
+        });
+        setOrderDetails(prev => {
+            if (prev[orderId] !== undefined) return prev; // already cached — no refetch
+            refreshOrder(orderId);
+            return prev;
+        });
+    }, [refreshOrder]);
+
+    const collapseOrder = useCallback((orderId) => {
+        setExpandedOrderIds(prev => { const next = new Set(prev); next.delete(orderId); return next; });
     }, []);
 
     const toggleOrder = useCallback((orderId) => {
-        if (orderId === expandedOrderId) {
-            setExpandedOrderId(null);
-            setOrderDetail(null);
-            return;
-        }
-        setExpandedOrderId(orderId);
-        setOrderDetail(null);
-        setLoadingOrder(true);
-        planningApi.getOrderDetail(orderId)
-            .then(res => setOrderDetail(res.data?.data ?? res.data))
-            .catch(e  => console.error('Order detail fetch failed', e))
-            .finally(() => setLoadingOrder(false));
-    }, [expandedOrderId]);
+        if (expandedOrderIds.has(orderId)) collapseOrder(orderId);
+        else expandOrder(orderId);
+    }, [expandedOrderIds, collapseOrder, expandOrder]);
 
-    const handleLink = useCallback(async (sopId, bomId, secondaryFabricTypeId = null) => {
+    const handleLink = useCallback(async (sopId, bomId, secondaryFabricTypeId, orderId) => {
         const res = await planningApi.linkBom(sopId, {
             bom_id: bomId,
             secondary_fabric_type_id: secondaryFabricTypeId,
         });
-        await refreshOrder(expandedOrderId);
+        await refreshOrder(orderId);
         return res?.data;
-    }, [expandedOrderId, refreshOrder]);
+    }, [refreshOrder]);
 
     // Generic "please re-sync this order" signal — used after a readiness
     // toggle, a BOM link/unlink, or any mutation inside the SOP workspace
     // (reserve, release, recalculate, raise PR) that might have changed
     // bom_id or production_readiness.
-    const handleSopChanged = useCallback(() => {
-        if (expandedOrderId) refreshOrder(expandedOrderId);
-    }, [expandedOrderId, refreshOrder]);
+    const handleSopChanged = useCallback((orderId) => {
+        if (orderId) refreshOrder(orderId);
+    }, [refreshOrder]);
 
-    const onOpenStage = useCallback((sop, stageKey) => {
+    const onOpenStage = useCallback((sop, stageKey, orderId) => {
         switch (stageKey) {
-            case 'order':        setOrderOverlaySopId(sop.id); break;
-            case 'bom':          setBomStageSopId(sop.id); break;
-            case 'requirements': setRequirementsStageSopId(sop.id); break;
-            case 'fabric':       setWorkspaceTarget({ sopId: sop.id, scope: 'fabric' }); break;
-            case 'trim':         setWorkspaceTarget({ sopId: sop.id, scope: 'trim' }); break;
-            case 'ready':        setReadinessStageSopId(sop.id); break;
+            case 'order':        setOrderOverlay({ sopId: sop.id, orderId }); break;
+            case 'bom':          setBomStage({ sopId: sop.id, orderId }); break;
+            case 'requirements': setRequirementsStage({ sopId: sop.id, orderId }); break;
+            case 'fabric':       setWorkspaceTarget({ sopId: sop.id, orderId, scope: 'fabric' }); break;
+            case 'trim':         setWorkspaceTarget({ sopId: sop.id, orderId, scope: 'trim' }); break;
+            case 'ready':        setReadinessStage({ sopId: sop.id, orderId }); break;
             default: break;
         }
     }, []);
@@ -112,15 +139,23 @@ const MerchandiserPlanningPage = () => {
     const bomsByProduct = formData?.boms_by_product  || {};
     const bomOptionsFor = (sop) => (sop ? (bomsByProduct[String(sop.product_id)] || bomsByProduct[sop.product_id] || []) : []);
 
-    // Always re-derive from the latest orderDetail (rather than a snapshot
-    // captured at click time) so each overlay reflects any mutation
-    // (link/unlink, recalc, readiness toggle) made while it's open.
-    const sops                  = orderDetail?.products || [];
-    const workspaceSop          = workspaceTarget          ? sops.find(s => s.id === workspaceTarget.sopId)  : null;
-    const orderOverlaySop       = orderOverlaySopId        ? sops.find(s => s.id === orderOverlaySopId)      : null;
-    const bomStageSop           = bomStageSopId            ? sops.find(s => s.id === bomStageSopId)          : null;
-    const requirementsStageSop  = requirementsStageSopId   ? sops.find(s => s.id === requirementsStageSopId) : null;
-    const readinessStageSop     = readinessStageSopId      ? sops.find(s => s.id === readinessStageSopId)    : null;
+    // Always re-derive from the latest cached orderDetails (rather than a
+    // snapshot captured at click time) so each overlay reflects any mutation
+    // (link/unlink, recalc, readiness toggle) made while it's open. sop.id is
+    // a global primary key, so searching every currently-cached order's
+    // products (instead of tracking "which order" separately) is sufficient.
+    const sopById = (sopId) => {
+        for (const detail of Object.values(orderDetails)) {
+            const match = detail?.products?.find(s => s.id === sopId);
+            if (match) return match;
+        }
+        return null;
+    };
+    const workspaceSop          = workspaceTarget   ? sopById(workspaceTarget.sopId)   : null;
+    const orderOverlaySop       = orderOverlay      ? sopById(orderOverlay.sopId)      : null;
+    const bomStageSop           = bomStage          ? sopById(bomStage.sopId)          : null;
+    const requirementsStageSop  = requirementsStage ? sopById(requirementsStage.sopId) : null;
+    const readinessStageSop     = readinessStage    ? sopById(readinessStage.sopId)    : null;
 
     const filteredOrders = orders.filter(o => {
         const matchesSearch =
@@ -181,11 +216,12 @@ const MerchandiserPlanningPage = () => {
                         <OrderTrailGroup
                             key={order.id}
                             order={order}
-                            isExpanded={expandedOrderId === order.id}
+                            isExpanded={expandedOrderIds.has(order.id)}
                             onToggle={() => toggleOrder(order.id)}
-                            orderDetail={expandedOrderId === order.id ? orderDetail : null}
-                            loadingOrder={expandedOrderId === order.id && loadingOrder}
-                            onOpenStage={onOpenStage}
+                            onEnterView={() => expandOrder(order.id)}
+                            orderDetail={orderDetails[order.id] || null}
+                            loadingOrder={loadingOrderIds.has(order.id)}
+                            onOpenStage={(sop, stageKey) => onOpenStage(sop, stageKey, order.id)}
                         />
                     ))}
                 </div>
@@ -194,8 +230,8 @@ const MerchandiserPlanningPage = () => {
             {orderOverlaySop && (
                 <OrderDetailOverlay
                     sop={orderOverlaySop}
-                    salesOrder={orderDetail}
-                    onClose={() => setOrderOverlaySopId(null)}
+                    salesOrder={orderDetails[orderOverlay.orderId]}
+                    onClose={() => setOrderOverlay(null)}
                 />
             )}
 
@@ -204,10 +240,10 @@ const MerchandiserPlanningPage = () => {
                     sop={bomStageSop}
                     bomOptions={bomOptionsFor(bomStageSop)}
                     fabricTypes={fabricTypes}
-                    onLink={handleLink}
+                    onLink={(sopId, bomIdVal, secondaryFabricTypeId) => handleLink(sopId, bomIdVal, secondaryFabricTypeId, bomStage.orderId)}
                     onPreview={setPreviewBomId}
-                    onDone={handleSopChanged}
-                    onClose={() => setBomStageSopId(null)}
+                    onDone={() => handleSopChanged(bomStage.orderId)}
+                    onClose={() => setBomStage(null)}
                 />
             )}
 
@@ -215,25 +251,25 @@ const MerchandiserPlanningPage = () => {
                 <RequirementsStageModal
                     sop={requirementsStageSop}
                     fabricTypes={fabricTypes}
-                    onDone={handleSopChanged}
-                    onClose={() => setRequirementsStageSopId(null)}
+                    onDone={() => handleSopChanged(requirementsStage.orderId)}
+                    onClose={() => setRequirementsStage(null)}
                 />
             )}
 
             {readinessStageSop && (
                 <ReadinessStageModal
                     sop={readinessStageSop}
-                    onDone={handleSopChanged}
-                    onClose={() => setReadinessStageSopId(null)}
+                    onDone={() => handleSopChanged(readinessStage.orderId)}
+                    onClose={() => setReadinessStage(null)}
                 />
             )}
 
             {workspaceSop && (
                 <WorkspaceDrawer
                     sop={workspaceSop}
-                    salesOrder={orderDetail}
+                    salesOrder={orderDetails[workspaceTarget.orderId]}
                     scope={workspaceTarget.scope}
-                    onSopChanged={handleSopChanged}
+                    onSopChanged={() => handleSopChanged(workspaceTarget.orderId)}
                     onClose={() => setWorkspaceTarget(null)}
                 />
             )}

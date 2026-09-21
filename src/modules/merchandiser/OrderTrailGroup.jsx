@@ -1,11 +1,13 @@
 // ─── ORDER TRAIL GROUP ───────────────────────────────────────────────────────
 // One sales order as a collapsible section in the full-page planning list:
 // order-identity header (replaces the old narrow-sidebar OrderCard) which
-// expands in place to reveal one SopTrailRow per product line. Expanding
-// triggers the order-detail fetch lazily (same planningApi.getOrderDetail
-// call the old sidebar's selectOrder made) — only the currently-expanded
-// order's products are ever fetched.
+// expands in place to reveal one SopTrailRow per product line. Expands either
+// by click (onToggle) or automatically the first time it scrolls into view
+// (onEnterView, via IntersectionObserver below) — both funnel through the
+// parent's expandOrder(), which is idempotent and fetches lazily, so scrolling
+// past many rows doesn't mean re-fetching ones already expanded.
 
+import { useEffect, useRef } from 'react';
 import { ChevronDown, ShoppingBag } from 'lucide-react';
 import { Spinner } from './merchandiserShared';
 import SopTrailRow from './SopTrailRow';
@@ -20,7 +22,31 @@ const ORDER_STATUS_CFG = {
     CANCELLED:      { cls: 'bg-red-100 text-red-500'       },
 };
 
-const OrderTrailGroup = ({ order, isExpanded, onToggle, orderDetail, loadingOrder, onOpenStage }) => {
+const OrderTrailGroup = ({ order, isExpanded, onToggle, onEnterView, orderDetail, loadingOrder, onOpenStage }) => {
+    const rootRef = useRef(null);
+
+    // Auto-expand once, the first time this row scrolls into view — fires
+    // only pre-expand (skipped entirely once already expanded) and
+    // disconnects itself after triggering, so it never fights a manual
+    // collapse later or re-fetches on every scroll back past it.
+    useEffect(() => {
+        if (isExpanded) return undefined;
+        const el = rootRef.current;
+        if (!el || typeof IntersectionObserver === 'undefined') return undefined;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries.some(e => e.isIntersecting)) {
+                    onEnterView();
+                    observer.disconnect();
+                }
+            },
+            { rootMargin: '0px 0px -10% 0px', threshold: 0 }
+        );
+        observer.observe(el);
+        return () => observer.disconnect();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     const { cls } = ORDER_STATUS_CFG[order.status] || { cls: 'bg-gray-100 text-gray-500' };
     const linked = order.linked_bom_count ?? 0;
     const total  = order.product_count    ?? 0;
@@ -30,7 +56,7 @@ const OrderTrailGroup = ({ order, isExpanded, onToggle, orderDetail, loadingOrde
     const sops = isExpanded ? (orderDetail?.products || []) : [];
 
     return (
-        <div className={`bg-white border rounded-xl overflow-hidden transition-colors ${isExpanded ? 'border-violet-300 shadow-sm' : 'border-slate-200'}`}>
+        <div ref={rootRef} className={`bg-white border rounded-xl overflow-hidden transition-colors ${isExpanded ? 'border-violet-300 shadow-sm' : 'border-slate-200'}`}>
             <button
                 type="button"
                 onClick={onToggle}
