@@ -2,9 +2,13 @@ import api from '../utils/api';
 
 export const lineLoaderApi = {
   /**
-   * Fetches all aggregated data for the dashboard.
+   * Fetches aggregated batch data for the dashboard. With no args, returns
+   * every active batch unpaginated (other consumers — JobWorkDashboardPage,
+   * DispatchJobWorkPage — rely on this). Pass { limit, offset } to paginate
+   * instead (LineLoaderDashboardPage does, to avoid a ~1.6MB/138-batch
+   * payload) — the response then carries an `x-has-more` header.
    */
-  getDashboardData: () => api.get('/line-loader/dashboard'),
+  getDashboardData: (params) => api.get('/line-loader/dashboard', { params }),
 
   /**
    * Fetches available production lines for a specific line type.

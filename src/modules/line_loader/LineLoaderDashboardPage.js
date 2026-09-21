@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { lineLoaderApi } from '../../api/lineLoaderApi';
 import { Link } from 'react-router-dom';
 import Modal from '../../shared/Modal';
@@ -1625,23 +1625,46 @@ const HistoryPanel = ({ onClose }) => {
 // ============================================================================
 // MAIN PAGE
 // ============================================================================
+// The dashboard endpoint returns every non-fully-completed batch — 138 of
+// them at last count, ~1.6MB of nested per-stage roll/size data. Rendering
+// all of that up front was the actual remaining slowness after the backend
+// query itself got fixed (983-row correlated-subquery scan -> indexed temp
+// tables, ~3.4s -> ~1.1s). This loads PAGE_SIZE at a time and fetches more as
+// the bottom sentinel scrolls into view, same "auto-expand on scroll" pattern
+// used on the merchandiser planning page.
+const PAGE_SIZE = 25;
+
 const LineLoaderDashboardPage = () => {
     const [allBatches, setAllBatches] = useState([]);
     const [wipMap, setWipMap] = useState({}); // { lineId: { currentWip, wipLimit, isAtCapacity } }
     const [isLoading, setIsLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [hasMore, setHasMore] = useState(false);
     const [error, setError] = useState(null);
     const [showHistory, setShowHistory] = useState(false);
 
+    // Mirrors allBatches.length without needing it in fetchData's/loadMore's
+    // own dependency arrays (both would otherwise have to be recreated, and
+    // re-subscribe the IntersectionObserver below, on every fetch).
+    const loadedCountRef = useRef(0);
+    useEffect(() => { loadedCountRef.current = allBatches.length; }, [allBatches]);
+
+    // Initial load AND "Refresh"/post-mutation resync — refetches from the
+    // top, but for as many batches as were already loaded (not just one
+    // page), so a batch loaded via scroll doesn't disappear from view just
+    // because its line assignment changed.
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         try {
+            const limit = Math.max(loadedCountRef.current, PAGE_SIZE);
             const [dashRes, wipRes] = await Promise.all([
-                lineLoaderApi.getDashboardData(),
+                lineLoaderApi.getDashboardData({ limit, offset: 0 }),
                 lineLoaderApi.getAllActiveLineWip().catch(() => ({ data: {} })) // non-fatal
             ]);
 
             setAllBatches(dashRes.data || []);
+            setHasMore(dashRes.headers?.['x-has-more'] === 'true');
             // wipRes.data expected: { [lineId]: { currentWip, wipLimit, isAtCapacity } }
             setWipMap(wipRes.data || {});
         } catch (err) {
@@ -1653,6 +1676,36 @@ const LineLoaderDashboardPage = () => {
     }, []);
 
     useEffect(() => { fetchData(); }, [fetchData]);
+
+    const loadMore = useCallback(async () => {
+        if (loadingMore || !hasMore) return;
+        setLoadingMore(true);
+        try {
+            const res = await lineLoaderApi.getDashboardData({ limit: PAGE_SIZE, offset: loadedCountRef.current });
+            setAllBatches(prev => [...prev, ...(res.data || [])]);
+            setHasMore(res.headers?.['x-has-more'] === 'true');
+        } catch (err) {
+            console.error('Failed to load more batches', err);
+        } finally {
+            setLoadingMore(false);
+        }
+    }, [loadingMore, hasMore]);
+
+    // Fires loadMore a bit before the sentinel actually reaches the bottom of
+    // the viewport (rootMargin) for a smoother "keeps filling in" feel, and
+    // keeps re-observing (unlike a one-shot reveal) since scrolling can cross
+    // many pages in one session.
+    const sentinelRef = useRef(null);
+    useEffect(() => {
+        const el = sentinelRef.current;
+        if (!el || typeof IntersectionObserver === 'undefined') return undefined;
+        const observer = new IntersectionObserver(
+            (entries) => { if (entries.some(e => e.isIntersecting)) loadMore(); },
+            { rootMargin: '400px 0px 0px 0px', threshold: 0 }
+        );
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [loadMore]);
 
     const handleAssign = async (data) => {
         try {
@@ -1704,6 +1757,11 @@ const LineLoaderDashboardPage = () => {
                     {allBatches.map(batch => (
                         <BatchPipelineCard key={batch.batch_id} batch={batch} wipMap={wipMap} onAssign={handleAssign} onAssignSizes={handleAssignSizes} onRefresh={fetchData} />
                     ))}
+                    {hasMore && (
+                        <div ref={sentinelRef} className="flex justify-center py-6">
+                            {loadingMore && <Loader size={20} className="animate-spin text-slate-400" />}
+                        </div>
+                    )}
                 </div>
             )}
             {showHistory && <HistoryPanel onClose={() => setShowHistory(false)} />}
