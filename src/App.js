@@ -43,6 +43,7 @@ import SalesAccessProtectedRoute from './shared/SalesAccessProtectedRoute'; // <
 
 // --- PUBLIC PAGES ---
 import LoginPage from './login/LoginPage';
+import PublicWorkstationScorecardPage from './modules/public/PublicWorkstationScorecardPage';
 import AuthCallbackPage from './login/AuthCallbackPage';
 import UnauthorizedPage from './login/UnauthorizedPage';
 
@@ -217,6 +218,8 @@ function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
+      {/* No auth at all, by design — factory-floor TV/kiosk display, open link */}
+      <Route path="/kiosk/workstation-scorecard" element={<PublicWorkstationScorecardPage />} />
 
       {/* --- 2. PROTECTED ROUTES --- */}
       <Route element={<ProtectedRoute />}>
