@@ -16,9 +16,9 @@
 // Data is fetched via the same gatherProductionWorkflowBatchData() the Excel
 // exporter uses, so the numbers here always match the download.
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { Loader2, ArrowUp, ArrowDown, ArrowUpDown, Filter, SlidersHorizontal, GripVertical, X } from 'lucide-react';
 import { gatherProductionWorkflowBatchData } from './productionWorkflowExcelExport';
+import AnchoredPopover from '../../shared/AnchoredPopover';
 
 const STORAGE_KEY = 'pwf_table_columns_v1';
 
@@ -131,42 +131,6 @@ function loadColumnPrefs() {
 const SortIcon = ({ active, dir }) => {
     if (!active) return <ArrowUpDown size={11} className="text-slate-300" />;
     return dir === 1 ? <ArrowUp size={11} className="text-indigo-600" /> : <ArrowDown size={11} className="text-indigo-600" />;
-};
-
-// Fixed-position popover anchored under a trigger button, escaping any
-// scroll-clipping ancestor via a body portal. Closes on outside click.
-const Popover = ({ anchorEl, onClose, width = 240, align = 'left', children }) => {
-    const ref = useRef(null);
-    const [pos, setPos] = useState(null);
-
-    useEffect(() => {
-        if (!anchorEl) return;
-        const r = anchorEl.getBoundingClientRect();
-        const left = align === 'right'
-            ? Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8))
-            : Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
-        setPos({ top: r.bottom + 6, left });
-    }, [anchorEl, align, width]);
-
-    useEffect(() => {
-        const onDown = (e) => {
-            if (ref.current && !ref.current.contains(e.target) && anchorEl && !anchorEl.contains(e.target)) onClose();
-        };
-        document.addEventListener('mousedown', onDown);
-        return () => document.removeEventListener('mousedown', onDown);
-    }, [anchorEl, onClose]);
-
-    if (!pos) return null;
-    return createPortal(
-        <div
-            ref={ref}
-            style={{ position: 'fixed', top: pos.top, left: pos.left, width, zIndex: 1000 }}
-            className="bg-white rounded-xl shadow-2xl border border-slate-200 p-3"
-        >
-            {children}
-        </div>,
-        document.body
-    );
 };
 
 const FilterPopoverBody = ({ col, filterVal, options, onChange, onClear }) => {
@@ -533,7 +497,7 @@ const ProductionWorkflowTableView = ({ salesOrders, onSOClick, onBatchClick }) =
             </div>
 
             {openFilterCol && (
-                <Popover anchorEl={filterBtnRefs.current[openFilterCol.key]} onClose={() => setOpenFilterKey(null)}>
+                <AnchoredPopover anchorEl={filterBtnRefs.current[openFilterCol.key]} onClose={() => setOpenFilterKey(null)}>
                     <FilterPopoverBody
                         col={openFilterCol}
                         filterVal={filters[openFilterCol.key]}
@@ -541,11 +505,11 @@ const ProductionWorkflowTableView = ({ salesOrders, onSOClick, onBatchClick }) =
                         onChange={v => setFilter(openFilterCol.key, v)}
                         onClear={() => clearFilter(openFilterCol.key)}
                     />
-                </Popover>
+                </AnchoredPopover>
             )}
 
             {columnSettingsOpen && (
-                <Popover anchorEl={settingsBtnRef.current} onClose={() => setColumnSettingsOpen(false)} width={260}>
+                <AnchoredPopover anchorEl={settingsBtnRef.current} onClose={() => setColumnSettingsOpen(false)} width={260}>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Drag to reorder · check to show</p>
                     <div className="max-h-80 overflow-y-auto space-y-0.5 pr-1">
                         {orderedColumns.map(col => (
@@ -571,7 +535,7 @@ const ProductionWorkflowTableView = ({ salesOrders, onSOClick, onBatchClick }) =
                         <button onClick={resetColumns} className="text-[11px] text-slate-400 hover:text-slate-600">Reset</button>
                         <span className="text-[10px] text-slate-400">{visibleColumns.length}/{orderedColumns.length} shown</span>
                     </div>
-                </Popover>
+                </AnchoredPopover>
             )}
         </div>
     );

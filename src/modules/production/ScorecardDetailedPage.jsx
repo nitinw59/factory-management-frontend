@@ -5,7 +5,6 @@ import { LuRefreshCw, LuClock, LuIndianRupee } from 'react-icons/lu';
 import TypeScorecardCard from './TypeScorecardCard';
 import DailyOutputByLineTypeCard from './DailyOutputByLineTypeCard';
 import WorkstationLiveScorecard from './WorkstationLiveScorecard';
-import useLiveQcSocket from '../qc_live/useLiveQcSocket';
 
 const REFRESH_SECONDS = 900; // 15 minutes
 const STORAGE_KEY      = 'scorecard_detailed_selected_line_type';
@@ -50,11 +49,10 @@ export default function ScorecardDetailedPage() {
     const [monthlyTarget, setMonthlyTarget] = useState(null);
     const [savingMonthlyTarget, setSavingMonthlyTarget] = useState(false);
 
-    // Daily output by line type — by_day series per line type id, and the
-    // live per-workstation scorecard. Both refresh on the same cycle as
-    // everything else on this page.
+    // Daily output by line type — by_day series per line type id. The live
+    // per-workstation scorecard is a self-contained widget (its own fetch +
+    // live socket) — see WorkstationLiveScorecard.jsx.
     const [dailySeriesByType, setDailySeriesByType] = useState(null);
-    const [workstationRows,   setWorkstationRows]   = useState(null);
 
     const [loading,     setLoading]     = useState(false);
     const [lastRefresh, setLastRefresh] = useState(null);
@@ -89,7 +87,7 @@ export default function ScorecardDetailedPage() {
         setLoading(true);
         const { startDate: sd, endDate: ed } = getMonthRange(selectedMonth);
         try {
-            const [rangeRes, salaryRes, monthlyTargetRes, dailyByTypeRes, workstationRes] = await Promise.allSettled([
+            const [rangeRes, salaryRes, monthlyTargetRes, dailyByTypeRes] = await Promise.allSettled([
                 productionManagerApi.getRangeSummary({
                     start_date: sd, end_date: ed, line_type_id: selectedLineTypeId,
                 }),
@@ -106,7 +104,6 @@ export default function ScorecardDetailedPage() {
                         .then(res => [t.id, res.data?.by_day || []])
                         .catch(() => [t.id, []])
                 )),
-                productionManagerApi.getWorkstationLiveScorecard(),
             ]);
 
             setRangeSummary(rangeRes.status === 'fulfilled' ? rangeRes.value.data : null);
@@ -116,7 +113,6 @@ export default function ScorecardDetailedPage() {
             setDailySeriesByType(
                 dailyByTypeRes.status === 'fulfilled' ? Object.fromEntries(dailyByTypeRes.value) : null
             );
-            setWorkstationRows(workstationRes.status === 'fulfilled' ? workstationRes.value.data : null);
 
             setLastRefresh(new Date());
             countdownRef.current = REFRESH_SECONDS;
@@ -133,30 +129,6 @@ export default function ScorecardDetailedPage() {
         const interval = setInterval(loadData, REFRESH_SECONDS * 1000);
         return () => clearInterval(interval);
     }, [loadData]);
-
-    // ── Live workstation scorecard ───────────────────────────────────────────
-    // The rest of this page (range summary, salary, monthly target) stays on
-    // the REFRESH_SECONDS poll above — only the per-workstation scorecard
-    // needs to feel instant. Every piece/bundle/garment check-in already
-    // broadcasts a QC_LIVE_EVENT over the shared /ws socket (see
-    // utils/liveQc.js — covers APPROVED/REPAIRED/NEEDS_REWORK/QC_REJECTED
-    // across numbering, sewing, preparatory bundling, assembly, post-assembly
-    // and finishing), so on each event this re-fetches just the lightweight
-    // scorecard endpoint instead of waiting for the next 15-minute cycle.
-    // Debounced so a burst of check-ins (e.g. a multi-piece bundle approval)
-    // triggers one re-fetch, not one per event.
-    const wsDebounceRef = useRef(null);
-    const refreshWorkstationScorecard = useCallback(() => {
-        productionManagerApi.getWorkstationLiveScorecard()
-            .then(res => setWorkstationRows(res.data))
-            .catch(err => console.error('[ScorecardDetailed] live scorecard refresh error', err));
-    }, []);
-    const handleLiveQcEvent = useCallback(() => {
-        if (wsDebounceRef.current) clearTimeout(wsDebounceRef.current);
-        wsDebounceRef.current = setTimeout(refreshWorkstationScorecard, 800);
-    }, [refreshWorkstationScorecard]);
-    useEffect(() => () => { if (wsDebounceRef.current) clearTimeout(wsDebounceRef.current); }, []);
-    const liveConnected = useLiveQcSocket(handleLiveQcEvent);
 
     useEffect(() => {
         const tick = setInterval(() => {
@@ -332,10 +304,8 @@ export default function ScorecardDetailedPage() {
                     />
                 )}
 
-                {/* Live per-workstation scorecard */}
-                {(!loading || workstationRows) && (
-                    <WorkstationLiveScorecard rows={workstationRows} loading={loading} live={liveConnected} />
-                )}
+                {/* Live per-workstation scorecard — self-contained widget */}
+                <WorkstationLiveScorecard />
             </div>
         </div>
     );
