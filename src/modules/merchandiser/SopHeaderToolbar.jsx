@@ -1,41 +1,16 @@
 // ─── SOP HEADER TOOLBAR ─────────────────────────────────────────────────────
-// Action row for the SOP workspace: link/change BOM, download the linked BOM
-// as Excel, calculate/recalculate requirements, and export the fabric (PDF) /
-// trim (Excel) requirement documents.
+// Export action for one scoped requirements grid — Fabric PDF when scope is
+// 'fabric', Trim PDFs (one per bucket — see trimRequirementsPdfGenerator.js)
+// when scope is 'trim'. BOM link/unlink and calculate/recalculate
+// requirements now live in their own dedicated overlays (BomStageModal,
+// RequirementsStageModal) since each trail node opens its own focused view
+// instead of sharing this toolbar.
 
 import { useState } from 'react';
-import { Calculator, Download, FileSpreadsheet, FileText, Link2, Loader2 } from 'lucide-react';
-import { planningApi } from '../../api/planningApi';
-import { bomApi } from '../../api/bomApi';
+import { ChevronDown, FileText, Loader2 } from 'lucide-react';
 import { adminApi } from '../../api/adminApi';
-import LinkAndAllocateModal from './LinkAndAllocateModal';
-import FinalizeQuantitiesModal from './FinalizeQuantitiesModal';
-import RecalculateConfirmModal, { logRecalcBrief } from './RecalculateConfirmModal';
-import { generateBomExcel } from './bomExcelExport';
 import { generateFabricRequirementsPdf } from './fabricRequirementsPdfGenerator';
-import { generateTrimRequirementsExcel } from './trimRequirementsExcelExport';
-import { useSecondaryFabricInfo } from './merchandiserShared';
-import { useAuth } from '../../context/AuthContext';
-
-const ToolbarButton = ({ icon: Icon, label, onClick, disabled, busy, title, tone = 'slate' }) => {
-    const toneCls = {
-        slate:   'text-slate-600 bg-slate-100 hover:bg-slate-200',
-        violet:  'text-white bg-violet-600 hover:bg-violet-700',
-        indigo:  'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200',
-        amber:   'text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200',
-    }[tone];
-    return (
-        <button
-            onClick={onClick}
-            disabled={disabled || busy}
-            title={title}
-            className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${toneCls}`}
-        >
-            {busy ? <Loader2 size={13} className="animate-spin" /> : <Icon size={13} />}
-            {label}
-        </button>
-    );
-};
+import { getTrimPdfBuckets, generateTrimRequirementsPdf, generateAllTrimRequirementsPdfs } from './trimRequirementsPdfGenerator';
 
 const downloadBlob = (blob, filename) => {
     const url = URL.createObjectURL(blob);
@@ -48,82 +23,17 @@ const downloadBlob = (blob, filename) => {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
-const SopHeaderToolbar = ({ sop, sopReqs, bomOptions, fabricTypes, salesOrder, onLinkBom, onPreviewBom, onRefresh }) => {
-    const { user } = useAuth();
-    // Matches SopSummaryCard's own gate and the backend's checkRole(['merchandiser', 'factory_admin'])
-    // on the link-bom/unlink-bom routes — UX only, the route is the real enforcement.
-    const canManageBom = user?.role === 'merchandiser' || user?.role === 'factory_admin';
-    const [showLinkModal,     setShowLinkModal]     = useState(false);
-    const [downloadingBom,    setDownloadingBom]    = useState(false);
-    const [downloadingPdf,    setDownloadingPdf]    = useState(false);
-    const [downloadingExcel,  setDownloadingExcel]  = useState(false);
-    const [recalcing,         setRecalcing]         = useState(false);
-    const [recalcErr,         setRecalcErr]         = useState(null);
-    const [preview,           setPreview]           = useState(null);
-    const [showRecalcConfirm, setShowRecalcConfirm] = useState(false);
-    const [showQuantityPicker, setShowQuantityPicker] = useState(false);
-    const [err,               setErr]               = useState(null);
+const SopHeaderToolbar = ({ sop, sopReqs, salesOrder, scope }) => {
+    const [downloading,  setDownloading]  = useState(false);
+    const [err,          setErr]          = useState(null);
+    const [info,         setInfo]         = useState(null);
+    const [showTrimMenu, setShowTrimMenu] = useState(false);
 
     const fabricRequirements = sopReqs?.fabric_requirements || [];
     const trimRequirements   = sopReqs?.trim_requirements   || [];
 
-    // Color Cluster rule(s) attached to the currently-linked BOM's SECONDARY fabric
-    // line (if any — a line can carry more than one) — previewed in the
-    // recalculate-confirm dialog below so a merchandiser sees which of this
-    // order's colors resolve to which rule's target color before confirming,
-    // not just the resulting requirement rows after the fact.
-    const { clusters: secondaryClusters } = useSecondaryFabricInfo(sop.bom_id);
-
-    const handleDownloadBomExcel = async () => {
-        if (!sop.bom_id) return;
-        setDownloadingBom(true);
-        setErr(null);
-        try {
-            const res = await bomApi.getById(sop.bom_id);
-            generateBomExcel(res.data?.data ?? res.data);
-        } catch (e) {
-            setErr(e?.response?.data?.error || e?.response?.data?.message || 'Failed to download BOM.');
-        } finally {
-            setDownloadingBom(false);
-        }
-    };
-
-    const handleRecalcClick = async () => {
-        setRecalcErr(null);
-        setRecalcing(true);
-        try {
-            const res  = await planningApi.getRecalculationPreview(sop.id);
-            const data = res.data?.data ?? res.data;
-            logRecalcBrief('PREVIEW', sop, data);
-            if (!data?.has_existing_data) {
-                setShowQuantityPicker(true);
-            } else {
-                setPreview(data);
-                setShowRecalcConfirm(true);
-            }
-        } catch (e) {
-            const status = e?.response?.status;
-            setRecalcErr(
-                e?.response?.data?.error
-                || (status === 403 ? 'Not permitted for your role.'
-                    : status ? `Recalculation preview failed (HTTP ${status})`
-                    : 'Recalculation preview failed')
-            );
-        } finally {
-            setRecalcing(false);
-        }
-    };
-
-    const doRecalculate = () => {
-        logRecalcBrief('CONFIRM', sop, preview);
-        setShowRecalcConfirm(false);
-        setPreview(null);
-        setRecalcErr(null);
-        setShowQuantityPicker(true);
-    };
-
     const handleExportPdf = async () => {
-        setDownloadingPdf(true);
+        setDownloading(true);
         setErr(null);
         try {
             let company = null;
@@ -136,117 +46,93 @@ const SopHeaderToolbar = ({ sop, sopReqs, bomOptions, fabricTypes, salesOrder, o
         } catch (e) {
             setErr(e?.response?.data?.error || e?.response?.data?.message || 'Failed to generate fabric PDF.');
         } finally {
-            setDownloadingPdf(false);
+            setDownloading(false);
         }
     };
 
-    const handleExportExcel = async () => {
-        setDownloadingExcel(true);
+    // Both jsPDF calls below are synchronous (doc.save()) — no loading state needed.
+    const trimBuckets = scope === 'trim' ? getTrimPdfBuckets({ sop, salesOrder, trimRequirements }) : [];
+    const trimBucketsAvailable = trimBuckets.filter(b => b.count > 0).length;
+
+    const handlePickTrimBucket = (bucketKey) => {
+        setShowTrimMenu(false);
         setErr(null);
-        try {
-            generateTrimRequirementsExcel({ sop, salesOrder, trimRequirements });
-        } catch (e) {
-            setErr('Failed to generate trim Excel.');
-        } finally {
-            setDownloadingExcel(false);
+        setInfo(null);
+        const ok = generateTrimRequirementsPdf({ sop, salesOrder, trimRequirements, bucketKey });
+        if (!ok) setErr('That report has no trim requirements to export.');
+    };
+
+    const handleDownloadAllTrimPdfs = () => {
+        setShowTrimMenu(false);
+        setErr(null);
+        setInfo(null);
+        const { downloaded, skipped } = generateAllTrimRequirementsPdfs({ sop, salesOrder, trimRequirements });
+        if (downloaded.length === 0) {
+            setErr('Nothing to export — no trim requirements in any bucket yet.');
+        } else if (skipped.length > 0) {
+            setInfo(`Downloaded ${downloaded.length} PDF${downloaded.length > 1 ? 's' : ''} (skipped empty: ${skipped.join(', ')}).`);
+        } else {
+            setInfo(`Downloaded ${downloaded.length} PDFs.`);
         }
     };
 
     return (
-        <>
-            <div className="flex flex-wrap items-center gap-1.5">
-                {canManageBom && (
-                    <ToolbarButton
-                        icon={Link2}
-                        tone="violet"
-                        label={sop.bom_id ? 'Change BOM' : 'Link BOM'}
-                        onClick={() => setShowLinkModal(true)}
-                    />
-                )}
-                <ToolbarButton
-                    icon={Download}
-                    label="Download BOM (Excel)"
-                    disabled={!sop.bom_id}
-                    busy={downloadingBom}
-                    onClick={handleDownloadBomExcel}
-                    title={!sop.bom_id ? 'Link a BOM first' : 'Download the linked BOM as an Excel workbook'}
-                />
-                <ToolbarButton
-                    icon={Calculator}
-                    tone="slate"
-                    label={sopReqs ? 'Recalculate Requirements' : 'Calculate Requirements'}
-                    disabled={!sop.bom_id}
-                    busy={recalcing}
-                    onClick={handleRecalcClick}
-                    title={!sop.bom_id ? 'Link a BOM first' : undefined}
-                />
-                <span className="w-px h-6 bg-slate-200 mx-1" />
-                <ToolbarButton
-                    icon={FileText}
-                    tone="indigo"
-                    label="Export Fabric PDF"
-                    disabled={fabricRequirements.length === 0}
-                    busy={downloadingPdf}
+        <div className="flex flex-wrap items-center gap-1.5">
+            {scope === 'fabric' ? (
+                <button
                     onClick={handleExportPdf}
+                    disabled={fabricRequirements.length === 0 || downloading}
                     title="Export fully-reserved fabric requirements as a PDF"
-                />
-                <ToolbarButton
-                    icon={FileSpreadsheet}
-                    tone="amber"
-                    label="Export Trim Excel"
-                    disabled={trimRequirements.length === 0}
-                    busy={downloadingExcel}
-                    onClick={handleExportExcel}
-                    title="Export trim requirements as Excel — Completed, In Progress, Pending (with stock per candidate variant), and Raised PRs sheets"
-                />
-            </div>
-
-            {(err || recalcErr) && (
-                <p className="text-[11px] text-red-500 mt-1.5">{err || recalcErr}</p>
+                    className="flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200"
+                >
+                    {downloading ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
+                    Export Fabric PDF
+                </button>
+            ) : (
+                <div className="relative">
+                    <button
+                        onClick={() => setShowTrimMenu(v => !v)}
+                        disabled={trimRequirements.length === 0}
+                        title="Export trim requirements as a PDF — pick a report"
+                        className="flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200"
+                    >
+                        <FileText size={13} />
+                        Export Trim PDF
+                        <ChevronDown size={11} className={`transition-transform ${showTrimMenu ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showTrimMenu && (
+                        <>
+                            <div className="fixed inset-0 z-10" onClick={() => setShowTrimMenu(false)} />
+                            <div className="absolute left-0 top-full mt-1 z-20 w-64 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 animate-in fade-in zoom-in-95 duration-100">
+                                <button
+                                    onClick={handleDownloadAllTrimPdfs}
+                                    disabled={trimBucketsAvailable === 0}
+                                    className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    Download All
+                                    <span className="text-[10px] font-normal text-slate-400">{trimBucketsAvailable} report{trimBucketsAvailable !== 1 ? 's' : ''}</span>
+                                </button>
+                                <div className="h-px bg-slate-100 my-1" />
+                                {trimBuckets.map(b => (
+                                    <button
+                                        key={b.key}
+                                        onClick={() => handlePickTrimBucket(b.key)}
+                                        disabled={b.count === 0}
+                                        title={b.count === 0 ? 'No trim requirements in this bucket' : undefined}
+                                        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        {b.label}
+                                        <span className="text-[10px] font-bold text-slate-400">{b.count}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </>
+                    )}
+                </div>
             )}
-
-            {showLinkModal && (
-                <LinkAndAllocateModal
-                    sop={sop}
-                    bomOptions={bomOptions}
-                    fabricTypes={fabricTypes}
-                    onClose={() => setShowLinkModal(false)}
-                    onLink={onLinkBom}
-                    onPreview={onPreviewBom}
-                    onDone={(warnings) => {
-                        setShowLinkModal(false);
-                        onRefresh();
-                        setErr(warnings?.length > 0 ? warnings.join(' ') : null);
-                    }}
-                />
-            )}
-
-            {showRecalcConfirm && (
-                <RecalculateConfirmModal
-                    preview={preview}
-                    sopName={sop?.product_name}
-                    clusterInfo={secondaryClusters}
-                    sopColors={sop.colors}
-                    busy={recalcing}
-                    err={recalcErr}
-                    onClose={() => { if (recalcing) return; setShowRecalcConfirm(false); setPreview(null); }}
-                    onConfirm={doRecalculate}
-                />
-            )}
-
-            {showQuantityPicker && (
-                <FinalizeQuantitiesModal
-                    sop={sop}
-                    fabricTypes={fabricTypes}
-                    onClose={() => setShowQuantityPicker(false)}
-                    onDone={(warnings) => {
-                        setShowQuantityPicker(false);
-                        onRefresh();
-                        setErr(warnings?.length > 0 ? warnings.join(' ') : null);
-                    }}
-                />
-            )}
-        </>
+            {err && <p className="text-[11px] text-red-500">{err}</p>}
+            {info && <p className="text-[11px] text-emerald-600">{info}</p>}
+        </div>
     );
 };
 

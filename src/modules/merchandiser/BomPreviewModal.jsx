@@ -4,7 +4,7 @@
 // summarizeBom/logBomBrief, reused by LinkAndAllocateModal at link time.
 
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { bomApi } from '../../api/bomApi';
 import { Spinner } from './merchandiserShared';
 
@@ -56,7 +56,7 @@ export const logBomBrief = (phase, bom) => {
 // sequence_no, with an "Unassigned" bucket (legacy/no-stage rows) surfaced
 // first when present. Mirrors the grouping used in the BOM editor, dashboard,
 // approval, and batch-drilldown views.
-const materialsByStage = (bom) => {
+export const materialsByStage = (bom) => {
     const stages = bom?.product_stages || [];
     const groups = stages.map(s => ({
         key: `stage-${s.production_line_type_id}`,
@@ -68,10 +68,11 @@ const materialsByStage = (bom) => {
     return groups;
 };
 
-const BomPreviewModal = ({ bomId, onClose }) => {
-    const [bom,     setBom]     = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [err,     setErr]     = useState(null);
+const BomPreviewModal = ({ bomId, onClose, headerActions }) => {
+    const [bom,      setBom]      = useState(null);
+    const [loading,  setLoading]  = useState(true);
+    const [err,      setErr]      = useState(null);
+    const [searchQ,  setSearchQ]  = useState('');
 
     useEffect(() => {
         bomApi.getById(bomId)
@@ -84,21 +85,57 @@ const BomPreviewModal = ({ bomId, onClose }) => {
             .finally(() => setLoading(false));
     }, [bomId]);
 
+    const q = searchQ.trim().toLowerCase();
+    const fabricConsumptions = (bom?.fabric_consumptions || []).filter(fc => {
+        if (!q) return true;
+        const hay = `${fc.fabric_role || ''} ${fc.fabric_type_name || ''} ${fc.comments || ''}`.toLowerCase();
+        return hay.includes(q);
+    });
+    const stageGroups = materialsByStage(bom || {}).map(g => ({
+        ...g,
+        materials: g.materials.filter(mc => {
+            if (!q) return true;
+            const hay = `${mc.trim_item_name || ''} ${mc.item_code || ''} ${mc.placement_description || ''} ${mc.comments || ''}`.toLowerCase();
+            return hay.includes(q);
+        }),
+    })).filter(g => g.materials.length > 0);
+    const hasSearchableContent = (bom?.fabric_consumptions?.length || 0) + (bom?.material_consumptions?.length || 0) > 0;
+    const noSearchResults = q && hasSearchableContent && fabricConsumptions.length === 0 && stageGroups.length === 0;
+
     return (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col max-h-[85vh]"
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh]"
                 onClick={e => e.stopPropagation()}>
                 {/* Header */}
-                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
-                    <div>
+                <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+                    <div className="min-w-0">
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">BOM Preview</p>
-                        <h2 className="font-extrabold text-slate-800 text-base">
+                        <h2 className="font-extrabold text-slate-800 text-base truncate">
                             {loading ? 'Loading…' : bom?.bom_name || '—'}
                         </h2>
                         {bom && <p className="text-xs text-slate-400 mt-0.5">{bom.product?.name}</p>}
                     </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><X size={18} /></button>
+                    <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                        {headerActions}
+                        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><X size={18} /></button>
+                    </div>
                 </div>
+
+                {/* Search — filters Fabric Consumptions + Materials & Trims below (Ratio Groups always shown) */}
+                {hasSearchableContent && (
+                    <div className="px-5 pt-3 shrink-0">
+                        <div className="relative">
+                            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input
+                                type="search"
+                                value={searchQ}
+                                onChange={e => setSearchQ(e.target.value)}
+                                placeholder="Search fabric or trim…"
+                                className="w-full text-sm border border-slate-200 rounded-lg pl-7 pr-3 py-1.5 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                            />
+                        </div>
+                    </div>
+                )}
 
                 {/* Body */}
                 <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
@@ -106,6 +143,10 @@ const BomPreviewModal = ({ bomId, onClose }) => {
                     {err && <p className="text-sm text-red-500">{err}</p>}
                     {bom && (
                         <>
+                            {noSearchResults && (
+                                <p className="text-sm text-slate-400 italic text-center py-6">No fabric or trim matches "{searchQ}".</p>
+                            )}
+
                             {/* Ratio Groups */}
                             {(bom.ratio_groups || []).length > 0 && (
                                 <div>
@@ -130,11 +171,11 @@ const BomPreviewModal = ({ bomId, onClose }) => {
                             )}
 
                             {/* Fabric Consumptions — BOM-level, not per marker/ratio group */}
-                            {(bom.fabric_consumptions || []).length > 0 && (
+                            {fabricConsumptions.length > 0 && (
                                 <div>
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Fabric Consumptions</p>
                                     <div className="flex flex-wrap gap-1.5">
-                                        {bom.fabric_consumptions.map((fc, j) => (
+                                        {fabricConsumptions.map((fc, j) => (
                                             <span key={j} className="bg-sky-50 text-sky-700 border border-sky-100 rounded px-2 py-0.5 text-[10px] font-bold" title={fc.comments || undefined}>
                                                 {fc.fabric_role ? `${fc.fabric_role} (generic)` : (fc.fabric_type_name || `Fabric #${fc.fabric_type_id}`)}: {fc.consumption_inches}" / pc
                                                 {fc.comments && <span className="font-normal text-sky-500"> — {fc.comments}</span>}
@@ -145,11 +186,11 @@ const BomPreviewModal = ({ bomId, onClose }) => {
                             )}
 
                             {/* Materials — grouped by the product's own workflow stage */}
-                            {(bom.material_consumptions || []).length > 0 && (
+                            {stageGroups.length > 0 && (
                                 <div>
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Materials & Trims</p>
                                     <div className="space-y-3">
-                                        {materialsByStage(bom).map(group => (
+                                        {stageGroups.map(group => (
                                             <div key={group.key}>
                                                 <p className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${group.key === 'unassigned' ? 'text-amber-600' : 'text-violet-500'}`}>
                                                     {group.label} <span className="font-normal normal-case text-slate-400">· {group.materials.length}</span>

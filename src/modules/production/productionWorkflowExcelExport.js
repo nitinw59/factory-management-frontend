@@ -10,6 +10,11 @@
 // already-correct per-processing-mode logic. Fabric assigned / pieces
 // dispatched / cut pieces ARE bulk-fetched (one call, GROUP BY SUM) — those
 // are trivial aggregations with no per-product branching.
+//
+// gatherProductionWorkflowBatchData() below does all of the above fetching
+// and is shared with ProductionWorkflowTableView.jsx (the on-screen Excel-like
+// grid) — both consumers read the same batch/totals/stageQty entries so the
+// numbers never drift between the download and the on-screen table.
 
 import * as XLSX from 'xlsx';
 import { productionManagerApi } from '../../api/productionManagerApi';
@@ -59,16 +64,18 @@ async function mapLimit(items, limit, fn) {
     return results;
 }
 
-export async function generateProductionWorkflowExcel(salesOrders = []) {
+// Fetches everything needed to render one row per batch (bulk totals +
+// per-batch stage quantities) and returns the raw entries plus the union of
+// stage names across every included batch (different products can have
+// different cycle flows), ordered by the lowest sequence_no any product uses
+// it at. Consumers (Excel export, on-screen table) derive their own
+// formatted columns from these entries.
+export async function gatherProductionWorkflowBatchData(salesOrders = []) {
     const batchRows = salesOrders.flatMap(batchRowsOf);
 
-    // Bulk totals (fabric assigned, pieces dispatched) — one call, not N.
     const totalsRes = await productionManagerApi.getWorkflowBatchTotals();
     const totalsByBatch = new Map((totalsRes.data || []).map(t => [t.batch_id, t]));
 
-    // Per-batch approved+repaired stage quantities — reuses the same endpoint
-    // the on-screen stage chips use, capped at 6 concurrent requests so a
-    // large export doesn't hammer the server.
     const stageResults = await mapLimit(batchRows, 6, ({ batch }) =>
         batch
             ? productionManagerApi.getBatchStageQuantities(batch.batch_id)
@@ -77,9 +84,6 @@ export async function generateProductionWorkflowExcel(salesOrders = []) {
             : Promise.resolve(new Map())
     );
 
-    // Union of stage names across every exported batch (different products
-    // can have different cycle flows), ordered by the lowest sequence_no
-    // any product uses it at.
     const stageOrder = new Map(); // line_type_name -> min sequence_no
     batchRows.forEach(({ batch }) => {
         if (!batch) return;
@@ -90,8 +94,20 @@ export async function generateProductionWorkflowExcel(salesOrders = []) {
     });
     const stageNames = [...stageOrder.entries()].sort((a, b) => a[1] - b[1]).map(([name]) => name);
 
+    const entries = batchRows.map(({ so, sop, batch }, i) => ({
+        so, sop, batch,
+        totals: batch ? (totalsByBatch.get(batch.batch_id) || {}) : {},
+        stageQty: stageResults[i],
+    }));
+
+    return { entries, stageNames };
+}
+
+export async function generateProductionWorkflowExcel(salesOrders = []) {
+    const { entries, stageNames } = await gatherProductionWorkflowBatchData(salesOrders);
+
     const today = new Date();
-    const rows = batchRows.map(({ so, sop, batch }, i) => {
+    const rows = entries.map(({ so, sop, batch, totals, stageQty }) => {
         const orderDate = so.order_date ? new Date(so.order_date) : null;
         const daysSinceOrder = orderDate ? Math.round((today - orderDate) / 86400000) : '—';
 
@@ -121,8 +137,6 @@ export async function generateProductionWorkflowExcel(salesOrders = []) {
             return row;
         }
 
-        const totals = totalsByBatch.get(batch.batch_id) || {};
-        const stageQty = stageResults[i];
         const dispatched = totals.pieces_dispatched || 0;
         // Garment-level cut count — matches the batch drilldown modal's "Primary
         // Pieces Cut" stat (one canonical primary part per product), not the raw

@@ -1,8 +1,8 @@
 // ─── TRIM RESERVATION UTILS ─────────────────────────────────────────────────
 // Shared logic for "which physical variant actually got reserved against
 // which requested color" — feeds both the trim grid's hover summary (see
-// TrimRequirementsGrid) and the trim requirements Excel export's summary sheet
-// (see trimRequirementsExcelExport.js).
+// TrimRequirementsGrid) and the trim requirements PDF export's summary report
+// (see trimRequirementsPdfGenerator.js).
 
 export const nameAndNumber = (name, number) => {
     if (name && number) return `${name} (${number})`;

@@ -8,12 +8,21 @@
 // line) — nothing here depends on a T&A timeline item existing.
 
 import { useState } from 'react';
-import { AlertCircle, Loader2, RotateCw, ShoppingCart, Trash2, X } from 'lucide-react';
+import { AlertCircle, Ban, Loader2, RotateCw, ShoppingCart, Trash2, X } from 'lucide-react';
 import { planningApi } from '../../api/planningApi';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
 import { getFabricCellStatus, getTrimCellStatus, CELL_COLOR_CLS, CELL_COLOR_DOT } from './requirementCellStatus';
 import { deriveTrimReservations, nameAndNumber } from './trimReservationUtils';
 import ReserveFulfillModal from './ReserveFulfillModal';
+
+const PR_STATUS_CLS = {
+    PENDING:    'bg-amber-50 text-amber-700 border-amber-200',
+    PO_RAISED:  'bg-blue-50 text-blue-700 border-blue-200',
+    FULFILLED:  'bg-emerald-50 text-emerald-700 border-emerald-200',
+    CANCELLED:  'bg-slate-100 text-slate-400 border-slate-200',
+};
+
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '—';
 
 // Builds the `item` shape ReserveFulfillModal/reservation-list rendering expects,
 // for a single fabric requirement.
@@ -37,7 +46,7 @@ const buildFabricReserveItem = (req) => {
 // Same derivation the old ProductionTrackingModal used to figure out which
 // variant was actually reserved and whether it's a substitute, plus a deduped
 // substitutes list — the backend doesn't always send is_substitute directly.
-// Exported for reuse by trimRequirementsExcelExport.js.
+// Exported for reuse by trimRequirementsPdfGenerator.js.
 export const buildTrimReserveItem = (req) => {
     const quantity_required = Number(req.quantity_required || 0);
     const quantity_reserved = Number(req.quantity_reserved || 0);
@@ -190,6 +199,7 @@ const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone
     const [recalcing,     setRecalcing]     = useState(false);
     const [raising,       setRaising]       = useState(false);
     const [showRaiseForm, setShowRaiseForm] = useState(false);
+    const [cancelingId,   setCancelingId]   = useState(null);
     const [err,           setErr]           = useState(null);
 
     const [raiseUrgency,   setRaiseUrgency]   = useState('normal');
@@ -201,6 +211,7 @@ const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone
     const status = isFabric ? getFabricCellStatus(requirement) : getTrimCellStatus(requirement);
     const reserveItem = isFabric ? buildFabricReserveItem(requirement) : buildTrimReserveItem(requirement);
     const reservations = isFabric ? (requirement.reservations || []) : reserveItem.reservations;
+    const purchaseRequirements = requirement.purchase_requirements || [];
     const required = isFabric ? Number(requirement.meters_required || 0) : Number(requirement.quantity_required || 0);
     const reserved = isFabric ? Number(requirement.meters_reserved || 0) : Number(requirement.quantity_reserved || 0);
     const shortfall = Math.max(0, required - reserved);
@@ -268,6 +279,20 @@ const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone
             setErr(e?.response?.data?.error || e?.response?.data?.message || 'Recalculation failed.');
         } finally {
             setRecalcing(false);
+        }
+    };
+
+    const handleCancelPR = async (pr) => {
+        if (!window.confirm('Cancel this purchase requirement? This cannot be undone.')) return;
+        setCancelingId(pr.id);
+        setErr(null);
+        try {
+            await purchaseDeptApi.cancelRequirement(pr.id);
+            onDone();
+        } catch (e) {
+            setErr(e?.response?.data?.error || e?.response?.data?.message || 'Failed to cancel purchase requirement.');
+        } finally {
+            setCancelingId(null);
         }
     };
 
@@ -420,6 +445,51 @@ const RequirementCellDrilldownModal = ({ type, requirement, sop, onClose, onDone
                             </div>
                         )}
                     </div>
+
+                    {/* Purchase Requirements — already raised against this line */}
+                    {purchaseRequirements.length > 0 && (
+                        <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                                Purchase Requirements · {purchaseRequirements.length}
+                            </p>
+                            <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl">
+                                {purchaseRequirements.map(pr => {
+                                    const prQty = isFabric ? Number(pr.meters_required || 0) : Number(pr.quantity_required || 0);
+                                    const prUnit = isFabric ? 'm' : (pr.unit_of_measure || unit);
+                                    return (
+                                        <div key={pr.id} className="px-3 py-2.5 text-xs space-y-1">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${PR_STATUS_CLS[pr.status] || 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                                                    {String(pr.status || '').replace(/_/g, ' ')}
+                                                </span>
+                                                {pr.urgency && (
+                                                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{pr.urgency}</span>
+                                                )}
+                                                {pr.po_code && (
+                                                    <span className="text-[9px] font-mono font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">PO {pr.po_code}</span>
+                                                )}
+                                                <span className="text-slate-400 ml-auto shrink-0">{fmtDate(pr.created_at)}</span>
+                                            </div>
+                                            <p className="font-bold text-slate-800 tabular-nums">
+                                                {prQty.toLocaleString(undefined, { maximumFractionDigits: 3 })} {prUnit}
+                                            </p>
+                                            {pr.notes && <p className="text-slate-400 italic">{pr.notes}</p>}
+                                            {pr.status === 'PENDING' && (
+                                                <button
+                                                    onClick={() => handleCancelPR(pr)}
+                                                    disabled={cancelingId != null}
+                                                    className="flex items-center gap-1 text-[10px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-2 py-1 rounded-md transition disabled:opacity-40 disabled:cursor-not-allowed mt-1"
+                                                >
+                                                    {cancelingId === pr.id ? <Loader2 size={11} className="animate-spin" /> : <Ban size={11} />}
+                                                    Cancel requirement
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Raise PR */}
                     {shortfall > 0 && (

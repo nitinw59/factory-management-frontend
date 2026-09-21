@@ -1,107 +1,50 @@
 // src/modules/merchandiser/MerchandiserPlanningPage.jsx
 //
 // Route entry point (kept at this path/export name — see App.js's 3 routes).
-// Owns the order sidebar and order-detail fetching; the right panel switches
-// between the SOP list (SopListPanel) and, once a product line is opened, its
-// full-page requirements workspace (MerchandiserSopWorkspace) — replacing the
-// old "click a SopCard → open ProductionTrackingModal" pattern.
+// Full-page order-tracking list: every sales order is a collapsible group of
+// SopTrailRows, each rendering its product line's lifecycle as a 6-node
+// interactive trail (Order Details -> BOM -> Requirements -> Fabric -> Trim ->
+// Ready). Each node opens its own focused overlay instead of one shared
+// workspace: OrderDetailOverlay, BomStageModal, RequirementsStageModal,
+// ReadinessStageModal (all centered modals), and WorkspaceDrawer — a
+// full-screen requirements grid, scoped to just Fabric or just Trim — for
+// the two nodes that need the room.
 
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, ShoppingBag } from 'lucide-react';
 import { planningApi } from '../../api/planningApi';
 import { Spinner } from './merchandiserShared';
 import BomPreviewModal from './BomPreviewModal';
-import SopListPanel from './SopListPanel';
-import MerchandiserSopWorkspace from './MerchandiserSopWorkspace';
+import OrderTrailGroup from './OrderTrailGroup';
+import OrderDetailOverlay from './OrderDetailOverlay';
+import BomStageModal from './BomStageModal';
+import RequirementsStageModal from './RequirementsStageModal';
+import ReadinessStageModal from './ReadinessStageModal';
+import WorkspaceDrawer from './WorkspaceDrawer';
 
-// ─── ORDER STATUS CONFIG ────────────────────────────────────────────────────
+const MerchandiserPlanningPage = () => {
+    const [formData,    setFormData]    = useState(null);
+    const [loadingForm, setLoadingForm] = useState(true);
+    const [formErr,     setFormErr]     = useState(null);
 
-// Matches the backend's sales_order_status enum exactly: DRAFT, CONFIRMED,
-// IN_PRODUCTION, SHIPPED, CANCELLED (this used to key on COMPLETED, a value
-// the enum has never had — so a SHIPPED order's badge always fell through to
-// the OrderCard's gray default regardless of its real status).
-const ORDER_STATUS_CFG = {
-    DRAFT:          { cls: 'bg-slate-100 text-slate-500'   },
-    CONFIRMED:      { cls: 'bg-blue-100 text-blue-700'     },
-    IN_PRODUCTION:  { cls: 'bg-violet-100 text-violet-700' },
-    SHIPPED:        { cls: 'bg-emerald-100 text-emerald-700'},
-    CANCELLED:      { cls: 'bg-red-100 text-red-500'       },
-};
-
-// ─── ORDER CARD (left sidebar) ─────────────────────────────────────────────
-
-const OrderCard = ({ order, isSelected, onClick }) => {
-    const { cls } = ORDER_STATUS_CFG[order.status] || { cls: 'bg-gray-100 text-gray-500' };
-    const linked    = order.linked_bom_count ?? 0;
-    const total     = order.product_count    ?? 0;
-    const allLinked = linked === total && total > 0;
-    const customerName = order.customer_name || order.buyer_name || '—';
-    const productNames = order.product_names     || [];
-    const fabricTypes  = order.fabric_type_names || [];
-
-    return (
-        <button
-            onClick={onClick}
-            className={`w-full text-left px-4 py-3 border-b border-slate-100 transition-colors hover:bg-slate-50
-                ${isSelected ? 'bg-violet-50 border-l-[3px] border-l-violet-500' : 'border-l-[3px] border-l-transparent'}`}
-        >
-            <div className="flex items-center justify-between mb-1">
-                <span className="font-bold text-slate-800 text-sm truncate">
-                    {order.order_number}
-                    {order.buyer_po_number && (
-                        <span className="font-normal text-slate-400 ml-1 text-[10px]">· PO {order.buyer_po_number}</span>
-                    )}
-                </span>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase shrink-0 ml-1 ${cls}`}>
-                    {order.status}
-                </span>
-            </div>
-            <p className="text-[11px] text-slate-500 mb-1 truncate">{customerName}</p>
-            {productNames.length > 0 && (
-                <p className="text-[10px] text-slate-400 mb-1.5 truncate">
-                    <span className="text-slate-500 font-medium">{productNames[0]}</span>
-                    {productNames.length > 1 && ` +${productNames.length - 1} more`}
-                    {fabricTypes.length > 0 && ` · ${fabricTypes.join(', ')}`}
-                </p>
-            )}
-            <div className="flex items-center justify-between">
-                <span className={`text-[10px] font-bold ${allLinked ? 'text-emerald-600' : 'text-amber-600'}`}>
-                    {linked}/{total} BOMs linked
-                </span>
-                {order.delivery_date && (
-                    <span className="text-[10px] text-slate-400">
-                        {new Date(order.delivery_date).toLocaleDateString()}
-                    </span>
-                )}
-            </div>
-        </button>
-    );
-};
-
-// ─── MAIN PAGE ────────────────────────────────────────────────────────────────
-
-const ProductionPlanningPage = () => {
-    const [formData,        setFormData]        = useState(null);
-    const [loadingForm,     setLoadingForm]     = useState(true);
-    const [formErr,         setFormErr]         = useState(null);
-
-    const [selectedOrderId, setSelectedOrderId] = useState(null);
+    const [expandedOrderId, setExpandedOrderId] = useState(null);
     const [orderDetail,     setOrderDetail]     = useState(null);
     const [loadingOrder,    setLoadingOrder]    = useState(false);
 
-    const [linking,           setLinking]           = useState({});
-    const [searchQ,           setSearchQ]           = useState('');
-    const [filterStatus,      setFilterStatus]      = useState('ALL');
-    const [needsBomOnly,      setNeedsBomOnly]      = useState(false);
+    const [searchQ,      setSearchQ]      = useState('');
+    const [filterStatus, setFilterStatus] = useState('ALL');
+    const [needsBomOnly, setNeedsBomOnly] = useState(false);
+
     const [previewBomId,      setPreviewBomId]      = useState(null);
-    const [sidebarOpen,       setSidebarOpen]       = useState(true);
+    const [workspaceTarget,   setWorkspaceTarget]   = useState(null); // { sopId, scope: 'fabric'|'trim' } | null
+    const [orderOverlaySopId,       setOrderOverlaySopId]       = useState(null); // sopId | null
+    const [bomStageSopId,           setBomStageSopId]           = useState(null); // sopId | null
+    const [requirementsStageSopId,  setRequirementsStageSopId]  = useState(null); // sopId | null
+    const [readinessStageSopId,     setReadinessStageSopId]     = useState(null); // sopId | null
+
     // For the Secondary Fabric picker in LinkAndAllocateModal — only needed when a BOM has
     // a generic SECONDARY fabric line, but cheap enough to load once up front.
-    const [fabricTypes,       setFabricTypes]       = useState([]);
-    // Which SOP's full-page requirements workspace is open, if any. null = show the list.
-    const [openWorkspaceSopId, setOpenWorkspaceSopId] = useState(null);
+    const [fabricTypes, setFabricTypes] = useState([]);
 
-    // Load sales orders + approved BOMs on mount
     useEffect(() => {
         planningApi.getFormData()
             .then(res => setFormData(res.data?.data ?? res.data))
@@ -121,60 +64,63 @@ const ProductionPlanningPage = () => {
         setFormData(fdRes.data?.data ?? fdRes.data);
     }, []);
 
-    const selectOrder = useCallback((orderId) => {
-        if (orderId === selectedOrderId) return;
-        setSelectedOrderId(orderId);
+    const toggleOrder = useCallback((orderId) => {
+        if (orderId === expandedOrderId) {
+            setExpandedOrderId(null);
+            setOrderDetail(null);
+            return;
+        }
+        setExpandedOrderId(orderId);
         setOrderDetail(null);
-        setOpenWorkspaceSopId(null);
         setLoadingOrder(true);
         planningApi.getOrderDetail(orderId)
             .then(res => setOrderDetail(res.data?.data ?? res.data))
             .catch(e  => console.error('Order detail fetch failed', e))
             .finally(() => setLoadingOrder(false));
-    }, [selectedOrderId]);
+    }, [expandedOrderId]);
 
     const handleLink = useCallback(async (sopId, bomId, secondaryFabricTypeId = null) => {
-        setLinking(l => ({ ...l, [sopId]: true }));
-        try {
-            const res = await planningApi.linkBom(sopId, {
-                bom_id: bomId,
-                secondary_fabric_type_id: secondaryFabricTypeId,
-            });
-            await refreshOrder(selectedOrderId);
-            return res?.data;
-        } catch (e) {
-            console.error('Link BOM failed', e);
-            throw e;
-        } finally {
-            setLinking(l => ({ ...l, [sopId]: false }));
-        }
-    }, [selectedOrderId, refreshOrder]);
-
-    const handleUnlink = useCallback(async (sopId) => {
-        setLinking(l => ({ ...l, [sopId]: true }));
-        try {
-            await planningApi.unlinkBom(sopId);
-            await refreshOrder(selectedOrderId);
-        } catch (e) {
-            console.error('Unlink BOM failed', e);
-        } finally {
-            setLinking(l => ({ ...l, [sopId]: false }));
-        }
-    }, [selectedOrderId, refreshOrder]);
+        const res = await planningApi.linkBom(sopId, {
+            bom_id: bomId,
+            secondary_fabric_type_id: secondaryFabricTypeId,
+        });
+        await refreshOrder(expandedOrderId);
+        return res?.data;
+    }, [expandedOrderId, refreshOrder]);
 
     // Generic "please re-sync this order" signal — used after a readiness
-    // toggle, a BOM link, or any mutation inside the SOP workspace (reserve,
-    // release, recalculate, raise PR) that might have changed bom_id or
-    // production_readiness.
+    // toggle, a BOM link/unlink, or any mutation inside the SOP workspace
+    // (reserve, release, recalculate, raise PR) that might have changed
+    // bom_id or production_readiness.
     const handleSopChanged = useCallback(() => {
-        if (selectedOrderId) refreshOrder(selectedOrderId);
-    }, [selectedOrderId, refreshOrder]);
+        if (expandedOrderId) refreshOrder(expandedOrderId);
+    }, [expandedOrderId, refreshOrder]);
 
-    const orders         = formData?.sales_orders    || [];
-    const bomsByProduct  = formData?.boms_by_product || {};
-    const sops           = orderDetail?.products     || [];
-    const unlinkedCount  = sops.filter(s => !s.bom_linked && !s.bom_id).length;
-    const workspaceSop   = openWorkspaceSopId ? sops.find(s => s.id === openWorkspaceSopId) : null;
+    const onOpenStage = useCallback((sop, stageKey) => {
+        switch (stageKey) {
+            case 'order':        setOrderOverlaySopId(sop.id); break;
+            case 'bom':          setBomStageSopId(sop.id); break;
+            case 'requirements': setRequirementsStageSopId(sop.id); break;
+            case 'fabric':       setWorkspaceTarget({ sopId: sop.id, scope: 'fabric' }); break;
+            case 'trim':         setWorkspaceTarget({ sopId: sop.id, scope: 'trim' }); break;
+            case 'ready':        setReadinessStageSopId(sop.id); break;
+            default: break;
+        }
+    }, []);
+
+    const orders        = formData?.sales_orders    || [];
+    const bomsByProduct = formData?.boms_by_product  || {};
+    const bomOptionsFor = (sop) => (sop ? (bomsByProduct[String(sop.product_id)] || bomsByProduct[sop.product_id] || []) : []);
+
+    // Always re-derive from the latest orderDetail (rather than a snapshot
+    // captured at click time) so each overlay reflects any mutation
+    // (link/unlink, recalc, readiness toggle) made while it's open.
+    const sops                  = orderDetail?.products || [];
+    const workspaceSop          = workspaceTarget          ? sops.find(s => s.id === workspaceTarget.sopId)  : null;
+    const orderOverlaySop       = orderOverlaySopId        ? sops.find(s => s.id === orderOverlaySopId)      : null;
+    const bomStageSop           = bomStageSopId            ? sops.find(s => s.id === bomStageSopId)          : null;
+    const requirementsStageSop  = requirementsStageSopId   ? sops.find(s => s.id === requirementsStageSopId) : null;
+    const readinessStageSop     = readinessStageSopId      ? sops.find(s => s.id === readinessStageSopId)    : null;
 
     const filteredOrders = orders.filter(o => {
         const matchesSearch =
@@ -187,169 +133,116 @@ const ProductionPlanningPage = () => {
     });
 
     return (
-        <>
-        <div className="flex h-full bg-slate-50 overflow-hidden">
-
-            {/* ── LEFT: Order sidebar (collapsible) ── */}
-            <div className={`${sidebarOpen ? 'w-72 min-w-[18rem]' : 'w-14'} bg-white border-r border-slate-200 flex flex-col overflow-hidden transition-all duration-200 shrink-0`}>
-                {sidebarOpen ? (
-                    <>
-                        <div className="px-4 py-4 border-b border-slate-100 shrink-0">
-                            <div className="flex items-center justify-between mb-3">
-                                <h2 className="font-extrabold text-slate-800 text-sm">Sales Orders</h2>
+        <div className="h-full overflow-y-auto bg-slate-50">
+            <div className="max-w-5xl mx-auto px-4 py-5">
+                {/* Search + filters */}
+                <div className="mb-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+                        <input
+                            type="search"
+                            placeholder="Search order or buyer…"
+                            value={searchQ}
+                            onChange={e => setSearchQ(e.target.value)}
+                            className="w-full sm:w-72 text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        />
+                        <div className="flex flex-wrap items-center gap-1">
+                            {['ALL', 'DRAFT', 'CONFIRMED', 'IN_PRODUCTION', 'SHIPPED', 'CANCELLED'].map(s => (
                                 <button
-                                    onClick={() => setSidebarOpen(false)}
-                                    className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-1 rounded-lg transition-colors"
-                                    title="Collapse sidebar"
-                                >
-                                    <ChevronLeft size={15} />
-                                </button>
-                            </div>
-                            <input
-                                type="search"
-                                placeholder="Search order or buyer…"
-                                value={searchQ}
-                                onChange={e => setSearchQ(e.target.value)}
-                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-violet-400"
-                            />
-                            <div className="flex flex-wrap items-center gap-1 mt-2.5">
-                                {['ALL', 'DRAFT', 'CONFIRMED', 'IN_PRODUCTION', 'SHIPPED', 'CANCELLED'].map(s => (
-                                    <button
-                                        key={s}
-                                        onClick={() => setFilterStatus(s)}
-                                        className={`px-2 py-1 rounded-md text-[10px] font-bold transition-colors ${
-                                            filterStatus === s ? 'bg-violet-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                                        }`}
-                                    >
-                                        {s === 'ALL' ? 'All' : s.replace(/_/g, ' ')}
-                                    </button>
-                                ))}
-                                <button
-                                    onClick={() => setNeedsBomOnly(v => !v)}
-                                    title="Only orders with at least one product line missing a BOM link"
-                                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition-colors ml-auto ${
-                                        needsBomOnly ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+                                    key={s}
+                                    onClick={() => setFilterStatus(s)}
+                                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition-colors ${
+                                        filterStatus === s ? 'bg-violet-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'
                                     }`}
                                 >
-                                    Needs BOM
+                                    {s === 'ALL' ? 'All' : s.replace(/_/g, ' ')}
                                 </button>
-                            </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto">
-                            {loadingForm && <Spinner h={32} />}
-                            {formErr && <p className="text-xs text-red-500 px-4 py-3">{formErr}</p>}
-                            {!loadingForm && filteredOrders.length === 0 && (
-                                <p className="text-xs text-slate-400 text-center py-10">No orders found</p>
-                            )}
-                            {filteredOrders.map(order => (
-                                <OrderCard
-                                    key={order.id}
-                                    order={order}
-                                    isSelected={selectedOrderId === order.id}
-                                    onClick={() => selectOrder(order.id)}
-                                />
                             ))}
-                        </div>
-                    </>
-                ) : (
-                    /* ── Collapsed rail ── */
-                    <div className="flex flex-col items-center pt-3 pb-4 gap-3 overflow-y-auto">
-                        {/* Donut: BOM-linking completion — click to expand */}
-                        <button
-                            onClick={() => setSidebarOpen(true)}
-                            title={`${sops.length - unlinkedCount}/${sops.length} BOMs linked — click to expand`}
-                            className="shrink-0 hover:opacity-80 transition-opacity"
-                        >
-                            {(() => {
-                                const r  = 14;
-                                const circ = 2 * Math.PI * r;
-                                const frac = sops.length > 0 ? (sops.length - unlinkedCount) / sops.length : 0;
-                                const color = frac === 1 ? '#10b981' : frac > 0 ? '#a78bfa' : '#cbd5e1';
-                                return (
-                                    <svg width="40" height="40" viewBox="0 0 40 40">
-                                        <circle cx="20" cy="20" r={r} fill="none" stroke="#e2e8f0" strokeWidth="4" />
-                                        <circle cx="20" cy="20" r={r} fill="none" stroke={color} strokeWidth="4"
-                                            strokeDasharray={circ}
-                                            strokeDashoffset={circ * (1 - frac)}
-                                            strokeLinecap="round"
-                                            transform="rotate(-90 20 20)"
-                                        />
-                                        <text x="20" y="24" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#334155">
-                                            {Math.round(frac * 100)}%
-                                        </text>
-                                    </svg>
-                                );
-                            })()}
-                        </button>
-
-                        <div className="w-8 border-t border-slate-100" />
-
-                        {/* Order mini-chips */}
-                        {filteredOrders.map(order => (
                             <button
-                                key={order.id}
-                                onClick={() => { selectOrder(order.id); setSidebarOpen(true); }}
-                                title={`#${order.order_number}${order.customer_name ? ` · ${order.customer_name}` : ''}`}
-                                className={`w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold transition-colors shrink-0 ${
-                                    selectedOrderId === order.id
-                                        ? 'bg-violet-100 text-violet-700 ring-2 ring-violet-400'
-                                        : 'bg-slate-100 text-slate-500 hover:bg-violet-50 hover:text-violet-600'
+                                onClick={() => setNeedsBomOnly(v => !v)}
+                                title="Only orders with at least one product line missing a BOM link"
+                                className={`px-2 py-1 rounded-md text-[10px] font-bold transition-colors sm:ml-2 ${
+                                    needsBomOnly ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-600 border border-amber-100 hover:bg-amber-100'
                                 }`}
                             >
-                                {String(order.order_number || '').slice(-3)}
+                                Needs BOM
                             </button>
-                        ))}
+                        </div>
                     </div>
+                </div>
+
+                {/* Order list */}
+                {loadingForm && <Spinner h={48} />}
+                {formErr && <p className="text-xs text-red-500 px-1 py-3">{formErr}</p>}
+                {!loadingForm && filteredOrders.length === 0 && (
+                    <p className="text-sm text-slate-400 text-center py-16">No orders found</p>
                 )}
+                <div className="space-y-2.5">
+                    {filteredOrders.map(order => (
+                        <OrderTrailGroup
+                            key={order.id}
+                            order={order}
+                            isExpanded={expandedOrderId === order.id}
+                            onToggle={() => toggleOrder(order.id)}
+                            orderDetail={expandedOrderId === order.id ? orderDetail : null}
+                            loadingOrder={expandedOrderId === order.id && loadingOrder}
+                            onOpenStage={onOpenStage}
+                        />
+                    ))}
+                </div>
             </div>
 
-            {/* ── RIGHT: Detail panel ── */}
-            <div className="flex-1 overflow-y-auto">
-                {!selectedOrderId && (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-3">
-                        <ShoppingBag size={52} className="opacity-20" />
-                        <p className="text-sm font-medium">Select a sales order to start planning</p>
-                    </div>
-                )}
+            {orderOverlaySop && (
+                <OrderDetailOverlay
+                    sop={orderOverlaySop}
+                    salesOrder={orderDetail}
+                    onClose={() => setOrderOverlaySopId(null)}
+                />
+            )}
 
-                {selectedOrderId && loadingOrder && <Spinner />}
+            {bomStageSop && (
+                <BomStageModal
+                    sop={bomStageSop}
+                    bomOptions={bomOptionsFor(bomStageSop)}
+                    fabricTypes={fabricTypes}
+                    onLink={handleLink}
+                    onPreview={setPreviewBomId}
+                    onDone={handleSopChanged}
+                    onClose={() => setBomStageSopId(null)}
+                />
+            )}
 
-                {selectedOrderId && !loadingOrder && orderDetail && (
-                    workspaceSop ? (
-                        <MerchandiserSopWorkspace
-                            sop={workspaceSop}
-                            salesOrder={orderDetail}
-                            bomOptions={bomsByProduct[String(workspaceSop.product_id)] || bomsByProduct[workspaceSop.product_id] || []}
-                            fabricTypes={fabricTypes}
-                            onLinkBom={handleLink}
-                            onPreviewBom={setPreviewBomId}
-                            onSopChanged={handleSopChanged}
-                            onBack={() => setOpenWorkspaceSopId(null)}
-                        />
-                    ) : (
-                        <SopListPanel
-                            orderDetail={orderDetail}
-                            sops={sops}
-                            unlinkedCount={unlinkedCount}
-                            bomsByProduct={bomsByProduct}
-                            fabricTypes={fabricTypes}
-                            linking={linking}
-                            onLink={handleLink}
-                            onUnlink={handleUnlink}
-                            onPreview={setPreviewBomId}
-                            onReadinessChange={handleSopChanged}
-                            onOpenWorkspace={setOpenWorkspaceSopId}
-                        />
-                    )
-                )}
-            </div>
+            {requirementsStageSop && (
+                <RequirementsStageModal
+                    sop={requirementsStageSop}
+                    fabricTypes={fabricTypes}
+                    onDone={handleSopChanged}
+                    onClose={() => setRequirementsStageSopId(null)}
+                />
+            )}
+
+            {readinessStageSop && (
+                <ReadinessStageModal
+                    sop={readinessStageSop}
+                    onDone={handleSopChanged}
+                    onClose={() => setReadinessStageSopId(null)}
+                />
+            )}
+
+            {workspaceSop && (
+                <WorkspaceDrawer
+                    sop={workspaceSop}
+                    salesOrder={orderDetail}
+                    scope={workspaceTarget.scope}
+                    onSopChanged={handleSopChanged}
+                    onClose={() => setWorkspaceTarget(null)}
+                />
+            )}
+
+            {previewBomId && (
+                <BomPreviewModal bomId={previewBomId} onClose={() => setPreviewBomId(null)} />
+            )}
         </div>
-
-        {previewBomId && (
-            <BomPreviewModal bomId={previewBomId} onClose={() => setPreviewBomId(null)} />
-        )}
-        </>
     );
 };
 
-export default ProductionPlanningPage;
+export default MerchandiserPlanningPage;

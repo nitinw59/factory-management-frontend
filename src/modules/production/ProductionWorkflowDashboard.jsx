@@ -7,7 +7,7 @@ import {
     ChevronUp, DollarSign, Palette,
     Package, Truck, Layers, Trash2, Printer, Warehouse,
     Edit2, AlertTriangle, Paperclip, ExternalLink, AlertCircle,
-    Pencil, Download,
+    Pencil, Download, Workflow, Table2,
 } from 'lucide-react';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import { accountingApi } from '../../api/accountingApi';
@@ -22,6 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 // a "download/print PDF" button, not on every load of this dashboard.
 import FabricIntakeForm from '../accounts/purchase/FabricIntakeForm';
 import { generateProductionWorkflowExcel } from './productionWorkflowExcelExport';
+import ProductionWorkflowTableView from './ProductionWorkflowTableView';
 import BatchDrilldownModal from './BatchDrilldownModal';
 import BatchDispatchModal from '../depatch_portal/BatchDispatchModal';
 import EndBitBatchModal from '../initialisation_portal/EndBitBatchModal';
@@ -859,16 +860,23 @@ const SalesOrderDetailsModal = ({ so, onClose, onViewPO }) => {
     const [error, setError]                 = useState(null);
     const [downloading, setDownloading]     = useState(false);
     const [downloadError, setDownloadError] = useState(null);
+    const [batchTotals, setBatchTotals]     = useState(null); // Map<batch_id, {fabric_meters_assigned, cut_pieces, pieces_dispatched}>
 
     useEffect(() => {
         Promise.all([
             accountingApi.getSalesOrderDetails(soId),
             accountingApi.getSizes(),
+            // Same bulk per-batch endpoint the workflow table/Excel export use
+            // (one GROUP BY call, not N) — scoped to the last 2 months, same as
+            // getWorkflowData itself, so every SO reachable from this dashboard
+            // is guaranteed to be inside that window already.
+            productionManagerApi.getWorkflowBatchTotals(),
         ])
-            .then(([detailsRes, sizesRes]) => {
+            .then(([detailsRes, sizesRes, totalsRes]) => {
                 setDetails(detailsRes.data);
                 const sizes = sizesRes.data?.data ?? sizesRes.data ?? [];
                 setSizeMap(Object.fromEntries(sizes.map(s => [String(s.id), s.name])));
+                setBatchTotals(new Map((totalsRes.data || []).map(t => [String(t.batch_id), t])));
             })
             .catch(() => setError('Failed to load order details.'))
             .finally(() => setLoading(false));
@@ -877,6 +885,29 @@ const SalesOrderDetailsModal = ({ so, onClose, onViewPO }) => {
     // Flattened across SO-level legacy POs and SOP-nested POs (allPosOf), so the
     // list here matches what the workflow graph/table already show for this SO.
     const purchaseOrders = allPosOf(so);
+    const batches        = allBatchesOf(so);
+
+    // Reconciliation report — fabric assigned vs. pieces cut vs. pieces
+    // dispatched, summed across every batch linked to this SO (any SOP).
+    let reconciliation = null;
+    if (batchTotals) {
+        let fabric = 0, cut = 0, dispatched = 0, endbitReused = 0;
+        batches.forEach(b => {
+            const t = batchTotals.get(String(b.batch_id));
+            if (!t) return;
+            fabric       += Number(t.fabric_meters_assigned) || 0;
+            cut          += Number(t.cut_pieces) || 0;
+            dispatched   += Number(t.pieces_dispatched) || 0;
+            // Fabric recycled from this SO's own cutting-room endbits — already
+            // subtracted out of `fabric` above (see getWorkflowBatchTotals) so it
+            // isn't double-counted, but still worth surfacing next to the total.
+            endbitReused += Number(t.fabric_meters_same_so_endbit) || 0;
+        });
+        reconciliation = {
+            fabric, cut, dispatched, endbitReused,
+            ratioPct: cut > 0 ? (dispatched / cut) * 100 : null,
+        };
+    }
 
     const handleDownload = async () => {
         if (!details) return;
@@ -1096,6 +1127,57 @@ const SalesOrderDetailsModal = ({ so, onClose, onViewPO }) => {
                             </div>
                         </>
                     )}
+
+                    {/* Reconciliation Report — fabric assigned vs. pieces cut vs.
+                        pieces dispatched, summed across every batch linked to this
+                        SO (any SOP), sourced from the same bulk totals endpoint the
+                        workflow table/Excel export use. Shown independent of the
+                        details/notes fetch above since it only needs batchTotals. */}
+                    <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                            <Layers size={12} /> Reconciliation Report · {batches.length} batch{batches.length !== 1 ? 'es' : ''}
+                        </p>
+                        {batches.length === 0 ? (
+                            <div className="px-4 py-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl text-sm text-slate-400 text-center">
+                                No production batches linked to this sales order yet
+                            </div>
+                        ) : !reconciliation ? (
+                            <div className="flex justify-center py-6">
+                                <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
+                                    <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">Total Fabric Assigned</p>
+                                    <p className="text-lg font-bold text-blue-800 mt-1 tabular-nums">
+                                        {reconciliation.fabric.toLocaleString(undefined, { maximumFractionDigits: 1 })} m
+                                        {reconciliation.endbitReused > 0 && (
+                                            <span className="text-xs font-semibold text-blue-500 ml-1">
+                                                ({reconciliation.endbitReused.toLocaleString(undefined, { maximumFractionDigits: 1 })} m same-SO endbit)
+                                            </span>
+                                        )}
+                                    </p>
+                                </div>
+                                <div className="bg-violet-50 border border-violet-100 rounded-xl px-4 py-3">
+                                    <p className="text-[10px] font-bold text-violet-500 uppercase tracking-wider">Total Pieces Cut</p>
+                                    <p className="text-lg font-bold text-violet-800 mt-1 tabular-nums">{reconciliation.cut.toLocaleString()} pcs</p>
+                                </div>
+                                <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+                                    <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">Total Dispatched</p>
+                                    <p className="text-lg font-bold text-emerald-800 mt-1 tabular-nums">{reconciliation.dispatched.toLocaleString()} pcs</p>
+                                </div>
+                                <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
+                                    <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Cut → Dispatch Ratio</p>
+                                    <p className="text-lg font-bold text-amber-800 mt-1 tabular-nums">
+                                        {reconciliation.ratioPct == null ? '—' : `${reconciliation.ratioPct.toFixed(1)}%`}
+                                    </p>
+                                    <p className="text-[10px] text-amber-500 mt-0.5 tabular-nums">
+                                        {reconciliation.dispatched.toLocaleString()} / {reconciliation.cut.toLocaleString()} pcs
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
 
                     {/* Linked Purchase Orders — includes SOP-nested POs, unlike the accounting portal's SO-level-only list */}
                     <div>
@@ -2540,6 +2622,7 @@ const ProductionWorkflowDashboard = () => {
     const [inwardPO, setInwardPO]               = useState(null);
     const [trimOrdersBatch, setTrimOrdersBatch] = useState(null);
     const [exporting, setExporting]             = useState(false);
+    const [viewMode, setViewMode]               = useState('graph'); // 'graph' | 'table'
 
     const fetchData = async () => {
         setLoading(true);
@@ -2664,6 +2747,23 @@ const ProductionWorkflowDashboard = () => {
                             ))}
                         </div>
 
+                        <div className="flex items-center gap-0.5 bg-slate-100 rounded-lg p-0.5">
+                            <button
+                                onClick={() => setViewMode('graph')}
+                                title="Workflow graph view"
+                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold transition-colors ${viewMode === 'graph' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                <Workflow size={13} /> Workflow
+                            </button>
+                            <button
+                                onClick={() => setViewMode('table')}
+                                title="Excel-like table view — one row per batch, filter any column"
+                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold transition-colors ${viewMode === 'table' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                <Table2 size={13} /> Table
+                            </button>
+                        </div>
+
                         <div className="ml-auto flex items-center gap-2">
                             <button
                                 onClick={handleExportExcel}
@@ -2701,6 +2801,12 @@ const ProductionWorkflowDashboard = () => {
                     <div className="h-full flex items-center justify-center">
                         <Loader2 className="animate-spin text-indigo-600 w-10 h-10" />
                     </div>
+                ) : viewMode === 'table' ? (
+                    <ProductionWorkflowTableView
+                        salesOrders={filteredData}
+                        onSOClick={setSelectedSO}
+                        onBatchClick={handleBatchDrilldown}
+                    />
                 ) : (
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                         <table className="min-w-full text-left border-collapse">

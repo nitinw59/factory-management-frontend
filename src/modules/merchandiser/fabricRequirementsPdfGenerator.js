@@ -28,7 +28,10 @@ export async function generateFabricRequirementsPdf({ sop, salesOrder, fabricReq
     doc.text(`Fabric Requirements — ${soLabel} — ${sop.product_name}`, 14, 18);
     doc.setFont(undefined, 'normal');
     doc.setFontSize(9);
-    doc.text(`Generated: ${new Date().toLocaleDateString('en', { dateStyle: 'medium' })}${company?.name ? `   |   ${company.name}` : ''}`, 14, 25);
+    doc.text(
+        `Generated: ${new Date().toLocaleDateString('en', { dateStyle: 'medium' })}   |   Fabric Type: ${sop.fabric_type_name || '—'}${company?.name ? `   |   ${company.name}` : ''}`,
+        14, 25
+    );
 
     let y = 32;
     let grandRequired = 0;
