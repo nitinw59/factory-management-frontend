@@ -152,12 +152,22 @@ export default function PublicWorkstationScorecardPage() {
         return () => clearInterval(t);
     }, [pages.length]);
 
-    const tickerText = useMemo(() => {
-        if (orderedRows.length === 0) return '';
-        return orderedRows
-            .map(w => `${w.workstation_name} — ${w.user_name || 'Unassigned'} (${w.today_output ?? 0})`)
-            .join('     •     ');
-    }, [orderedRows]);
+    // Built as JSX items, not one joined string — so the count can carry its
+    // own color (emerald once real output has landed today, muted otherwise)
+    // instead of the whole ticker being flat gray text.
+    const renderTickerItems = (copyKey) => orderedRows.map((w, i) => {
+        const count = w.today_output ?? 0;
+        return (
+            <span key={`${copyKey}-${w.workstation_id}-${i}`} className="text-lg font-bold whitespace-nowrap">
+                <span className="text-gray-300">{w.workstation_name}</span>
+                <span className="text-gray-600"> — {w.user_name || 'Unassigned'} </span>
+                <span className={`font-black tabular-nums ${count > 0 ? 'text-emerald-400' : 'text-gray-600'}`}>
+                    ({count.toLocaleString()})
+                </span>
+                <span className="text-gray-700 mx-4">•</span>
+            </span>
+        );
+    });
 
     const currentRows = pages[pageIdx] || [];
 
@@ -182,10 +192,10 @@ export default function PublicWorkstationScorecardPage() {
                     </span>
                 </div>
                 <div className="flex-1 overflow-hidden whitespace-nowrap">
-                    {tickerText && (
-                        <div className="inline-flex wls-marquee-track">
-                            <span className="text-lg font-bold text-gray-300 px-4">{tickerText}</span>
-                            <span className="text-lg font-bold text-gray-300 px-4">{tickerText}</span>
+                    {orderedRows.length > 0 && (
+                        <div className="inline-flex wls-marquee-track px-4">
+                            {renderTickerItems('a')}
+                            {renderTickerItems('b')}
                         </div>
                     )}
                 </div>
