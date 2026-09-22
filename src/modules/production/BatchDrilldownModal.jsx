@@ -5,6 +5,7 @@ import {
     BarChart2, FileText, AlertTriangle, Box
 } from 'lucide-react';
 import { productionManagerApi } from '../../api/productionManagerApi';
+import PriorityChip from '../../shared/PriorityChip';
 
 // ─── SHARED ───────────────────────────────────────────────────────────────────
 
@@ -960,6 +961,7 @@ const BatchDrilldownModal = ({ batchId, batchCode, onClose }) => {
                             )}
                         </div>
                         {h.batch_status && <StatusBadge status={h.batch_status} />}
+                        {h.priority && <PriorityChip priority={h.priority} size="xs" />}
                     </div>
                     <button
                         onClick={onClose}

@@ -9,6 +9,7 @@ import {
 // Assuming you have a centralized API client configured (e.g., axios instance)
 import { warRoomApi } from '../../api/warRoomApi';
 import { productionManagerApi } from '../../api/productionManagerApi';
+import PriorityChip from '../../shared/PriorityChip';
 
 // ============================================================================
 // DATE HELPERS & PRESETS (Unchanged)
@@ -155,6 +156,7 @@ const BatchDetailView = ({ batch, lineName, onBack }) => {
                     <div>
                         <h2 className="text-4xl font-black text-black flex items-center tracking-tight mb-2">
                             <Shirt className="w-10 h-10 mr-5 text-indigo-600" /> #{batch.batchId ?? batch.batchCode}
+                            {batch.priority && <span className="ml-4"><PriorityChip priority={batch.priority} size="md" /></span>}
                         </h2>
                         <span className="block text-sm font-mono font-bold text-slate-500 mb-1">{batch.batchCode}</span>
                         <span className="text-xl font-bold text-slate-500 flex items-center">
@@ -498,7 +500,10 @@ const BatchModeCard = ({ batch, lineName, onClick }) => {
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center flex-shrink-0"><Shirt className="w-5 h-5 text-indigo-600" /></div>
                         <div>
-                            <h3 className="font-black text-slate-900 text-lg leading-tight">#{batch.batchId ?? batch.batchCode}</h3>
+                            <h3 className="font-black text-slate-900 text-lg leading-tight flex items-center gap-1.5">
+                                #{batch.batchId ?? batch.batchCode}
+                                {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
+                            </h3>
                             <span className="text-xs font-bold text-slate-500 leading-tight block truncate max-w-[180px]" title={batch.batchCode}>{batch.batchCode}</span>
                             <span className="text-[10px] font-bold text-slate-400 leading-tight block truncate max-w-[180px]">{batch.product}</span>
                         </div>
@@ -595,6 +600,7 @@ export default function FactoryLineControlBoard() {
                 active_batches: (line.active_batches || []).map(b => ({
                     batchId: b.batch_id ?? null,
                     batchCode: b.batch_code || 'UNKNOWN',
+                    priority: b.priority || null,
                     product: b.product || 'Unknown Product',
                     target: parseInt(b.target) || 0,
                     completed: parseInt(b.completed) || 0,

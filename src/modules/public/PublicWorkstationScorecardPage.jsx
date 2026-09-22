@@ -13,8 +13,8 @@ import { publicApi } from '../../api/publicApi';
 import usePublicSocket from './usePublicSocket';
 import AnchoredPopover from '../../shared/AnchoredPopover';
 
-const ROWS_PER_PAGE = 6;
-const ROTATE_MS = 5000;
+const ROWS_PER_PAGE = 3;
+const ROTATE_MS = 15000;
 const SAFETY_POLL_MS = 60000;
 // Own key, separate from the admin dashboard widget's (wls_row_order_v1) —
 // this is set per kiosk device, not tied to whoever's logged into the admin
@@ -33,6 +33,16 @@ const STAT_COLORS = {
     repaired: 'text-amber-400',
     rework:   'text-orange-400',
     rejected: 'text-red-400',
+    dhu:      'text-cyan-400',
+};
+
+// DHU (Defects per Hundred Units), as defined for this scorecard: approved
+// good pieces per defective piece — repaired + rework + rejected all count
+// as a "defect" for this ratio. Null (rendered as "—") when there are no
+// defects yet, rather than showing a division-by-zero artifact.
+const computeDhu = (w) => {
+    const defects = (w.today_repaired ?? 0) + (w.today_rework ?? 0) + (w.today_rejected ?? 0);
+    return defects === 0 ? null : (w.today_approved ?? 0) / defects;
 };
 
 const StatBlock = ({ label, value, cls }) => (
@@ -44,13 +54,20 @@ const StatBlock = ({ label, value, cls }) => (
     </div>
 );
 
+const DhuBlock = ({ dhu }) => (
+    <div className="flex flex-col items-center justify-center px-4 min-w-[6rem]">
+        <span className="text-[11px] uppercase tracking-widest font-bold text-gray-500 mb-1">DHU</span>
+        <span className={`text-4xl font-black tabular-nums ${dhu !== null ? STAT_COLORS.dhu : 'text-gray-700'}`}>
+            {dhu !== null ? dhu.toFixed(2) : '—'}
+        </span>
+    </div>
+);
+
 const WorkstationRow = ({ w }) => (
     <div className="flex-1 flex items-center justify-between px-10 border-b border-gray-800 last:border-b-0">
         <div className="min-w-0 flex-1">
-            <p className="text-4xl font-black text-white truncate">{w.workstation_name}</p>
-            <p className="text-xl text-gray-400 truncate mt-1">
+            <p className="text-4xl font-black text-white truncate">
                 {w.user_name || <span className="text-gray-600">Unassigned</span>}
-                {w.line_name && <span className="text-gray-600"> · {w.line_name}</span>}
             </p>
         </div>
         <div className="flex items-center shrink-0">
@@ -58,12 +75,72 @@ const WorkstationRow = ({ w }) => (
             <StatBlock label="Repaired" value={w.today_repaired} cls={STAT_COLORS.repaired} />
             <StatBlock label="Rework"   value={w.today_rework}   cls={STAT_COLORS.rework} />
             <StatBlock label="Rejected" value={w.today_rejected} cls={STAT_COLORS.rejected} />
+            <DhuBlock dhu={computeDhu(w)} />
             <div className="flex flex-col items-center justify-center px-6 ml-2 border-l border-gray-800 min-w-[7rem]">
                 <span className="text-[11px] uppercase tracking-widest font-bold text-gray-500 mb-1">Today</span>
                 <span className="text-5xl font-black text-white tabular-nums">
                     {(w.today_output ?? 0).toLocaleString()}
                 </span>
             </div>
+        </div>
+    </div>
+);
+
+// ─── Mobile phone layout ──────────────────────────────────────────────────
+// Same data, rendered as a plain scrollable list instead of the TV's
+// timed-rotation pages — a phone has no "someone standing across the room"
+// constraint, so there's no reason to hide rows behind a 15s rotation.
+// Per request: only the user's name is shown per row, not the workstation.
+const MOBILE_BREAKPOINT = 768;
+
+function useIsMobile(breakpoint = MOBILE_BREAKPOINT) {
+    const [isMobile, setIsMobile] = useState(
+        () => typeof window !== 'undefined' && window.innerWidth < breakpoint
+    );
+    useEffect(() => {
+        const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+        const onChange = () => setIsMobile(mq.matches);
+        onChange();
+        mq.addEventListener('change', onChange);
+        return () => mq.removeEventListener('change', onChange);
+    }, [breakpoint]);
+    return isMobile;
+}
+
+const MobileStat = ({ label, value, cls }) => (
+    <div className="flex flex-col items-center">
+        <span className="text-[9px] uppercase tracking-wider font-bold text-gray-500">{label}</span>
+        <span className={`text-sm font-black tabular-nums ${value > 0 ? cls : 'text-gray-700'}`}>
+            {(value ?? 0).toLocaleString()}
+        </span>
+    </div>
+);
+
+const MobileDhu = ({ dhu }) => (
+    <div className="flex flex-col items-center">
+        <span className="text-[9px] uppercase tracking-wider font-bold text-gray-500">DHU</span>
+        <span className={`text-sm font-black tabular-nums ${dhu !== null ? STAT_COLORS.dhu : 'text-gray-700'}`}>
+            {dhu !== null ? dhu.toFixed(2) : '—'}
+        </span>
+    </div>
+);
+
+const MobileWorkstationRow = ({ w }) => (
+    <div className="px-4 py-3 border-b border-gray-800">
+        <div className="flex items-center justify-between mb-2 gap-2">
+            <p className="text-base font-black text-white truncate">
+                {w.user_name || <span className="text-gray-600">Unassigned</span>}
+            </p>
+            <span className="text-2xl font-black text-white tabular-nums shrink-0">
+                {(w.today_output ?? 0).toLocaleString()}
+            </span>
+        </div>
+        <div className="grid grid-cols-5 gap-1">
+            <MobileStat label="Appr" value={w.today_approved} cls={STAT_COLORS.approved} />
+            <MobileStat label="Rep"  value={w.today_repaired} cls={STAT_COLORS.repaired} />
+            <MobileStat label="Rwk"  value={w.today_rework}   cls={STAT_COLORS.rework} />
+            <MobileStat label="Rej"  value={w.today_rejected} cls={STAT_COLORS.rejected} />
+            <MobileDhu dhu={computeDhu(w)} />
         </div>
     </div>
 );
@@ -159,8 +236,7 @@ export default function PublicWorkstationScorecardPage() {
         const count = w.today_output ?? 0;
         return (
             <span key={`${copyKey}-${w.workstation_id}-${i}`} className="text-lg font-bold whitespace-nowrap">
-                <span className="text-gray-300">{w.workstation_name}</span>
-                <span className="text-gray-600"> — {w.user_name || 'Unassigned'} </span>
+                <span className="text-gray-300">{w.user_name || 'Unassigned'} </span>
                 <span className={`font-black tabular-nums ${count > 0 ? 'text-emerald-400' : 'text-gray-600'}`}>
                     ({count.toLocaleString()})
                 </span>
@@ -170,6 +246,31 @@ export default function PublicWorkstationScorecardPage() {
     });
 
     const currentRows = pages[pageIdx] || [];
+    const isMobile = useIsMobile();
+
+    if (isMobile) {
+        return (
+            <div className="h-screen w-screen bg-black text-white flex flex-col overflow-hidden">
+                <div className="shrink-0 h-12 bg-gray-950 border-b border-gray-800 flex items-center px-4 gap-2">
+                    <span className={`h-2 w-2 rounded-full ${live ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'}`} />
+                    <span className="text-xs font-black uppercase tracking-widest text-gray-400">Factory Live</span>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                    {rows === null ? (
+                        <div className="h-full flex items-center justify-center text-gray-600 text-base font-bold px-6 text-center">
+                            Loading factory floor…
+                        </div>
+                    ) : orderedRows.length === 0 ? (
+                        <div className="h-full flex items-center justify-center text-gray-600 text-base font-bold px-6 text-center">
+                            No active workstations configured.
+                        </div>
+                    ) : (
+                        orderedRows.map(w => <MobileWorkstationRow key={w.workstation_id} w={w} />)
+                    )}
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="h-screen w-screen bg-black text-white flex flex-col overflow-hidden">

@@ -8,6 +8,7 @@ import {
 import { qcApi } from '../../api/qcApi';
 import { productionManagerApi } from '../../api/productionManagerApi';
 import QcDefectsDrilldownModal from './QcDefectsDrilldownModal';
+import PriorityChip from '../../shared/PriorityChip';
 import {
     Loader2, AlertCircle, RefreshCw, Filter,
     ShieldCheck, TrendingUp, TrendingDown, Layers, BarChart2,
@@ -193,6 +194,7 @@ const normBatches = (rows) => rows.map(b => {
     return {
         batch_id:           b.batch_id,
         batch_code:         b.batch_code,
+        priority:           b.priority || null,
         date:               b.date || null,
         line_name:          b.line_name || null,
         pieces_processed:   parseInt(b.pieces_processed)   || 0,
@@ -722,7 +724,12 @@ const QCAnalyticsDashboard = () => {
                                             return (
                                                 <tr key={b.batch_id ?? i} className="hover:bg-slate-50 transition-colors cursor-pointer"
                                                     onClick={() => b.batch_id != null && openDrilldown(`Batch: ${b.batch_code ?? b.batch_id}`, { batch_id: b.batch_id })}>
-                                                    <td className="py-2 pr-3 font-mono font-bold text-slate-700 whitespace-nowrap">{b.batch_code ?? b.batch_id}</td>
+                                                    <td className="py-2 pr-3 font-mono font-bold text-slate-700 whitespace-nowrap">
+                                                        <span className="inline-flex items-center gap-1.5">
+                                                            {b.batch_code ?? b.batch_id}
+                                                            {b.priority && <PriorityChip priority={b.priority} size="xs" />}
+                                                        </span>
+                                                    </td>
                                                     <td className="py-2 pr-3 text-slate-600 whitespace-nowrap">{b.line_name ?? <span className="text-slate-300">—</span>}</td>
                                                     <td className="py-2 pr-3 text-slate-500 whitespace-nowrap">{b.date || <span className="text-slate-300">—</span>}</td>
                                                     {/* Piece level */}

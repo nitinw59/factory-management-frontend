@@ -69,6 +69,7 @@ export const productionManagerApi = {
   // workflow payload — built for the Excel export, one row per batch.
   getWorkflowBatchTotals: () => api.get('/production-manager/production-workflow-batch-totals'),
   getBatchDrilldown: (batchId, flowId) => api.get(`/production-manager/batch/${batchId}/drilldown`, { params: flowId != null ? { flowId } : {} }),
+  setBatchPriority: (batchId, priority) => api.patch(`/production-manager/batches/${batchId}/priority`, { priority }),
   getBatchDrilldownFull: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/drilldown`),
   // Lightweight sibling of getBatchDrilldownFull — just per-stage done/total
   // garment counts, for the workflow graph's StagePipelineChip hover.

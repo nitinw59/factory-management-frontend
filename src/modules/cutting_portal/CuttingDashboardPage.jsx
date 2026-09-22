@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import PriorityChip from '../../shared/PriorityChip';
 import { cuttingPortalApi } from '../../api/cuttingPortalApi';
 import {
     CheckCircle, Loader2, Package, Filter, X, Eye,
@@ -59,7 +60,10 @@ const BatchCard = ({ batch, onOpenCutForm }) => {
                 </div>
 
                 <div className="mt-1">
-                    <h3 className="font-bold text-lg text-slate-800 leading-tight">{batch.batch_code}</h3>
+                    <div className="flex items-center gap-1.5">
+                        <h3 className="font-bold text-lg text-slate-800 leading-tight">{batch.batch_code}</h3>
+                        {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
+                    </div>
                     <p className="text-sm text-slate-500 mt-0.5 line-clamp-1">{batch.product_name}</p>
                 </div>
             </div>

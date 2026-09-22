@@ -130,7 +130,7 @@ const BatchCard = ({ batch, onOpenDispatch }) => {
             <div className={`${accent.hdr} px-4 py-3 flex items-start justify-between gap-3`}>
                 <div className="min-w-0">
                     <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                        <BatchIdentifier batchId={batch.id} batchCode={batch.batch_code} />
+                        <BatchIdentifier batchId={batch.id} batchCode={batch.batch_code} priority={batch.priority} />
                         <StatusBadge status={ds.status} />
                         <QcGateBadge batchId={batch.id} />
                     </div>

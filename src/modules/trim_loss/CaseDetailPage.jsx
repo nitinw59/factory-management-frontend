@@ -5,6 +5,7 @@ import { caseStatusOf, debitStatusOf } from './trimLossStatusConfig';
 import StatusTimeline from './StatusTimeline';
 import CaseActions from './CaseActions';
 import { fmtDateTime, fmtMoney, variantText } from './format';
+import PriorityChip from '../../shared/PriorityChip';
 import {
     Loader2, ArrowLeft, RefreshCw, AlertCircle, PackageX, FileText, History, Link2, ScrollText,
 } from 'lucide-react';
@@ -129,7 +130,14 @@ const CaseDetailPage = () => {
                     <Tile label="Unit cost">{Number(c.unit_cost) > 0 ? fmtMoney(c.unit_cost) : '—'}</Tile>
                     <Tile label="Loss value">{c.loss_value != null ? fmtMoney(c.loss_value) : '—'}</Tile>
                     {(c.production_line_name || c.line_name) && <Tile label="Production line">{c.production_line_name || c.line_name}</Tile>}
-                    {(c.batch_code || c.production_batch_id) && <Tile label="Batch">{c.batch_code ? `${c.batch_code}${c.production_batch_id ? ` · #${c.production_batch_id}` : ''}` : `#${c.production_batch_id}`}</Tile>}
+                    {(c.batch_code || c.production_batch_id) && (
+                        <Tile label="Batch">
+                            <span className="inline-flex items-center gap-1.5">
+                                {c.batch_code ? `${c.batch_code}${c.production_batch_id ? ` · #${c.production_batch_id}` : ''}` : `#${c.production_batch_id}`}
+                                {c.batch_priority && <PriorityChip priority={c.batch_priority} size="xs" />}
+                            </span>
+                        </Tile>
+                    )}
                     {c.reported_by_name && <Tile label="Reported by">{c.reported_by_name}</Tile>}
                     {c.created_at && <Tile label="Reported at">{fmtDateTime(c.created_at)}</Tile>}
                 </div>

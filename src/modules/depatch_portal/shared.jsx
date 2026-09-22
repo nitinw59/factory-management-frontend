@@ -3,6 +3,7 @@
 // slightly divergent copies (DispatchDashboardPage.jsx, BatchDispatchModal.jsx)
 // and batch_id/batch_code display was inconsistent across every file in this
 // module.
+import PriorityChip from '../../shared/PriorityChip';
 
 // ─── STATUS BADGE ─────────────────────────────────────────────────────────────
 // Superset of every status value used across the portal's pages: dispatch
@@ -37,10 +38,15 @@ const SIZE_CLS = {
     md: 'text-lg',
 };
 
-export const BatchIdentifier = ({ batchId, batchCode, size = 'sm', className = '' }) => (
-    <span className={`font-black text-slate-800 ${SIZE_CLS[size] || SIZE_CLS.sm} ${className}`}>
-        #{batchId ?? '—'}
-        {batchCode && <span className="font-mono font-semibold text-slate-400"> · {batchCode}</span>}
+// `priority` is optional — pass it when the caller's data carries it (see
+// PriorityChip) to show the color-coded priority chip alongside the id/code.
+export const BatchIdentifier = ({ batchId, batchCode, priority, size = 'sm', className = '' }) => (
+    <span className={`inline-flex items-center gap-1.5 font-black text-slate-800 ${SIZE_CLS[size] || SIZE_CLS.sm} ${className}`}>
+        <span>
+            #{batchId ?? '—'}
+            {batchCode && <span className="font-mono font-semibold text-slate-400"> · {batchCode}</span>}
+        </span>
+        {priority && <PriorityChip priority={priority} size="xs" />}
     </span>
 );
 

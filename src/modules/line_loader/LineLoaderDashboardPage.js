@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { lineLoaderApi } from '../../api/lineLoaderApi';
 import { Link } from 'react-router-dom';
 import Modal from '../../shared/Modal';
+import PriorityChip from '../../shared/PriorityChip';
 import {
     Loader, CheckCircle2, X,
     Package, FileText, ExternalLink,
@@ -543,6 +544,7 @@ const BatchInfoBanner = ({ batch, activeStage }) => {
                         <span className="font-mono text-xs font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
                             {batch.batch_code}
                         </span>
+                        {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
                     </div>
                     <p className="text-slate-400 text-xs font-medium mt-0.5">{batch.product_name}</p>
                 </div>
@@ -1213,6 +1215,7 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onAssignSizes, onRefresh }
                     <div className="flex items-center gap-3 flex-wrap">
                         <h2 className="text-xl font-black text-white tracking-tight">BATCH #{batch.batch_id}</h2>
                         <span className="text-sm font-mono font-bold text-slate-400 bg-slate-800 px-2.5 py-1 rounded-lg">{batch.batch_code}</span>
+                        {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
                         {batch.overall_status && (
                             <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
                                 batch.overall_status === 'COMPLETED'  ? 'bg-emerald-900 text-emerald-400' :

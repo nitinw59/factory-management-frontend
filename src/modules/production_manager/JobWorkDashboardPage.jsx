@@ -5,6 +5,7 @@ import { lineLoaderApi } from '../../api/lineLoaderApi';
 import { jobWorkApi } from '../../api/jobWorkApi';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import { productionManagerApi } from '../../api/productionManagerApi';
+import PriorityChip from '../../shared/PriorityChip';
 import {
     RefreshCw, Package, ChevronDown, ChevronUp, Loader,
     CheckCircle2, AlertCircle, Send, FileText, Plus, X,
@@ -189,8 +190,9 @@ const BatchJobCard = ({ batch, challans, jobWorkLineIds, onCreateChallan, onSend
                 <div className="flex items-center gap-3">
                     <Package size={16} className="text-slate-400 shrink-0" />
                     <div>
-                        <div className="text-sm font-black text-slate-800">
+                        <div className="text-sm font-black text-slate-800 flex items-center gap-1.5">
                             #{batch.batch_id} · <span className="font-mono">{batch.batch_code}</span>
+                            {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
                         </div>
                         <div className="text-xs text-slate-500">{batch.product_name}</div>
                     </div>

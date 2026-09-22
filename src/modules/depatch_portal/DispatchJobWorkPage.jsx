@@ -75,7 +75,7 @@ const BatchChallanGroup = ({ batch, challans, onSend, sendingChallanId }) => {
                 <div className="flex items-center gap-3">
                     <Package size={15} className="text-slate-400 shrink-0" />
                     <div>
-                        <BatchIdentifier batchId={batch.batch_id} batchCode={batch.batch_code} />
+                        <BatchIdentifier batchId={batch.batch_id} batchCode={batch.batch_code} priority={batch.priority} />
                         <span className="text-xs text-slate-400 block mt-0.5">{batch.product_name}</span>
                         {(batch.customer_name || batch.order_number) && (
                             <span className="text-[11px] text-slate-400 block mt-0.5">

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { LuUsers } from 'react-icons/lu';
+import PriorityChip from '../../shared/PriorityChip';
 
 // ── Color helpers ──────────────────────────────────────────────────────────────
 
@@ -259,8 +260,9 @@ export default function LineCard({ line, defaultExpandEmployees = false }) {
                     <div className="flex flex-wrap gap-1.5 mt-1">
                         {batches.map(b => (
                             <span key={b.batch_id}
-                                className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700">
+                                className="inline-flex items-center gap-1 text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700">
                                 {b.batch_id}
+                                {b.priority && <PriorityChip priority={b.priority} size="xs" />}
                             </span>
                         ))}
                     </div>

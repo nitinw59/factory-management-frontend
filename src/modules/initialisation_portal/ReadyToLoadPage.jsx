@@ -4,6 +4,7 @@ import {
     Loader2, RefreshCw, Package, ChevronDown, ChevronRight,
     AlertCircle, X, CheckCircle2, Layers, Truck,
 } from 'lucide-react';
+import PriorityChip from '../../shared/PriorityChip';
 
 const STATUS_CFG = {
     PENDING:     { cls: 'bg-slate-100 text-slate-600 border-slate-200',   label: 'Pending'     },
@@ -236,6 +237,7 @@ const BatchCard = ({ batch, expanded, onToggle, onSelectRoll }) => {
                         <span className="text-[10px] font-bold font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
                             #{batch.batch_id}
                         </span>
+                        {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
                         <StatusPill status={batch.seq1_progress_status} />
                     </div>
                     <p className="text-xs text-slate-500 mt-0.5 truncate">

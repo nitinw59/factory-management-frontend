@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { jobWorkApi } from '../../api/jobWorkApi';
+import PriorityChip from '../../shared/PriorityChip';
 import {
     Loader, AlertCircle, PackageCheck, Package, X,
     CheckCircle2, RefreshCw, Clock, ArrowRight,
@@ -183,7 +184,10 @@ const ReceiveModal = ({ challan, onClose, onReceived }) => {
                     {/* Batch context */}
                     <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 grid grid-cols-2 gap-x-4 gap-y-2">
                         {[
-                            ['Batch',   `#${challan.production_batch_id}${challan.batch_code ? ` · ${challan.batch_code}` : ''}`],
+                            ['Batch',   <span className="inline-flex items-center gap-1.5">
+                                {`#${challan.production_batch_id}${challan.batch_code ? ` · ${challan.batch_code}` : ''}`}
+                                {challan.priority && <PriorityChip priority={challan.priority} size="xs" />}
+                            </span>],
                             ['Product', challan.product_name ?? '—'],
                             ['Vendor',  challan.vendor_name  ?? '—'],
                             ['Line',    challan.line_name    ?? '—'],
@@ -351,7 +355,10 @@ const QueueCard = ({ item, onProcess }) => {
                                 ['Product',  item.product_name],
                                 ['Vendor',   item.vendor_name],
                                 ['Line',     item.line_name],
-                                ['Batch',    `#${item.production_batch_id} · ${item.batch_code}`],
+                                ['Batch',    <span className="inline-flex items-center gap-1.5">
+                                    {`#${item.production_batch_id} · ${item.batch_code}`}
+                                    {item.priority && <PriorityChip priority={item.priority} size="xs" />}
+                                </span>],
                             ].map(([lbl, val]) => (
                                 <div key={lbl}>
                                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{lbl} </span>

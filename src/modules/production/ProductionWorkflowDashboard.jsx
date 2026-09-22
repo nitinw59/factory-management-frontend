@@ -21,6 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 // here — they're a heavy dependency (~250KB) needed only when a user clicks
 // a "download/print PDF" button, not on every load of this dashboard.
 import FabricIntakeForm from '../accounts/purchase/FabricIntakeForm';
+import PriorityChip from '../../shared/PriorityChip';
 import { generateProductionWorkflowExcel } from './productionWorkflowExcelExport';
 import ProductionWorkflowTableView from './ProductionWorkflowTableView';
 import BatchDrilldownModal from './BatchDrilldownModal';
@@ -112,7 +113,7 @@ const NODE_H_SO            = 190;
 const NODE_H_SOP_BASE      = 76;    // base height (no embedded POs)
 const NODE_H_SOP_PO_SEC    = 18;    // "Purchase Orders" header strip
 const NODE_H_PO_ROW        = 54;    // per embedded PO mini-row
-const NODE_H_BATCH         = 160;
+const NODE_H_BATCH         = 176; // +16 vs. original 160 to fit the priority chip row
 const NODE_H_DISPATCH      = 170;
 const NODE_W_CB            = 68;    // CreateBatch circle (3/4 of previous 90)
 const NODE_H_CB            = 68;
@@ -253,7 +254,7 @@ const SalesOrderNode = ({ data, x, y, poCount, sopCount, batchCount, onAddPO, on
 );
 
 
-const BatchNode = ({ data, x, y, onStageClick, onDrilldown, onTrimOrders, onEditBatch }) => {
+const BatchNode = ({ data, x, y, onStageClick, onDrilldown, onTrimOrders, onEditBatch, onPriorityChange }) => {
     const done  = data.stage_progress?.completed || 0;
     const total = data.stage_progress?.total     || 0;
     const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -291,6 +292,13 @@ const BatchNode = ({ data, x, y, onStageClick, onDrilldown, onTrimOrders, onEdit
                     )}
                     <StatusBadge status={data.overall_status || 'PENDING'} />
                 </div>
+            </div>
+            <div className="mb-1.5">
+                <PriorityChip
+                    priority={data.priority}
+                    size="xs"
+                    onChange={onPriorityChange ? (p) => onPriorityChange(data.batch_id, p) : undefined}
+                />
             </div>
             <p className="text-[10px] text-slate-600 font-semibold truncate mb-2" title={data.product_name}>{data.product_name || '—'}</p>
             <div className="flex flex-wrap gap-1 mb-auto">
@@ -564,7 +572,7 @@ const SopNode = ({ data, x, y, pos = [], sopH, onAddPO, onInward, onShowDetails 
 
 // ─── WORKFLOW GRAPH ───────────────────────────────────────────────────────────
 
-const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onOpenEndBitBatch, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders, onEditBatch, onShowSODetails, onShowSopDetails }) => {
+const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onOpenEndBitBatch, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders, onEditBatch, onPriorityChange, onShowSODetails, onShowSopDetails }) => {
     const { nodes, connectors, height, totalWidth, totalPoCount, totalBatchCount, totalSopCount } = useMemo(() => {
         const nodesList  = [];
         const connList   = [];
@@ -724,7 +732,7 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
                 if (node.type === 'SOP')                 return <SopNode              key={i} {...node} onAddPO={onAddSopPO} onInward={onInward} onShowDetails={onShowSopDetails} />;
                 if (node.type === 'CREATE_BATCH_CIRCLE')         return <CreateBatchCircleNode       key={i} {...node} so={so} onCreateBatch={onCreateBatch} />;
                 if (node.type === 'CREATE_ENDBIT_BATCH_CIRCLE')  return <CreateEndBitBatchCircleNode key={i} {...node} so={so} onOpenEndBitBatch={onOpenEndBitBatch} />;
-                if (node.type === 'BATCH')               return <BatchNode            key={i} {...node} onStageClick={onStageClick} onDrilldown={onDrilldown} onTrimOrders={onTrimOrders} onEditBatch={onEditBatch} />;
+                if (node.type === 'BATCH')               return <BatchNode            key={i} {...node} onStageClick={onStageClick} onDrilldown={onDrilldown} onTrimOrders={onTrimOrders} onEditBatch={onEditBatch} onPriorityChange={onPriorityChange} />;
                 if (node.type === 'DISPATCH')            return <DispatchNode         key={i} {...node} onDispatch={onDispatch} />;
                 return null;
             })}
@@ -734,7 +742,7 @@ const WorkflowGraph = ({ so, onStageClick, onAddPO, onAddSopPO, onCreateBatch, o
 
 // ─── TABLE ROW ────────────────────────────────────────────────────────────────
 
-const SalesOrderTableRow = ({ so, onSODetails, onSopDetails, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onOpenEndBitBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders, onEditBatch }) => {
+const SalesOrderTableRow = ({ so, onSODetails, onSopDetails, onStageClick, onAddPO, onAddSopPO, onCreateBatch, onOpenEndBitBatch, onViewPODetails, onInward, onEditSO, onDrilldown, onDispatch, onTrimOrders, onEditBatch, onPriorityChange }) => {
     const [expanded, setExpanded] = useState(false);
 
     const pos         = allPosOf(so);
@@ -832,6 +840,7 @@ const SalesOrderTableRow = ({ so, onSODetails, onSopDetails, onStageClick, onAdd
                                 onDispatch={onDispatch}
                                 onTrimOrders={onTrimOrders}
                                 onEditBatch={onEditBatch}
+                                onPriorityChange={onPriorityChange}
                                 onShowSODetails={onSODetails}
                                 onShowSopDetails={onSopDetails}
                             />
@@ -2685,10 +2694,20 @@ const ProductionWorkflowDashboard = () => {
     const canInward     = user?.role === 'accountant' || user?.role === 'store_manager';
     const canTrimOrders = user && ['production_manager', 'admin', 'factory_admin', 'store_manager'].includes(user.role);
     const canEditBatch  = user && ['production_manager', 'cutting_manager', 'store_manager'].includes(user.role);
+    const canSetPriority = user && ['production_manager', 'factory_admin'].includes(user.role);
 
     const handleInward      = (po) => setInwardPO({ ...po, id: po.po_id });
     const handleTrimOrders  = (batchId) => setTrimOrdersBatch(batchId);
     const handleEditBatch   = (batchId) => navigate(`${basePath}/batches/edit/${batchId}`);
+    const handlePriorityChange = async (batchId, priority) => {
+        try {
+            await productionManagerApi.setBatchPriority(batchId, priority);
+            fetchData();
+        } catch (err) {
+            console.error('Failed to set batch priority', err);
+            alert('Failed to update batch priority. Please try again.');
+        }
+    };
     const handleExportExcel = async () => {
         setExporting(true);
         try {
@@ -2841,6 +2860,7 @@ const ProductionWorkflowDashboard = () => {
                                         onDispatch={handleDispatch}
                                         onTrimOrders={canTrimOrders ? handleTrimOrders : null}
                                         onEditBatch={canEditBatch ? handleEditBatch : null}
+                                        onPriorityChange={canSetPriority ? handlePriorityChange : null}
                                     />
                                 )) : (
                                     <tr>

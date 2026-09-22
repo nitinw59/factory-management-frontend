@@ -19,6 +19,7 @@ import { caseStatusOf } from '../trim_loss/trimLossStatusConfig';
 import { effectiveStockOf, reservedOf } from './trimOrderCellStatus';
 import TrimOrderItemsGrid from './TrimOrderItemsGrid';
 import TrimOrderItemDrilldownModal from './TrimOrderItemDrilldownModal';
+import PriorityChip from '../../shared/PriorityChip';
 const Spinner = () => <div className="flex justify-center items-center p-12"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
 
 // --- Barcode Print/Download Modal ---
@@ -658,6 +659,7 @@ const TrimOrderDetailPage = () => {
                 batchId: response.data.production_batch_id,
                 batch_code: response.data.batch_code,
                 batch_index: response.data.batch_index ?? null,
+                batchPriority: response.data.batch_priority ?? null,
                 sopId: response.data.sales_order_product_id ?? null,
                 salesOrderNumber: response.data.sales_order_number ?? null,
                 purchaseOrderCode: response.data.purchase_order_code ?? null,
@@ -1195,6 +1197,7 @@ const TrimOrderDetailPage = () => {
                                         {kitStatusOf(orderInfo.status).label}
                                     </span>
                                 )}
+                                {orderInfo?.batchPriority && <PriorityChip priority={orderInfo.batchPriority} size="xs" />}
                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Trim Order #{orderId}</span>
                                 {orderInfo?.productName && (
                                     <button

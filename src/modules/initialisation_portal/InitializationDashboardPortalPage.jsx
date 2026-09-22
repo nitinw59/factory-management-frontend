@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { initializationPortalApi } from '../../api/initializationPortalApi';
 import Modal from '../../shared/Modal';
-import CuttingForm from '../cutting_portal/CuttingForm'; 
+import PriorityChip from '../../shared/PriorityChip';
+import CuttingForm from '../cutting_portal/CuttingForm';
 import {
     Play, Layers, MoreHorizontal, Square, CheckSquare,
     ChevronDown, ChevronRight, Loader2, AlertCircle,
@@ -416,6 +417,7 @@ const BatchCard = ({ batch, onStartClick, onViewProgress, onCutRoll, onFinalizeC
                         </span>
                         <span className="text-slate-300 text-xs">·</span>
                         <span className="font-mono text-xs font-bold text-slate-700">{batch.batch_code || batch.batch_id}</span>
+                        {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
                     </div>
                     <span className={`px-2.5 py-0.5 text-[10px] uppercase font-bold tracking-wider rounded-full border shrink-0 ${statusBadge}`}>
                         {status.replace('_', ' ')}

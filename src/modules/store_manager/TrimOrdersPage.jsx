@@ -4,6 +4,7 @@ import { storeManagerApi } from '../../api/storeManagerApi';
 import { FiClock, FiCheckCircle, FiList, FiPackage, FiSend, FiTruck, FiLock } from 'react-icons/fi';
 import { ChevronRight, Search, RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
 import { kitStatusOf } from '../trim_kits/kitStatusConfig';
+import PriorityChip from '../../shared/PriorityChip';
 
 const Spinner = () => <div className="flex justify-center items-center p-12"><Loader2 className="animate-spin h-10 w-10 text-blue-600" /></div>;
 
@@ -64,10 +65,13 @@ const OrderCard = ({ order }) => {
                             CODE <span className="text-blue-600">#{order.batch_code || order.production_batch_id}</span>
                         </p>
                     </div>
-                    <span className={`inline-flex items-center text-[10px] uppercase tracking-wider font-bold px-2.5 py-1 rounded-full ${badgeColorClass}`}>
-                        <Icon size={12} className="mr-1.5"/>
-                        {statusMeta.label}
-                    </span>
+                    <div className="flex flex-col items-end gap-1">
+                        <span className={`inline-flex items-center text-[10px] uppercase tracking-wider font-bold px-2.5 py-1 rounded-full ${badgeColorClass}`}>
+                            <Icon size={12} className="mr-1.5"/>
+                            {statusMeta.label}
+                        </span>
+                        {order.batch_priority && <PriorityChip priority={order.batch_priority} size="xs" />}
+                    </div>
                 </div>
 
                 <div className="pt-3 border-t border-gray-100 flex justify-between items-center mb-3">

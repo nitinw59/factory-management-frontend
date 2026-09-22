@@ -6,6 +6,7 @@ import {
 import { preparationManagerApi } from '../../api/preparationManagerApi';
 import Modal from '../../shared/Modal';
 import { LuClipboardCheck, LuPackage, LuBookHeart, LuPlay, LuListTodo } from 'react-icons/lu';
+import PriorityChip from '../../shared/PriorityChip';
 
 const Spinner = () => <div className="flex justify-center items-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
 
@@ -301,7 +302,10 @@ const BatchCard = ({ batch, onActionSuccess, onRollDetailsClick }) => {
         <div className="bg-white p-4 rounded-xl shadow-lg border-l-4 border-purple-500 hover:shadow-xl transition-shadow flex flex-col">
             <div className="flex justify-between items-start mb-2">
                 <div>
-                    <h3 className="font-bold text-lg text-purple-600 tracking-wider">{batch.batch_code || `Batch #${batch.id}`}</h3>
+                    <h3 className="font-bold text-lg text-purple-600 tracking-wider flex items-center gap-1.5">
+                        {batch.batch_code || `Batch #${batch.id}`}
+                        {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
+                    </h3>
                     <p className="text-sm text-gray-600">{batch.product_name}</p>
                     <p className="text-xs text-gray-400 mt-1">Step: <span className="font-medium text-gray-600">{batch.current_step_name || 'N/A'}</span></p>
                 </div>

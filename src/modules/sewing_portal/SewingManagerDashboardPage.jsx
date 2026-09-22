@@ -3,6 +3,7 @@ import { FiPlay, FiLayers, FiInfo,  FiSquare, FiCheckSquare, FiEdit3, FiTruck, F
 
 import { LuPlay, LuLayers, LuInfo, LuRuler, LuSquare, LuSquareCheck, LuPencil, LuTruck, LuCheck, LuLoader, LuLayoutDashboard } from 'react-icons/lu';
 import Modal from '../../shared/Modal';
+import PriorityChip from '../../shared/PriorityChip';
 import {sewingManagerApi} from '../../api/sewingManagerApi';
 
 // --- SHARED & REUSABLE COMPONENTS ---
@@ -123,7 +124,10 @@ const BatchCard = ({ batch, onStartClick }) => {
                         {status.replace('_', ' ')}
                     </span>
                 </div>
-                <p className="font-mono text-sm text-gray-500">{batch.batch_code || `BATCH-${batch.batch_id}`}</p>
+                <div className="flex items-center gap-1.5">
+                    <p className="font-mono text-sm text-gray-500">{batch.batch_code || `BATCH-${batch.batch_id}`}</p>
+                    {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
+                </div>
                  {progress?.line_name && (
                     <div className="mt-2 text-xs font-semibold text-blue-800 bg-blue-100 rounded-full px-2 py-0.5 inline-block">
                         Assigned to: {progress.line_name}

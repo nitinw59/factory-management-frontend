@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { LuClock, LuLayers, LuChevronRight, LuDownload, LuLoader, LuCircleCheck, LuX } from 'react-icons/lu';
 import { universalApi } from '../../api/universalApi';
+import PriorityChip from '../../shared/PriorityChip';
 import {
     Shirt, Layers, ClipboardCheck, Component, Check, X,
     Hammer, Loader2, Menu, ChevronDown, ChevronRight, CheckCircle2,
@@ -2128,6 +2129,7 @@ const UniversalWorkstationDashboard = () => {
                                                 <h2 className="text-lg font-black text-white tracking-tight uppercase">
                                                     BATCH #{batch.batch_id}
                                                 </h2>
+                                                {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
                                                 {(batch.cut_rolls != null || batch.total_rolls != null) && (
                                                     <div className="flex items-center gap-2">
                                                         <span className="text-xs font-black text-white bg-slate-800 px-3 py-1 rounded-lg border border-slate-700">

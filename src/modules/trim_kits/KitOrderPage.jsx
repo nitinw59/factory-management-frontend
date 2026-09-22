@@ -713,6 +713,7 @@ const KitOrderPage = () => {
                     orderId,
                     batchLabel: kitBatchLabel(kit),
                     batch_code: kit.batch_code,
+                    priority: kit.priority,
                     production_batch_id: batchIdOf(kit),
                     issue_id: data.issue?.id,
                     issue_number: data.issue?.issue_number,
@@ -802,7 +803,7 @@ const KitOrderPage = () => {
                 <div className="flex flex-wrap justify-between items-start gap-3">
                     <div>
                         <div className="flex items-center gap-3">
-                            <h1 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">Kit — Batch <BatchTag code={kit.batch_code} id={batchIdOf(kit)} /></h1>
+                            <h1 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">Kit — Batch <BatchTag code={kit.batch_code} id={batchIdOf(kit)} priority={kit.priority} /></h1>
                             <span className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full border ${statusMeta.badge}`}>
                                 {statusMeta.label}
                             </span>

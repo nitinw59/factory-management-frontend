@@ -128,7 +128,7 @@ const KitPickupQueuePage = () => {
                             <div className="flex justify-between items-center gap-4">
                                 <div className="min-w-0">
                                     <div className="flex items-center gap-3">
-                                        <h3 className="font-bold text-lg text-gray-900 truncate inline-flex items-center gap-1.5">Batch <BatchTag code={kit.batch_code} id={batchIdOf(kit)} /></h3>
+                                        <h3 className="font-bold text-lg text-gray-900 truncate inline-flex items-center gap-1.5">Batch <BatchTag code={kit.batch_code} id={batchIdOf(kit)} priority={kit.priority} /></h3>
                                         <span className="text-[10px] uppercase tracking-wider font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded-full whitespace-nowrap">
                                             Ready for pickup
                                         </span>
@@ -184,7 +184,7 @@ const KitPickupQueuePage = () => {
                                             <FileText className="w-4 h-4 text-gray-400 shrink-0" />
                                             <span className="font-bold text-gray-800 truncate inline-flex items-center gap-1.5">
                                                 Batch {p.batch_code || p.production_batch_id != null
-                                                    ? <BatchTag code={p.batch_code} id={p.production_batch_id} />
+                                                    ? <BatchTag code={p.batch_code} id={p.production_batch_id} priority={p.priority} />
                                                     : (p.batchLabel || `#${p.orderId}`)}
                                             </span>
                                             {p.order_status === 'PARTIALLY_ISSUED' && (

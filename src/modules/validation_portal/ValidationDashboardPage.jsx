@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { validationPortalApi } from '../../api/validationPortalApi';
 import Modal from '../../shared/Modal';
+import PriorityChip from '../../shared/PriorityChip';
 
 import { LuClipboardCheck, LuPackage, LuBookHeart, LuCircleCheck, LuClock, LuPackageCheck, LuPackageX } from 'react-icons/lu';
 
@@ -53,8 +54,11 @@ const ValidationDashboardPage = () => {
     const BatchCard = ({ batch, isPending }) => (
         <div className={`bg-white p-4 rounded-lg shadow border-l-4 ${isPending ? 'border-purple-500' : 'border-green-500'}`}>
             <div className="flex justify-between items-center">
-                <h3 className={`font-bold text-lg ${isPending ? 'text-purple-600' : 'text-green-600'}`}>{batch.batch_code || `Batch #${batch.id}`}</h3>
-                
+                <h3 className={`font-bold text-lg flex items-center gap-1.5 ${isPending ? 'text-purple-600' : 'text-green-600'}`}>
+                    {batch.batch_code || `Batch #${batch.id}`}
+                    {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
+                </h3>
+
                 {isPending ? (
                     <button onClick={() => setSelectedBatch(batch)} className="flex items-center px-3 py-1 text-sm bg-purple-600 text-white rounded hover:bg-purple-700">
                         <LuClipboardCheck className="mr-1" /> Validate

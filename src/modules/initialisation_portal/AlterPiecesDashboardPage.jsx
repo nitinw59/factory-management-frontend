@@ -3,6 +3,7 @@ import { initializationPortalApi } from '../../api/initializationPortalApi';
 import { numberingCheckerApi } from '../../api/numberingCheckerApi';
 
 import { LuTriangleAlert, LuHammer, LuWrench, LuCircleX } from 'react-icons/lu';
+import PriorityChip from '../../shared/PriorityChip';
 
 // --- SHARED UI COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
@@ -198,7 +199,10 @@ const AlterPiecesDashboardPage = () => {
                                         <tr key={batch.batch_id}>
                                             <td className="py-2 px-3">
                                                 <p className="font-semibold">{batch.product_name}</p>
-                                                <p className="text-xs text-gray-500 font-mono">{batch.batch_code || `BATCH-${batch.batch_id}`}</p>
+                                                <p className="text-xs text-gray-500 font-mono flex items-center gap-1.5">
+                                                    {batch.batch_code || `BATCH-${batch.batch_id}`}
+                                                    {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
+                                                </p>
                                             </td>
                                             <td className="py-2 px-3 text-right font-bold text-yellow-600">{batch.altered_count}</td>
                                             <td className="py-2 px-3 text-right font-bold text-orange-600">{batch.repaired_count}</td>

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { assemblyApi } from '../../api/assemblyApi';
 import { universalApi } from '../../api/universalApi';
+import PriorityChip from '../../shared/PriorityChip';
 
 // ── Work Log helpers ──────────────────────────────────────────────────────────
 const STATS_REFRESH_MS = 60_000;
@@ -1410,9 +1411,12 @@ const AssemblyProcessingPortal = () => {
                                                 className="bg-slate-50 p-8 rounded-[2rem] text-left border-2 border-slate-100 hover:border-indigo-500 hover:shadow-lg transition-all group"
                                             >
                                                 <div className="flex items-center justify-between mb-4">
-                                                    <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-600 font-black text-[10px] uppercase rounded-lg">
-                                                        {batch.batch_id}
-                                                    </span>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-600 font-black text-[10px] uppercase rounded-lg">
+                                                            {batch.batch_id}
+                                                        </span>
+                                                        {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
+                                                    </div>
                                                     {velocity != null && (
                                                         <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-sky-100 text-sky-700">
                                                             {velocity}/hr
@@ -1461,7 +1465,10 @@ const AssemblyProcessingPortal = () => {
                                                 <ArrowLeft size={16} className="mr-2" /> Back to Batches
                                             </button>
                                             <h2 className="text-2xl font-black text-slate-900">{selectedBatch.product_name}</h2>
-                                            <p className="text-indigo-600 font-black text-sm uppercase tracking-widest mt-0.5">{selectedBatch.batch_id}</p>
+                                            <div className="flex items-center gap-2 mt-0.5">
+                                                <p className="text-indigo-600 font-black text-sm uppercase tracking-widest">{selectedBatch.batch_id}</p>
+                                                {selectedBatch.priority && <PriorityChip priority={selectedBatch.priority} size="xs" />}
+                                            </div>
                                         </div>
                                         {/* Summary */}
                                         {(() => {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { checkingWorkstationApi } from '../../api/checkingWorkstationApi';
 import { LuShirt, LuLayers, LuClipboardCheck, LuComponent, LuCheck, LuX, LuHammer, LuWrench } from 'react-icons/lu';
+import PriorityChip from '../../shared/PriorityChip';
 
 // --- UI & LOGIC COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
@@ -158,7 +159,7 @@ const FabricRollCard = ({ roll, onValidateClick, onApproveAlterClick }) => (
 const ProductionBatchCard = ({ batch, onValidateClick, onApproveAlterClick }) => (
     <div className="bg-white p-4 rounded-lg shadow-md border border-gray-200">
         <div className="border-b pb-3 mb-3">
-            <h2 className="text-xl font-bold text-gray-800 flex items-center"><LuShirt className="mr-2 text-blue-500"/>Batch #{batch.batch_id} <span className="ml-2 text-sm font-normal text-gray-500">{batch.batch_code}</span></h2>
+            <h2 className="text-xl font-bold text-gray-800 flex items-center"><LuShirt className="mr-2 text-blue-500"/>Batch #{batch.batch_id} <span className="ml-2 text-sm font-normal text-gray-500">{batch.batch_code}</span> {batch.priority && <PriorityChip priority={batch.priority} size="xs" className="ml-2" />}</h2>
         </div>
         <div className="space-y-4">
             {batch.rolls.map(roll => <FabricRollCard key={roll.fabric_roll_id} roll={roll} onValidateClick={(itemInfo) => onValidateClick(batch.batch_id, itemInfo)} onApproveAlterClick={(itemInfo) => onApproveAlterClick(batch.batch_id, itemInfo)} />)}

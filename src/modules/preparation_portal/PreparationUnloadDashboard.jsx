@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 
 import preparationUnloadApi from '../../api/preparationUnloadApi';
+import PriorityChip from '../../shared/PriorityChip';
 
 const Spinner = () => <div className="flex justify-center items-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
 
@@ -194,6 +195,7 @@ const PreparationUnloadDashboard = () => {
                         <h3 className="font-bold text-lg text-gray-800 flex items-center">
                              <ClipboardCheck className="w-5 h-5 mr-2 text-blue-500"/>
                              {batch.batch_code || `Batch #${batch.id}`}
+                             {batch.priority && <PriorityChip priority={batch.priority} size="xs" className="ml-2" />}
                         </h3>
                         <p className="text-sm text-gray-600 mt-1 ml-7">{batch.product_name}</p>
                     </div>

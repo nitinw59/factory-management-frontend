@@ -9,6 +9,7 @@ import {
 } from 'react-icons/fi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import PriorityChip from '../../shared/PriorityChip';
 
 const Spinner = () => (
     <div className="flex justify-center items-center p-12">
@@ -536,8 +537,9 @@ const BatchCuttingDetailsPage = () => {
                             <h6 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
                                 Cutting Details
                             </h6>
-                            <h1 className="text-2xl font-bold text-gray-900 leading-none mb-1">
+                            <h1 className="text-2xl font-bold text-gray-900 leading-none mb-1 flex items-center gap-2">
                                 Batch <span className="font-mono text-indigo-600">{details.batch_code || `#${batchId}`}</span>
+                                {details.priority && <PriorityChip priority={details.priority} size="xs" />}
                             </h1>
                             <h3 className="text-sm font-medium text-gray-500">
                                 {details.product_name}

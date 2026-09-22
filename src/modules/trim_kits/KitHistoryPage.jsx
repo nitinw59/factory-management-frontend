@@ -56,7 +56,7 @@ export const HandoverDetailModal = ({ issueId, orderId, onClose }) => {
             ) : (
                 <div className="space-y-4">
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                        <div><p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Batch</p><p className="font-semibold text-gray-800"><BatchTag code={data.batch_code} id={batchIdOf(data)} /></p></div>
+                        <div><p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Batch</p><p className="font-semibold text-gray-800"><BatchTag code={data.batch_code} id={batchIdOf(data)} priority={data.priority} /></p></div>
                         <div><p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Signed</p><p className="font-semibold text-gray-800">{fmtDateTime(data.created_at)}</p></div>
                         <div><p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Taken by</p><p className="font-semibold text-gray-800">{data.issued_to_name || '—'}</p></div>
                         <div><p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Prepared by</p><p className="font-semibold text-gray-800">{data.issued_by_name || '—'}</p></div>
@@ -328,7 +328,7 @@ const KitHistoryPage = () => {
                             <div className="min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-mono font-bold text-gray-800">{r.issue_number}</span>
-                                    <span className="text-xs font-semibold text-gray-500 inline-flex items-center gap-1">Batch <BatchTag code={r.batch_code} id={batchIdOf(r)} /></span>
+                                    <span className="text-xs font-semibold text-gray-500 inline-flex items-center gap-1">Batch <BatchTag code={r.batch_code} id={batchIdOf(r)} priority={r.priority} /></span>
                                     {r.delivery_line_name && <span className="text-[10px] uppercase tracking-wider font-bold bg-gray-100 text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded">{r.delivery_line_name}</span>}
                                 </div>
                                 <p className="text-xs text-gray-500 mt-0.5">
