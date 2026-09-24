@@ -166,7 +166,7 @@ export default function DispatchReceiptDocument({ receipt, onBack }) {
                     <div className="grid grid-cols-2 gap-8 mb-6 bg-slate-50 p-6 rounded-lg border border-slate-100 print:bg-transparent print:border-none print:p-0">
                         <div>
                             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 print:text-slate-600">Batch Information</h3>
-                            <BatchIdentifier batchId={receipt.batchId} batchCode={receipt.batchCode} size="md" className="print:text-black" />
+                            <BatchIdentifier batchId={receipt.batchId} batchCode={receipt.batchCode} priority={receipt.priority} size="md" className="print:text-black" />
                             <p className="text-slate-600 mt-1 print:text-black">{receipt.style}</p>
                         </div>
                         <div>

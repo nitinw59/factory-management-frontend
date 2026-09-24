@@ -46,27 +46,27 @@ const computeDhu = (w) => {
 };
 
 const StatBlock = ({ label, value, cls }) => (
-    <div className="flex flex-col items-center justify-center px-4 min-w-[6rem]">
-        <span className="text-[11px] uppercase tracking-widest font-bold text-gray-500 mb-1">{label}</span>
-        <span className={`text-4xl font-black tabular-nums ${value > 0 ? cls : 'text-gray-700'}`}>
+    <div className="flex flex-col items-center justify-center px-5 min-w-[9rem]">
+        <span className="text-xl uppercase tracking-widest font-bold text-gray-500 mb-1.5">{label}</span>
+        <span className={`text-[7vh] leading-none font-black tabular-nums ${value > 0 ? cls : 'text-gray-700'}`}>
             {(value ?? 0).toLocaleString()}
         </span>
     </div>
 );
 
 const DhuBlock = ({ dhu }) => (
-    <div className="flex flex-col items-center justify-center px-4 min-w-[6rem]">
-        <span className="text-[11px] uppercase tracking-widest font-bold text-gray-500 mb-1">DHU</span>
-        <span className={`text-4xl font-black tabular-nums ${dhu !== null ? STAT_COLORS.dhu : 'text-gray-700'}`}>
+    <div className="flex flex-col items-center justify-center px-5 min-w-[9rem]">
+        <span className="text-xl uppercase tracking-widest font-bold text-gray-500 mb-1.5">DHU</span>
+        <span className={`text-[7vh] leading-none font-black tabular-nums ${dhu !== null ? STAT_COLORS.dhu : 'text-gray-700'}`}>
             {dhu !== null ? dhu.toFixed(2) : '—'}
         </span>
     </div>
 );
 
 const WorkstationRow = ({ w }) => (
-    <div className="flex-1 flex items-center justify-between px-10 border-b border-gray-800 last:border-b-0">
-        <div className="min-w-0 flex-1">
-            <p className="text-4xl font-black text-white truncate">
+    <div className="flex-1 flex items-center justify-between px-14 border-b border-gray-800 last:border-b-0">
+        <div className="min-w-0 flex-1 pr-6">
+            <p className="text-[9vh] leading-none font-black text-white truncate">
                 {w.user_name || <span className="text-gray-600">Unassigned</span>}
             </p>
         </div>
@@ -76,9 +76,9 @@ const WorkstationRow = ({ w }) => (
             <StatBlock label="Rework"   value={w.today_rework}   cls={STAT_COLORS.rework} />
             <StatBlock label="Rejected" value={w.today_rejected} cls={STAT_COLORS.rejected} />
             <DhuBlock dhu={computeDhu(w)} />
-            <div className="flex flex-col items-center justify-center px-6 ml-2 border-l border-gray-800 min-w-[7rem]">
-                <span className="text-[11px] uppercase tracking-widest font-bold text-gray-500 mb-1">Today</span>
-                <span className="text-5xl font-black text-white tabular-nums">
+            <div className="flex flex-col items-center justify-center px-8 ml-3 border-l border-gray-800 min-w-[11rem]">
+                <span className="text-xl uppercase tracking-widest font-bold text-gray-500 mb-1.5">Today</span>
+                <span className="text-[9vh] leading-none font-black text-white tabular-nums">
                     {(w.today_output ?? 0).toLocaleString()}
                 </span>
             </div>
@@ -235,12 +235,12 @@ export default function PublicWorkstationScorecardPage() {
     const renderTickerItems = (copyKey) => orderedRows.map((w, i) => {
         const count = w.today_output ?? 0;
         return (
-            <span key={`${copyKey}-${w.workstation_id}-${i}`} className="text-lg font-bold whitespace-nowrap">
+            <span key={`${copyKey}-${w.workstation_id}-${i}`} className="text-3xl font-bold whitespace-nowrap">
                 <span className="text-gray-300">{w.user_name || 'Unassigned'} </span>
                 <span className={`font-black tabular-nums ${count > 0 ? 'text-emerald-400' : 'text-gray-600'}`}>
                     ({count.toLocaleString()})
                 </span>
-                <span className="text-gray-700 mx-4">•</span>
+                <span className="text-gray-700 mx-5">•</span>
             </span>
         );
     });
@@ -280,15 +280,15 @@ export default function PublicWorkstationScorecardPage() {
                     to   { transform: translateX(-50%); }
                 }
                 .wls-marquee-track {
-                    animation: wls-marquee 45s linear infinite;
+                    animation: wls-marquee 60s linear infinite;
                 }
             `}</style>
 
             {/* Ticker */}
-            <div className="shrink-0 h-14 bg-gray-950 border-b border-gray-800 flex items-center overflow-hidden relative">
-                <div className="shrink-0 px-4 h-full flex items-center bg-black border-r border-gray-800 z-10">
-                    <span className="text-[11px] font-black uppercase tracking-widest text-gray-500 flex items-center gap-1.5">
-                        <span className={`h-1.5 w-1.5 rounded-full ${live ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'}`} />
+            <div className="shrink-0 h-20 bg-gray-950 border-b border-gray-800 flex items-center overflow-hidden relative">
+                <div className="shrink-0 px-6 h-full flex items-center bg-black border-r border-gray-800 z-10">
+                    <span className="text-base font-black uppercase tracking-widest text-gray-500 flex items-center gap-2">
+                        <span className={`h-2.5 w-2.5 rounded-full ${live ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'}`} />
                         Factory Live
                     </span>
                 </div>
@@ -308,20 +308,20 @@ export default function PublicWorkstationScorecardPage() {
                     ref={settingsBtnRef}
                     onClick={() => setArrangeOpen(o => !o)}
                     title="Arrange row order"
-                    className={`shrink-0 h-full px-3 flex items-center border-l border-gray-800 z-10 transition-colors ${arrangeOpen ? 'text-white bg-gray-800' : 'text-gray-600 hover:text-gray-300'}`}
+                    className={`shrink-0 h-full px-4 flex items-center border-l border-gray-800 z-10 transition-colors ${arrangeOpen ? 'text-white bg-gray-800' : 'text-gray-600 hover:text-gray-300'}`}
                 >
-                    <SlidersHorizontal size={14} />
+                    <SlidersHorizontal size={20} />
                 </button>
             </div>
 
             {/* Rows — up to 6, filling the rest of the screen */}
             <div className="flex-1 flex flex-col">
                 {rows === null ? (
-                    <div className="flex-1 flex items-center justify-center text-gray-600 text-2xl font-bold">
+                    <div className="flex-1 flex items-center justify-center text-gray-600 text-5xl font-bold">
                         Loading factory floor…
                     </div>
                 ) : currentRows.length === 0 ? (
-                    <div className="flex-1 flex items-center justify-center text-gray-600 text-2xl font-bold">
+                    <div className="flex-1 flex items-center justify-center text-gray-600 text-5xl font-bold">
                         No active workstations configured.
                     </div>
                 ) : (
@@ -331,9 +331,9 @@ export default function PublicWorkstationScorecardPage() {
 
             {/* Page indicator, only when there's more than one page */}
             {pages.length > 1 && (
-                <div className="shrink-0 flex items-center justify-center gap-1.5 py-2 bg-gray-950 border-t border-gray-800">
+                <div className="shrink-0 flex items-center justify-center gap-2 py-3 bg-gray-950 border-t border-gray-800">
                     {pages.map((_, i) => (
-                        <span key={i} className={`h-1.5 rounded-full transition-all ${i === pageIdx ? 'w-6 bg-emerald-400' : 'w-1.5 bg-gray-700'}`} />
+                        <span key={i} className={`h-2.5 rounded-full transition-all ${i === pageIdx ? 'w-10 bg-emerald-400' : 'w-2.5 bg-gray-700'}`} />
                     ))}
                 </div>
             )}

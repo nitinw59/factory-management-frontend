@@ -48,6 +48,7 @@ export default function DispatchReceiptsPage() {
                     : '—',
                 batchId: r.batch_id ?? null,
                 batchCode: r.batch_code || null,
+                priority: r.priority || null,
                 style: r.product_name || '—',
                 client: r.customer_name || '—',
                 orderNumber: r.order_number || null,
@@ -173,7 +174,7 @@ export default function DispatchReceiptsPage() {
                                         )}
                                         <div className="flex items-center gap-2 mb-1">
                                             <Box size={14} className="text-slate-400" />
-                                            <BatchIdentifier batchId={receipt.batchId} batchCode={receipt.batchCode} />
+                                            <BatchIdentifier batchId={receipt.batchId} batchCode={receipt.batchCode} priority={receipt.priority} />
                                         </div>
                                         <p className="text-xs font-medium text-slate-600 truncate">{receipt.style} • {receipt.client}</p>
                                     </div>
@@ -233,7 +234,7 @@ export default function DispatchReceiptsPage() {
                                             </td>
                                             <td className="p-4">
                                                 <div className="flex flex-col">
-                                                    <BatchIdentifier batchId={receipt.batchId} batchCode={receipt.batchCode} className="mb-1" />
+                                                    <BatchIdentifier batchId={receipt.batchId} batchCode={receipt.batchCode} priority={receipt.priority} className="mb-1" />
                                                     <span className="text-sm font-medium text-slate-800">{receipt.style}</span>
                                                 </div>
                                             </td>

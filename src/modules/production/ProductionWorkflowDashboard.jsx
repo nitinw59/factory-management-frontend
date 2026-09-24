@@ -387,9 +387,10 @@ const DispatchNode = ({ x, y, batches, onDispatch }) => {
                                 onClick={(e) => { e.stopPropagation(); onDispatch && onDispatch(b.batch_id, b.batch_code); }}
                                 className={`w-full text-left rounded px-1.5 py-1.5 border transition-colors ${onDispatch ? 'hover:bg-indigo-50 hover:border-indigo-200 cursor-pointer' : 'cursor-default'} border-slate-100 bg-slate-50`}
                             >
-                                <div className="flex items-center justify-between mb-0.5">
+                                <div className="flex items-center justify-between mb-0.5 gap-1">
                                     <span className="font-mono text-[9px] font-bold text-slate-700 truncate">BATCH #{b.batch_id}</span>
                                     <span className="font-mono text-[9px] font-bold text-slate-700 truncate">{b.batch_code}</span>
+                                    {b.priority && <PriorityChip priority={b.priority} size="xs" />}
                                     <StatusBadge status={b.overall_status || 'PENDING'} />
                                 </div>
                                 {expanded && b.product_name && (
@@ -1499,7 +1500,10 @@ const SopDetailsModal = ({ sop, onClose, onViewPO, onViewBatch }) => {
                                     className="text-left bg-blue-50/40 border border-blue-100 rounded-lg p-3 hover:bg-blue-50 hover:border-blue-300 transition-colors"
                                 >
                                     <div className="flex items-center justify-between gap-2">
-                                        <span className="font-bold text-slate-700 text-sm truncate">Batch #{b.batch_id}</span>
+                                        <span className="font-bold text-slate-700 text-sm truncate flex items-center gap-1.5">
+                                            Batch #{b.batch_id}
+                                            {b.priority && <PriorityChip priority={b.priority} size="xs" />}
+                                        </span>
                                         <StatusBadge status={b.overall_status} />
                                     </div>
                                     <p className="text-xs text-slate-500 mt-1 truncate">
@@ -2570,7 +2574,10 @@ const GlobalSearch = ({ data, onDispatch, onBatchDrilldown, onSOClick, onPOClick
                                                 <div key={b.batch_id} className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-50">
                                                     <Scissors size={13} className="text-emerald-500 shrink-0" />
                                                     <div className="flex-1 min-w-0">
-                                                        <p className="font-mono font-bold text-slate-800 text-sm">{b.batch_code}</p>
+                                                        <p className="font-mono font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                                                            {b.batch_code}
+                                                            {b.priority && <PriorityChip priority={b.priority} size="xs" />}
+                                                        </p>
                                                         <p className="text-xs text-slate-500 truncate">#{b.batch_id} · {b.so?.order_number}{b.product_name ? ` · ${b.product_name}` : ''}</p>
                                                     </div>
                                                     <StatusBadge status={b.overall_status} />

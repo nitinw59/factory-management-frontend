@@ -7,6 +7,7 @@ import {
 import { storeManagerApi } from '../../api/storeManagerApi'; 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import PriorityChip from '../../shared/PriorityChip';
 
 // --- UTILS ---
 const formatDate = (dateString) => {
@@ -183,7 +184,10 @@ const TrimOrderSummaryPage = () => {
                     </div>
                     <div className="text-right">
                         <p className="text-sm font-medium text-gray-500 uppercase">Production Batch</p>
-                        <p className="text-lg font-bold text-blue-600">{order.batch_code}</p>
+                        <p className="text-lg font-bold text-blue-600 flex items-center justify-end gap-1.5">
+                            {order.batch_code}
+                            {order.batch_priority && <PriorityChip priority={order.batch_priority} size="xs" />}
+                        </p>
                         <p className="text-lg font-bold text-green-600">Batch ID: {order.batch_id}</p>
 
                         <p className="text-sm text-gray-600">{order.product_name}</p>
