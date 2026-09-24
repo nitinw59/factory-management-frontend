@@ -84,15 +84,16 @@ const VALUE_RATIO = 0.50;
 const LABEL_RATIO = 0.11;
 
 // Shared column template — every row is its own CSS Grid using these exact
-// fractions, so Approved/Repaired/Rework/Rejected/DHU/Today line up in
+// percentages, so Approved/Repaired/Rework/Rejected/DHU/Today line up in
 // identical X positions from row to row regardless of how wide any one
 // row's name or numbers happen to render (a flex `min-w` layout doesn't
 // guarantee that: a wider number in one row can push its own column wider
 // than its neighbor above/below it, since each row's flex children size
-// off their own content). Name gets the most room and stays left-aligned;
-// every stat column is equal width and center-aligned; Today gets a little
-// extra width plus its divider, same as before.
-const ROW_GRID_COLS = '2fr 1fr 1fr 1fr 1fr 1fr 1.25fr';
+// off their own content). Name is locked to 30% and stays left-aligned; the
+// other six columns split the remaining 70% between them (same 1:1:1:1:1:1.25
+// ratio as before — Today a little wider for its divider — just rescaled so
+// their total is exactly 70, not whatever fr math happened to add up to).
+const ROW_GRID_COLS = '30% 11.2% 11.2% 11.2% 11.2% 11.2% 14%';
 
 const StatBlock = ({ label, value, cls, rowH }) => (
     <div className="flex flex-col items-center justify-center">
