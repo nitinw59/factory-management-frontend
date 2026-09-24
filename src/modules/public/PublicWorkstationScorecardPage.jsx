@@ -7,7 +7,7 @@
 // backend utils/websocket.js's ?public=1 opt-in) — falls back to a 60s
 // safety-net poll in case a socket event is ever missed on an unattended
 // screen with nobody around to notice.
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { SlidersHorizontal, GripVertical } from 'lucide-react';
 import { publicApi } from '../../api/publicApi';
 import usePublicSocket from './usePublicSocket';
@@ -45,43 +45,117 @@ const computeDhu = (w) => {
     return defects === 0 ? null : (w.today_approved ?? 0) / defects;
 };
 
-const StatBlock = ({ label, value, cls }) => (
-    <div className="flex flex-col items-center justify-center px-5 min-w-[9rem]">
-        <span className="text-xl uppercase tracking-widest font-bold text-gray-500 mb-1.5">{label}</span>
-        <span className={`text-[7vh] leading-none font-black tabular-nums ${value > 0 ? cls : 'text-gray-700'}`}>
+// Shortens a display name to at most MAX_NAME_LEN characters for the TV row
+// and ticker — but if the name carries a trailing numeric id/code (e.g. an
+// operator number like "Ravi Kumar 042"), that number is kept intact and the
+// text before it is what gets cut, rather than truncating blindly from the
+// end and risking chopping the number itself.
+const MAX_NAME_LEN = 10;
+const shortenUserName = (name) => {
+    if (!name || name.length <= MAX_NAME_LEN) return name;
+
+    const match = name.match(/^(.*?)[\s-]*(\d+)\s*$/);
+    if (match) {
+        const [, textPart, numPart] = match;
+        const trimmedText = textPart.trim();
+        const budget = MAX_NAME_LEN - numPart.length - 1; // -1 for the joining space
+        if (budget > 0) {
+            const shortText = trimmedText.length > budget ? trimmedText.slice(0, budget) : trimmedText;
+            return shortText ? `${shortText} ${numPart}` : numPart;
+        }
+        return numPart.slice(0, MAX_NAME_LEN);
+    }
+
+    return name.slice(0, MAX_NAME_LEN);
+};
+
+// Font sizes are driven off the row's own MEASURED pixel height (see
+// rowHeightPx in the page component, via ResizeObserver on the rows
+// container) rather than a guessed vh fraction — that guess only held for
+// whatever ROWS_PER_PAGE/ticker-height happened to be true at the time it was
+// tuned, and silently went stale the moment either changed. Measuring is the
+// only way to *guarantee* "fills the row" regardless of row count or the TV's
+// reported resolution. Ratios below are of that measured row height; label +
+// value (with its own gap) are sized to land close to the same total height
+// as the single-line name/output text they sit beside, so the row reads as
+// evenly filled left-to-right.
+const NAME_RATIO  = 0.68;
+const VALUE_RATIO = 0.50;
+const LABEL_RATIO = 0.11;
+
+// Shared column template — every row is its own CSS Grid using these exact
+// fractions, so Approved/Repaired/Rework/Rejected/DHU/Today line up in
+// identical X positions from row to row regardless of how wide any one
+// row's name or numbers happen to render (a flex `min-w` layout doesn't
+// guarantee that: a wider number in one row can push its own column wider
+// than its neighbor above/below it, since each row's flex children size
+// off their own content). Name gets the most room and stays left-aligned;
+// every stat column is equal width and center-aligned; Today gets a little
+// extra width plus its divider, same as before.
+const ROW_GRID_COLS = '2fr 1fr 1fr 1fr 1fr 1fr 1.25fr';
+
+const StatBlock = ({ label, value, cls, rowH }) => (
+    <div className="flex flex-col items-center justify-center">
+        <span
+            className="uppercase tracking-widest font-bold text-gray-500 mb-1 leading-tight"
+            style={{ fontSize: rowH * LABEL_RATIO }}
+        >
+            {label}
+        </span>
+        <span
+            className={`leading-none font-black tabular-nums ${value > 0 ? cls : 'text-gray-700'}`}
+            style={{ fontSize: rowH * VALUE_RATIO }}
+        >
             {(value ?? 0).toLocaleString()}
         </span>
     </div>
 );
 
-const DhuBlock = ({ dhu }) => (
-    <div className="flex flex-col items-center justify-center px-5 min-w-[9rem]">
-        <span className="text-xl uppercase tracking-widest font-bold text-gray-500 mb-1.5">DHU</span>
-        <span className={`text-[7vh] leading-none font-black tabular-nums ${dhu !== null ? STAT_COLORS.dhu : 'text-gray-700'}`}>
+const DhuBlock = ({ dhu, rowH }) => (
+    <div className="flex flex-col items-center justify-center">
+        <span
+            className="uppercase tracking-widest font-bold text-gray-500 mb-1 leading-tight"
+            style={{ fontSize: rowH * LABEL_RATIO }}
+        >
+            DHU
+        </span>
+        <span
+            className={`leading-none font-black tabular-nums ${dhu !== null ? STAT_COLORS.dhu : 'text-gray-700'}`}
+            style={{ fontSize: rowH * VALUE_RATIO }}
+        >
             {dhu !== null ? dhu.toFixed(2) : '—'}
         </span>
     </div>
 );
 
-const WorkstationRow = ({ w }) => (
-    <div className="flex-1 flex items-center justify-between px-14 border-b border-gray-800 last:border-b-0">
-        <div className="min-w-0 flex-1 pr-6">
-            <p className="text-[9vh] leading-none font-black text-white truncate">
-                {w.user_name || <span className="text-gray-600">Unassigned</span>}
+const WorkstationRow = ({ w, rowH }) => (
+    <div
+        className="flex-1 grid items-center gap-x-4 px-14 border-b border-gray-800 last:border-b-0"
+        style={{ gridTemplateColumns: ROW_GRID_COLS }}
+    >
+        <div className="min-w-0">
+            <p className="leading-none font-black text-white truncate" style={{ fontSize: rowH * NAME_RATIO }}>
+                {w.user_name ? shortenUserName(w.user_name) : <span className="text-gray-600">Unassigned</span>}
             </p>
         </div>
-        <div className="flex items-center shrink-0">
-            <StatBlock label="Approved" value={w.today_approved} cls={STAT_COLORS.approved} />
-            <StatBlock label="Repaired" value={w.today_repaired} cls={STAT_COLORS.repaired} />
-            <StatBlock label="Rework"   value={w.today_rework}   cls={STAT_COLORS.rework} />
-            <StatBlock label="Rejected" value={w.today_rejected} cls={STAT_COLORS.rejected} />
-            <DhuBlock dhu={computeDhu(w)} />
-            <div className="flex flex-col items-center justify-center px-8 ml-3 border-l border-gray-800 min-w-[11rem]">
-                <span className="text-xl uppercase tracking-widest font-bold text-gray-500 mb-1.5">Today</span>
-                <span className="text-[9vh] leading-none font-black text-white tabular-nums">
-                    {(w.today_output ?? 0).toLocaleString()}
-                </span>
-            </div>
+        <StatBlock label="Approved" value={w.today_approved} cls={STAT_COLORS.approved} rowH={rowH} />
+        <StatBlock label="Repaired" value={w.today_repaired} cls={STAT_COLORS.repaired} rowH={rowH} />
+        <StatBlock label="Rework"   value={w.today_rework}   cls={STAT_COLORS.rework}   rowH={rowH} />
+        <StatBlock label="Rejected" value={w.today_rejected} cls={STAT_COLORS.rejected} rowH={rowH} />
+        <DhuBlock dhu={computeDhu(w)} rowH={rowH} />
+        <div className="flex flex-col items-center justify-center pl-6 border-l border-gray-800 h-full">
+            <span
+                className="uppercase tracking-widest font-bold text-gray-500 mb-1 leading-tight"
+                style={{ fontSize: rowH * LABEL_RATIO }}
+            >
+                Today
+            </span>
+            <span
+                className="leading-none font-black text-white tabular-nums"
+                style={{ fontSize: rowH * NAME_RATIO }}
+            >
+                {(w.today_output ?? 0).toLocaleString()}
+            </span>
         </div>
     </div>
 );
@@ -153,6 +227,23 @@ export default function PublicWorkstationScorecardPage() {
     const [arrangeOpen, setArrangeOpen] = useState(false);
     const [dragRowId, setDragRowId]     = useState(null);
     const settingsBtnRef = useRef(null);
+
+    // Measured height (px) of ONE row, from the actual rows container —
+    // ResizeObserver-driven so font sizes (see NAME_RATIO etc. above) always
+    // resolve against real available space, not a guessed viewport fraction.
+    // Divides by ROWS_PER_PAGE (not currentRows.length) so text size stays
+    // constant across pages even when the last page has fewer rows.
+    const rowsContainerRef = useRef(null);
+    const [rowHeightPx, setRowHeightPx] = useState(0);
+    useLayoutEffect(() => {
+        const el = rowsContainerRef.current;
+        if (!el) return;
+        const measure = () => setRowHeightPx(el.clientHeight / ROWS_PER_PAGE);
+        measure();
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
 
     const fetchRows = useCallback(() => {
         publicApi.getWorkstationScorecard()
@@ -236,7 +327,7 @@ export default function PublicWorkstationScorecardPage() {
         const count = w.today_output ?? 0;
         return (
             <span key={`${copyKey}-${w.workstation_id}-${i}`} className="text-3xl font-bold whitespace-nowrap">
-                <span className="text-gray-300">{w.user_name || 'Unassigned'} </span>
+                <span className="text-gray-300">{w.user_name ? shortenUserName(w.user_name) : 'Unassigned'} </span>
                 <span className={`font-black tabular-nums ${count > 0 ? 'text-emerald-400' : 'text-gray-600'}`}>
                     ({count.toLocaleString()})
                 </span>
@@ -315,7 +406,7 @@ export default function PublicWorkstationScorecardPage() {
             </div>
 
             {/* Rows — up to 6, filling the rest of the screen */}
-            <div className="flex-1 flex flex-col">
+            <div ref={rowsContainerRef} className="flex-1 flex flex-col">
                 {rows === null ? (
                     <div className="flex-1 flex items-center justify-center text-gray-600 text-5xl font-bold">
                         Loading factory floor…
@@ -325,7 +416,7 @@ export default function PublicWorkstationScorecardPage() {
                         No active workstations configured.
                     </div>
                 ) : (
-                    currentRows.map(w => <WorkstationRow key={w.workstation_id} w={w} />)
+                    currentRows.map(w => <WorkstationRow key={w.workstation_id} w={w} rowH={rowHeightPx} />)
                 )}
             </div>
 
