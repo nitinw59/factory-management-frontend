@@ -17,6 +17,15 @@ export const adminApi = {
     deleteCompanyProfileImage: (kind) =>
         api.delete(`/admin/company-profile/image/${kind}`),
 
+    // Row order for the public/TV workstation scorecard kiosk page — set here
+    // instead of on the kiosk page itself (a TV has no keyboard/mouse for
+    // in-place reordering, and per-device localStorage there isn't reachable
+    // from anywhere else to manage).
+    getKioskScorecardOrder: () => api.get('/admin/company-profile/kiosk-scorecard-order'),
+    // `hidden` = workstation_id[] switched off for the public screen;
+    // `options` = { show_logo, show_wordmark } idle-animation switches.
+    saveKioskScorecardOrder: (order, hidden, options) => api.put('/admin/company-profile/kiosk-scorecard-order', { order, hidden, options }),
+
     // Trim substitute clusters — reads open to merchandiser/cutting_manager/store_manager
     // too (BomFormPage.jsx's Color Cluster picker needs to list them); mutations
     // (create/update/delete/members) stay factory_admin only — see adminLineRoutes.js.

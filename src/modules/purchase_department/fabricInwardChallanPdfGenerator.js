@@ -1,7 +1,7 @@
 // ─── FABRIC INWARD CHALLAN PDF ───────────────────────────────────────────────
 // Replaces the fabric store's manual paper "Fabric Inward Challan" (one row
-// per fabric-type/colour line on the receipt: roll count, total meters, and a
-// breakdown of each individual roll's meters) with a generated PDF pulled
+// per fabric-type/colour line on the receipt: roll count and total meters,
+// with a blank Remarks column for hand-written notes) with a generated PDF pulled
 // straight from the inward that was just recorded/approved. Printed and
 // hand-signed on receipt/dispatch, same as the paper original — no embedded
 // signature/seal images, just ruled sign-off lines.
@@ -70,7 +70,11 @@ export async function generateFabricInwardChallanPdf({ inward, company }) {
     const ink  = [15, 23, 42];    // near-black — this is a plain ruled form, not a branded document
     const line = [15, 23, 42];
 
-    const isPending = inward.approval_status === 'PENDING_APPROVAL' || inward.approval_status === 'PENDING_UPDATE';
+    // Only a first-time PENDING_APPROVAL inward has its rolls parked in
+    // pending_rolls. A PENDING_UPDATE (edit of an approved inward) keeps its
+    // live fabric_rolls untouched — the proposed edit sits in a separate table
+    // — so it prints from `rolls` like an approved one (same as the detail modal).
+    const isPending = inward.approval_status === 'PENDING_APPROVAL';
     const fabricLines = (inward.items || []).filter(it => (it.item_type || 'trim') === 'fabric');
 
     let y = MARGIN;
@@ -102,8 +106,9 @@ export async function generateFabricInwardChallanPdf({ inward, company }) {
     // ── Roll breakdown table ─────────────────────────────────────────────────
     // One row per fabric-type/colour line (NOT one row per physical roll) —
     // "Roll No" here is this line's sequence number on the challan, matching
-    // the paper convention; the individual roll meters are spelled out in
-    // Remarks instead.
+    // the paper convention. Remarks is deliberately left blank — the per-roll
+    // meter breakdown that used to be auto-filled there was unreliable, so
+    // it's filled in by hand on the print.
     let totalMeters = 0, totalRolls = 0;
     const body = fabricLines.map((it, idx) => {
         const rolls = (isPending ? it.pending_rolls : it.rolls) || [];
@@ -125,7 +130,7 @@ export async function generateFabricInwardChallanPdf({ inward, company }) {
             fmtMeter(meters),
             String(rolls.length),
             uoms.length === 1 ? uoms[0].toUpperCase() : 'MTR',
-            rolls.map(r => fmtMeter(r.meter)).join('+'),
+            '',
         ];
     });
     // Pad to at least the paper template's 15 blank ruled rows so a printed/

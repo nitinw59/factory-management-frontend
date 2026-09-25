@@ -186,7 +186,7 @@ const BulkPasteModal = ({ supplier, items, onClose, onApply }) => {
                 await trimsApi.upsertVariantSupplierCode(r.variant.id, {
                     supplier_id: supplier.id,
                     supplier_color_code: r.supplier_code,
-                    supplier_color_notes: r.notes,
+                    notes: r.notes,
                 });
                 success++;
             } catch {
@@ -420,7 +420,7 @@ const SupplierColorCodesPage = () => {
             await trimsApi.upsertVariantSupplierCode(variantId, {
                 supplier_id: Number(supplierId),
                 supplier_color_code: editing.code.trim(),
-                supplier_color_notes: editing.notes.trim() || null,
+                notes: editing.notes.trim() || null,
             });
             const newCode = editing.code.trim();
             const newNotes = editing.notes.trim() || null;
@@ -468,7 +468,7 @@ const SupplierColorCodesPage = () => {
                 await trimsApi.upsertVariantSupplierCode(adding.variantId, {
                     supplier_id: Number(selectedSupplierId),
                     supplier_color_code: adding.code.trim(),
-                    supplier_color_notes: adding.notes.trim() || null,
+                    notes: adding.notes.trim() || null,
                 });
                 setAdding(null);
                 setToast('Mapping added.');
@@ -485,7 +485,7 @@ const SupplierColorCodesPage = () => {
                 await trimsApi.upsertVariantSupplierCode(selectedVariantId, {
                     supplier_id: Number(adding.supplierId),
                     supplier_color_code: adding.code.trim(),
-                    supplier_color_notes: adding.notes.trim() || null,
+                    notes: adding.notes.trim() || null,
                 });
                 setAdding(null);
                 setToast('Mapping added.');

@@ -679,7 +679,8 @@ export default function InwardsPage({ lockedItemType = null, title, subtitle }) 
     // StandaloneInwardModal.handleLoadPo does for the "against a PO" create flow.
     // Print Challan — the fabric store's paper "Fabric Inward Challan" as a
     // generated PDF, from whatever's actually recorded on this row (rolls
-    // while pending are pulled from pending_rolls, same as the detail modal).
+    // of a PENDING_APPROVAL inward are pulled from pending_rolls, same as the
+    // detail modal; an edit-pending row prints its current live rolls).
     // Available at any approval status — a store manager may want it printed
     // for the receiving desk before purchase-manager approval even lands.
     const handlePrintChallan = useCallback(async (row) => {

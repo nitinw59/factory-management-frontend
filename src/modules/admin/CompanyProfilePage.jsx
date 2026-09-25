@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
     Loader2, Save, AlertTriangle, CheckCircle2, Building2, Receipt, MapPin, Phone,
     Banknote, FileText, Image as ImageIcon, Trash2, Upload, RefreshCw, Scale,
+    Tv, GripVertical, Eye, EyeOff, Sparkles, Type,
 } from 'lucide-react';
 import { adminApi } from '../../api/adminApi';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
@@ -252,6 +253,209 @@ function MatchToleranceCard() {
     );
 }
 
+// Small on/off switch used by the kiosk card's animation options.
+function ToggleSwitch({ checked, onChange, label, hint, icon: Icon }) {
+    return (
+        <button
+            type="button"
+            role="switch"
+            aria-checked={checked}
+            onClick={() => onChange(!checked)}
+            className="flex items-center gap-3 w-full text-left px-3 py-2.5 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-slate-50 transition"
+        >
+            {Icon && <Icon size={16} className={checked ? 'text-indigo-500 shrink-0' : 'text-slate-300 shrink-0'} />}
+            <span className="flex-1 min-w-0">
+                <span className={`block text-xs font-bold ${checked ? 'text-slate-700' : 'text-slate-400'}`}>{label}</span>
+                {hint && <span className="block text-[11px] text-slate-400">{hint}</span>}
+            </span>
+            <span className={`relative shrink-0 w-9 h-5 rounded-full transition-colors ${checked ? 'bg-indigo-600' : 'bg-slate-300'}`}>
+                <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : ''}`} />
+            </span>
+        </button>
+    );
+}
+
+// Row order for the public/TV workstation scorecard kiosk page
+// (/kiosk/workstation-scorecard). Moved here from a per-device localStorage
+// setting on the kiosk page itself — a TV has no keyboard/mouse to drag-reorder
+// with, and per-device storage on that screen isn't reachable from anywhere
+// else to manage. Self-contained like MatchToleranceCard above: loads/saves
+// through its own endpoints (app_settings key kiosk_scorecard_row_order),
+// not through the company_profile row/form.
+function KioskScorecardOrderCard() {
+    const [workstations, setWorkstations] = useState([]); // full active-workstation list, for names
+    const [order,        setOrder]        = useState([]); // workstation_id[] as strings
+    const [hidden,       setHidden]       = useState(() => new Set()); // workstation_ids switched off for the public screen
+    const [options,      setOptions]      = useState({ show_logo: true, show_wordmark: true }); // idle-screen animations
+    const [loaded,        setLoaded]       = useState(false);
+    const [saving,        setSaving]       = useState(false);
+    const [dragId,        setDragId]       = useState(null);
+    const [msg,           setMsg]          = useState(null); // { ok: bool, text }
+
+    const load = useCallback(() => {
+        setLoaded(false);
+        adminApi.getKioskScorecardOrder()
+            .then(res => {
+                const ws = res.data?.workstations ?? [];
+                const savedOrder = (res.data?.order ?? []).map(String);
+                const currentIds = ws.map(w => String(w.workstation_id));
+                // Reconcile: keep the saved relative order for ids still active,
+                // append any new workstation at the end — same reconciliation
+                // the kiosk page itself used to do client-side.
+                const reconciled = savedOrder.filter(id => currentIds.includes(id));
+                currentIds.forEach(id => { if (!reconciled.includes(id)) reconciled.push(id); });
+                setWorkstations(ws);
+                setOrder(reconciled);
+                setHidden(new Set((res.data?.hidden ?? []).map(String).filter(id => currentIds.includes(id))));
+                setOptions({
+                    show_logo:     res.data?.options?.show_logo     !== false,
+                    show_wordmark: res.data?.options?.show_wordmark !== false,
+                });
+            })
+            .catch(() => setMsg({ ok: false, text: 'Failed to load workstation order.' }))
+            .finally(() => setLoaded(true));
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    const orderedWorkstations = useMemo(() => {
+        const byId = new Map(workstations.map(w => [String(w.workstation_id), w]));
+        return order.map(id => byId.get(id)).filter(Boolean);
+    }, [workstations, order]);
+
+    const handleDragOver = (e, overId) => {
+        e.preventDefault();
+        if (!dragId || dragId === overId) return;
+        setOrder(prev => {
+            const next = [...prev];
+            const from = next.indexOf(dragId);
+            const to = next.indexOf(overId);
+            if (from === -1 || to === -1) return prev;
+            next.splice(from, 1);
+            next.splice(to, 0, dragId);
+            return next;
+        });
+    };
+
+    const toggleHidden = (id) => setHidden(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+    });
+
+    const save = async () => {
+        setSaving(true); setMsg(null);
+        try {
+            await adminApi.saveKioskScorecardOrder(order, [...hidden], options);
+            setMsg({ ok: true, text: 'Kiosk scorecard saved. The TV screen picks it up within a minute.' });
+        } catch (e) {
+            setMsg({ ok: false, text: e?.response?.data?.error || 'Failed to save kiosk row order.' });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <section className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+            <div className="flex items-center gap-2 px-5 py-3 bg-slate-50 border-b border-slate-100">
+                <Tv size={14} className="text-indigo-500" />
+                <h2 className="text-sm font-bold text-slate-700">Kiosk Scorecard — Rows, Visibility &amp; Idle Animations</h2>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+                <p className="text-xs text-slate-500">
+                    Controls the order workstations appear in on the public TV scorecard
+                    (<span className="font-mono">/kiosk/workstation-scorecard</span>) — both the rotating rows
+                    and the top ticker follow this same order. Drag to rearrange; use the eye to show or
+                    hide a workstation on the public screen.
+                    {hidden.size > 0 && <span className="ml-1 font-semibold text-amber-600">{hidden.size} hidden.</span>}
+                </p>
+                <div className="space-y-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Idle screen animations</p>
+                    <p className="text-xs text-slate-500">
+                        After a minute on the scorecard the TV plays an animation for a few seconds, then returns.
+                        With both on they alternate; with both off the scorecard just stays up.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <ToggleSwitch
+                            icon={Sparkles}
+                            checked={options.show_logo}
+                            onChange={v => setOptions(o => ({ ...o, show_logo: v }))}
+                            label="Show logo animation"
+                            hint="The animated MC monogram"
+                        />
+                        <ToggleSwitch
+                            icon={Type}
+                            checked={options.show_wordmark}
+                            onChange={v => setOptions(o => ({ ...o, show_wordmark: v }))}
+                            label="Show “MATRIX OVERSEAS” animation"
+                            hint="The company name set like a logo"
+                        />
+                    </div>
+                </div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 pt-1">Workstation rows</p>
+                {!loaded ? (
+                    <div className="flex justify-center py-6"><Loader2 className="animate-spin h-5 w-5 text-indigo-500" /></div>
+                ) : orderedWorkstations.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic py-2">No active workstations found.</p>
+                ) : (
+                    <div className="max-h-80 overflow-y-auto space-y-1 border border-slate-100 rounded-lg p-2">
+                        {orderedWorkstations.map(w => {
+                            const id = String(w.workstation_id);
+                            const isHidden = hidden.has(id);
+                            return (
+                                <div
+                                    key={id}
+                                    draggable
+                                    onDragStart={() => setDragId(id)}
+                                    onDragOver={e => handleDragOver(e, id)}
+                                    onDragEnd={() => setDragId(null)}
+                                    className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs cursor-move select-none ${dragId === id ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
+                                >
+                                    <GripVertical size={13} className="text-slate-400 shrink-0" />
+                                    <span className={`font-semibold truncate ${isHidden ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{w.workstation_name}</span>
+                                    <span className={`truncate ${isHidden ? 'text-slate-300' : 'text-slate-400'}`}>— {w.user_name || 'Unassigned'}</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => toggleHidden(id)}
+                                        title={isHidden ? 'Hidden on the public scorecard — click to show' : 'Shown on the public scorecard — click to hide'}
+                                        className={`ml-auto shrink-0 p-1 rounded-md transition ${isHidden ? 'text-slate-400 hover:bg-slate-100' : 'text-indigo-600 hover:bg-indigo-50'}`}
+                                    >
+                                        {isHidden ? <EyeOff size={15} /> : <Eye size={15} />}
+                                    </button>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={save}
+                        disabled={!loaded || saving || orderedWorkstations.length === 0}
+                        className="flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-3 py-2 rounded-lg transition"
+                    >
+                        {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                        Save Order
+                    </button>
+                    <button
+                        type="button"
+                        onClick={load}
+                        disabled={!loaded}
+                        className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-300 px-3 py-2 rounded-lg transition bg-white disabled:opacity-50"
+                    >
+                        <RefreshCw size={12} className={!loaded ? 'animate-spin' : ''} /> Reload
+                    </button>
+                    {msg && (
+                        <span className={`text-xs flex items-center gap-1 ${msg.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {msg.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />} {msg.text}
+                        </span>
+                    )}
+                </div>
+            </div>
+        </section>
+    );
+}
+
 export default function CompanyProfilePage() {
     const [form,       setForm]       = useState(emptyForm);
     const [existing,   setExisting]   = useState(null);   // last loaded row (for image URLs + change detection)
@@ -433,6 +637,9 @@ export default function CompanyProfilePage() {
 
             {/* Purchasing controls */}
             <MatchToleranceCard />
+
+            {/* Kiosk / TV display controls */}
+            <KioskScorecardOrderCard />
 
             {/* Images */}
             <section className="bg-white border border-slate-200 rounded-2xl overflow-hidden">

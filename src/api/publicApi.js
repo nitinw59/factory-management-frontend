@@ -7,4 +7,8 @@ import api from '../utils/api';
 // ignores on these routes either way.
 export const publicApi = {
     getWorkstationScorecard: () => api.get('/public/workstation-scorecard'),
+    // Read-only. The order itself is set by an admin on /admin/company-profile
+    // (adminApi.getKioskScorecardOrder / saveKioskScorecardOrder) — this is
+    // just the kiosk page's own read of that same saved value.
+    getWorkstationScorecardOrder: () => api.get('/public/workstation-scorecard-order'),
 };
