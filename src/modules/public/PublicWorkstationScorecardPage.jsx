@@ -132,41 +132,54 @@ const computeSizes = (rowH, containerW, nameCpl) => {
     };
 };
 
-const StatBlock = ({ label, value, cls, sz }) => (
+// Per-element text-size multipliers set by an admin on /admin/company-profile
+// (options.text_scale, whole percents: 100 = the automatic size above). One
+// per grid column plus the ticker. Clamped again here so a bad value can never
+// make text vanish or explode; anything unreadable falls back to 100.
+const TEXT_SCALE_KEYS = ['name', 'approved', 'repaired', 'rework', 'rejected', 'dhu', 'today', 'ticker'];
+const clampPct = (v) => {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) ? Math.min(200, Math.max(50, n)) : 100;
+};
+const normalizeTextScale = (raw) =>
+    Object.fromEntries(TEXT_SCALE_KEYS.map(k => [k, clampPct(raw?.[k] ?? 100)]));
+
+// `k` scales BOTH the column's label and its number (they move together).
+const StatBlock = ({ label, value, cls, sz, k = 1 }) => (
     <div className="min-w-0 overflow-hidden px-2 flex flex-col items-center justify-center">
         <span
             className="uppercase tracking-widest font-bold text-gray-500 mb-1 leading-tight whitespace-nowrap"
-            style={{ fontSize: sz.label }}
+            style={{ fontSize: sz.label * k }}
         >
             {label}
         </span>
         <span
             className={`leading-none font-black tabular-nums whitespace-nowrap ${value > 0 ? cls : 'text-gray-700'}`}
-            style={{ fontSize: sz.value }}
+            style={{ fontSize: sz.value * k }}
         >
             {(value ?? 0).toLocaleString()}
         </span>
     </div>
 );
 
-const DhuBlock = ({ dhu, sz }) => (
+const DhuBlock = ({ dhu, sz, k = 1 }) => (
     <div className="min-w-0 overflow-hidden px-2 flex flex-col items-center justify-center">
         <span
             className="uppercase tracking-widest font-bold text-gray-500 mb-1 leading-tight whitespace-nowrap"
-            style={{ fontSize: sz.label }}
+            style={{ fontSize: sz.label * k }}
         >
             DHU
         </span>
         <span
             className={`leading-none font-black tabular-nums whitespace-nowrap ${dhu !== null ? STAT_COLORS.dhu : 'text-gray-700'}`}
-            style={{ fontSize: sz.value }}
+            style={{ fontSize: sz.value * k }}
         >
             {dhu !== null ? dhu.toFixed(2) : '—'}
         </span>
     </div>
 );
 
-const WorkstationRow = ({ w, sz }) => (
+const WorkstationRow = ({ w, sz, ts }) => (
     <div
         className="flex-1 grid items-center px-8 border-b border-gray-800 last:border-b-0"
         style={{ gridTemplateColumns: ROW_GRID_COLS }}
@@ -175,28 +188,28 @@ const WorkstationRow = ({ w, sz }) => (
             <p
                 className="font-black text-white break-words"
                 style={{
-                    fontSize: sz.name, lineHeight: 1.15,
+                    fontSize: sz.name * ts.name, lineHeight: 1.15,
                     display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden',
                 }}
             >
                 {w.user_name || <span className="text-gray-600">Unassigned</span>}
             </p>
         </div>
-        <StatBlock label="Approved" value={w.today_approved} cls={STAT_COLORS.approved} sz={sz} />
-        <StatBlock label="Repaired" value={w.today_repaired} cls={STAT_COLORS.repaired} sz={sz} />
-        <StatBlock label="Rework"   value={w.today_rework}   cls={STAT_COLORS.rework}   sz={sz} />
-        <StatBlock label="Rejected" value={w.today_rejected} cls={STAT_COLORS.rejected} sz={sz} />
-        <DhuBlock dhu={computeDhu(w)} sz={sz} />
+        <StatBlock label="Approved" value={w.today_approved} cls={STAT_COLORS.approved} sz={sz} k={ts.approved} />
+        <StatBlock label="Repaired" value={w.today_repaired} cls={STAT_COLORS.repaired} sz={sz} k={ts.repaired} />
+        <StatBlock label="Rework"   value={w.today_rework}   cls={STAT_COLORS.rework}   sz={sz} k={ts.rework} />
+        <StatBlock label="Rejected" value={w.today_rejected} cls={STAT_COLORS.rejected} sz={sz} k={ts.rejected} />
+        <DhuBlock dhu={computeDhu(w)} sz={sz} k={ts.dhu} />
         <div className="min-w-0 overflow-hidden px-3 flex flex-col items-center justify-center border-l border-gray-800 h-full">
             <span
                 className="uppercase tracking-widest font-bold text-gray-500 mb-1 leading-tight whitespace-nowrap"
-                style={{ fontSize: sz.todayLabel }}
+                style={{ fontSize: sz.todayLabel * ts.today }}
             >
                 Today
             </span>
             <span
                 className="leading-none font-black text-white tabular-nums whitespace-nowrap"
-                style={{ fontSize: sz.today }}
+                style={{ fontSize: sz.today * ts.today }}
             >
                 {(w.today_output ?? 0).toLocaleString()}
             </span>
@@ -274,7 +287,7 @@ export default function PublicWorkstationScorecardPage() {
     const [rowOrder, setRowOrder] = useState([]); // workstation_id[] as strings
     // Which idle animations an admin has left switched on (both default on,
     // and stay on if the setting can't be read).
-    const [options, setOptions] = useState({ show_logo: true, show_wordmark: true });
+    const [options, setOptions] = useState({ show_logo: true, show_wordmark: true, text_scale: normalizeTextScale(null) });
 
     // Measured size of the rows container — ResizeObserver-driven so font
     // sizes (see computeSizes above) always resolve against real available
@@ -292,21 +305,37 @@ export default function PublicWorkstationScorecardPage() {
         ro.observe(el);
         return () => ro.disconnect();
     }, []);
+    // The scorecard numbers and the admin-set settings (row order, idle
+    // animations, text sizes) are fetched INDEPENDENTLY: a failure or a slow
+    // response on one must never block the other. Previously they were one
+    // Promise.all, so if the settings request failed for any reason (e.g. a
+    // backend that hadn't been updated yet) the whole screen sat on "Loading…"
+    // forever. Now a settings failure just keeps the last-known / default
+    // settings and the scorecard still shows.
+    const [settingsReady, setSettingsReady] = useState(false);
     const fetchRows = useCallback(() => {
-        Promise.all([
-            publicApi.getWorkstationScorecard(),
-            publicApi.getWorkstationScorecardOrder(),
-        ])
-            .then(([dataRes, orderRes]) => {
-                setRows(dataRes.data);
-                setRowOrder((orderRes.data?.order ?? []).map(String));
-                const o = orderRes.data?.options;
+        publicApi.getWorkstationScorecard()
+            .then(res => setRows(res.data))
+            .catch(err => console.error('[PublicWorkstationScorecard] scorecard fetch error', err));
+
+        publicApi.getWorkstationScorecardOrder()
+            .then(res => {
+                setRowOrder((res.data?.order ?? []).map(String));
+                const o = res.data?.options;
                 setOptions(prev => {
-                    const next = { show_logo: o?.show_logo !== false, show_wordmark: o?.show_wordmark !== false };
-                    return prev.show_logo === next.show_logo && prev.show_wordmark === next.show_wordmark ? prev : next;
+                    const next = {
+                        show_logo: o?.show_logo !== false,
+                        show_wordmark: o?.show_wordmark !== false,
+                        text_scale: normalizeTextScale(o?.text_scale),
+                    };
+                    // keep the same object when nothing changed, so a poll doesn't re-render the grid
+                    return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
                 });
             })
-            .catch(err => console.error('[PublicWorkstationScorecard] fetch error', err));
+            .catch(err => console.error('[PublicWorkstationScorecard] settings fetch error — using last known / default settings', err))
+            // Ready either way, so the first paint uses the real settings when
+            // they arrive with the data instead of flashing defaults first.
+            .finally(() => setSettingsReady(true));
     }, []);
 
     useEffect(() => {
@@ -374,6 +403,11 @@ export default function PublicWorkstationScorecardPage() {
         [orderedRows]
     );
     const sizes = useMemo(() => computeSizes(dims.rowH, dims.w, nameCpl), [dims, nameCpl]);
+    // percent → multiplier, per column + ticker
+    const ts = useMemo(
+        () => Object.fromEntries(TEXT_SCALE_KEYS.map(k => [k, options.text_scale[k] / 100])),
+        [options.text_scale]
+    );
 
     const pages = useMemo(() => {
         const out = [];
@@ -397,12 +431,12 @@ export default function PublicWorkstationScorecardPage() {
     const renderTickerItems = (copyKey) => orderedRows.map((w, i) => {
         const count = w.today_output ?? 0;
         return (
-            <span key={`${copyKey}-${w.workstation_id}-${i}`} className="text-4xl font-bold whitespace-nowrap">
+            <span key={`${copyKey}-${w.workstation_id}-${i}`} className="font-bold whitespace-nowrap" style={{ fontSize: 36 * ts.ticker }}>
                 <span className="text-gray-300">{w.user_name || 'Unassigned'} </span>
                 <span className={`font-black tabular-nums ${count > 0 ? 'text-emerald-400' : 'text-gray-600'}`}>
                     ({count.toLocaleString()})
                 </span>
-                <span className="text-gray-700 mx-5">•</span>
+                <span className="text-gray-700" style={{ margin: '0 0.55em' }}>•</span>
             </span>
         );
     });
@@ -418,7 +452,7 @@ export default function PublicWorkstationScorecardPage() {
                     <span className="text-xs font-black uppercase tracking-widest text-gray-400">Factory Live</span>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                    {rows === null ? (
+                    {(rows === null || !settingsReady) ? (
                         <div className="h-full flex items-center justify-center text-gray-600 text-base font-bold px-6 text-center">
                             Loading factory floor…
                         </div>
@@ -449,10 +483,16 @@ export default function PublicWorkstationScorecardPage() {
             `}</style>
 
             {/* Ticker */}
-            <div className="shrink-0 h-24 bg-gray-950 border-b border-gray-800 flex items-center overflow-hidden relative">
+            <div
+                className="shrink-0 bg-gray-950 border-b border-gray-800 flex items-center overflow-hidden relative"
+                style={{ height: Math.round(96 * ts.ticker) }}
+            >
                 <div className="shrink-0 px-5 h-full flex items-center bg-black border-r border-gray-800 z-10">
-                    <span className="text-base font-black uppercase tracking-widest text-gray-500 flex items-center gap-2">
-                        <span className={`h-3 w-3 rounded-full ${live ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'}`} />
+                    <span className="font-black uppercase tracking-widest text-gray-500 flex items-center gap-2" style={{ fontSize: 16 * ts.ticker }}>
+                        <span
+                            className={`rounded-full ${live ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'}`}
+                            style={{ width: 12 * ts.ticker, height: 12 * ts.ticker }}
+                        />
                         Factory Live
                     </span>
                 </div>
@@ -468,7 +508,7 @@ export default function PublicWorkstationScorecardPage() {
 
             {/* Rows — up to 6, filling the rest of the screen */}
             <div ref={rowsContainerRef} className="flex-1 flex flex-col">
-                {rows === null ? (
+                {(rows === null || !settingsReady) ? (
                     <div className="flex-1 flex items-center justify-center text-gray-600 text-4xl font-bold">
                         Loading factory floor…
                     </div>
@@ -477,7 +517,7 @@ export default function PublicWorkstationScorecardPage() {
                         No active workstations configured.
                     </div>
                 ) : (
-                    currentRows.map(w => <WorkstationRow key={w.workstation_id} w={w} sz={sizes} />)
+                    currentRows.map(w => <WorkstationRow key={w.workstation_id} w={w} sz={sizes} ts={ts} />)
                 )}
             </div>
 

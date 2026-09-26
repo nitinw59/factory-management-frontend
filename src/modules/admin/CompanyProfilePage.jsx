@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
     Loader2, Save, AlertTriangle, CheckCircle2, Building2, Receipt, MapPin, Phone,
     Banknote, FileText, Image as ImageIcon, Trash2, Upload, RefreshCw, Scale,
-    Tv, GripVertical, Eye, EyeOff, Sparkles, Type,
+    Tv, GripVertical, Eye, EyeOff, Sparkles, Type, Plus, Minus, RotateCcw,
 } from 'lucide-react';
 import { adminApi } from '../../api/adminApi';
 import { purchaseDeptApi } from '../../api/purchaseDeptApi';
@@ -253,6 +253,50 @@ function MatchToleranceCard() {
     );
 }
 
+// Text-size steppers for the kiosk grid: one per column plus the ticker. Values
+// are whole percents of the kiosk's automatic size (100 = as designed); the
+// server clamps to the same 50–200 range, so the buttons just stop there.
+const KIOSK_TEXT_TARGETS = [
+    { key: 'name',     label: 'Name' },
+    { key: 'approved', label: 'Approved' },
+    { key: 'repaired', label: 'Repaired' },
+    { key: 'rework',   label: 'Rework' },
+    { key: 'rejected', label: 'Rejected' },
+    { key: 'dhu',      label: 'DHU' },
+    { key: 'today',    label: 'Today' },
+    { key: 'ticker',   label: 'Ticker (top bar)' },
+];
+const TEXT_SCALE_MIN = 50, TEXT_SCALE_MAX = 200, TEXT_SCALE_STEP = 10;
+const DEFAULT_TEXT_SCALE = Object.fromEntries(KIOSK_TEXT_TARGETS.map(t => [t.key, 100]));
+
+function TextSizeStepper({ label, value, onChange }) {
+    const changed = value !== 100;
+    return (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200">
+            <span className={`flex-1 min-w-0 truncate text-xs font-bold ${changed ? 'text-indigo-700' : 'text-slate-600'}`}>{label}</span>
+            <button
+                type="button"
+                onClick={() => onChange(Math.max(TEXT_SCALE_MIN, value - TEXT_SCALE_STEP))}
+                disabled={value <= TEXT_SCALE_MIN}
+                title="Smaller"
+                className="p-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300 disabled:opacity-30 disabled:hover:bg-transparent transition"
+            >
+                <Minus size={12} />
+            </button>
+            <span className={`w-12 text-center text-xs font-bold tabular-nums ${changed ? 'text-indigo-700' : 'text-slate-500'}`}>{value}%</span>
+            <button
+                type="button"
+                onClick={() => onChange(Math.min(TEXT_SCALE_MAX, value + TEXT_SCALE_STEP))}
+                disabled={value >= TEXT_SCALE_MAX}
+                title="Larger"
+                className="p-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300 disabled:opacity-30 disabled:hover:bg-transparent transition"
+            >
+                <Plus size={12} />
+            </button>
+        </div>
+    );
+}
+
 // Small on/off switch used by the kiosk card's animation options.
 function ToggleSwitch({ checked, onChange, label, hint, icon: Icon }) {
     return (
@@ -286,7 +330,7 @@ function KioskScorecardOrderCard() {
     const [workstations, setWorkstations] = useState([]); // full active-workstation list, for names
     const [order,        setOrder]        = useState([]); // workstation_id[] as strings
     const [hidden,       setHidden]       = useState(() => new Set()); // workstation_ids switched off for the public screen
-    const [options,      setOptions]      = useState({ show_logo: true, show_wordmark: true }); // idle-screen animations
+    const [options,      setOptions]      = useState({ show_logo: true, show_wordmark: true, text_scale: DEFAULT_TEXT_SCALE }); // idle-screen animations + text sizes
     const [loaded,        setLoaded]       = useState(false);
     const [saving,        setSaving]       = useState(false);
     const [dragId,        setDragId]       = useState(null);
@@ -310,6 +354,7 @@ function KioskScorecardOrderCard() {
                 setOptions({
                     show_logo:     res.data?.options?.show_logo     !== false,
                     show_wordmark: res.data?.options?.show_wordmark !== false,
+                    text_scale:    { ...DEFAULT_TEXT_SCALE, ...(res.data?.options?.text_scale ?? {}) },
                 });
             })
             .catch(() => setMsg({ ok: false, text: 'Failed to load workstation order.' }))
@@ -359,7 +404,7 @@ function KioskScorecardOrderCard() {
         <section className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-3 bg-slate-50 border-b border-slate-100">
                 <Tv size={14} className="text-indigo-500" />
-                <h2 className="text-sm font-bold text-slate-700">Kiosk Scorecard — Rows, Visibility &amp; Idle Animations</h2>
+                <h2 className="text-sm font-bold text-slate-700">Kiosk Scorecard — Rows, Visibility, Text &amp; Idle Animations</h2>
             </div>
             <div className="px-5 py-4 space-y-3">
                 <p className="text-xs text-slate-500">
@@ -390,6 +435,34 @@ function KioskScorecardOrderCard() {
                             label="Show “MATRIX OVERSEAS” animation"
                             hint="The company name set like a logo"
                         />
+                    </div>
+                </div>
+                <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Text size</p>
+                        <button
+                            type="button"
+                            onClick={() => setOptions(o => ({ ...o, text_scale: DEFAULT_TEXT_SCALE }))}
+                            disabled={KIOSK_TEXT_TARGETS.every(t => options.text_scale[t.key] === 100)}
+                            className="ml-auto flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-indigo-600 disabled:opacity-30 disabled:hover:text-slate-500 transition"
+                        >
+                            <RotateCcw size={11} /> Reset all to 100%
+                        </button>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                        Nudge the text on the TV up or down, per column and for the top ticker (50%–200%, in steps of 10).
+                        100% is the automatic size. A column's label and number move together. Very large sizes can clip in
+                        narrow columns, so check the screen after saving.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {KIOSK_TEXT_TARGETS.map(t => (
+                            <TextSizeStepper
+                                key={t.key}
+                                label={t.label}
+                                value={options.text_scale[t.key]}
+                                onChange={v => setOptions(o => ({ ...o, text_scale: { ...o.text_scale, [t.key]: v } }))}
+                            />
+                        ))}
                     </div>
                 </div>
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 pt-1">Workstation rows</p>
