@@ -5,6 +5,8 @@ export const universalApi = {
     getWorkstationData: () => api.get('/workstation-universal/queue'),
     logPieceCheck: (validationData) => api.post('/workstation-universal/log-check', validationData),
     approveAlteredPieces: (data) => api.post('/workstation-universal/approve-repair', data),
+    // Supervisor-gated undo: flips an APPROVED piece/bundle back to PENDING.
+    revertPieceToPending: (data) => api.post('/workstation-universal/revert-to-pending', data),
 
     // 2. Global Lookups
     getDefectCodes: () => api.get('/workstation-universal/defect-codes'),
@@ -32,4 +34,9 @@ export const universalApi = {
     // Batch history
     getBatchHistory: (page = 1, limit = 20) => api.get('/workstation-universal/batch-history', { params: { page, limit } }),
     getBatchHistoryDetail: (batchId) => api.get(`/workstation-universal/batch-history/${batchId}`),
+
+    // Rework-backlog thresholds (warning + hard block on plain APPROVE), set via
+    // the production_manager settings page — see productionManagerApi.js's
+    // getReworkThresholds/setReworkThresholds for the write side.
+    getReworkThresholds: () => api.get('/workstation-universal/rework-thresholds'),
 };

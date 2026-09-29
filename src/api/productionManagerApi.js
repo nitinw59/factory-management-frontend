@@ -84,6 +84,14 @@ export const productionManagerApi = {
     getFactorySettings: () => api.get('/production-manager/settings'),
     updateFactorySettings: (settingsData) => api.put('/production-manager/settings', settingsData),
 
+    // Rework-backlog thresholds — warning_threshold shows the full-screen
+    // interrupt on the checker dashboard, block_threshold hard-disables plain
+    // APPROVE beyond it (repair/reject stay allowed). Checkers read the live
+    // values via universalApi.getReworkThresholds instead (this namespace is
+    // role-gated away from them at the app level).
+    getReworkThresholds: () => api.get('/production-manager/rework-thresholds'),
+    setReworkThresholds: (data) => api.put('/production-manager/rework-thresholds', data),
+
     // Production Targets
     getTargetFormData: (targetDate) => api.get('/production-manager/production-targets/form-data', { params: { target_date: targetDate } }),
     saveTargets: (data) => api.post('/production-manager/production-targets', data),

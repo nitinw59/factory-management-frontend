@@ -1,14 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { productionManagerApi } from '../../api/productionManagerApi';
-import { LuClock, LuPlus, LuTrash2, LuSave } from 'react-icons/lu';
+import { LuClock, LuPlus, LuTrash2, LuSave, LuShieldAlert } from 'react-icons/lu';
 
 export default function ProductionSettingsPage() {
     const [timeSlots, setTimeSlots] = useState([]);
     const [newTime, setNewTime] = useState('09:00');
     const [isSaving, setIsSaving] = useState(false);
 
+    const [warningThreshold, setWarningThreshold] = useState(10);
+    const [blockThreshold, setBlockThreshold] = useState(20);
+    const [isSavingThresholds, setIsSavingThresholds] = useState(false);
+
     useEffect(() => {
         productionManagerApi.getFactorySettings().then(res => setTimeSlots(res.data.timeSlots || []));
+        productionManagerApi.getReworkThresholds().then(res => {
+            setWarningThreshold(res.data.warning_threshold);
+            setBlockThreshold(res.data.block_threshold);
+        });
     }, []);
 
     const handleAddSlot = () => {
@@ -31,6 +39,22 @@ export default function ProductionSettingsPage() {
             alert("Failed to save settings.");
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const handleSaveThresholds = async () => {
+        if (blockThreshold < warningThreshold) {
+            alert('Block threshold cannot be lower than the warning threshold.');
+            return;
+        }
+        setIsSavingThresholds(true);
+        try {
+            await productionManagerApi.setReworkThresholds({ warning_threshold: warningThreshold, block_threshold: blockThreshold });
+            alert('Rework backlog thresholds updated.');
+        } catch (err) {
+            alert(err.response?.data?.error || 'Failed to save thresholds.');
+        } finally {
+            setIsSavingThresholds(false);
         }
     };
 
@@ -76,6 +100,48 @@ export default function ProductionSettingsPage() {
 
                 <button onClick={handleSave} disabled={isSaving} className="bg-indigo-600 text-white font-bold py-2.5 px-6 rounded-lg hover:bg-indigo-700 flex items-center">
                     <LuSave className="mr-2"/> {isSaving ? 'Saving...' : 'Save Configuration'}
+                </button>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mt-6">
+                <h2 className="text-lg font-bold text-slate-800 flex items-center mb-4">
+                    <LuShieldAlert className="mr-2 text-rose-500" /> Rework Backlog Thresholds
+                </h2>
+                <p className="text-sm text-slate-500 mb-6">
+                    Applies per checking line, based on how many pieces are currently sitting unresolved in Pending
+                    Rework on that line. Below the warning number, checking works as normal. At or above the warning
+                    number, the checker sees a full-screen interrupt every time they submit a check. Above the block
+                    number, the server itself refuses any further plain Approve on that line — only repairing a
+                    reworked piece or rejecting one is still accepted, until the backlog is brought back down.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <label className="block text-xs font-black uppercase tracking-widest text-amber-600 mb-1.5">Warning threshold</label>
+                        <input
+                            type="number"
+                            min={1}
+                            value={warningThreshold}
+                            onChange={(e) => setWarningThreshold(parseInt(e.target.value, 10) || 0)}
+                            className="w-full border border-slate-300 rounded-lg px-4 py-2 outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                        <p className="text-xs text-slate-400 mt-1">Pending rework count that triggers the full-screen warning.</p>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-black uppercase tracking-widest text-rose-600 mb-1.5">Block threshold</label>
+                        <input
+                            type="number"
+                            min={1}
+                            value={blockThreshold}
+                            onChange={(e) => setBlockThreshold(parseInt(e.target.value, 10) || 0)}
+                            className="w-full border border-slate-300 rounded-lg px-4 py-2 outline-none focus:ring-2 focus:ring-rose-500"
+                        />
+                        <p className="text-xs text-slate-400 mt-1">Pending rework count beyond which plain Approve is disabled.</p>
+                    </div>
+                </div>
+
+                <button onClick={handleSaveThresholds} disabled={isSavingThresholds} className="bg-rose-600 text-white font-bold py-2.5 px-6 rounded-lg hover:bg-rose-700 flex items-center">
+                    <LuSave className="mr-2"/> {isSavingThresholds ? 'Saving...' : 'Save Thresholds'}
                 </button>
             </div>
         </div>

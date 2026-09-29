@@ -2,7 +2,7 @@ import React from 'react';
 import BaseManagerLayout from './BaseManagerLayout';
 import {
     LuLayoutDashboard, LuHammer, LuFileText, LuCalendarClock,
-    LuTruck, LuLayers, LuTrophy, LuActivity, LuClipboardList, LuChartBar,
+    LuTruck, LuLayers, LuTrophy, LuActivity, LuClipboardList, LuChartBar, LuPackageX,
 } from 'react-icons/lu';
 
 export default function InitializationPortalLayout() {
@@ -17,6 +17,7 @@ export default function InitializationPortalLayout() {
             children: [
                 { to: '/initialization-portal/ready-to-load', label: 'Ready to Load',    icon: LuTruck },
                 { to: '/initialization-portal/alter-pieces',  label: 'Alter Pieces',     icon: LuHammer },
+                { to: '/initialization-portal/material-replacements', label: 'Material Replacements', icon: LuPackageX },
                 { to: '/initialization-portal/summary',       label: 'Batch QC Summary', icon: LuFileText },
             ],
         },

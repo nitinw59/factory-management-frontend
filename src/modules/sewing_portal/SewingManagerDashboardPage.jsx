@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { FiPlay, FiLayers, FiInfo,  FiSquare, FiCheckSquare, FiEdit3, FiTruck, FiCheck, FiLoader, FiLayout, FiX } from 'react-icons/fi';
 
-import { LuPlay, LuLayers, LuInfo, LuRuler, LuSquare, LuSquareCheck, LuPencil, LuTruck, LuCheck, LuLoader, LuLayoutDashboard } from 'react-icons/lu';
+import { LuPlay, LuLayers, LuInfo, LuRuler, LuSquare, LuSquareCheck, LuPencil, LuTruck, LuCheck, LuLoader, LuLayoutDashboard, LuPackageX } from 'react-icons/lu';
 import Modal from '../../shared/Modal';
 import PriorityChip from '../../shared/PriorityChip';
 import {sewingManagerApi} from '../../api/sewingManagerApi';
+import { materialReplacementApi } from '../../api/materialReplacementApi';
+import { MaterialReplacementRequestModal, MaterialReplacementStatusModal } from '../Universal/MaterialReplacementModals';
 
 // --- SHARED & REUSABLE COMPONENTS ---
 const Spinner = () => <div className="flex justify-center items-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
@@ -181,6 +183,13 @@ const SewingManagerDashboardPage = () => {
     const [error, setError] = useState(null);
     const [modalState, setModalState] = useState({ type: null, data: null });
 
+    // Material Replacement — pending rework across every line this manager
+    // runs (not per-checker/per-workstation like the checker dashboard, since
+    // a line manager has neither), plus the read-only status view.
+    const [pendingReworkPieces, setPendingReworkPieces] = useState([]);
+    const [showReplacementRequestModal, setShowReplacementRequestModal] = useState(false);
+    const [showReplacementStatusModal, setShowReplacementStatusModal] = useState(false);
+
     const fetchDashboardData = useCallback(async () => {
         setIsLoading(true);
         try {
@@ -189,7 +198,7 @@ const SewingManagerDashboardPage = () => {
             // ✅ FIX: The API returns an object { batches: [...] }, not just the array.
             console.log("Updated batches state:", response.data || []);
             setBatches(response.data || []);
-            
+
         } catch (err) {
             setError("Could not load sewing queue.");
             console.error(err);
@@ -198,7 +207,17 @@ const SewingManagerDashboardPage = () => {
         }
     }, []);
 
-    useEffect(() => { fetchDashboardData(); }, [fetchDashboardData]);
+    const loadPendingRework = useCallback(async () => {
+        try {
+            const res = await materialReplacementApi.getMyLinePendingRework();
+            setPendingReworkPieces(res.data?.pieces ?? []);
+        } catch (err) { console.error('Failed to load pending rework', err); }
+    }, []);
+
+    useEffect(() => {
+        fetchDashboardData();
+        loadPendingRework();
+    }, [fetchDashboardData, loadPendingRework]);
 
     const handleStartBatch = async (data) => {
         try {
@@ -211,9 +230,33 @@ const SewingManagerDashboardPage = () => {
         }
     };
 
+    const handleSubmitReplacementRequest = async (pieceIds, notes) => {
+        await materialReplacementApi.createRequests({ pieceIds, notes });
+        await loadPendingRework(); // flagged pieces must drop out of the list immediately
+        setShowReplacementRequestModal(false);
+    };
+
     return (
         <div className="p-6 bg-gray-100 min-h-screen">
-            <h1 className="text-3xl font-bold mb-6 text-gray-800">Sewing Manager Dashboard</h1>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+                <h1 className="text-3xl font-bold text-gray-800">Sewing Manager Dashboard</h1>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setShowReplacementRequestModal(true)}
+                        disabled={pendingReworkPieces.length === 0}
+                        title={pendingReworkPieces.length === 0 ? 'Nothing pending rework right now' : 'Select pieces from your line(s) to flag for material replacement'}
+                        className="flex items-center gap-1.5 text-sm font-bold bg-amber-100 text-amber-800 border-2 border-amber-200 px-4 py-2 rounded-xl hover:bg-amber-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                        <LuPackageX /> Pending Rework ({pendingReworkPieces.length})
+                    </button>
+                    <button
+                        onClick={() => setShowReplacementStatusModal(true)}
+                        className="flex items-center gap-1.5 text-sm font-bold bg-violet-100 text-violet-800 border-2 border-violet-200 px-4 py-2 rounded-xl hover:bg-violet-200 transition"
+                    >
+                        <LuPackageX /> Material Replacements — My Line
+                    </button>
+                </div>
+            </div>
             {isLoading ? <Spinner /> : error ? <ErrorDisplay message={error} /> : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {batches.length > 0 ? batches.map(batch => (
@@ -239,6 +282,20 @@ const SewingManagerDashboardPage = () => {
                     currentLineId={modalState.data.progress_for_sewing?.line_id}
                     onClose={() => setModalState({ type: null, data: null })}
                     onSave={handleStartBatch}
+                />
+            )}
+
+            {showReplacementRequestModal && (
+                <MaterialReplacementRequestModal
+                    pieces={pendingReworkPieces}
+                    onClose={() => setShowReplacementRequestModal(false)}
+                    onSubmit={handleSubmitReplacementRequest}
+                />
+            )}
+            {showReplacementStatusModal && (
+                <MaterialReplacementStatusModal
+                    fetchRequests={materialReplacementApi.getMyLineRequests}
+                    onClose={() => setShowReplacementStatusModal(false)}
                 />
             )}
         </div>

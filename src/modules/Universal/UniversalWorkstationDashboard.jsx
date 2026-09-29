@@ -4,12 +4,15 @@ import { useAuth } from '../../context/AuthContext';
 import { LuClock, LuLayers, LuChevronRight, LuDownload, LuLoader, LuCircleCheck, LuX } from 'react-icons/lu';
 import { universalApi } from '../../api/universalApi';
 import PriorityChip from '../../shared/PriorityChip';
+import { materialReplacementApi } from '../../api/materialReplacementApi';
+import { MaterialReplacementRequestModal, MaterialReplacementStatusModal } from './MaterialReplacementModals';
+import MaterialReplacementsPage from '../initialisation_portal/MaterialReplacementsPage';
 import {
     Shirt, Layers, ClipboardCheck, Component, Check, X,
     Hammer, Loader2, Menu, ChevronDown, ChevronRight, CheckCircle2,
     Square, CheckSquare, XCircle, ArrowLeft, Package, Send, AlertCircle, Zap,
     LogOut, FileText, ThumbsUp, LayoutGrid, History, ChevronLeft, BarChart2,
-    ShieldAlert, ShieldCheck, RefreshCw, Ruler, Lock,
+    ShieldAlert, ShieldCheck, RefreshCw, Ruler, Lock, RotateCcw, PackageX,
 } from 'lucide-react';
 
 // TEMPORARY FIX: hardcoded supervisor override password to un-reject a
@@ -19,6 +22,7 @@ import {
 const REJECT_UNLOCK_PASSWORD = 'RAJESH2026';
 
 const PART_FILTER_LS_KEY = 'ws-part-filter';
+const BATCH_FILTER_LS_KEY = 'ws-selected-batch';
 const STATS_REFRESH_MS   = 60_000;
 
 // ── Work Log helpers ──────────────────────────────────────────────────────────
@@ -483,6 +487,7 @@ const getPieceColorClass = (status, isSelected) => {
         case 'QC_REJECTED': return "bg-rose-950 border-rose-900 text-rose-400 opacity-70 shadow-[inset_0_0_10px_rgba(225,29,72,0.3)]";
         case 'PREVIOUSLY_REJECTED': return "bg-slate-200 border-slate-300 text-slate-400 opacity-30 cursor-not-allowed line-through";
         case 'NEEDS_REWORK': return "bg-amber-400 border-amber-500 text-amber-900 shadow-md cursor-not-allowed opacity-80"; 
+        case 'FOR_REPLACEMENT': return "bg-violet-100 border-violet-300 text-violet-600 opacity-70 cursor-not-allowed shadow-[inset_0_0_10px_rgba(139,92,246,0.15)]";
         case 'PENDING':
         default: return "bg-white border-slate-300 text-slate-900 hover:border-slate-500 shadow-sm";
     }
@@ -545,7 +550,7 @@ const StageCompletionHandoff = ({ batchId, lineId, onBatchComplete }) => {
 // ============================================================================
 // PRIMARY INSPECTION MODAL (Black/Industrial)
 // ============================================================================
-const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidationSubmit, onRepairSubmit }) => {
+const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidationSubmit, onRepairSubmit, onRevertToPending, isApproveBlocked, highlightPieceId }) => {
     const pieces = itemInfo.pieces || [];
 
     const actionablePieces = pieces.filter(p => p.qc_status === 'PENDING' || !p.qc_status);
@@ -571,6 +576,13 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [pieceRepairDetails, setPieceRepairDetails] = useState({});
     const fetchedPiecesRef = useRef(new Set());
+    const highlightRef = useRef(null);
+
+    // Scroll the highlighted tile into view once, when the modal opens with one.
+    useEffect(() => {
+        if (highlightPieceId) highlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const fetchPieceRepairs = async (pieceId) => {
         if (fetchedPiecesRef.current.has(pieceId)) return;
@@ -665,6 +677,26 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
             await onRepairSubmit({ pieceIds: [piece.id], status: 'APPROVED', defectCodeIds: [] });
         } catch {
             // onRepairSubmit (handleApproveAlterSubmit) already shows an alert on failure
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    // Same supervisor-password gate as handleUnlockRejectedPiece above, for
+    // the opposite mistake: an APPROVED piece that shouldn't have been.
+    // Reverts it to PENDING so it can be re-inspected.
+    const handleRevertApprovedPiece = async (piece) => {
+        const password = window.prompt('Supervisor password required to revert this approved piece back to pending:');
+        if (password === null) return; // cancelled
+        if (password !== REJECT_UNLOCK_PASSWORD) {
+            alert('Incorrect password.');
+            return;
+        }
+        setIsSubmitting(true);
+        try {
+            await onRevertToPending({ pieceIds: [piece.id] });
+        } catch {
+            // onRevertToPending (handleRevertToPending) already shows an alert on failure
         } finally {
             setIsSubmitting(false);
         }
@@ -977,6 +1009,8 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                             const isSelected = selectedIds.has(piece.id);
                                             const isRework = piece.qc_status === 'NEEDS_REWORK';
                                             const isRejected = piece.qc_status === 'QC_REJECTED';
+                                            const isApproved = piece.qc_status === 'APPROVED';
+                                            const isHighlighted = highlightPieceId != null && String(piece.id) === String(highlightPieceId);
                                             const selClass = isRework
                                                 ? 'bg-amber-500 border-amber-600 text-white shadow-[0_0_20px_rgba(245,158,11,0.8)] transform scale-105 z-10'
                                                 : getPieceColorClass(piece.qc_status, true);
@@ -985,14 +1019,17 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                                 : getPieceColorClass(piece.qc_status, false);
                                             return (
                                                 <button key={piece.id}
-                                                    disabled={!isRejected && piece.qc_status !== 'PENDING' && piece.qc_status && piece.qc_status !== 'NEEDS_REWORK'}
-                                                    onClick={() => isRejected ? handleUnlockRejectedPiece(piece) : togglePiece(piece)}
-                                                    title={isRejected ? 'Rejected — click to unlock with supervisor password' : undefined}
-                                                    className={`relative aspect-square rounded-2xl border-4 font-mono font-black text-3xl flex items-center justify-center transition-all active:scale-95 ${isRejected ? 'cursor-pointer hover:border-rose-600' : ''} ${isSelected ? selClass : unselClass}`}>
+                                                    ref={isHighlighted ? highlightRef : undefined}
+                                                    disabled={!isRejected && !isApproved && piece.qc_status !== 'PENDING' && piece.qc_status && piece.qc_status !== 'NEEDS_REWORK'}
+                                                    onClick={() => isRejected ? handleUnlockRejectedPiece(piece) : isApproved ? handleRevertApprovedPiece(piece) : togglePiece(piece)}
+                                                    title={isRejected ? 'Rejected — click to unlock with supervisor password' : isApproved ? 'Approved — click to revert to pending with supervisor password' : undefined}
+                                                    className={`relative aspect-square rounded-2xl border-4 font-mono font-black text-3xl flex items-center justify-center transition-all active:scale-95 ${isRejected ? 'cursor-pointer hover:border-rose-600' : ''} ${isApproved ? 'cursor-pointer hover:border-emerald-500' : ''} ${isSelected ? selClass : unselClass} ${isHighlighted ? 'animate-pulse ring-4 ring-offset-2 ring-blue-500 z-20' : ''}`}>
                                                     {piece.piece_sequence}
                                                     {isSelected && <Check className={`absolute top-2 right-2 w-8 h-8 rounded-full p-1 shadow-md ${isRework ? 'bg-amber-700 text-white' : 'bg-indigo-500 text-white'}`} strokeWidth={4} />}
                                                     {!isSelected && isRework && <Hammer className="absolute top-2 right-2 w-6 h-6 text-amber-700" />}
                                                     {isRejected && <Lock className="absolute top-2 right-2 w-6 h-6 text-rose-400" />}
+                                                    {isApproved && <RotateCcw className="absolute top-2 right-2 w-5 h-5 text-emerald-500" />}
+                                                    {piece.qc_status === 'FOR_REPLACEMENT' && <PackageX className="absolute top-2 right-2 w-5 h-5 text-violet-400" />}
                                                 </button>
                                             );
                                         })}
@@ -1058,7 +1095,8 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                     <div className="relative h-full">
                                         {isBundleLocked && selectedIds.size > 0 && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Bundle Locked: Active Reworks</span></div>}
                                         {itemInfo.isBundle && !isBundleLocked && selectedIds.size > 0 && selectedIds.size !== actionablePieces.length && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Partial Selection: Reject/Rework Only</span></div>}
-                                        <button onClick={() => handleActionInitiation('APPROVED')} disabled={selectedIds.size === 0 || isBundleLocked || (itemInfo.isBundle && selectedIds.size !== actionablePieces.length)} className="w-full h-full bg-black text-white rounded-xl font-black text-lg shadow-xl hover:bg-slate-800 active:scale-95 disabled:opacity-20 disabled:bg-slate-400 flex items-center justify-center border-b-4 border-slate-800">
+                                        {isApproveBlocked && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-red-700 text-white text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Rework Backlog: Approve Disabled</span></div>}
+                                        <button onClick={() => handleActionInitiation('APPROVED')} disabled={selectedIds.size === 0 || isBundleLocked || isApproveBlocked || (itemInfo.isBundle && selectedIds.size !== actionablePieces.length)} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it via Repair or Reject before approving new pieces.' : undefined} className="w-full h-full bg-black text-white rounded-xl font-black text-lg shadow-xl hover:bg-slate-800 active:scale-95 disabled:opacity-20 disabled:bg-slate-400 flex items-center justify-center border-b-4 border-slate-800">
                                             <CheckCircle2 className="w-5 h-5 mr-2" /> APPROVE
                                         </button>
                                     </div>
@@ -1127,7 +1165,7 @@ const RollHandoffButton = ({ batchId, lineId, rollId, onComplete }) => {
 // ============================================================================
 // PART ACCORDION (Piece Mode Grouping)
 // ============================================================================
-const PartAccordion = ({ batch, roll, part, setModalState, allowMultiple }) => {
+const PartAccordion = ({ batch, roll, part, setModalState, allowMultiple, onRequestReplacement }) => {
     const [isOpen, setIsOpen] = useState(false);
 
     const allPieces = part.size_details.reduce((acc, sz) => {
@@ -1171,10 +1209,11 @@ const PartAccordion = ({ batch, roll, part, setModalState, allowMultiple }) => {
                     {part.size_details.map(size => {
                         const sizePieces = size.pieces.map(p => ({ ...p, _displayGroup: `Size ${size.size}` }));
                         return (
-                            <ValidationProgressRow 
+                            <ValidationProgressRow
                                 key={size.size} label={`Size ${size.size}`} icon={Layers} entity={{ pieces: sizePieces }}
                                 onInspect={() => setModalState({ type: 'validate', isBundle: false, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: roll.roll_id, partId: part.part_id, partName: part.part_name, size: size.size, pieces: sizePieces, allowMultiple })}
                                 onRepair={() => setModalState({ type: 'validate', forceRepairMode: true, isBundle: false, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: roll.roll_id, partId: part.part_id, partName: part.part_name, size: size.size, pieces: sizePieces })}
+                                onRequestReplacement={onRequestReplacement && (() => onRequestReplacement(new Set(sizePieces.map(p => p.id))))}
                             />
                         );
                     })}
@@ -1187,7 +1226,7 @@ const PartAccordion = ({ batch, roll, part, setModalState, allowMultiple }) => {
 // Size-first counterpart to PartAccordion — same shape, roll and size
 // swapped: rows are labeled "Roll #X" instead of "Size X", since within one
 // size section it's the roll that varies, not the size.
-const PartAccordionBySize = ({ batch, size, part, setModalState, allowMultiple }) => {
+const PartAccordionBySize = ({ batch, size, part, setModalState, allowMultiple, onRequestReplacement }) => {
     const [isOpen, setIsOpen] = useState(false);
 
     const allPieces = part.roll_details.reduce((acc, r) => {
@@ -1235,6 +1274,7 @@ const PartAccordionBySize = ({ batch, size, part, setModalState, allowMultiple }
                                 key={r.roll_id} label={`Roll #${r.roll_id}`} icon={Layers} entity={{ pieces: rollPieces }}
                                 onInspect={() => setModalState({ type: 'validate', isBundle: false, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: r.roll_id, partId: part.part_id, partName: part.part_name, size, pieces: rollPieces, allowMultiple })}
                                 onRepair={() => setModalState({ type: 'validate', forceRepairMode: true, isBundle: false, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: r.roll_id, partId: part.part_id, partName: part.part_name, size, pieces: rollPieces })}
+                                onRequestReplacement={onRequestReplacement && (() => onRequestReplacement(new Set(rollPieces.map(p => p.id))))}
                             />
                         );
                     })}
@@ -1247,9 +1287,13 @@ const PartAccordionBySize = ({ batch, size, part, setModalState, allowMultiple }
 // ============================================================================
 // DYNAMIC PROGRESS ROWS
 // ============================================================================
-const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect, onRepair, canApproveBundle, onQuickApprove }) => {
+const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect, onRepair, canApproveBundle, onQuickApprove, isApproveBlocked, onRequestReplacement }) => {
     const { total_cut, total_processed, pending_alter, isComplete, total_validated, total_rejected, total_repaired } = checkEntityStatus(entity);
     if (total_cut === 0) return null;
+    // Keeps the button visible even after every rework piece here has already
+    // been sent (pending_alter drops to 0 once they flip to FOR_REPLACEMENT) —
+    // otherwise there'd be no way back into this row's "already sent" status.
+    const hasReplacementActivity = (entity.pieces || []).some(p => p.qc_status === 'FOR_REPLACEMENT');
 
     return (
         <div className="p-4 bg-white border-2 border-slate-200 rounded-2xl shadow-sm flex flex-col md:flex-row md:items-center md:justify-between hover:border-indigo-300 transition-colors">
@@ -1273,11 +1317,14 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
                 {pending_alter > 0 && (
                      <button onClick={() => onRepair(entity)} className="px-4 py-2 text-sm bg-amber-100 text-amber-900 border-2 border-amber-200 rounded-xl hover:bg-amber-200 font-black flex items-center shadow-sm active:scale-95 transition-all"><Hammer className="w-4 h-4 mr-2"/> Fix Rework ({pending_alter})</button>
                 )}
+                {(pending_alter > 0 || hasReplacementActivity) && onRequestReplacement && (
+                     <button onClick={() => onRequestReplacement(entity)} className="px-4 py-2 text-sm bg-violet-100 text-violet-800 border-2 border-violet-200 rounded-xl hover:bg-violet-200 font-black flex items-center shadow-sm active:scale-95 transition-all"><PackageX className="w-4 h-4 mr-2"/> Replacement</button>
+                )}
                 {!isComplete ? (
                     <>
                         <button onClick={() => onInspect(entity)} className="px-6 py-2 text-sm bg-white text-slate-800 border-2 border-slate-300 rounded-xl hover:border-indigo-500 hover:text-indigo-700 font-black shadow-sm active:scale-95 flex items-center transition-all">INSPECT</button>
                         {canApproveBundle && (
-                            <button onClick={() => onQuickApprove(entity)} className="px-4 py-2 text-sm bg-emerald-100 text-emerald-800 border-2 border-emerald-200 rounded-xl hover:bg-emerald-200 font-black shadow-sm active:scale-95 flex items-center transition-all">
+                            <button onClick={() => onQuickApprove(entity)} disabled={isApproveBlocked} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it via Repair or Reject before approving new pieces.' : undefined} className="px-4 py-2 text-sm bg-emerald-100 text-emerald-800 border-2 border-emerald-200 rounded-xl hover:bg-emerald-200 font-black shadow-sm active:scale-95 flex items-center transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100">
                                 <CheckCircle2 className="w-4 h-4 mr-2" /> QUICK APPROVE
                             </button>
                         )}
@@ -1665,7 +1712,13 @@ const UniversalWorkstationDashboard = () => {
     const [error, setError] = useState(null);
     const [modalState, setModalState] = useState(null);
     const [headerInfo, setHeaderInfo] = useState({});
-    const [selectedBatchId, setSelectedBatchId] = useState('ALL');
+    // Persisted across refresh — reconciled back to 'ALL' below once the
+    // stored batch is no longer in the live `batches` list (i.e. no longer
+    // active on this checker's line), so a stale selection never sticks.
+    const [selectedBatchId, setSelectedBatchId] = useState(() => {
+        try { return localStorage.getItem(BATCH_FILTER_LS_KEY) || 'ALL'; }
+        catch { return 'ALL'; }
+    });
     const [openBatchId,    setOpenBatchId]    = useState(null);
     const [openBundleParts, setOpenBundleParts] = useState(new Set());
     const toggleBundlePart = (key) => setOpenBundleParts(prev => {
@@ -1687,6 +1740,16 @@ const UniversalWorkstationDashboard = () => {
     const [todayApprovedPieces, setTodayApprovedPieces] = useState(null);
     const [showModal,         setShowModal]         = useState(false);
     const [showApprovedModal, setShowApprovedModal] = useState(false);
+    const [showReplacementRequestModal, setShowReplacementRequestModal] = useState(false);
+    const [showReplacementStatusModal, setShowReplacementStatusModal] = useState(false);
+    // null = whole-queue (opened from the "Pending Rework" tile/toolbar button);
+    // a Set of piece ids = opened from one size/roll row's own "Replacement"
+    // button, scoping the modal to just that row's rework pieces.
+    const [replacementScopePieceIds, setReplacementScopePieceIds] = useState(null);
+    // Set when a card in the "Already Sent For This Row" list is clicked —
+    // UniversalValidationModal blinks the matching tile so it's easy to find
+    // among everything else in that size/roll group.
+    const [highlightPieceId, setHighlightPieceId] = useState(null);
     const [workData,          setWorkData]          = useState(null);
     const [loadingWork,       setLoadingWork]       = useState(false);
     const [apiError,    setApiError]    = useState(null);
@@ -1708,6 +1771,15 @@ const UniversalWorkstationDashboard = () => {
     const allowMultiple = headerInfo.can_approve_multiple_piece || false;
     const allowBundle = headerInfo.can_approve_whole_bundle || false;
     const allowRoll = headerInfo.can_approve_whole_roll || false;
+    // Stage 1 of the PRODUCT's cycle (product_cycle_flow.sequence_no = 1 —
+    // e.g. "cutting", universally, regardless of product) — a checker whose
+    // own line is of that type is also allowed to accept/fulfill/cancel
+    // material replacement requests (see materialReplacementRoutes.js's
+    // requireFulfillmentAccess, which enforces this same condition
+    // server-side regardless of what this button shows). NOT the checker's
+    // position within their own line's workstation sequence.
+    const isStage1Checker = headerInfo.is_stage_1 === true;
+    const [showFulfillmentModal, setShowFulfillmentModal] = useState(false);
 
     const fetchQueue = useCallback(async () => {
         setIsLoading(true);
@@ -1743,10 +1815,101 @@ const UniversalWorkstationDashboard = () => {
         return result;
     }, [batches]);
 
+    // Every piece currently sitting in this checker's own PENDING REWORK
+    // queue (unresolved NEEDS_REWORK), flattened with batch/roll/part/size
+    // context — feeds the "Pending Rework" tile's click-through and the
+    // material-replacement request picker (the actual list). This is the
+    // SAME set "Pending Rework" already counts (see getCheckerStats'
+    // pending_rework), just materialized client-side with full context
+    // instead of a bare number. PIECE-mode only (batch.rolls) — BUNDLE-mode
+    // batches approve/reject as a whole bundle, and fulfilling a replacement
+    // clears the WHOLE bundle's tracking row, which would wrongly reset
+    // other pieces in that bundle too; not offered there for that reason.
+    const pendingReworkPieces = useMemo(() => {
+        const out = [];
+        batches.forEach(batch => {
+            (batch.rolls || []).forEach(roll => {
+                (roll.parts_details || []).forEach(part => {
+                    (part.size_details || []).forEach(sizeGroup => {
+                        (sizeGroup.pieces || []).forEach(piece => {
+                            if (piece.qc_status === 'NEEDS_REWORK') {
+                                out.push({
+                                    id: piece.id,
+                                    piece_sequence: piece.piece_sequence,
+                                    batch_id: batch.batch_id,
+                                    batch_code: batch.batch_code,
+                                    roll_id: roll.roll_id,
+                                    part_name: part.part_name,
+                                    size: sizeGroup.size,
+                                    defect_reason: piece.defect_reason,
+                                });
+                            }
+                        });
+                    });
+                });
+            });
+        });
+        return out;
+    }, [batches]);
+
+    // Opened from a size/roll row's own "Replacement" button — scopes the
+    // modal to that row's own pieces (every id in the row, not just its
+    // current NEEDS_REWORK ones — a piece already sent for replacement is
+    // FOR_REPLACEMENT by the time this is clicked again, and a fulfilled one
+    // has already reverted to a fresh PENDING piece, so scoping to the row's
+    // full piece set is what lets the "already sent" history keep finding it)
+    // instead of the whole queue. Called with no Set (the "Pending Rework"
+    // tile/toolbar entry point bypasses this handler entirely) means unscoped.
+    const openReplacementRequest = (pieceIds) => {
+        setReplacementScopePieceIds(pieceIds instanceof Set ? pieceIds : null);
+        setShowReplacementRequestModal(true);
+    };
+
+    // Clicked from a card in the "Already Sent For This Row" list — locates
+    // that piece in the live queue and opens the normal Inspect view for its
+    // whole size group (not the repair-only view), with the tile blinking so
+    // it's easy to spot among the rest of the group.
+    const openValidationForPiece = (pieceId) => {
+        for (const batch of batches) {
+            for (const roll of batch.rolls || []) {
+                for (const part of roll.parts_details || []) {
+                    for (const sizeGroup of part.size_details || []) {
+                        const found = (sizeGroup.pieces || []).some(p => String(p.id) === String(pieceId));
+                        if (!found) continue;
+                        const sizePieces = sizeGroup.pieces.map(p => ({ ...p, _displayGroup: `Size ${sizeGroup.size}` }));
+                        setModalState({ type: 'validate', isBundle: false, batchId: batch.batch_id, batchCode: batch.batch_code, rollId: roll.roll_id, partId: part.part_id, partName: part.part_name, size: sizeGroup.size, pieces: sizePieces, allowMultiple });
+                        setHighlightPieceId(pieceId);
+                        setShowReplacementRequestModal(false);
+                        setReplacementScopePieceIds(null);
+                        return;
+                    }
+                }
+            }
+        }
+        popApiError('Could not find that piece in the current queue — it may have already moved on.');
+    };
+    const replacementModalPieces = replacementScopePieceIds
+        ? pendingReworkPieces.filter(p => replacementScopePieceIds.has(p.id))
+        : pendingReworkPieces;
+
     useEffect(() => {
         try { localStorage.setItem(PART_FILTER_LS_KEY, JSON.stringify([...selectedParts])); }
         catch {}
     }, [selectedParts]);
+
+    useEffect(() => {
+        try { localStorage.setItem(BATCH_FILTER_LS_KEY, selectedBatchId); }
+        catch {}
+    }, [selectedBatchId]);
+
+    // Drops back to 'ALL' the moment the selected batch falls out of the live
+    // queue (fulfilled/moved off this line) — a refresh restores the pick
+    // from localStorage, but it should never survive past the batch itself.
+    useEffect(() => {
+        if (selectedBatchId === 'ALL' || batches.length === 0) return;
+        const stillActive = batches.some(b => String(b.batch_id) === String(selectedBatchId));
+        if (!stillActive) setSelectedBatchId('ALL');
+    }, [batches, selectedBatchId]);
 
     useEffect(() => {
         const handler = (e) => {
@@ -1772,10 +1935,45 @@ const UniversalWorkstationDashboard = () => {
 
     // ── Checker stats (auto-refresh) ──────────────────────────────────────────
     const loadStats = useCallback(async () => {
-        try { const res = await universalApi.getCheckerStats(); setStats(res.data); }
+        try {
+            const res = await universalApi.getCheckerStats();
+            setStats(res.data);
+            return res.data; // callers that need the FRESH value right away (not next render's stale-closure `stats`) use this
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        catch (err) { popApiError(err.response?.data?.error || err.message || 'Failed to load stats'); }
+        } catch (err) {
+            popApiError(err.response?.data?.error || err.message || 'Failed to load stats');
+            return null;
+        }
     }, []);
+
+    // Full-screen, un-missable interrupt once this checker's own pending-rework
+    // backlog (same count as the "Pending Rework" tile) reaches the configured
+    // warning threshold — re-checked after every APPROVED/NEEDS_REWORK/
+    // REPAIRED/QC_REJECTED submission (not the passive 60s background poll,
+    // and not revert-to-pending — none of those are a "submit" event) so it
+    // resurfaces on the checker's own next action for as long as the backlog
+    // stays at/above the threshold, rather than showing once and being
+    // forgotten. Both thresholds are set by production_manager (see
+    // ProductionSettingsPage.jsx); defaults here match the backend's own
+    // fallback so the dashboard behaves the same before the fetch resolves.
+    const [reworkWarningThreshold, setReworkWarningThreshold] = useState(10);
+    const [reworkBlockThreshold, setReworkBlockThreshold] = useState(20);
+    useEffect(() => {
+        universalApi.getReworkThresholds()
+            .then(res => {
+                setReworkWarningThreshold(res.data.warning_threshold);
+                setReworkBlockThreshold(res.data.block_threshold);
+            })
+            .catch(() => { /* keep defaults — server-side enforcement is authoritative regardless */ });
+    }, []);
+    // Plain APPROVE is hard-blocked past this — server enforces it independently
+    // (logPieceCheck), this just mirrors it in the UI so the button itself
+    // disables instead of the checker discovering it via a failed submit.
+    const isApproveBlocked = (stats?.pending_rework ?? 0) > reworkBlockThreshold;
+    const [showReworkWarning, setShowReworkWarning] = useState(false);
+    const checkReworkBacklog = (freshStats) => {
+        if ((freshStats?.pending_rework ?? 0) >= reworkWarningThreshold) setShowReworkWarning(true);
+    };
     const refreshTodayApproved = useCallback(async () => {
         try {
             const today = new Date().toISOString().split('T')[0];
@@ -1883,7 +2081,7 @@ const UniversalWorkstationDashboard = () => {
             const newBatches = await fetchQueue();
             refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
             refreshTodayApproved();
-            loadStats(); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
+            checkReworkBacklog(await loadStats()); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
         } catch (err) {
             alert(err.response?.data?.error || `Error: ${err.message}`);
             throw err;
@@ -1899,13 +2097,35 @@ const UniversalWorkstationDashboard = () => {
             const newBatches = await fetchQueue();
             refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
             refreshTodayApproved();
-            loadStats(); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
+            checkReworkBacklog(await loadStats()); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
         } catch (err) {
             alert(err.response?.data?.error || `Error: ${err.message}`);
             throw err;
         } finally {
             setIsProcessing(false); // 🚨 Global Full-Screen Lock OFF
         }
+    };
+
+    const handleRevertToPending = async ({ pieceIds }) => {
+        setIsProcessing(true); // 🚨 Global Full-Screen Lock ON
+        try {
+            await universalApi.revertPieceToPending({ batchId: modalState.batchId, bundleId: modalState.bundle_id, pieceIds });
+            const newBatches = await fetchQueue();
+            refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
+            refreshTodayApproved();
+            loadStats();
+        } catch (err) {
+            alert(err.response?.data?.error || `Error: ${err.message}`);
+            throw err;
+        } finally {
+            setIsProcessing(false); // 🚨 Global Full-Screen Lock OFF
+        }
+    };
+
+    const handleSubmitReplacementRequest = async (pieceIds, notes) => {
+        await materialReplacementApi.createRequests({ pieceIds, notes });
+        await fetchQueue(); // flagged pieces need to disappear from the normal queue immediately
+        setShowReplacementRequestModal(false);
     };
 
     const handleQuickBulkApprove = async (entity, batchId, rollId) => {
@@ -1921,7 +2141,7 @@ const UniversalWorkstationDashboard = () => {
             });
             await fetchQueue();
             refreshTodayApproved();
-            loadStats(); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
+            checkReworkBacklog(await loadStats()); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
         } catch (err) { alert(err.response?.data?.error || `Error: ${err.message}`); }
         finally { setIsProcessing(false); }
     };
@@ -2010,13 +2230,19 @@ const UniversalWorkstationDashboard = () => {
                 {/* Row 2: summary bar */}
                 <div className="px-4 py-1.5 bg-gray-50 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-4 flex-wrap">
-                        <div className="flex items-center gap-1.5">
+                        <button
+                            type="button"
+                            onClick={() => setShowReplacementRequestModal(true)}
+                            disabled={pendingReworkPieces.length === 0}
+                            className="flex items-center gap-1.5 hover:bg-amber-50 rounded px-1.5 py-0.5 transition disabled:opacity-50 disabled:hover:bg-transparent"
+                            title={pendingReworkPieces.length === 0 ? 'Nothing pending rework right now' : 'Click to flag some of these for material replacement instead'}
+                        >
                             <Hammer size={13} className="text-amber-500 shrink-0" />
                             <span className="text-xs text-gray-500">Pending Rework</span>
                             <span className={`text-sm font-black tabular-nums ${stats == null ? 'text-gray-400' : stats.pending_rework > 0 ? 'text-amber-500' : 'text-emerald-600'}`}>
                                 {stats == null ? '—' : (stats.pending_rework ?? 0)}
                             </span>
-                        </div>
+                        </button>
                         <span className="text-gray-200 hidden sm:inline">│</span>
                         <div className="flex items-center gap-1.5">
                             <Hammer size={13} className="text-indigo-400 shrink-0" />
@@ -2051,14 +2277,31 @@ const UniversalWorkstationDashboard = () => {
                             <span className="text-sm font-black tabular-nums text-sky-600">{stats == null ? '—' : (stats.checked_this_hour ?? 0)}</span>
                         </div>
                     </div>
-                    <button
-                        onClick={handleOpenModal}
-                        disabled={loadingWork && !showModal}
-                        className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 hover:text-indigo-600 border border-gray-200 hover:border-indigo-300 px-3 py-1.5 rounded-lg transition disabled:opacity-50 bg-white shadow-sm"
-                    >
-                        {loadingWork && !showModal ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
-                        Today's Work
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setShowReplacementStatusModal(true)}
+                            className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 hover:text-violet-600 border border-gray-200 hover:border-violet-300 px-3 py-1.5 rounded-lg transition bg-white shadow-sm"
+                        >
+                            <PackageX size={12} /> For Replacement
+                        </button>
+                        {isStage1Checker && (
+                            <button
+                                onClick={() => setShowFulfillmentModal(true)}
+                                title="Stage-1 only — accept, fulfill, or cancel material replacement requests across every line"
+                                className="flex items-center gap-1.5 text-xs font-semibold text-white bg-violet-600 hover:bg-violet-700 border border-violet-700 px-3 py-1.5 rounded-lg transition shadow-sm"
+                            >
+                                <PackageX size={12} /> Fulfill Replacements
+                            </button>
+                        )}
+                        <button
+                            onClick={handleOpenModal}
+                            disabled={loadingWork && !showModal}
+                            className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 hover:text-indigo-600 border border-gray-200 hover:border-indigo-300 px-3 py-1.5 rounded-lg transition disabled:opacity-50 bg-white shadow-sm"
+                        >
+                            {loadingWork && !showModal ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+                            Today's Work
+                        </button>
+                    </div>
                 </div>
 
                 {/* Row 3: collapsible nav + batch filter */}
@@ -2211,6 +2454,7 @@ const UniversalWorkstationDashboard = () => {
                                                                                     {bundles.map(bundle => (
                                                                                         <ValidationProgressRow key={bundle.bundle_id} label={`Roll #${bundle.roll_id}`} subLabel={`Bundle ${bundle.bundle_code}`} icon={Layers} entity={bundle}
                                                                                             canApproveBundle={allowBundle}
+                                                                                            isApproveBlocked={isApproveBlocked}
                                                                                             onQuickApprove={(entity) => handleQuickBulkApprove(entity, batch.batch_id, bundle.roll_id)}
                                                                                             onInspect={() => setModalState({ type: 'validate', isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, allowMultiple, ...bundle, pieces: bundle.pieces.map(p => ({ ...p, _displayGroup: `${partName} | Roll #${bundle.roll_id}` })) })}
                                                                                             onRepair={() => setModalState({ type: 'validate', forceRepairMode: true, isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, ...bundle })}
@@ -2284,6 +2528,7 @@ const UniversalWorkstationDashboard = () => {
                                                                                     {bundles.map(bundle => (
                                                                                         <ValidationProgressRow key={bundle.bundle_id} label={`Size ${bundle.size}`} subLabel={`Bundle ${bundle.bundle_code}`} icon={Package} entity={bundle}
                                                                                             canApproveBundle={allowBundle}
+                                                                                            isApproveBlocked={isApproveBlocked}
                                                                                             onQuickApprove={(entity) => handleQuickBulkApprove(entity, batch.batch_id, rollId)}
                                                                                             onInspect={() => setModalState({ type: 'validate', isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, allowMultiple, ...bundle, pieces: bundle.pieces.map(p => ({ ...p, _displayGroup: `${partName} | Size ${bundle.size}` })) })}
                                                                                             onRepair={() => setModalState({ type: 'validate', forceRepairMode: true, isBundle: true, batchId: batch.batch_id, batchCode: batch.batch_code, ...bundle })}
@@ -2318,7 +2563,7 @@ const UniversalWorkstationDashboard = () => {
                                                                     )}
                                                                 </div>
                                                                 {sizeGroup.parts_details.filter(p => isPartVisible(p.part_name)).map(part => (
-                                                                    <PartAccordionBySize key={part.part_id} batch={batch} size={sizeGroup.size} part={part} setModalState={setModalState} allowMultiple={allowMultiple} />
+                                                                    <PartAccordionBySize key={part.part_id} batch={batch} size={sizeGroup.size} part={part} setModalState={setModalState} allowMultiple={allowMultiple} onRequestReplacement={openReplacementRequest} />
                                                                 ))}
                                                             </div>
                                                         );
@@ -2345,7 +2590,7 @@ const UniversalWorkstationDashboard = () => {
                                                                 </div>
                                                             </div>
                                                             {roll.parts_details.filter(p => isPartVisible(p.part_name)).map(part => (
-                                                                <PartAccordion key={part.part_id} batch={batch} roll={roll} part={part} setModalState={setModalState} allowMultiple={allowMultiple} />
+                                                                <PartAccordion key={part.part_id} batch={batch} roll={roll} part={part} setModalState={setModalState} allowMultiple={allowMultiple} onRequestReplacement={openReplacementRequest} />
                                                             ))}
                                                         </div>
                                                     ))
@@ -2380,8 +2625,62 @@ const UniversalWorkstationDashboard = () => {
                     onDateChange={handleModalDateChange}
                 />
             )}
-            {modalState && modalState.type === 'validate' && <UniversalValidationModal itemInfo={modalState} defectCodes={defectCodes} onClose={() => setModalState(null)} onValidationSubmit={handleValidationSubmit} onRepairSubmit={handleApproveAlterSubmit} />}
+            {modalState && modalState.type === 'validate' && <UniversalValidationModal itemInfo={modalState} defectCodes={defectCodes} onClose={() => { setModalState(null); setHighlightPieceId(null); }} onValidationSubmit={handleValidationSubmit} onRepairSubmit={handleApproveAlterSubmit} onRevertToPending={handleRevertToPending} isApproveBlocked={isApproveBlocked} highlightPieceId={highlightPieceId} />}
+            {showReplacementRequestModal && (
+                <MaterialReplacementRequestModal
+                    pieces={replacementModalPieces}
+                    onClose={() => { setShowReplacementRequestModal(false); setReplacementScopePieceIds(null); }}
+                    onSubmit={handleSubmitReplacementRequest}
+                    fetchRequests={materialReplacementApi.getMyLineRequests}
+                    scopePieceIds={replacementScopePieceIds}
+                    onOpenPiece={openValidationForPiece}
+                />
+            )}
+            {showReplacementStatusModal && (
+                <MaterialReplacementStatusModal
+                    fetchRequests={materialReplacementApi.getMyLineRequests}
+                    onClose={() => setShowReplacementStatusModal(false)}
+                />
+            )}
+            {showFulfillmentModal && (
+                <div className="fixed inset-0 bg-gray-100 z-[150] flex flex-col">
+                    <div className="bg-slate-900 text-white px-5 py-3 flex justify-between items-center shrink-0">
+                        <span className="font-black uppercase tracking-widest text-sm flex items-center gap-2">
+                            <PackageX className="w-4 h-4" /> Material Replacements — Fulfillment
+                        </span>
+                        <button onClick={() => setShowFulfillmentModal(false)} className="p-1.5 hover:bg-slate-800 rounded-full transition">
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                    <div className="flex-grow overflow-y-auto">
+                        <MaterialReplacementsPage />
+                    </div>
+                </div>
+            )}
             {showHistory && <BatchHistoryPanel onClose={() => setShowHistory(false)} />}
+
+            {/* Full-screen rework-backlog interrupt — z-[400], above every other
+                modal in this file (all z-[150]), so it still surfaces even when
+                the submit that triggered it happened from inside one. */}
+            {showReworkWarning && (
+                <div className="fixed inset-0 bg-red-700 z-[400] flex flex-col items-center justify-center p-8 text-center">
+                    <ShieldAlert className="w-24 h-24 text-white mb-6 animate-pulse" strokeWidth={1.5} />
+                    <h2 className="text-4xl font-black text-white uppercase tracking-widest mb-3">
+                        {isApproveBlocked ? 'Approve Disabled — Backlog Too High' : 'Rework Backlog Too High'}
+                    </h2>
+                    <p className="text-red-100 text-lg font-bold max-w-md mb-8">
+                        {isApproveBlocked
+                            ? `${stats?.pending_rework ?? 0} pieces are sitting in Pending Rework on your line — over the limit of ${reworkBlockThreshold}. New pieces can no longer be approved; only Repair or Reject on existing rework until the backlog drops.`
+                            : `${stats?.pending_rework ?? 0} pieces are sitting in Pending Rework on your line — clear the backlog down before continuing.`}
+                    </p>
+                    <button
+                        onClick={() => setShowReworkWarning(false)}
+                        className="bg-white text-red-700 font-black uppercase tracking-widest text-lg px-10 py-4 rounded-2xl shadow-2xl hover:bg-red-50 active:scale-95 transition"
+                    >
+                        Continue
+                    </button>
+                </div>
+            )}
         </div>
     );
 };

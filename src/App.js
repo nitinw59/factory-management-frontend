@@ -78,6 +78,7 @@ import CheckingWorkstationDashboardPage from './modules/checking_portal/Checking
 import NumberingWorkstationDashboardPage from './modules/numbering_portal/NumberingWorkstationDashboardPage';
 import InitializationDashboardPortalPage from './modules/initialisation_portal/InitializationDashboardPortalPage';
 import AlterPiecesDashboardPage from './modules/initialisation_portal/AlterPiecesDashboardPage';
+import MaterialReplacementsPage from './modules/initialisation_portal/MaterialReplacementsPage';
 import ReadyToLoadPage from './modules/initialisation_portal/ReadyToLoadPage';
 import NumberingBatchDetailsPage from './modules/numbering_portal/NumberingBatchDetailsPage';
 import PreparationManagerDashboardPage from './modules/preparation_portal/PreparationManagerDashboardPage';
@@ -413,6 +414,7 @@ function App() {
           <Route index element={<InitializationDashboardPortalPage />} />
           <Route path="dashboard" element={<InitializationDashboardPortalPage />} />
           <Route path="alter-pieces" element={<AlterPiecesDashboardPage />} />
+          <Route path="material-replacements" element={<MaterialReplacementsPage />} />
           <Route path="ready-to-load" element={<ReadyToLoadPage />} />
 
           <Route path="summary" element={<NumberingBatchDetailsPage />} />
