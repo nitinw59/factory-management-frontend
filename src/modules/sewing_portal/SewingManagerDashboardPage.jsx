@@ -136,7 +136,7 @@ const BatchCard = ({ batch, onStartClick }) => {
                     </div>
                 )}
             </div>
-            <div className="p-4 grid grid-cols-2 gap-4 flex-1">
+            <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
                 <div>
                     <h4 className="text-xs font-bold text-gray-500 uppercase mb-2 flex items-center"><LuInfo className="mr-1"/> Details</h4>
                     <p className="text-sm"><strong className="font-medium">Layer Length:</strong> {batch.length_of_layer_inches || 'N/A'} in</p>

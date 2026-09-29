@@ -1,3 +1,14 @@
+html, body {
+  /* Without this, a single element wider than the phone's screen (an
+     un-wrapped table, a fixed-width grid, ...) forces mobile browsers to
+     zoom the whole page out to fit it — which reads as "showing the desktop
+     layout" even though the viewport meta tag is set correctly. Clipping
+     horizontal overflow here keeps the page pinned to device width no
+     matter what a specific page's own CSS gets wrong. */
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',

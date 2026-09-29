@@ -13,7 +13,7 @@
 // PIECE-mode batches that are currently sitting in the checker's own
 // pending-rework queue (an unresolved NEEDS_REWORK defect).
 import { useState, useEffect, useMemo } from 'react';
-import { X, PackageX, Search, Loader2, AlertCircle } from 'lucide-react';
+import { X, PackageX, Search, Loader2, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 
 const STATUS_TABS = [
     { key: 'REQUESTED', label: 'Requested' },
@@ -132,6 +132,19 @@ export function MaterialReplacementRequestModal({ pieces, onClose, onSubmit, fet
         return next;
     });
 
+    // Batch groups start collapsed — each is its own accordion row, so a busy
+    // queue with many batches reads as a compact list of headers first,
+    // rather than every tile from every batch dumped on screen at once.
+    // Tracks which are explicitly opened, not which are closed, so a fresh
+    // batch id (search changes, new pieces arrive) is collapsed by default
+    // without needing to know about it in advance.
+    const [expandedBatches, setExpandedBatches] = useState(new Set());
+    const toggleBatchCollapse = (batchId) => setExpandedBatches(prev => {
+        const next = new Set(prev);
+        if (next.has(batchId)) next.delete(batchId); else next.add(batchId);
+        return next;
+    });
+
     const handleSubmit = async () => {
         if (selectedIds.size === 0) return;
         setSubmitting(true);
@@ -192,45 +205,61 @@ export function MaterialReplacementRequestModal({ pieces, onClose, onSubmit, fet
                 {filteredPieces.length === 0 ? (
                     <p className="text-center text-slate-400 font-bold py-12">No pending rework pieces match.</p>
                 ) : (
-                    <div className="space-y-5 sm:space-y-6">
-                        {groupedPieces.map(({ batch_id, pieces: batchPieces }) => (
-                            <div key={batch_id}>
-                                <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2">
-                                    Batch #{batch_id}
-                                </p>
-                                <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
-                                    {batchPieces.map(p => {
-                                        const isSelected = selectedIds.has(p.id);
-                                        return (
-                                            <button
-                                                key={p.id}
-                                                onClick={() => togglePiece(p.id)}
-                                                className={`text-left rounded-xl border-2 p-2.5 sm:p-3 transition active:scale-95 ${
-                                                    isSelected ? 'bg-violet-600 border-violet-700 text-white shadow-lg' : 'bg-white border-slate-200 hover:border-violet-300'
-                                                }`}
-                                            >
-                                                <div className={`text-[10px] sm:text-xs font-black uppercase tracking-wide truncate ${isSelected ? 'text-violet-200' : 'text-slate-400'}`}>
-                                                    Batch #{p.batch_id} · Roll #{p.roll_id}
-                                                </div>
-                                                <div className={`font-mono font-black text-base sm:text-lg ${isSelected ? 'text-white' : 'text-slate-800'}`}>
-                                                    #{p.piece_sequence}
-                                                </div>
-                                                <div className={`text-xs sm:text-sm font-black rounded-lg px-2 py-1 mt-1 inline-block ${
-                                                    isSelected ? 'bg-white/20 text-white' : 'bg-violet-100 text-violet-700'
-                                                }`}>
-                                                    {p.part_name} · Size {p.size}
-                                                </div>
-                                                {p.defect_reason && (
-                                                    <div className={`mt-1 text-[11px] italic truncate ${isSelected ? 'text-violet-200' : 'text-amber-600'}`} title={p.defect_reason}>
-                                                        {p.defect_reason}
-                                                    </div>
-                                                )}
-                                            </button>
-                                        );
-                                    })}
+                    <div className="space-y-3">
+                        {groupedPieces.map(({ batch_id, pieces: batchPieces }) => {
+                            const isCollapsed = !expandedBatches.has(batch_id);
+                            const selectedCount = batchPieces.filter(p => selectedIds.has(p.id)).length;
+                            return (
+                                <div key={batch_id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                                    <button
+                                        onClick={() => toggleBatchCollapse(batch_id)}
+                                        className="w-full flex items-center justify-between px-3 py-2.5 bg-slate-50 hover:bg-slate-100 transition"
+                                    >
+                                        <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-slate-600">
+                                            {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
+                                            Batch #{batch_id}
+                                        </span>
+                                        <span className="flex items-center gap-2 text-[11px] font-bold text-slate-400">
+                                            {selectedCount > 0 && <span className="text-violet-600">{selectedCount} selected</span>}
+                                            {batchPieces.length} piece{batchPieces.length !== 1 ? 's' : ''}
+                                        </span>
+                                    </button>
+                                    {!isCollapsed && (
+                                        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 p-2.5 sm:p-3">
+                                            {batchPieces.map(p => {
+                                                const isSelected = selectedIds.has(p.id);
+                                                return (
+                                                    <button
+                                                        key={p.id}
+                                                        onClick={() => togglePiece(p.id)}
+                                                        className={`text-left rounded-xl border-2 p-2.5 sm:p-3 transition active:scale-95 ${
+                                                            isSelected ? 'bg-violet-600 border-violet-700 text-white shadow-lg' : 'bg-white border-slate-200 hover:border-violet-300'
+                                                        }`}
+                                                    >
+                                                        <div className={`text-[10px] sm:text-xs font-black uppercase tracking-wide truncate ${isSelected ? 'text-violet-200' : 'text-slate-400'}`}>
+                                                            Batch #{p.batch_id} · Roll #{p.roll_id}
+                                                        </div>
+                                                        <div className={`font-mono font-black text-base sm:text-lg ${isSelected ? 'text-white' : 'text-slate-800'}`}>
+                                                            #{p.piece_sequence}
+                                                        </div>
+                                                        <div className={`text-xs sm:text-sm font-black rounded-lg px-2 py-1 mt-1 inline-block ${
+                                                            isSelected ? 'bg-white/20 text-white' : 'bg-violet-100 text-violet-700'
+                                                        }`}>
+                                                            {p.part_name} · Size {p.size}
+                                                        </div>
+                                                        {p.defect_reason && (
+                                                            <div className={`mt-1 text-[11px] italic truncate ${isSelected ? 'text-violet-200' : 'text-amber-600'}`} title={p.defect_reason}>
+                                                                {p.defect_reason}
+                                                            </div>
+                                                        )}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>
