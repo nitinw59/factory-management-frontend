@@ -1976,6 +1976,30 @@ const BatchStageDrilldownModal = ({ batchId, flowId, stageName, onClose }) => {
                 </div>
             )}
 
+            {/* Status totals — BUNDLE mode (e.g. Preparatory). Approved pieces
+                only count pieces the previous stage (cutting) also cleared, so
+                they can never exceed cutting's approved + repaired; pieces
+                rejected at cutting are shown separately as flagged. */}
+            {mode === 'BUNDLE' && stage.tracking_data?.stats && (() => {
+                const bs = stage.tracking_data.stats;
+                const rejectedUp = parseInt(bs.rejected_upstream_pieces || 0);
+                return (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                        {[
+                            { label: 'Bundles Approved',    val: `${parseInt(bs.approved_bundles || 0)} / ${parseInt(bs.total_bundles || 0)}`, color: 'bg-indigo-50 text-indigo-700' },
+                            { label: 'Approved Pieces',     val: parseInt(bs.approved_pieces || 0),  color: 'bg-emerald-50 text-emerald-700' },
+                            { label: 'Total Pieces',        val: parseInt(bs.total_pieces || 0),     color: 'bg-slate-50 text-slate-700' },
+                            { label: 'Rejected at Cutting', val: rejectedUp,                          color: rejectedUp > 0 ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-400' },
+                        ].map(({ label, val, color }) => (
+                            <div key={label} className={`${color} rounded-xl p-3 text-center border border-black/5`}>
+                                <div className="text-xl font-black">{val}</div>
+                                <div className="text-[9px] font-bold uppercase tracking-wider opacity-70 mt-0.5 leading-tight">{label}</div>
+                            </div>
+                        ))}
+                    </div>
+                );
+            })()}
+
             {/* Roll accordion */}
             <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
                 {rollsInStage.length === 0 && (

@@ -525,12 +525,14 @@ const SizeSelectionModal = ({ batchId, cycleFlow, currentLineId, readySizes = []
 // BATCH INFO BANNER  (shared by StageDetailModal + ChangeLineModal)
 // ============================================================================
 const BatchInfoBanner = ({ batch, activeStage }) => {
-    const completedStages = (batch.progress || []).filter(p => p.status === 'COMPLETED').length;
-    const totalStages     = batch.total_steps || batch.cycle_flow?.length || 1;
-    const lastProgress    = [...(batch.progress || [])].sort((a, b) => b.sequence_no - a.sequence_no)[0];
-    const completedRolls  = lastProgress?.roll_summary?.completed ?? lastProgress?.completed_roll_ids?.length ?? 0;
-    const totalRolls      = batch.total_rolls ?? 0;
-    const gs              = batch.garment_summary;
+    const isMode2          = batch.piece_sequencing_mode === 'MODE_2';
+    const completedStages  = (batch.progress || []).filter(p => p.status === 'COMPLETED').length;
+    const totalStages      = batch.total_steps || batch.cycle_flow?.length || 1;
+    const lastProgress     = [...(batch.progress || [])].sort((a, b) => b.sequence_no - a.sequence_no)[0];
+    const completedRolls   = lastProgress?.roll_summary?.completed ?? lastProgress?.completed_roll_ids?.length ?? 0;
+    const totalRolls       = batch.total_rolls ?? 0;
+    const totalSizes       = batch.total_sizes ?? batch.all_sizes?.length ?? 0;
+    const gs               = batch.garment_summary;
 
     return (
         <div className="bg-slate-900 rounded-xl px-4 py-3.5 mb-4">
@@ -545,6 +547,11 @@ const BatchInfoBanner = ({ batch, activeStage }) => {
                             {batch.batch_code}
                         </span>
                         {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
+                        {isMode2 && (
+                            <span className="text-[10px] font-black uppercase tracking-widest bg-violet-900 text-violet-300 px-2 py-0.5 rounded border border-violet-700">
+                                Size Mode
+                            </span>
+                        )}
                     </div>
                     <p className="text-slate-400 text-xs font-medium mt-0.5">{batch.product_name}</p>
                 </div>
@@ -560,7 +567,7 @@ const BatchInfoBanner = ({ batch, activeStage }) => {
             </div>
 
             {/* Stats row */}
-            <div className="grid grid-cols-3 gap-2">
+            <div className={`grid ${isMode2 ? 'grid-cols-4' : 'grid-cols-3'} gap-2`}>
                 <div className="bg-slate-800 rounded-lg px-2.5 py-2 text-center">
                     <div className="text-white font-black text-base leading-none">
                         {completedStages}/{totalStages}
@@ -573,6 +580,14 @@ const BatchInfoBanner = ({ batch, activeStage }) => {
                     </div>
                     <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-0.5">Rolls</div>
                 </div>
+                {isMode2 && (
+                    <div className="bg-slate-800 rounded-lg px-2.5 py-2 text-center">
+                        <div className="text-violet-300 font-black text-base leading-none">
+                            {totalSizes}
+                        </div>
+                        <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-0.5">Sizes</div>
+                    </div>
+                )}
                 <div className="bg-slate-800 rounded-lg px-2.5 py-2 text-center">
                     {gs ? (
                         <>
@@ -762,18 +777,46 @@ const SizeProgressBadge = ({ sizeProgress }) => {
     );
 };
 
+// Per-size status pills — the count badge (SizeProgressBadge) says "1/6
+// done", this says exactly which size(s): green = COMPLETED here, blue =
+// still IN_PROGRESS, gray = any other/unexpected status. Only worth showing
+// once a roll actually carries more than one size (MODE_2).
+const SIZE_PILL_STYLE = {
+    COMPLETED:   'bg-emerald-50 text-emerald-700 border-emerald-200',
+    IN_PROGRESS: 'bg-blue-50 text-blue-700 border-blue-200',
+};
+const SizeBreakdownPills = ({ sizes }) => {
+    if (!sizes || sizes.length <= 1) return null;
+    return (
+        <div className="flex flex-wrap gap-1 mt-2">
+            {sizes.map(s => (
+                <span
+                    key={s.size}
+                    title={`Size ${s.size}: ${s.status.replace('_', ' ')}`}
+                    className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${SIZE_PILL_STYLE[s.status] || 'bg-slate-50 text-slate-500 border-slate-200'}`}
+                >
+                    {s.size}
+                </span>
+            ))}
+        </div>
+    );
+};
+
 const RollRow = ({ roll, badge, badgeClass }) => (
-    <div className="flex justify-between items-center p-3 text-sm border-b border-slate-100 last:border-0">
-        <div>
-            <span className="font-bold text-slate-800 block">Roll #{roll.roll_id}</span>
-            <span className="text-xs text-slate-500">{roll.fabric_type} · {roll.color_name} · {roll.color_number}</span>
+    <div className="p-3 text-sm border-b border-slate-100 last:border-0">
+        <div className="flex justify-between items-center">
+            <div>
+                <span className="font-bold text-slate-800 block">Roll #{roll.roll_id}</span>
+                <span className="text-xs text-slate-500">{roll.fabric_type} · {roll.color_name} · {roll.color_number}</span>
+            </div>
+            <div className="flex items-center gap-2">
+                <SizeProgressBadge sizeProgress={roll.size_progress} />
+                {roll.primary_pieces_cut > 0 && <span className="text-[10px] text-slate-400 font-bold">{roll.primary_pieces_cut} pcs</span>}
+                <span className="font-mono font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-md text-xs">{roll.meter}m</span>
+                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${badgeClass}`}>{badge}</span>
+            </div>
         </div>
-        <div className="flex items-center gap-2">
-            <SizeProgressBadge sizeProgress={roll.size_progress} />
-            {roll.primary_pieces_cut > 0 && <span className="text-[10px] text-slate-400 font-bold">{roll.primary_pieces_cut} pcs</span>}
-            <span className="font-mono font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-md text-xs">{roll.meter}m</span>
-            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${badgeClass}`}>{badge}</span>
-        </div>
+        <SizeBreakdownPills sizes={roll.sizes} />
     </div>
 );
 

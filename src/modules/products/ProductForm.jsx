@@ -87,6 +87,16 @@ const ProductForm = ({ onSave, onClose, initialData = null }) => {
       }
   };
   const removeCycleStep = (idToRemove) => setCycleFlow(cycleFlow.filter(step => step.production_line_type_id !== idToRemove));
+  // Parts NOT scanned at a given stage (e.g. BELT at BF SEWING) — that stage
+  // and the assembly DNA check then treat the part as out of scope there.
+  const toggleSkippedPart = (lineTypeId, partName) => setCycleFlow(cycleFlow.map(step => {
+    if (step.production_line_type_id !== lineTypeId) return step;
+    const skipped = step.skipped_parts || [];
+    return { ...step, skipped_parts: skipped.includes(partName) ? skipped.filter(n => n !== partName) : [...skipped, partName] };
+  }));
+  const partNames = [...new Set(pieceParts
+    .filter(p => p.part_name && p.is_active !== false)
+    .map(p => p.part_name.trim().toUpperCase()))];
   const handleDragStart = (e, index) => setDraggedItem(cycleFlow[index]);
   const handleDragOver = (e, index) => {
     e.preventDefault();
@@ -109,7 +119,8 @@ const ProductForm = ({ onSave, onClose, initialData = null }) => {
         pieceParts: pieceParts.filter(p => p.part_name),
         cycleFlow: cycleFlow.map((step, index) => ({
             production_line_type_id: step.production_line_type_id,
-            sequence_no: index + 1
+            sequence_no: index + 1,
+            skipped_parts: (step.skipped_parts || []).filter(n => partNames.includes(n))
         })),
         id: initialData?.id
       };
@@ -207,9 +218,26 @@ const ProductForm = ({ onSave, onClose, initialData = null }) => {
             <p className="text-sm text-gray-500">Define the sequence of production line types. Drag to reorder.</p>
             <div className="bg-gray-50 p-2 rounded-lg min-h-[100px] border">
               {cycleFlow.map((step, index) => (
-                <div key={step.production_line_type_id} className="flex items-center justify-between bg-white p-2 rounded shadow-sm mb-2" draggable onDragStart={(e) => handleDragStart(e, index)} onDragOver={(e) => handleDragOver(e, index)} onDragEnd={handleDragEnd}>
-                  <div className="flex items-center"><LuGripVertical className="cursor-move text-gray-400 mr-2" /><span className="font-medium">{index + 1}. {step.name}</span></div>
-                  <button type="button" onClick={() => removeCycleStep(step.production_line_type_id)} className="p-1 text-red-500 hover:bg-red-100 rounded-full"><LuTrash2 size={16} /></button>
+                <div key={step.production_line_type_id} className="bg-white p-2 rounded shadow-sm mb-2" draggable onDragStart={(e) => handleDragStart(e, index)} onDragOver={(e) => handleDragOver(e, index)} onDragEnd={handleDragEnd}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center"><LuGripVertical className="cursor-move text-gray-400 mr-2" /><span className="font-medium">{index + 1}. {step.name}</span></div>
+                    <button type="button" onClick={() => removeCycleStep(step.production_line_type_id)} className="p-1 text-red-500 hover:bg-red-100 rounded-full"><LuTrash2 size={16} /></button>
+                  </div>
+                  {partNames.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2 ml-6">
+                      <span className="text-xs text-gray-500 mr-1">Not scanned at this stage:</span>
+                      {partNames.map(name => {
+                        const skipped = (step.skipped_parts || []).includes(name);
+                        return (
+                          <button key={name} type="button" onClick={() => toggleSkippedPart(step.production_line_type_id, name)}
+                            title={skipped ? `${name} is not scanned at ${step.name} — click to require it` : `Click if ${name} is not scanned at ${step.name}`}
+                            className={`px-2 py-0.5 text-xs rounded-full border ${skipped ? 'bg-amber-100 border-amber-300 text-amber-800 line-through' : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-400'}`}>
+                            {name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               ))}
               {cycleFlow.length === 0 && <p className="text-center text-gray-400 text-sm p-4">Add production steps below.</p>}

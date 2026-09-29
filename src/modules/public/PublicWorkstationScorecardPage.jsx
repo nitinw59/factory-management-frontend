@@ -38,11 +38,12 @@ const IDLE_MS = 12000;  // how long an idle animation shows before the grid retu
 const FADE_MS = 700;    // cross-fade between grid and idle screen
 
 const STAT_COLORS = {
-    approved: 'text-emerald-400',
-    repaired: 'text-amber-400',
-    rework:   'text-orange-400',
-    rejected: 'text-red-400',
-    dhu:      'text-cyan-400',
+    approved:  'text-emerald-400',
+    repaired:  'text-amber-400',
+    rework:    'text-orange-400',
+    rejected:  'text-red-400',
+    dhu:       'text-cyan-400',
+    completed: 'text-violet-400',
 };
 
 // DHU — Defects per Hundred Units, the standard definition (lower is better):
@@ -96,17 +97,27 @@ const charsPerLineNeeded = (name) => {
 const NAME_RATIO  = 0.30;
 const VALUE_RATIO = 0.26;
 const LABEL_RATIO = 0.07;
+// Per request: the stat columns (Approved, Repaired, Rework, Rejected, DHU,
+// Complete Sets — label + the number below it) render at literal double the
+// auto-fit size computeSizes() would otherwise pick. Applied as a flat
+// multiplier on top of that base size (not baked into VALUE_RATIO/LABEL_RATIO
+// themselves) so it can't silently do nothing when the width-fit ceiling,
+// not the row-height ratio, happens to be the binding constraint — this
+// always visibly doubles it, at the cost of relying on the column's
+// overflow-hidden to clip an unusually wide number instead of guaranteeing
+// it never happens.
+const STAT_TEXT_BOOST = 2;
 
 // Shared column template — every row is its own CSS Grid using these exact
-// percentages, so Approved/Repaired/Rework/Rejected/DHU/Today line up in
-// identical X positions from row to row. Name is locked to 30%; the other
-// six columns split the remaining 70% (five equal + Today slightly wider).
-// NO grid gap: the percentages already sum to 100% of the row's content box,
-// so any gap would push the last column past the right edge. Spacing comes
-// from per-cell padding instead (CELL_PAD_X etc. below, which the width-fit
-// maths also subtracts).
-const ROW_GRID_COLS = '30% 11.2% 11.2% 11.2% 11.2% 11.2% 14%';
-const COL_FRAC = { name: 0.30, stat: 0.112, today: 0.14 };
+// percentages, so Approved/Repaired/Rework/Rejected/DHU/Complete-Sets/Today
+// line up in identical X positions from row to row. Name is locked to 26%;
+// the other seven columns split the remaining 74% (six equal + Today
+// slightly wider). NO grid gap: the percentages already sum to 100% of the
+// row's content box, so any gap would push the last column past the right
+// edge. Spacing comes from per-cell padding instead (CELL_PAD_X etc. below,
+// which the width-fit maths also subtracts).
+const ROW_GRID_COLS = '26% 10% 10% 10% 10% 10% 10% 14%';
+const COL_FRAC = { name: 0.26, stat: 0.10, today: 0.14 };
 const ROW_PAD_X    = 32; // px-8 on the row, each side
 const CELL_PAD_X   = 8;  // px-2 on stat cells, each side
 const TODAY_PAD_X  = 12; // px-3 on the Today cell, each side
@@ -136,7 +147,7 @@ const computeSizes = (rowH, containerW, nameCpl) => {
 // (options.text_scale, whole percents: 100 = the automatic size above). One
 // per grid column plus the ticker. Clamped again here so a bad value can never
 // make text vanish or explode; anything unreadable falls back to 100.
-const TEXT_SCALE_KEYS = ['name', 'approved', 'repaired', 'rework', 'rejected', 'dhu', 'today', 'ticker'];
+const TEXT_SCALE_KEYS = ['name', 'approved', 'repaired', 'rework', 'rejected', 'dhu', 'completed', 'today', 'ticker'];
 const clampPct = (v) => {
     const n = Math.round(Number(v));
     return Number.isFinite(n) ? Math.min(200, Math.max(50, n)) : 100;
@@ -149,13 +160,13 @@ const StatBlock = ({ label, value, cls, sz, k = 1 }) => (
     <div className="min-w-0 overflow-hidden px-2 flex flex-col items-center justify-center">
         <span
             className="uppercase tracking-widest font-bold text-gray-500 mb-1 leading-tight whitespace-nowrap"
-            style={{ fontSize: sz.label * k }}
+            style={{ fontSize: sz.label * k * STAT_TEXT_BOOST }}
         >
             {label}
         </span>
         <span
             className={`leading-none font-black tabular-nums whitespace-nowrap ${value > 0 ? cls : 'text-gray-700'}`}
-            style={{ fontSize: sz.value * k }}
+            style={{ fontSize: sz.value * k * STAT_TEXT_BOOST }}
         >
             {(value ?? 0).toLocaleString()}
         </span>
@@ -166,15 +177,37 @@ const DhuBlock = ({ dhu, sz, k = 1 }) => (
     <div className="min-w-0 overflow-hidden px-2 flex flex-col items-center justify-center">
         <span
             className="uppercase tracking-widest font-bold text-gray-500 mb-1 leading-tight whitespace-nowrap"
-            style={{ fontSize: sz.label * k }}
+            style={{ fontSize: sz.label * k * STAT_TEXT_BOOST }}
         >
             DHU
         </span>
         <span
             className={`leading-none font-black tabular-nums whitespace-nowrap ${dhu !== null ? STAT_COLORS.dhu : 'text-gray-700'}`}
-            style={{ fontSize: sz.value * k }}
+            style={{ fontSize: sz.value * k * STAT_TEXT_BOOST }}
         >
             {dhu !== null ? dhu.toFixed(2) : '—'}
+        </span>
+    </div>
+);
+
+// The TRUE today's-production figure (complete garment sets — every primary
+// part approved today, not just one part's own count). Flashes (wls-flash,
+// defined in the page's own <style> below) whenever it's actually produced
+// something today, so it reads as the headline number it is instead of
+// blending in with the other columns.
+const CompleteSetsBlock = ({ value, sz, k = 1 }) => (
+    <div className="min-w-0 overflow-hidden px-2 flex flex-col items-center justify-center">
+        <span
+            className="uppercase tracking-widest font-bold text-gray-500 mb-1 leading-tight whitespace-nowrap"
+            style={{ fontSize: sz.label * k * STAT_TEXT_BOOST }}
+        >
+            Complete Sets
+        </span>
+        <span
+            className={`leading-none font-black tabular-nums whitespace-nowrap ${value > 0 ? `${STAT_COLORS.completed} wls-flash` : 'text-gray-700'}`}
+            style={{ fontSize: sz.value * k * STAT_TEXT_BOOST }}
+        >
+            {(value ?? 0).toLocaleString()}
         </span>
     </div>
 );
@@ -200,6 +233,7 @@ const WorkstationRow = ({ w, sz, ts }) => (
         <StatBlock label="Rework"   value={w.today_rework}   cls={STAT_COLORS.rework}   sz={sz} k={ts.rework} />
         <StatBlock label="Rejected" value={w.today_rejected} cls={STAT_COLORS.rejected} sz={sz} k={ts.rejected} />
         <DhuBlock dhu={computeDhu(w)} sz={sz} k={ts.dhu} />
+        <CompleteSetsBlock value={w.complete_sets_today} sz={sz} k={ts.completed} />
         <div className="min-w-0 overflow-hidden px-3 flex flex-col items-center justify-center border-l border-gray-800 h-full">
             <span
                 className="uppercase tracking-widest font-bold text-gray-500 mb-1 leading-tight whitespace-nowrap"
@@ -256,6 +290,18 @@ const MobileDhu = ({ dhu }) => (
     </div>
 );
 
+// No <style>-defined wls-flash here (that block only renders on the desktop
+// layout) — Tailwind's built-in animate-pulse gives the same "flash" read on
+// a phone screen without needing the custom keyframe.
+const MobileCompleteSets = ({ value }) => (
+    <div className="flex flex-col items-center">
+        <span className="text-[9px] uppercase tracking-wider font-bold text-gray-500">Sets</span>
+        <span className={`text-sm font-black tabular-nums ${value > 0 ? `${STAT_COLORS.completed} animate-pulse` : 'text-gray-700'}`}>
+            {(value ?? 0).toLocaleString()}
+        </span>
+    </div>
+);
+
 const MobileWorkstationRow = ({ w }) => (
     <div className="px-4 py-3 border-b border-gray-800">
         <div className="flex items-center justify-between mb-2 gap-2">
@@ -266,12 +312,13 @@ const MobileWorkstationRow = ({ w }) => (
                 {(w.today_output ?? 0).toLocaleString()}
             </span>
         </div>
-        <div className="grid grid-cols-5 gap-1">
+        <div className="grid grid-cols-6 gap-1">
             <MobileStat label="Appr" value={w.today_approved} cls={STAT_COLORS.approved} />
             <MobileStat label="Rep"  value={w.today_repaired} cls={STAT_COLORS.repaired} />
             <MobileStat label="Rwk"  value={w.today_rework}   cls={STAT_COLORS.rework} />
             <MobileStat label="Rej"  value={w.today_rejected} cls={STAT_COLORS.rejected} />
             <MobileDhu dhu={computeDhu(w)} />
+            <MobileCompleteSets value={w.complete_sets_today} />
         </div>
     </div>
 );
@@ -479,6 +526,13 @@ export default function PublicWorkstationScorecardPage() {
                 @keyframes wls-idle-out { from { opacity: 1; } to { opacity: 0; } }
                 .wls-marquee-track {
                     animation: wls-marquee 60s linear infinite;
+                }
+                @keyframes wls-flash {
+                    0%, 100% { opacity: 1;   text-shadow: 0 0 0px rgba(167,139,250,0); }
+                    50%      { opacity: 0.55; text-shadow: 0 0 24px rgba(167,139,250,0.95); }
+                }
+                .wls-flash {
+                    animation: wls-flash 1.1s ease-in-out infinite;
                 }
             `}</style>
 

@@ -12,7 +12,7 @@ import {
     Hammer, Loader2, Menu, ChevronDown, ChevronRight, CheckCircle2,
     Square, CheckSquare, XCircle, ArrowLeft, Package, Send, AlertCircle, Zap,
     LogOut, FileText, ThumbsUp, LayoutGrid, History, ChevronLeft, BarChart2,
-    ShieldAlert, ShieldCheck, RefreshCw, Ruler, Lock, RotateCcw, PackageX,
+    ShieldAlert, ShieldCheck, RefreshCw, Ruler, Lock, RotateCcw, PackageX, AlertTriangle, Flag,
 } from 'lucide-react';
 
 // TEMPORARY FIX: hardcoded supervisor override password to un-reject a
@@ -304,6 +304,12 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
 
 const ApprovedSummaryModal = ({ workData, loading, onClose, onDateChange }) => {
     const [modalDate, setModalDate] = useState(workData?.date ?? new Date().toISOString().split('T')[0]);
+    // Part-wise breakdown (the original per-part cards below) is noise by
+    // default on a busy line — opt-in via the toggle rather than always shown.
+    const [showPartBreakdown, setShowPartBreakdown] = useState(false);
+    // Drilldown for the True Production Today card — null, {type:'part', part_name},
+    // or {type:'complete'}. Clicking the same pill again collapses it.
+    const [drilldown, setDrilldown] = useState(null);
 
     const groups = useMemo(() => {
         const map = new Map();
@@ -315,15 +321,21 @@ const ApprovedSummaryModal = ({ workData, loading, onClose, onDateChange }) => {
             g.total += 1;
             const sz = r.size || '—';
             g.sizes[sz] = (g.sizes[sz] || 0) + 1;
-            const bc = r.batch_code || `Batch #${r.batch_id ?? '—'}`;
+            const bc = `Batch #${r.batch_id ?? '—'}`;
             g.batches[bc] = (g.batches[bc] || 0) + 1;
         });
         return [...map.values()].sort((a, b) => b.total - a.total);
     }, [workData]);
 
     const totalApproved = groups.reduce((s, g) => s + g.total, 0);
+    const incompleteToday = workData?.incomplete_today ?? [];
+    const touchedToday = workData?.touched_today ?? 0;
 
     const handleDateChange = (e) => { const d = e.target.value; setModalDate(d); onDateChange(d); };
+    const togglePartDrilldown = (partName) =>
+        setDrilldown(d => (d?.type === 'part' && d.part_name === partName) ? null : { type: 'part', part_name: partName });
+    const toggleCompleteDrilldown = () =>
+        setDrilldown(d => d?.type === 'complete' ? null : { type: 'complete' });
 
     return (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
@@ -347,56 +359,176 @@ const ApprovedSummaryModal = ({ workData, loading, onClose, onDateChange }) => {
                 </div>
 
                 <div className="overflow-auto flex-1 p-4">
+                    {!loading && workData?.primary_part_breakdown?.length > 0 && (
+                        <div className="mb-4 p-4 bg-violet-50 border-2 border-violet-200 rounded-xl">
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                                <span className="text-xs font-black uppercase tracking-widest text-violet-700">True Production Today — Complete Garment Sets</span>
+                                <span className="text-2xl font-black text-violet-700 tabular-nums shrink-0">{workData.complete_sets_today}</span>
+                            </div>
+                            <p className="text-xs text-gray-500 mb-2.5 leading-relaxed">
+                                A garment isn't finished until <span className="font-bold text-gray-700">every</span> one of its primary parts is approved —
+                                not just one. Adding up each part's own count (or taking the smallest) over- or under-counts, because the exact same
+                                piece-sequences don't always line up across parts. This is the real figure: piece-sequences where <span className="font-bold text-gray-700">all</span> the
+                                primary parts below were approved today.
+                            </p>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                                {workData.primary_part_breakdown.map((p, i) => {
+                                    const isOpen = drilldown?.type === 'part' && drilldown.part_name === p.part_name;
+                                    return (
+                                        <span key={p.part_name} className="flex items-center gap-1.5">
+                                            <button
+                                                onClick={() => togglePartDrilldown(p.part_name)}
+                                                className={`text-xs font-bold px-2.5 py-1 rounded-full border transition ${
+                                                    isOpen ? 'bg-violet-700 border-violet-700 text-white' : 'bg-white border-violet-200 text-gray-700 hover:border-violet-400'
+                                                }`}
+                                            >
+                                                {p.part_name}: <span className={isOpen ? 'text-white font-black' : 'text-violet-700 font-black'}>{p.approved_today}</span> approved
+                                            </button>
+                                            {i < workData.primary_part_breakdown.length - 1 && <span className="text-violet-300 font-black">∩</span>}
+                                        </span>
+                                    );
+                                })}
+                                <span className="text-violet-400 font-black mx-0.5">=</span>
+                                <button
+                                    onClick={toggleCompleteDrilldown}
+                                    className={`text-xs font-black px-2.5 py-1 rounded-full transition ${
+                                        drilldown?.type === 'complete' ? 'bg-violet-900 text-white' : 'bg-violet-700 text-white hover:bg-violet-800'
+                                    }`}
+                                >
+                                    {workData.complete_sets_today} complete
+                                </button>
+                            </div>
+
+                            {drilldown?.type === 'part' && (() => {
+                                const g = groups.find(x => x.part_name === drilldown.part_name);
+                                if (!g) {
+                                    return (
+                                        <p className="mt-3 pt-3 border-t border-violet-200 text-xs text-gray-500 italic">
+                                            No detail available — {drilldown.part_name} today was approved by another checker on your line, not you, so its
+                                            piece-by-piece detail isn't in your own work log.
+                                        </p>
+                                    );
+                                }
+                                const sortedSizes   = Object.entries(g.sizes).sort((a, b) => a[0].localeCompare(b[0]));
+                                const sortedBatches = Object.entries(g.batches).sort((a, b) => b[1] - a[1]);
+                                return (
+                                    <div className="mt-3 pt-3 border-t border-violet-200 space-y-2">
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-violet-600">{g.part_name} — {g.total} approved today, by size &amp; batch</p>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {sortedSizes.map(([sz, n]) => (
+                                                <span key={sz} className="text-xs font-semibold px-2 py-0.5 rounded-full bg-white border border-violet-100 text-gray-700">
+                                                    {sz} <span className="text-violet-700 font-black">×{n}</span>
+                                                </span>
+                                            ))}
+                                        </div>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {sortedBatches.map(([bc, n]) => (
+                                                <span key={bc} className="text-xs font-semibold px-2 py-0.5 rounded-full bg-white border border-violet-100 text-gray-700 font-mono">
+                                                    {bc} <span className="text-violet-700 font-black">×{n}</span>
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
+                            {drilldown?.type === 'complete' && (
+                                <div className="mt-3 pt-3 border-t border-violet-200 space-y-2">
+                                    <p className="text-xs text-gray-600">
+                                        <span className="font-black text-gray-800">{touchedToday}</span> piece-sequences had at least one primary part approved today —
+                                        <span className="font-black text-emerald-600"> {workData.complete_sets_today} complete</span> (every primary part done) +
+                                        <span className="font-black text-amber-600"> {incompleteToday.length}{touchedToday - workData.complete_sets_today > incompleteToday.length ? '+' : ''} incomplete</span> (still missing at least one).
+                                    </p>
+                                    {incompleteToday.length > 0 && (
+                                        <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                                            {incompleteToday.map(inc => {
+                                                const missing = (inc.parts_expected || []).filter(p => !(inc.parts_done || []).includes(p));
+                                                return (
+                                                    <div key={`${inc.production_batch_id}-${inc.size}-${inc.piece_sequence}`} className="text-xs bg-white border border-amber-200 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2">
+                                                        <span className="font-mono text-gray-600">Batch #{inc.production_batch_id} · Size {inc.size} · #{inc.piece_sequence}</span>
+                                                        <span className="text-right">
+                                                            <span className="text-emerald-600 font-bold">{(inc.parts_done || []).join(', ')}</span>
+                                                            <span className="text-gray-400"> done · </span>
+                                                            <span className="text-amber-600 font-bold">{missing.join(', ')}</span>
+                                                            <span className="text-gray-400"> missing</span>
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
                     {loading ? (
                         <div className="flex items-center justify-center py-20 text-gray-400 gap-2">
                             <LuLoader size={18} className="animate-spin" /><span className="text-sm">Loading…</span>
                         </div>
-                    ) : groups.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-                            <LuCircleCheck size={36} className="mb-2 opacity-30" />
-                            <p className="text-sm font-medium">No approved pieces for this date.</p>
-                        </div>
                     ) : (
-                        <div className="space-y-2">
-                            {groups.map(g => {
-                                const sortedSizes   = Object.entries(g.sizes).sort((a, b) => a[0].localeCompare(b[0]));
-                                const sortedBatches = Object.entries(g.batches).sort((a, b) => b[1] - a[1]);
-                                return (
-                                    <div key={g.part_name} className="border border-gray-200 rounded-xl overflow-hidden">
-                                        <div className="bg-emerald-50/60 px-4 py-2.5 flex items-center justify-between border-b border-emerald-100">
-                                            <span className="font-black text-gray-700 text-sm capitalize">{g.part_name}</span>
-                                            <span className="text-base font-black tabular-nums text-emerald-600">{g.total} approved</span>
-                                        </div>
-                                        <div className="px-4 py-2.5 space-y-2">
-                                            {sortedSizes.length > 0 && (
-                                                <div>
-                                                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">By Size</p>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {sortedSizes.map(([sz, n]) => (
-                                                            <span key={sz} className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
-                                                                {sz} <span className="text-emerald-600 font-black">×{n}</span>
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {sortedBatches.length > 0 && (
-                                                <div>
-                                                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">By Batch</p>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {sortedBatches.map(([bc, n]) => (
-                                                            <span key={bc} className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 font-mono">
-                                                                {bc} <span className="text-emerald-600 font-black">×{n}</span>
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
+                        <>
+                            <button
+                                onClick={() => setShowPartBreakdown(v => !v)}
+                                className="w-full flex items-center justify-between px-3 py-2.5 mb-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition"
+                            >
+                                <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-gray-600">
+                                    {showPartBreakdown ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                    Part-wise Approved Breakdown
+                                </span>
+                                <span className="text-xs font-bold text-gray-400">
+                                    {totalApproved} piece{totalApproved === 1 ? '' : 's'} · {groups.length} part type{groups.length === 1 ? '' : 's'}
+                                </span>
+                            </button>
+                            {showPartBreakdown && (
+                                groups.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                                        <LuCircleCheck size={36} className="mb-2 opacity-30" />
+                                        <p className="text-sm font-medium">No approved pieces for this date.</p>
                                     </div>
-                                );
-                            })}
-                        </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {groups.map(g => {
+                                            const sortedSizes   = Object.entries(g.sizes).sort((a, b) => a[0].localeCompare(b[0]));
+                                            const sortedBatches = Object.entries(g.batches).sort((a, b) => b[1] - a[1]);
+                                            return (
+                                                <div key={g.part_name} className="border border-gray-200 rounded-xl overflow-hidden">
+                                                    <div className="bg-emerald-50/60 px-4 py-2.5 flex items-center justify-between border-b border-emerald-100">
+                                                        <span className="font-black text-gray-700 text-sm capitalize">{g.part_name}</span>
+                                                        <span className="text-base font-black tabular-nums text-emerald-600">{g.total} approved</span>
+                                                    </div>
+                                                    <div className="px-4 py-2.5 space-y-2">
+                                                        {sortedSizes.length > 0 && (
+                                                            <div>
+                                                                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">By Size</p>
+                                                                <div className="flex flex-wrap gap-1.5">
+                                                                    {sortedSizes.map(([sz, n]) => (
+                                                                        <span key={sz} className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                                                                            {sz} <span className="text-emerald-600 font-black">×{n}</span>
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {sortedBatches.length > 0 && (
+                                                            <div>
+                                                                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">By Batch</p>
+                                                                <div className="flex flex-wrap gap-1.5">
+                                                                    {sortedBatches.map(([bc, n]) => (
+                                                                        <span key={bc} className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 font-mono">
+                                                                            {bc} <span className="text-emerald-600 font-black">×{n}</span>
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )
+                            )}
+                        </>
                     )}
                 </div>
             </div>
@@ -419,18 +551,32 @@ const ErrorDisplay = ({ message }) => (
     </div>
 );
 
+// A defect's real severity is always shown; is_upstream_defect marks one raised
+// on a different line type (e.g. cutting), which that line — not this one — repairs.
+const isOwnRework = (p) => p.qc_status === 'NEEDS_REWORK' && !p.is_upstream_defect;
+const isUpstreamRework = (p) => p.qc_status === 'NEEDS_REWORK' && !!p.is_upstream_defect;
+
+// BUNDLE stations are gated on the previous PIECE stage (see backend
+// assertBundlesClearedUpstream): BLOCKING = pending/rework/missing there,
+// REJECTED = rejected there (bundle may proceed, flagged).
+const upstreamRejectedLabel = (p) => `${p.part_name || ''} ${p.size || ''} #${p.piece_sequence}`.trim();
+
 const checkEntityStatus = (entity) => {
     const pieces = entity.pieces || [];
     const total_cut = pieces.length;
     const total_validated = pieces.filter(p => p.qc_status === 'APPROVED').length;
     const total_rejected = pieces.filter(p => p.qc_status === 'QC_REJECTED').length;
     const total_repaired = pieces.filter(p => p.qc_status === 'REPAIRED').length;
-    const pending_alter = pieces.filter(p => p.qc_status === 'NEEDS_REWORK').length;
+    const pending_alter = pieces.filter(isOwnRework).length;
+    // Rework raised on ANOTHER line (e.g. cutting) — shown as rework, not
+    // rejection, but repaired by the line that raised it, so it's not in this
+    // station's "Fix Rework" and keeps the entity open until that line clears it.
+    const upstream_rework = pieces.filter(isUpstreamRework).length;
     const previously_rejected = pieces.filter(p => p.qc_status === 'PREVIOUSLY_REJECTED').length;
     const total_processed = total_validated + total_rejected + total_repaired + previously_rejected;
-    const isComplete = (total_processed + pending_alter) >= total_cut && total_cut > 0 && pending_alter === 0;
+    const isComplete = (total_processed + pending_alter) >= total_cut && total_cut > 0 && pending_alter === 0 && upstream_rework === 0;
 
-    return { total_cut, total_processed, pending_alter, isComplete, total_validated, total_rejected, total_repaired, previously_rejected };
+    return { total_cut, total_processed, pending_alter, upstream_rework, isComplete, total_validated, total_rejected, total_repaired, previously_rejected };
 };
 
 // Regroups the roll-first hierarchy (roll -> parts_details -> size_details ->
@@ -553,10 +699,17 @@ const StageCompletionHandoff = ({ batchId, lineId, onBatchComplete }) => {
 const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidationSubmit, onRepairSubmit, onRevertToPending, isApproveBlocked, highlightPieceId }) => {
     const pieces = itemInfo.pieces || [];
 
-    const actionablePieces = pieces.filter(p => p.qc_status === 'PENDING' || !p.qc_status);
-    const reworkPieces = pieces.filter(p => p.qc_status === 'NEEDS_REWORK');
-    const hasActiveReworks = reworkPieces.length > 0;
-    const isBundleLocked = itemInfo.isBundle && hasActiveReworks;
+    // Bundles with any piece not cleared upstream (cutting) can't be approved —
+    // their pieces are excluded from the actionable pool entirely.
+    const blockedBundleIds = new Set(pieces.filter(p => p.upstream_status === 'BLOCKING').map(p => p.bundle_id ?? itemInfo.bundle_id));
+    const upstreamBlockedCount = pieces.filter(p => p.upstream_status === 'BLOCKING').length;
+    const upstreamRejectedPieces = pieces.filter(p => p.upstream_status === 'REJECTED');
+    const upstreamStage = itemInfo.upstream_stage || pieces.find(p => p.upstream_stage)?.upstream_stage || 'previous stage';
+    const actionablePieces = pieces.filter(p => (p.qc_status === 'PENDING' || !p.qc_status) && !blockedBundleIds.has(p.bundle_id ?? itemInfo.bundle_id));
+    const reworkPieces = pieces.filter(isOwnRework);
+    const hasActiveReworks = reworkPieces.length > 0 || pieces.some(isUpstreamRework);
+    const isUpstreamBlocked = itemInfo.isBundle && upstreamBlockedCount > 0 && actionablePieces.length === 0;
+    const isBundleLocked = itemInfo.isBundle && (hasActiveReworks || isUpstreamBlocked);
 
     const { allowMultiple } = itemInfo;
 
@@ -604,15 +757,15 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     const displayPartSize = `${itemInfo.partName} | SIZE ${itemInfo.size || 'MIXED'}`;
 
     // True when selected pieces are NEEDS_REWORK — drives action bar switching
-    const isRepairMode = selectedIds.size > 0 && pieces.some(p => selectedIds.has(p.id) && p.qc_status === 'NEEDS_REWORK');
+    const isRepairMode = selectedIds.size > 0 && pieces.some(p => selectedIds.has(p.id) && isOwnRework(p));
 
     const togglePiece = (piece) => {
-        const isReworkPiece = piece.qc_status === 'NEEDS_REWORK';
-        const isPendingPiece = piece.qc_status === 'PENDING' || !piece.qc_status;
+        const isReworkPiece = isOwnRework(piece);
+        const isPendingPiece = (piece.qc_status === 'PENDING' || !piece.qc_status) && actionablePieces.some(p => p.id === piece.id);
         if (!isReworkPiece && !isPendingPiece) return;
 
         // Switching modes: clear existing selection when crossing PENDING ↔ NEEDS_REWORK boundary
-        const currentlyRepair = selectedIds.size > 0 && pieces.some(p => selectedIds.has(p.id) && p.qc_status === 'NEEDS_REWORK');
+        const currentlyRepair = selectedIds.size > 0 && pieces.some(p => selectedIds.has(p.id) && isOwnRework(p));
         if ((isReworkPiece && !currentlyRepair && selectedIds.size > 0) || (isPendingPiece && currentlyRepair)) {
             setSelectedIds(new Set([piece.id]));
             setIntendedAction(null);
@@ -1000,6 +1153,28 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                     </div>
 
                     <div className="flex-grow p-8 overflow-y-auto">
+                        {(upstreamBlockedCount > 0 || upstreamRejectedPieces.length > 0) && (
+                            <div className="mb-6 space-y-2">
+                                {upstreamBlockedCount > 0 && (
+                                    <div className="flex items-start gap-3 px-4 py-3 rounded-xl border-2 border-amber-300 bg-amber-50 text-amber-900">
+                                        <Lock className="w-5 h-5 shrink-0 mt-0.5" />
+                                        <p className="text-sm font-bold">
+                                            <span className="font-black uppercase tracking-widest">Blocked by {upstreamStage}:</span>{' '}
+                                            {upstreamBlockedCount} piece(s) are still pending or in rework at {upstreamStage}. {blockedBundleIds.size > 1 ? `${blockedBundleIds.size} bundles` : 'This bundle'} can't be approved until {upstreamStage} clears them.
+                                        </p>
+                                    </div>
+                                )}
+                                {upstreamRejectedPieces.length > 0 && (
+                                    <div className="flex items-start gap-3 px-4 py-3 rounded-xl border-2 border-rose-300 bg-rose-50 text-rose-900">
+                                        <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                                        <p className="text-sm font-bold">
+                                            <span className="font-black uppercase tracking-widest">Flagged:</span>{' '}
+                                            {upstreamRejectedPieces.length} piece(s) rejected at {upstreamStage} — {upstreamRejectedPieces.slice(0, 8).map(upstreamRejectedLabel).join(', ')}{upstreamRejectedPieces.length > 8 ? ', …' : ''}. These don't count toward this stage's approved pieces.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                         <div className="space-y-10">
                             {groups.map(([groupName, groupPieces]) => (
                                 <div key={groupName}>
@@ -1007,7 +1182,10 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                     <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-4">
                                         {groupPieces.map(piece => {
                                             const isSelected = selectedIds.has(piece.id);
-                                            const isRework = piece.qc_status === 'NEEDS_REWORK';
+                                            const isRework = isOwnRework(piece);
+                                            const isUpRework = isUpstreamRework(piece);
+                                            const isUpBlocked = piece.upstream_status === 'BLOCKING';
+                                            const isUpRejected = piece.upstream_status === 'REJECTED';
                                             const isRejected = piece.qc_status === 'QC_REJECTED';
                                             const isApproved = piece.qc_status === 'APPROVED';
                                             const isHighlighted = highlightPieceId != null && String(piece.id) === String(highlightPieceId);
@@ -1020,9 +1198,9 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                             return (
                                                 <button key={piece.id}
                                                     ref={isHighlighted ? highlightRef : undefined}
-                                                    disabled={!isRejected && !isApproved && piece.qc_status !== 'PENDING' && piece.qc_status && piece.qc_status !== 'NEEDS_REWORK'}
+                                                    disabled={isUpRework || (!isRejected && !isApproved && piece.qc_status !== 'PENDING' && piece.qc_status && piece.qc_status !== 'NEEDS_REWORK')}
                                                     onClick={() => isRejected ? handleUnlockRejectedPiece(piece) : isApproved ? handleRevertApprovedPiece(piece) : togglePiece(piece)}
-                                                    title={isRejected ? 'Rejected — click to unlock with supervisor password' : isApproved ? 'Approved — click to revert to pending with supervisor password' : undefined}
+                                                    title={isUpRework ? `Needs rework at ${piece.defect_origin_line || upstreamStage}${piece.defect_reason ? ` — ${piece.defect_reason}` : ''}` : isUpBlocked ? `Not cleared at ${upstreamStage} — bundle can't be approved yet` : isUpRejected ? `Rejected at ${upstreamStage}` : isRejected ? 'Rejected — click to unlock with supervisor password' : isApproved ? 'Approved — click to revert to pending with supervisor password' : undefined}
                                                     className={`relative aspect-square rounded-2xl border-4 font-mono font-black text-3xl flex items-center justify-center transition-all active:scale-95 ${isRejected ? 'cursor-pointer hover:border-rose-600' : ''} ${isApproved ? 'cursor-pointer hover:border-emerald-500' : ''} ${isSelected ? selClass : unselClass} ${isHighlighted ? 'animate-pulse ring-4 ring-offset-2 ring-blue-500 z-20' : ''}`}>
                                                     {piece.piece_sequence}
                                                     {isSelected && <Check className={`absolute top-2 right-2 w-8 h-8 rounded-full p-1 shadow-md ${isRework ? 'bg-amber-700 text-white' : 'bg-indigo-500 text-white'}`} strokeWidth={4} />}
@@ -1030,6 +1208,9 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                                     {isRejected && <Lock className="absolute top-2 right-2 w-6 h-6 text-rose-400" />}
                                                     {isApproved && <RotateCcw className="absolute top-2 right-2 w-5 h-5 text-emerald-500" />}
                                                     {piece.qc_status === 'FOR_REPLACEMENT' && <PackageX className="absolute top-2 right-2 w-5 h-5 text-violet-400" />}
+                                                    {isUpRework && <span className="absolute bottom-1 left-1 right-1 text-[9px] leading-tight font-sans font-black uppercase tracking-wide text-amber-900 bg-amber-200 rounded px-1 truncate">Rework @ {piece.defect_origin_line || upstreamStage}</span>}
+                                                    {!isUpRework && isUpBlocked && <span className="absolute bottom-1 left-1 right-1 text-[9px] leading-tight font-sans font-black uppercase tracking-wide text-amber-900 bg-amber-200 rounded px-1 truncate">Not cleared @ {upstreamStage}</span>}
+                                                    {isUpRejected && <span className="absolute bottom-1 left-1 right-1 text-[9px] leading-tight font-sans font-black uppercase tracking-wide text-white bg-rose-600 rounded px-1 truncate">Rejected @ {upstreamStage}</span>}
                                                 </button>
                                             );
                                         })}
@@ -1093,7 +1274,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                 </div>
                                 <div className="flex-grow grid grid-cols-3 gap-4 h-[60px]">
                                     <div className="relative h-full">
-                                        {isBundleLocked && selectedIds.size > 0 && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Bundle Locked: Active Reworks</span></div>}
+                                        {isBundleLocked && (selectedIds.size > 0 || isUpstreamBlocked) && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">{isUpstreamBlocked ? `Bundle Locked: ${upstreamBlockedCount} piece(s) not cleared at ${upstreamStage}` : 'Bundle Locked: Active Reworks'}</span></div>}
                                         {itemInfo.isBundle && !isBundleLocked && selectedIds.size > 0 && selectedIds.size !== actionablePieces.length && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Partial Selection: Reject/Rework Only</span></div>}
                                         {isApproveBlocked && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-red-700 text-white text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Rework Backlog: Approve Disabled</span></div>}
                                         <button onClick={() => handleActionInitiation('APPROVED')} disabled={selectedIds.size === 0 || isBundleLocked || isApproveBlocked || (itemInfo.isBundle && selectedIds.size !== actionablePieces.length)} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it via Repair or Reject before approving new pieces.' : undefined} className="w-full h-full bg-black text-white rounded-xl font-black text-lg shadow-xl hover:bg-slate-800 active:scale-95 disabled:opacity-20 disabled:bg-slate-400 flex items-center justify-center border-b-4 border-slate-800">
@@ -1288,8 +1469,11 @@ const PartAccordionBySize = ({ batch, size, part, setModalState, allowMultiple, 
 // DYNAMIC PROGRESS ROWS
 // ============================================================================
 const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect, onRepair, canApproveBundle, onQuickApprove, isApproveBlocked, onRequestReplacement }) => {
-    const { total_cut, total_processed, pending_alter, isComplete, total_validated, total_rejected, total_repaired } = checkEntityStatus(entity);
+    const { total_cut, total_processed, pending_alter, upstream_rework, isComplete, total_validated, total_rejected, total_repaired } = checkEntityStatus(entity);
     if (total_cut === 0) return null;
+    const upstreamStage = entity.upstream_stage || 'previous stage';
+    const upstreamBlocked = entity.upstream_blocked || 0;
+    const upstreamRejected = entity.upstream_rejected || [];
     // Keeps the button visible even after every rework piece here has already
     // been sent (pending_alter drops to 0 once they flip to FOR_REPLACEMENT) —
     // otherwise there'd be no way back into this row's "already sent" status.
@@ -1303,6 +1487,25 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
                     <span className="font-black text-slate-800 tracking-tight block text-lg">{label}</span>
                     {subLabel && <span className="text-xs text-indigo-500 font-black uppercase tracking-widest">{subLabel}</span>}
                     <span className="text-xs text-slate-500 font-bold uppercase tracking-widest">{total_processed} / {total_cut} pieces</span>
+                    {(upstreamBlocked > 0 || upstream_rework > 0 || upstreamRejected.length > 0) && (
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {upstreamBlocked > 0 && (
+                                <span title={`${upstreamBlocked} piece(s) pending or in rework at ${upstreamStage} — bundle can't be approved`} className="inline-flex items-center text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 rounded-md px-1.5 py-0.5">
+                                    <Lock className="w-3 h-3 mr-1" /> Blocked by {upstreamStage} ({upstreamBlocked})
+                                </span>
+                            )}
+                            {upstream_rework > 0 && (
+                                <span className="inline-flex items-center text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 rounded-md px-1.5 py-0.5">
+                                    <Hammer className="w-3 h-3 mr-1" /> {upstream_rework} rework upstream
+                                </span>
+                            )}
+                            {upstreamRejected.length > 0 && (
+                                <span title={upstreamRejected.map(upstreamRejectedLabel).join(', ')} className="inline-flex items-center text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-300 rounded-md px-1.5 py-0.5">
+                                    <Flag className="w-3 h-3 mr-1" /> {upstreamRejected.length} rejected at {upstreamStage}
+                                </span>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -1324,7 +1527,7 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
                     <>
                         <button onClick={() => onInspect(entity)} className="px-6 py-2 text-sm bg-white text-slate-800 border-2 border-slate-300 rounded-xl hover:border-indigo-500 hover:text-indigo-700 font-black shadow-sm active:scale-95 flex items-center transition-all">INSPECT</button>
                         {canApproveBundle && (
-                            <button onClick={() => onQuickApprove(entity)} disabled={isApproveBlocked} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it via Repair or Reject before approving new pieces.' : undefined} className="px-4 py-2 text-sm bg-emerald-100 text-emerald-800 border-2 border-emerald-200 rounded-xl hover:bg-emerald-200 font-black shadow-sm active:scale-95 flex items-center transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100">
+                            <button onClick={() => onQuickApprove(entity)} disabled={isApproveBlocked || upstreamBlocked > 0 || upstream_rework > 0} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it via Repair or Reject before approving new pieces.' : (upstreamBlocked > 0 || upstream_rework > 0) ? `Blocked — pieces not cleared at ${upstreamStage}` : undefined} className="px-4 py-2 text-sm bg-emerald-100 text-emerald-800 border-2 border-emerald-200 rounded-xl hover:bg-emerald-200 font-black shadow-sm active:scale-95 flex items-center transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100">
                                 <CheckCircle2 className="w-4 h-4 mr-2" /> QUICK APPROVE
                             </button>
                         )}
@@ -1832,7 +2035,7 @@ const UniversalWorkstationDashboard = () => {
                 (roll.parts_details || []).forEach(part => {
                     (part.size_details || []).forEach(sizeGroup => {
                         (sizeGroup.pieces || []).forEach(piece => {
-                            if (piece.qc_status === 'NEEDS_REWORK') {
+                            if (isOwnRework(piece)) {
                                 out.push({
                                     id: piece.id,
                                     piece_sequence: piece.piece_sequence,
@@ -2256,20 +2459,41 @@ const UniversalWorkstationDashboard = () => {
                             <span className="text-sm font-black tabular-nums text-teal-600">{stats == null ? '—' : (stats.today_resolved ?? 0)}</span>
                         </div>
                         <span className="text-gray-200 hidden sm:inline">│</span>
-                        <button
-                            type="button"
-                            onClick={handleOpenApprovedModal}
-                            disabled={loadingWork && !showApprovedModal}
-                            className="flex items-center gap-1.5 hover:bg-emerald-50 rounded px-1.5 py-0.5 transition disabled:opacity-50"
-                            title="View approved-piece breakdown"
-                        >
-                            <ThumbsUp size={13} className="text-emerald-500 shrink-0" />
-                            <span className="text-xs text-gray-500">Today's Approved</span>
-                            <span className="text-sm font-black tabular-nums text-emerald-600">
-                                {todayApprovedPieces != null ? todayApprovedPieces : stats == null ? '—' : (stats.today_approved ?? 0)}
-                            </span>
-                            {loadingWork && !showApprovedModal && <Loader2 size={11} className="animate-spin text-emerald-500" />}
-                        </button>
+                        {stats?.processing_mode === 'BUNDLE' ? (
+                            // BUNDLE-mode: "approved" is a confusing indirect number here
+                            // (every primary part's pieces counted together, not garments) —
+                            // see getCheckerStats' complete_sets_today comment. Show the real
+                            // figure instead; full calculation is in the same modal.
+                            <button
+                                type="button"
+                                onClick={handleOpenApprovedModal}
+                                disabled={loadingWork && !showApprovedModal}
+                                className="flex items-center gap-1.5 hover:bg-violet-50 rounded px-1.5 py-0.5 transition disabled:opacity-50"
+                                title="Complete garment sets today — every primary part approved. Click for the full calculation."
+                            >
+                                <ThumbsUp size={13} className="text-violet-500 shrink-0" />
+                                <span className="text-xs text-gray-500">Sets Completed</span>
+                                <span className="text-sm font-black tabular-nums text-violet-600">
+                                    {stats.complete_sets_today ?? 0}
+                                </span>
+                                {loadingWork && !showApprovedModal && <Loader2 size={11} className="animate-spin text-violet-500" />}
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={handleOpenApprovedModal}
+                                disabled={loadingWork && !showApprovedModal}
+                                className="flex items-center gap-1.5 hover:bg-emerald-50 rounded px-1.5 py-0.5 transition disabled:opacity-50"
+                                title="View approved-piece breakdown"
+                            >
+                                <ThumbsUp size={13} className="text-emerald-500 shrink-0" />
+                                <span className="text-xs text-gray-500">Today's Approved</span>
+                                <span className="text-sm font-black tabular-nums text-emerald-600">
+                                    {todayApprovedPieces != null ? todayApprovedPieces : stats == null ? '—' : (stats.today_approved ?? 0)}
+                                </span>
+                                {loadingWork && !showApprovedModal && <Loader2 size={11} className="animate-spin text-emerald-500" />}
+                            </button>
+                        )}
                         <span className="text-gray-200 hidden sm:inline">│</span>
                         <div className="flex items-center gap-1.5">
                             <LuClock size={13} className="text-sky-500 shrink-0" />

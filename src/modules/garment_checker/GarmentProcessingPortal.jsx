@@ -1118,19 +1118,30 @@ const AssemblyProcessingPortal = () => {
                                         {dnaDefect.garment.components.map((comp, i) => {
                                             const isApproving = approvingPieceId === comp.cut_piece_log_id;
                                             const clickable = comp.has_active_defect && !!comp.cut_piece_log_id;
+                                            // stage_status: this part at the previous piece stage (e.g. BF SEWING).
+                                            // SKIPPED = not scanned there by design (product flow setting).
+                                            const stageName = dnaDefect.garment.stage_check_name;
+                                            const stageBlocked = comp.stage_status && comp.stage_status !== 'CLEARED' && comp.stage_status !== 'SKIPPED';
+                                            const isBad = comp.has_active_defect || stageBlocked;
+                                            const stageNote = stageBlocked
+                                                ? `${comp.stage_status === 'NOT_SCANNED' ? 'Not scanned' : comp.stage_status.replace('_', ' ').toLowerCase()} @ ${stageName}`
+                                                : comp.stage_status === 'SKIPPED' ? `Skipped @ ${stageName}` : null;
                                             return (
                                                 <div
                                                     key={i}
                                                     onClick={clickable ? () => openComponentInfo(comp) : undefined}
                                                     title={clickable ? 'Click for piece details' : undefined}
-                                                    className={`px-4 py-3 rounded-2xl border-2 flex items-center gap-3 ${comp.has_active_defect ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-100'} ${clickable ? 'cursor-pointer hover:border-rose-400 hover:bg-rose-100 transition-colors' : ''}`}
+                                                    className={`px-4 py-3 rounded-2xl border-2 flex items-center gap-3 ${isBad ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-100'} ${clickable ? 'cursor-pointer hover:border-rose-400 hover:bg-rose-100 transition-colors' : ''}`}
                                                 >
-                                                    <div className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${comp.has_active_defect ? 'bg-rose-500 text-white' : 'bg-white text-slate-700 border border-slate-200'}`}>
+                                                    <div className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${isBad ? 'bg-rose-500 text-white' : 'bg-white text-slate-700 border border-slate-200'}`}>
                                                         {isApproving
                                                             ? <Loader2 size={14} className="animate-spin" />
-                                                            : comp.has_active_defect ? <X size={14} strokeWidth={3}/> : <Check size={14} strokeWidth={3}/>}
+                                                            : isBad ? <X size={14} strokeWidth={3}/> : <Check size={14} strokeWidth={3}/>}
                                                     </div>
-                                                    <span className={`font-bold text-sm ${comp.has_active_defect ? 'text-rose-700' : 'text-slate-600'}`}>{comp.part_name}</span>
+                                                    <span className={`font-bold text-sm ${isBad ? 'text-rose-700' : 'text-slate-600'}`}>
+                                                        {comp.part_name}
+                                                        {stageNote && <span className={`block text-[10px] font-black uppercase tracking-wider ${stageBlocked ? 'text-rose-500' : 'text-slate-400'}`}>{stageNote}</span>}
+                                                    </span>
                                                     {clickable && !isApproving && (
                                                         <span className="ml-auto text-[9px] font-black uppercase tracking-wider text-rose-500">Details</span>
                                                     )}

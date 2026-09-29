@@ -257,14 +257,15 @@ function MatchToleranceCard() {
 // are whole percents of the kiosk's automatic size (100 = as designed); the
 // server clamps to the same 50–200 range, so the buttons just stop there.
 const KIOSK_TEXT_TARGETS = [
-    { key: 'name',     label: 'Name' },
-    { key: 'approved', label: 'Approved' },
-    { key: 'repaired', label: 'Repaired' },
-    { key: 'rework',   label: 'Rework' },
-    { key: 'rejected', label: 'Rejected' },
-    { key: 'dhu',      label: 'DHU' },
-    { key: 'today',    label: 'Today' },
-    { key: 'ticker',   label: 'Ticker (top bar)' },
+    { key: 'name',       label: 'Name' },
+    { key: 'approved',   label: 'Approved' },
+    { key: 'repaired',   label: 'Repaired' },
+    { key: 'rework',     label: 'Rework' },
+    { key: 'rejected',   label: 'Rejected' },
+    { key: 'dhu',        label: 'DHU' },
+    { key: 'completed',  label: 'Complete Sets (flash)' },
+    { key: 'today',      label: 'Today' },
+    { key: 'ticker',     label: 'Ticker (top bar)' },
 ];
 const TEXT_SCALE_MIN = 50, TEXT_SCALE_MAX = 200, TEXT_SCALE_STEP = 10;
 const DEFAULT_TEXT_SCALE = Object.fromEntries(KIOSK_TEXT_TARGETS.map(t => [t.key, 100]));
