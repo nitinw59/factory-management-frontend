@@ -14,7 +14,7 @@ const STATUS_CFG = {
     PENDING:     { cls: 'bg-amber-100 text-amber-700 border-amber-200',   label: 'Pending'    },
     IN_PROGRESS: { cls: 'bg-blue-100 text-blue-700 border-blue-200',      label: 'In Progress' },
     COMPLETED:   { cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: 'Received' },
-    CANCELLED:   { cls: 'bg-slate-100 text-slate-500 border-slate-200',   label: 'Cancelled'  },
+    CANCELLED:   { cls: 'bg-slate-100 text-slate-600 border-slate-200',   label: 'Cancelled'  },
 };
 
 // GRN-lifecycle filter — matches order.computed_status from getAllPurchaseOrders
@@ -165,9 +165,10 @@ const OrdersPage = () => {
             : '';
         if (it.item_type === 'fabric') {
             const type  = it.fabric_type_name || 'Fabric';
-            const color = it.fabric_color_name ? ` · ${it.fabric_color_name}` : '';
-            const num   = it.fabric_color_number ? ` (${it.fabric_color_number})` : '';
-            return `${type}${color}${num}${qtyTxt}`;
+            // "Color number - Color name", dropping whichever half is missing.
+            const colorTxt = [it.fabric_color_number, it.fabric_color_name].filter(Boolean).join(' - ');
+            const color = colorTxt ? ` · ${colorTxt}` : '';
+            return `${type}${color}${qtyTxt}`;
         }
         if (it.item_type === 'spare') {
             return `${it.spare_part_name || 'Spare'}${it.spare_part_number ? ` (${it.spare_part_number})` : ''}${qtyTxt}`;
@@ -317,12 +318,12 @@ const OrdersPage = () => {
 
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-bold text-slate-800">{order.po_code || `PO #${order.id}`}</span>
+                            <span className="text-sm font-bold text-slate-900">{order.po_code || `PO #${order.id}`}</span>
                             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${scfg.cls}`}>
                                 {scfg.label}
                             </span>
                             {isCustom && (
-                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
                                     Custom PO
                                 </span>
                             )}
@@ -340,7 +341,7 @@ const OrdersPage = () => {
                                 </span>
                             )}
                         </div>
-                        <p className="text-xs text-slate-500 mt-0.5">
+                        <p className="text-xs text-slate-600 mt-0.5">
                             {order.supplier_name || 'No supplier'}
                             {reqCount > 0 && ` · ${reqCount} requirement${reqCount !== 1 ? 's' : ''}`}
                             {reqCount > 0 && (fabCount > 0 || trimCount > 0 || spareCount > 0 || otherCount > 0) && ` (${[fabCount && `${fabCount} fabric`, trimCount && `${trimCount} trim`, spareCount && `${spareCount} spare`, otherCount && `${otherCount} other`].filter(Boolean).join(', ')})`}
@@ -365,7 +366,7 @@ const OrdersPage = () => {
                                                     : it.item_type === 'spare'
                                                         ? 'bg-blue-50 text-blue-700 border-blue-100'
                                                         : it.item_type === 'other'
-                                                            ? 'bg-slate-50 text-slate-600 border-slate-200'
+                                                            ? 'bg-slate-50 text-slate-700 border-slate-200'
                                                             : 'bg-amber-50 text-amber-700 border-amber-100'
                                             }`}
                                             title={itemChipLabel(it)}
@@ -414,7 +415,7 @@ const OrdersPage = () => {
                                 Cancel
                             </button>
                         )}
-                        {isExpanded ? <ChevronUp size={15} className="text-slate-400" /> : <ChevronDown size={15} className="text-slate-400" />}
+                        {isExpanded ? <ChevronUp size={15} className="text-slate-500" /> : <ChevronDown size={15} className="text-slate-500" />}
                     </div>
                 </div>
 
@@ -422,22 +423,22 @@ const OrdersPage = () => {
                     <div className="border-t border-slate-100 px-4 pb-4 pt-3">
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 text-xs">
                             <div>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Supplier</p>
-                                <p className="font-medium text-slate-700">{order.supplier_name || '—'}</p>
+                                <p className="text-[9px] font-bold text-slate-500 uppercase mb-0.5">Supplier</p>
+                                <p className="font-medium text-slate-800">{order.supplier_name || '—'}</p>
                             </div>
                             <div>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Created</p>
-                                <p className="font-medium text-slate-700">{fmtDate(order.created_at)}</p>
+                                <p className="text-[9px] font-bold text-slate-500 uppercase mb-0.5">Created</p>
+                                <p className="font-medium text-slate-800">{fmtDate(order.created_at)}</p>
                             </div>
                             <div>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Expected Delivery</p>
-                                <p className={`font-medium ${isOverdue ? 'text-red-600' : 'text-slate-700'}`}>
+                                <p className="text-[9px] font-bold text-slate-500 uppercase mb-0.5">Expected Delivery</p>
+                                <p className={`font-medium ${isOverdue ? 'text-red-600' : 'text-slate-800'}`}>
                                     {fmtDate(order.expected_delivery_date)}
                                 </p>
                             </div>
                             <div>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Created by</p>
-                                <p className="font-medium text-slate-700">{order.created_by_name || '—'}</p>
+                                <p className="text-[9px] font-bold text-slate-500 uppercase mb-0.5">Created by</p>
+                                <p className="font-medium text-slate-800">{order.created_by_name || '—'}</p>
                             </div>
                         </div>
 
@@ -452,14 +453,14 @@ const OrdersPage = () => {
                             });
                             if (!detail) {
                                 return (
-                                    <p className="text-[11px] text-slate-400 italic flex items-center gap-1.5">
+                                    <p className="text-[11px] text-slate-500 italic flex items-center gap-1.5">
                                         <Loader2 size={11} className="animate-spin" /> Loading items…
                                     </p>
                                 );
                             }
                             const items = detail.items || [];
                             if (items.length === 0) {
-                                return <p className="text-[11px] text-slate-400 italic">No line items on this PO.</p>;
+                                return <p className="text-[11px] text-slate-500 italic">No line items on this PO.</p>;
                             }
                             // Some inward lines are linked via purchase_requirement_id instead of
                             // purchase_order_item_id (when the PO item was created from a requirement).
@@ -493,7 +494,7 @@ const OrdersPage = () => {
                                 <>
                                     <div className="overflow-hidden rounded-lg border border-slate-200">
                                         <table className="w-full text-[11px]">
-                                            <thead className="bg-slate-50 text-slate-500 uppercase">
+                                            <thead className="bg-slate-50 text-slate-600 uppercase">
                                                 <tr>
                                                     <th className="px-3 py-1.5 text-left font-bold">Item</th>
                                                     <th className="px-3 py-1.5 text-right font-bold w-24">Ordered</th>
@@ -511,17 +512,17 @@ const OrdersPage = () => {
                                                     const total = Number(it.total_price ?? (ord * (Number(it.unit_price) || 0)));
                                                     return (
                                                         <tr key={it.id} className="hover:bg-slate-50/60">
-                                                            <td className="px-3 py-1.5 text-slate-700">{itemChipLabel(it)}</td>
-                                                            <td className="px-3 py-1.5 text-right font-mono text-slate-700 tabular-nums">
+                                                            <td className="px-3 py-1.5 text-slate-800">{itemChipLabel(it)}</td>
+                                                            <td className="px-3 py-1.5 text-right font-mono text-slate-800 tabular-nums">
                                                                 {ord.toLocaleString()} {it.uom || (it.item_type === 'fabric' ? 'm' : 'pcs')}
                                                             </td>
-                                                            <td className={`px-3 py-1.5 text-right font-mono tabular-nums ${full ? 'text-emerald-700 font-bold' : partial ? 'text-amber-700 font-bold' : 'text-slate-400'}`}>
+                                                            <td className={`px-3 py-1.5 text-right font-mono tabular-nums ${full ? 'text-emerald-700 font-bold' : partial ? 'text-amber-700 font-bold' : 'text-slate-500'}`}>
                                                                 {inwards == null ? '…' : rec.toLocaleString()}
                                                             </td>
-                                                            <td className="px-3 py-1.5 text-right font-mono text-slate-600 tabular-nums">
+                                                            <td className="px-3 py-1.5 text-right font-mono text-slate-700 tabular-nums">
                                                                 {Number(it.unit_price ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 5 })}
                                                             </td>
-                                                            <td className="px-3 py-1.5 text-right font-mono font-bold text-slate-800 tabular-nums">
+                                                            <td className="px-3 py-1.5 text-right font-mono font-bold text-slate-900 tabular-nums">
                                                                 ₹{total.toFixed(2)}
                                                             </td>
                                                         </tr>
@@ -533,18 +534,18 @@ const OrdersPage = () => {
 
                                     {/* Fulfilment summary */}
                                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3 px-1">
-                                        <div className="flex items-center gap-2 text-[11px] text-slate-600">
-                                            <CheckCircle2 size={13} className={pctTotal >= 100 ? 'text-emerald-600' : 'text-slate-400'} />
+                                        <div className="flex items-center gap-2 text-[11px] text-slate-700">
+                                            <CheckCircle2 size={13} className={pctTotal >= 100 ? 'text-emerald-600' : 'text-slate-500'} />
                                             <span className="font-bold">{fullyReceivedCount} / {items.length}</span>
                                             <span>line{items.length === 1 ? '' : 's'} fully received</span>
-                                            <span className="text-slate-300">·</span>
-                                            <span className={pctTotal >= 100 ? 'text-emerald-700 font-bold' : 'text-slate-700 font-bold'}>
+                                            <span className="text-slate-400">·</span>
+                                            <span className={pctTotal >= 100 ? 'text-emerald-700 font-bold' : 'text-slate-800 font-bold'}>
                                                 {pctTotal}%
                                             </span>
                                             <span>by qty</span>
                                             {inwards != null && (
                                                 <>
-                                                    <span className="text-slate-300">·</span>
+                                                    <span className="text-slate-400">·</span>
                                                     <span>{inwards.length} inward{inwards.length === 1 ? '' : 's'} logged</span>
                                                 </>
                                             )}
@@ -560,7 +561,7 @@ const OrdersPage = () => {
                                     {/* GRN · Invoice Status nodes */}
                                     {inwards && inwards.length > 0 && (
                                         <div className="mt-4">
-                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">
+                                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2">
                                                 GRN · Invoice Status
                                             </p>
                                             <div className="space-y-2">
@@ -571,14 +572,14 @@ const OrdersPage = () => {
                                                         PARTIALLY_PAID: 'text-blue-600',
                                                         UNPAID:         'text-amber-600',
                                                         OVERDUE:        'text-red-600',
-                                                    }[invoice?.payment_status] ?? 'text-slate-500';
+                                                    }[invoice?.payment_status] ?? 'text-slate-600';
                                                     return (
                                                         <div key={iw.id} className="flex items-stretch gap-2">
                                                             <div className="flex-1 border border-slate-200 rounded-xl bg-slate-50 px-3 py-2 text-[11px]">
-                                                                <p className="font-bold text-slate-700">{iw.grn_number || `GRN #${iw.id}`}</p>
-                                                                <p className="text-slate-400">{fmtDate(iw.received_date)}</p>
+                                                                <p className="font-bold text-slate-800">{iw.grn_number || `GRN #${iw.id}`}</p>
+                                                                <p className="text-slate-500">{fmtDate(iw.received_date)}</p>
                                                             </div>
-                                                            <div className="flex items-center text-slate-300 text-sm px-1">→</div>
+                                                            <div className="flex items-center text-slate-400 text-sm px-1">→</div>
                                                             {invoice ? (
                                                                 <div className="flex-1 border border-emerald-300 rounded-xl bg-emerald-50 px-3 py-2 text-[11px]">
                                                                     <p className="font-bold text-emerald-800">{invoice.invoice_number}</p>
@@ -612,8 +613,8 @@ const OrdersPage = () => {
         <div className="p-4 sm:p-6 space-y-6">
             <div className="flex items-start justify-between gap-3">
                 <div>
-                    <h1 className="text-xl font-bold text-slate-800">Purchase Orders</h1>
-                    <p className="text-sm text-slate-500 mt-0.5">Track and manage all purchase orders created from requirements</p>
+                    <h1 className="text-xl font-bold text-slate-900">Purchase Orders</h1>
+                    <p className="text-sm text-slate-600 mt-0.5">Track and manage all purchase orders created from requirements</p>
                 </div>
                 <button
                     onClick={() => setShowFreshPo(true)}
@@ -625,7 +626,7 @@ const OrdersPage = () => {
 
             {/* Search */}
             <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
                     type="text"
                     placeholder="Search PO code, supplier, SO, customer…"
@@ -636,7 +637,7 @@ const OrdersPage = () => {
                 {search && (
                     <button
                         onClick={() => setSearch('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-wider"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-500 hover:text-slate-700 uppercase tracking-wider"
                     >
                         Clear
                     </button>
@@ -648,7 +649,7 @@ const OrdersPage = () => {
                 <button
                     onClick={() => setGrnFilter(null)}
                     className={`text-xs font-bold px-3 py-1.5 rounded-full border transition-colors ${
-                        !grnFilter ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                        !grnFilter ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
                     }`}
                 >
                     All
@@ -677,7 +678,7 @@ const OrdersPage = () => {
                     <Loader2 className="animate-spin h-7 w-7 text-orange-400" />
                 </div>
             ) : orders.length === 0 ? (
-                <div className="text-center py-20 text-slate-400">
+                <div className="text-center py-20 text-slate-500">
                     <PackageCheck size={40} className="mx-auto mb-3 opacity-30" />
                     <p className="font-medium">No purchase orders yet</p>
                     <p className="text-sm mt-1">Create purchase orders from the Requirements page</p>
@@ -688,7 +689,7 @@ const OrdersPage = () => {
                         <div>
                             <div className="flex items-center gap-2 mb-3">
                                 <Clock size={14} className="text-amber-500" />
-                                <span className="text-sm font-bold text-slate-700">Open Orders · {pending.length}</span>
+                                <span className="text-sm font-bold text-slate-800">Open Orders · {pending.length}</span>
                                 {canChangeLifecycle && (
                                     <button
                                         onClick={checkFulfilment}
@@ -736,8 +737,8 @@ const OrdersPage = () => {
                                                                 })}
                                                                 className="accent-emerald-600"
                                                             />
-                                                            <span className="text-xs font-bold text-slate-700">{o.po_code || `PO #${o.id}`}</span>
-                                                            <span className="text-xs text-slate-500">{o.supplier_name || '—'}</span>
+                                                            <span className="text-xs font-bold text-slate-800">{o.po_code || `PO #${o.id}`}</span>
+                                                            <span className="text-xs text-slate-600">{o.supplier_name || '—'}</span>
                                                         </label>
                                                     );
                                                 })}
@@ -770,14 +771,14 @@ const OrdersPage = () => {
                             >
                                 <div className="flex items-center gap-2">
                                     <CheckCircle2 size={14} className="text-emerald-500" />
-                                    <span className="text-sm font-bold text-slate-700">Completed</span>
+                                    <span className="text-sm font-bold text-slate-800">Completed</span>
                                     <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
                                         {completed.length}
                                     </span>
                                 </div>
-                                <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                                     {completedExpanded ? 'Hide' : 'Show'}
-                                    {completedExpanded ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+                                    {completedExpanded ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
                                 </div>
                             </button>
                             {completedExpanded && (

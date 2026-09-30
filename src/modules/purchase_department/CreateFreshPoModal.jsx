@@ -673,7 +673,7 @@ export default function CreateFreshPoModal({ onClose, onCreated }) {
                                                                 <SearchableSelect
                                                                     value={ln.fabric_color_id}
                                                                     onChange={v => setLineField(gi, li, 'fabric_color_id', v)}
-                                                                    options={fabricColors.map(c => ({ value: c.id, label: `${c.color_name || c.name || `Color #${c.id}`}${c.color_number ? ` (${c.color_number})` : ''}` }))}
+                                                                    options={fabricColors.map(c => ({ value: c.id, label: `${c.color_number ? `${c.color_number} - ` : ''}${c.color_name || c.name || `Color #${c.id}`}` }))}
                                                                     placeholder="— Color —"
                                                                     size="sm"
                                                                     accentColor="violet"

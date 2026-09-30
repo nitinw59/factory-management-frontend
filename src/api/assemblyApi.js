@@ -15,6 +15,8 @@ export const assemblyApi = {
      * @param {Object} data - { garmentId, status, defectCodeId }
      */
     processGarmentStatus: (data) => api.post('/assembly-portal/process-status', data),
+    // Supervisor override: approved garment back to PENDING at this stage.
+    revertGarment: (data) => api.post('/assembly-portal/revert-garment', data),
 
     // 2. Queue & Work-in-Progress (WIP)
     /**

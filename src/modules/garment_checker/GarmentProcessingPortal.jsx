@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { assemblyApi } from '../../api/assemblyApi';
 import { universalApi } from '../../api/universalApi';
+import { useSupervisorPinPrompt, withSupervisorPin } from '../../shared/SupervisorPinPrompt';
 import PriorityChip from '../../shared/PriorityChip';
 
 // ── Work Log helpers ──────────────────────────────────────────────────────────
@@ -713,6 +714,12 @@ const AssemblyProcessingPortal = () => {
     }, [garment?.garment_id, garment?.qc_status]);
 
     // --- FINAL ACTIONS ---
+    // Supervisor overrides on this screen — approving a REJECTED component,
+    // changing a REJECTED garment, reverting an APPROVED one. The server asks
+    // for a supervisor password (403 SUPERVISOR_PIN_REQUIRED) only when the
+    // action is an override; withSupervisorPin prompts and retries.
+    const [pinDialog, askSupervisorPin] = useSupervisorPinPrompt();
+
     const handleAction = async (status, defectCodeIds = []) => {
         if (isProcessingAction) {
             return;
@@ -726,13 +733,16 @@ const AssemblyProcessingPortal = () => {
 
         setIsProcessingAction(true);
         try {
-            await assemblyApi.processGarmentStatus({
-                garmentId: garment.garment_id,
-                status,
-                defectCodeId,
-                defectCodeIds,
-                detected_at_line_id: detectedAtLineId
-            });
+            const sent = await withSupervisorPin(askSupervisorPin, `Change REJECTED garment ${garment.garment_uid} to ${status}`,
+                (supervisorPin) => assemblyApi.processGarmentStatus({
+                    garmentId: garment.garment_id,
+                    status,
+                    defectCodeId,
+                    defectCodeIds,
+                    detected_at_line_id: detectedAtLineId,
+                    supervisorPin,
+                }), '');  // only a REJECTED garment needs a password — the server says when
+            if (sent === null) return; // supervisor dialog cancelled
 
             setLastAction({ uid: garment.garment_uid, status });
             setGarment(null);
@@ -760,6 +770,32 @@ const AssemblyProcessingPortal = () => {
         }
     };
 
+    // Supervisor override: an APPROVED garment back to PENDING here (e.g.
+    // approved by mistake). Refused by the server if the next stage has
+    // already checked it.
+    const handleRevertGarment = async () => {
+        if (!garment || isProcessingAction) return;
+        setIsProcessingAction(true);
+        try {
+            const sent = await withSupervisorPin(askSupervisorPin, `Revert approved garment ${garment.garment_uid} to pending`,
+                (supervisorPin) => assemblyApi.revertGarment({ garmentId: garment.garment_id, supervisorPin }));
+            if (sent === null) return;
+            setLastAction({ uid: garment.garment_uid, status: 'PENDING' });
+            setGarment(null);
+            setSelectedPiece(null);
+            if (viewMode === 'BATCH' && selectedBatch) {
+                const res = await assemblyApi.getBatchGarments(selectedBatch.batch_id);
+                setBatchPieces(res.data);
+            }
+            loadRequiredData();
+            setTimeout(() => setLastAction(null), 4000);
+        } catch (err) {
+            alert(err.response?.data?.error || 'Could not revert the garment.');
+        } finally {
+            setIsProcessingAction(false);
+        }
+    };
+
     // Lets the checker clear a DNA-Defect-blocking component directly from this screen,
     // instead of routing the piece back to the Universal Workstation dashboard.
     const handleApproveComponent = async (comp) => {
@@ -776,7 +812,8 @@ const AssemblyProcessingPortal = () => {
         }
         setApprovingPieceId(comp.cut_piece_log_id);
         try {
-            await universalApi.approveAlteredPieces({
+            const sent = await withSupervisorPin(askSupervisorPin, `Approve rejected component ${comp.part_name}`, (supervisorPin) => universalApi.approveAlteredPieces({
+                supervisorPin,
                 batchId,
                 pieceIds: [comp.cut_piece_log_id],
                 status: 'APPROVED',
@@ -786,7 +823,8 @@ const AssemblyProcessingPortal = () => {
                 // (sewing_piece_log) to resolve the defect against.
                 processingMode: 'PIECE',
                 processingScope: 'PRIMARY_ONLY',
-            });
+            }), '');  // '' = try without a password first; only rejections need one
+            if (sent === null) return; // supervisor dialog cancelled
             setDnaDefect(prev => prev ? {
                 ...prev,
                 garment: {
@@ -822,6 +860,7 @@ const AssemblyProcessingPortal = () => {
 
     return (
         <div className="min-h-screen bg-[#F8FAFC] p-4 md:p-10 font-inter select-none">
+            {pinDialog}
             {/* Global Loader for Batch Selection only */}
             {isLoading && viewMode === 'BATCH' && !selectedBatch && (
                 <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-[500] flex items-center justify-center">
@@ -936,6 +975,13 @@ const AssemblyProcessingPortal = () => {
                             className="px-14 py-5 bg-emerald-600 text-white font-black text-xl rounded-3xl hover:bg-emerald-700 active:scale-95 transition-all shadow-xl w-full"
                         >
                             OK
+                        </button>
+                        <button
+                            onClick={handleRevertGarment}
+                            disabled={isProcessingAction}
+                            className="mt-3 w-full py-3 text-sm font-black uppercase tracking-widest text-slate-500 border-2 border-slate-200 rounded-2xl hover:bg-slate-50 active:scale-95 transition-all disabled:opacity-50"
+                        >
+                            Revert to pending (supervisor)
                         </button>
                     </div>
                 </div>
@@ -1352,6 +1398,15 @@ const AssemblyProcessingPortal = () => {
                                     ) : (
                                         /* ── NORMAL QC MODE ── */
                                         <>
+                                            {garment.qc_status === 'QC_REJECTED' && (
+                                                <div className="bg-rose-50 border-2 border-rose-300 rounded-[2rem] p-5 text-center">
+                                                    <div className="flex items-center justify-center gap-2 mb-1">
+                                                        <ShieldAlert size={20} className="text-rose-600" />
+                                                        <span className="text-rose-700 font-black text-sm uppercase tracking-widest">Rejected garment</span>
+                                                    </div>
+                                                    <p className="text-xs font-bold text-rose-600">This garment was rejected. Changing it needs a line supervisor's password — the override is recorded under their name.</p>
+                                                </div>
+                                            )}
                                             <button
                                                 onClick={() => handleAction(STATUS.APPROVED)}
                                                 disabled={isProcessingAction || garment.components.some(c => c.has_active_defect)}
@@ -1487,8 +1542,12 @@ const AssemblyProcessingPortal = () => {
                                             const rejected = batchPieces.filter(p => p.status === 'QC_REJECTED').length;
                                             const rework = batchPieces.filter(p => p.status === 'NEEDS_REWORK').length;
                                             const pending = batchPieces.filter(p => !p.status || p.status === 'PENDING').length;
+                                            // Garments whose PIECES were rejected at an earlier stage
+                                            // (open piece defect) — the garment itself is still pending.
+                                            const partRejected = batchPieces.filter(p => +p.rejected_component_count > 0 && p.status !== 'APPROVED' && p.status !== 'QC_REJECTED').length;
                                             return (
                                                 <div className="flex gap-3 flex-wrap">
+                                                    {partRejected > 0 && <span className="text-xs font-black px-4 py-2 rounded-xl bg-rose-100 text-rose-800 border-2 border-rose-300">{partRejected} with rejected parts</span>}
                                                     <span className="text-xs font-black px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">{approved} Approved</span>
                                                     <span className="text-xs font-black px-4 py-2 rounded-xl bg-slate-100 text-slate-600 border border-slate-200">{pending} Pending</span>
                                                     {rework > 0 && <span className="text-xs font-black px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-200">{rework} Rework</span>}
@@ -1509,13 +1568,33 @@ const AssemblyProcessingPortal = () => {
                                     }, {});
                                     return Object.entries(byRoll).map(([rollId, pieces]) => {
                                         const sortedPieces = [...pieces].sort((a, b) => (a.piece_sequence ?? 0) - (b.piece_sequence ?? 0));
+                                        const partRejectedPieces = sortedPieces.filter(p => +p.rejected_component_count > 0 && p.status !== 'APPROVED' && p.status !== 'QC_REJECTED');
                                         return (
                                         <div key={rollId} className="bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-200">
-                                            <div className="flex items-center gap-3 mb-5">
+                                            <div className="flex items-center gap-3 mb-5 flex-wrap">
                                                 <Layers size={18} className="text-indigo-500" />
                                                 <span className="font-black text-slate-700 uppercase tracking-widest text-sm">Roll #{rollId}</span>
                                                 <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{pieces.length} pcs</span>
+                                                {partRejectedPieces.length > 0 && (
+                                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-300">
+                                                        {partRejectedPieces.length} with rejected parts
+                                                    </span>
+                                                )}
                                             </div>
+                                            {/* Visible (not hover — tablets) list of which part was rejected where */}
+                                            {partRejectedPieces.length > 0 && (
+                                                <div className="mb-4 px-4 py-3 rounded-xl bg-rose-50 border border-rose-200 flex flex-wrap gap-2">
+                                                    {partRejectedPieces.map(g => (
+                                                        <span key={g.id} className="text-xs font-bold px-2.5 py-1 rounded-lg bg-white border border-rose-300 text-rose-800">
+                                                            <span className="font-black font-mono">#{g.piece_sequence}</span>
+                                                            <span className="text-slate-500"> · size {g.size}</span>
+                                                            {(g.rejected_components || []).map((rc, i) => (
+                                                                <span key={i}> · <span className="font-black uppercase">{rc.part_name}</span> rejected{rc.detected_line ? ` @ ${rc.detected_line}` : ''}{rc.defect_desc ? ` — ${rc.defect_desc}` : ''}</span>
+                                                            ))}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
                                             <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-12 gap-2">
                                                 {sortedPieces.map(piece => {
                                                     const st = piece.status;
@@ -1525,6 +1604,11 @@ const AssemblyProcessingPortal = () => {
                                                     if (st === 'APPROVED') { cls = "bg-emerald-50 border-emerald-300 text-emerald-600"; icon = <CheckCircle2 size={12} />; }
                                                     else if (st === 'QC_REJECTED') { cls = "bg-rose-50 border-rose-300 text-rose-600 hover:border-rose-500"; icon = <X size={12} />; }
                                                     else if (st === 'NEEDS_REWORK') { cls = "bg-amber-50 border-amber-300 text-amber-700 hover:border-amber-500"; icon = <Hammer size={12} />; }
+                                                    // A part of this garment was rejected at an earlier stage —
+                                                    // the garment can't pass assembly (DNA block) until replaced.
+                                                    const rejectedParts = (st !== 'APPROVED' && st !== 'QC_REJECTED' && +piece.rejected_component_count > 0)
+                                                        ? [...new Set((piece.rejected_components || []).map(rc => rc.part_name))] : [];
+                                                    if (rejectedParts.length > 0) { cls = "bg-rose-50 border-rose-400 border-dashed text-rose-700 hover:border-rose-600"; icon = <X size={12} />; }
                                                     if (isSelected) cls += " ring-2 ring-indigo-500 ring-offset-1";
 
                                                     const tooltipLines = [
@@ -1545,6 +1629,9 @@ const AssemblyProcessingPortal = () => {
                                                         >
                                                             <span className="font-black text-base leading-none mb-1">{piece.piece_sequence}</span>
                                                             {isLoadingThis ? <RefreshCw size={12} className="animate-spin" /> : icon}
+                                                            {rejectedParts.length > 0 && (
+                                                                <span className="mt-1 text-[9px] font-black uppercase leading-tight text-rose-700 truncate max-w-full">{rejectedParts.join(', ')} ✗</span>
+                                                            )}
                                                         </button>
                                                     );
                                                 })}

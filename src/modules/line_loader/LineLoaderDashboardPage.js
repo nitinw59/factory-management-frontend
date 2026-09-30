@@ -36,6 +36,32 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
     const [siblingLinesMap,   setSiblingLinesMap]   = useState({});
     const [assemblyOverrides, setAssemblyOverrides] = useState({});
 
+    // Status of each ready roll at the stage it's coming FROM (the previous
+    // stage in the cycle) — shown on all three steps.
+    const prevStage = useMemo(() => {
+        const ordered = [...allStages].sort((a, b) => a.sequence_no - b.sequence_no);
+        const idx = ordered.findIndex(st => String(st.id) === String(cycleFlow.id));
+        return idx > 0 ? ordered[idx - 1] : null;
+    }, [allStages, cycleFlow.id]);
+    const [prevQc, setPrevQc] = useState(null);
+    const [prevQcLoading, setPrevQcLoading] = useState(false);
+    useEffect(() => {
+        if (!prevStage || !batchId) return;
+        setPrevQcLoading(true);
+        lineLoaderApi.getStageRollQc(batchId, prevStage.id)
+            .then(res => setPrevQc(res.data))
+            .catch(() => setPrevQc(null))
+            .finally(() => setPrevQcLoading(false));
+    }, [batchId, prevStage]);
+    const qcFor = (rollId) => prevQc?.rolls?.[rollId];
+    const qcUnit = prevQc?.unit || 'pieces';
+    const readyTotals = useMemo(() => {
+        if (!prevQc) return null;
+        const t = { total: 0, approved: 0, repaired: 0, pending: 0, needs_rework: 0, rework_upstream: 0, rejected: 0 };
+        readyRolls.forEach(r => { const q = prevQc.rolls?.[r.roll_id]; if (q) Object.keys(t).forEach(k => { t[k] += q[k]; }); });
+        return t;
+    }, [prevQc, readyRolls]);
+
     useEffect(() => {
         const init = async () => {
             try {
@@ -121,6 +147,22 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
                 <span className="px-2.5 py-1 bg-blue-100 text-blue-800 rounded-lg text-sm uppercase tracking-wide">{cycleFlow.line_type_name}</span>
                 <span className="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-lg text-sm font-black">{readyRolls.length} rolls ready</span>
             </h3>
+            {prevStage && readyRolls.length > 0 && (
+                <div className="mb-5 border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Status at {prevStage.line_type_name}</span>
+                        {readyTotals && <RollQcBadge qc={readyTotals} unit={qcUnit} />}
+                    </div>
+                    <div className="max-h-[30vh] overflow-y-auto divide-y divide-slate-100">
+                        {readyRolls.map(roll => (
+                            <div key={roll.roll_id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-1.5">
+                                <span className="font-black text-sm text-slate-800 w-28 shrink-0">Roll #{roll.roll_id}</span>
+                                <RollQcBadge qc={qcFor(roll.roll_id)} unit={qcUnit} loading={prevQcLoading} />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-5">
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Choose Production Line</label>
                 <select value={selectedLine} onChange={e => setSelectedLine(e.target.value)}
@@ -219,6 +261,7 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
                                 <div>
                                     <span className={`font-black text-sm block ${isSelected ? 'text-blue-900' : 'text-slate-800'}`}>Roll #{roll.roll_id}</span>
                                     <span className="text-xs text-slate-500">{roll.fabric_type} · {roll.color_name} · {roll.color_number}</span>
+                                    {prevStage && <div className="mt-0.5"><RollQcBadge qc={qcFor(roll.roll_id)} unit={qcUnit} loading={prevQcLoading} /></div>}
                                 </div>
                             </div>
                             <div className="flex flex-col items-end gap-1">
@@ -292,6 +335,7 @@ const LineSelectionModal = ({ batchId, cycleFlow, currentLineId, readyRolls = []
                             <div>
                                 <span className="font-bold text-slate-800 block">Roll #{roll.roll_id}</span>
                                 <span className="text-xs text-slate-500">{roll.fabric_type} · {roll.color_name} · {roll.color_number}</span>
+                                {prevStage && <div className="mt-0.5"><RollQcBadge qc={qcFor(roll.roll_id)} unit={qcUnit} loading={prevQcLoading} /></div>}
                             </div>
                             <div className="flex flex-col items-end gap-1">
                                 <span className="font-mono font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-md">{roll.meter}m</span>
@@ -524,20 +568,12 @@ const SizeSelectionModal = ({ batchId, cycleFlow, currentLineId, readySizes = []
 // ============================================================================
 // BATCH INFO BANNER  (shared by StageDetailModal + ChangeLineModal)
 // ============================================================================
-const BatchInfoBanner = ({ batch, activeStage }) => {
-    const isMode2          = batch.piece_sequencing_mode === 'MODE_2';
-    const completedStages  = (batch.progress || []).filter(p => p.status === 'COMPLETED').length;
-    const totalStages      = batch.total_steps || batch.cycle_flow?.length || 1;
-    const lastProgress     = [...(batch.progress || [])].sort((a, b) => b.sequence_no - a.sequence_no)[0];
-    const completedRolls   = lastProgress?.roll_summary?.completed ?? lastProgress?.completed_roll_ids?.length ?? 0;
-    const totalRolls       = batch.total_rolls ?? 0;
-    const totalSizes       = batch.total_sizes ?? batch.all_sizes?.length ?? 0;
-    const gs               = batch.garment_summary;
+const BatchInfoBanner = ({ batch }) => {
+    const isMode2 = batch.piece_sequencing_mode === 'MODE_2';
 
     return (
-        <div className="bg-slate-900 rounded-xl px-4 py-3.5 mb-4">
-            {/* Batch identity */}
-            <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="bg-slate-900 rounded-xl px-4 py-2.5 mb-4">
+            <div className="flex items-start justify-between gap-2">
                 <div>
                     <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-white font-black text-sm tracking-tight">
@@ -565,59 +601,6 @@ const BatchInfoBanner = ({ batch, activeStage }) => {
                     </div>
                 )}
             </div>
-
-            {/* Stats row */}
-            <div className={`grid ${isMode2 ? 'grid-cols-4' : 'grid-cols-3'} gap-2`}>
-                <div className="bg-slate-800 rounded-lg px-2.5 py-2 text-center">
-                    <div className="text-white font-black text-base leading-none">
-                        {completedStages}/{totalStages}
-                    </div>
-                    <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-0.5">Stages</div>
-                </div>
-                <div className="bg-slate-800 rounded-lg px-2.5 py-2 text-center">
-                    <div className="text-white font-black text-base leading-none">
-                        {completedRolls}/{totalRolls}
-                    </div>
-                    <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-0.5">Rolls</div>
-                </div>
-                {isMode2 && (
-                    <div className="bg-slate-800 rounded-lg px-2.5 py-2 text-center">
-                        <div className="text-violet-300 font-black text-base leading-none">
-                            {totalSizes}
-                        </div>
-                        <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-0.5">Sizes</div>
-                    </div>
-                )}
-                <div className="bg-slate-800 rounded-lg px-2.5 py-2 text-center">
-                    {gs ? (
-                        <>
-                            <div className="text-emerald-400 font-black text-base leading-none">
-                                {gs.approved ?? 0}
-                                {gs.qc_rejected > 0 && (
-                                    <span className="text-rose-400 text-xs ml-1">/ {gs.qc_rejected}✗</span>
-                                )}
-                            </div>
-                            <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-0.5">Garments</div>
-                        </>
-                    ) : (
-                        <>
-                            <div className="text-slate-500 font-black text-base leading-none">—</div>
-                            <div className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-0.5">Garments</div>
-                        </>
-                    )}
-                </div>
-            </div>
-
-            {/* Active stage pill */}
-            {activeStage && (
-                <div className="mt-3 flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-2">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Stage</span>
-                    <span className="text-xs font-black text-white">{activeStage.line_type_name}</span>
-                    <span className="ml-auto text-[10px] font-bold text-blue-400 uppercase tracking-widest">
-                        #{activeStage.sequence_no ?? ''}
-                    </span>
-                </div>
-            )}
         </div>
     );
 };
@@ -660,7 +643,7 @@ const ChangeLineModal = ({ batch, batchId, cycleFlow, currentLineId, currentLine
 
     return (
         <div className="p-2">
-            {batch && <BatchInfoBanner batch={batch} activeStage={cycleFlow} />}
+            {batch && <BatchInfoBanner batch={batch} />}
             <div className="flex items-center justify-between mb-4">
                 <h3 className="text-base font-black text-slate-800">Change Production Line</h3>
                 {currentLineName && (
@@ -802,51 +785,349 @@ const SizeBreakdownPills = ({ sizes }) => {
     );
 };
 
-const RollRow = ({ roll, badge, badgeClass }) => (
-    <div className="p-3 text-sm border-b border-slate-100 last:border-0">
-        <div className="flex justify-between items-center">
-            <div>
-                <span className="font-bold text-slate-800 block">Roll #{roll.roll_id}</span>
-                <span className="text-xs text-slate-500">{roll.fabric_type} · {roll.color_name} · {roll.color_number}</span>
-            </div>
-            <div className="flex items-center gap-2">
-                <SizeProgressBadge sizeProgress={roll.size_progress} />
-                {roll.primary_pieces_cut > 0 && <span className="text-[10px] text-slate-400 font-bold">{roll.primary_pieces_cut} pcs</span>}
-                <span className="font-mono font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-md text-xs">{roll.meter}m</span>
-                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${badgeClass}`}>{badge}</span>
-            </div>
-        </div>
-        <SizeBreakdownPills sizes={roll.sizes} />
-    </div>
-);
+// QC status of one roll at this stage (from getStageRollQc). Plain coloured
+// text, no boxes — only the counts that need attention.
+const QC_CHIPS = [
+    { key: 'pending',         label: 'pending',        longLabel: 'pending',                 text: 'text-slate-500' },
+    { key: 'needs_rework',    label: 'rework',         longLabel: 'needs rework',            text: 'text-amber-600' },
+    { key: 'rework_upstream', label: 'earlier rework', longLabel: 'rework at earlier stage', text: 'text-orange-600' },
+    { key: 'rejected',        label: 'rejected',       longLabel: 'rejected',                text: 'text-rose-600' },
+    { key: 'rejected_upstream', label: 'rejected earlier', longLabel: 'rejected at earlier stage', text: 'text-rose-400' },
+];
 
-const StageDetailModal = ({ batch, stage, progress, onClose, onAssign, onAssignSizes, onChangeLine, readyRolls, readySizes = [] }) => {
+// Sum the attention counts of several roll/size QC entries (section headers).
+const sumQc = (entries) => {
+    const t = Object.fromEntries(QC_CHIPS.map(c => [c.key, 0]));
+    entries.forEach(q => { if (q) QC_CHIPS.forEach(c => { t[c.key] += q[c.key] || 0; }); });
+    return t;
+};
+
+const QcIssues = ({ counts, className = '', long = false }) => {
+    const issues = QC_CHIPS.filter(c => counts[c.key] > 0);
+    if (issues.length === 0) return null;
+    return (
+        <span className={`text-xs font-bold ${className}`}>
+            {issues.map((c, i) => (
+                <React.Fragment key={c.key}>
+                    {i > 0 && <span className="text-slate-300"> · </span>}
+                    <span className={c.text}>{counts[c.key]} {long ? c.longLabel : c.label}</span>
+                </React.Fragment>
+            ))}
+        </span>
+    );
+};
+
+// "72/77 pieces cleared" + only the counts needing attention, or a green
+// "all checked" tag — used in the Assign Rolls steps (status of each ready
+// roll at the stage it's coming FROM).
+const RollQcBadge = ({ qc, unit = 'pieces', loading }) => {
+    if (loading) return <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-400"><Loader size={11} className="animate-spin" /> status…</span>;
+    if (!qc) return null;
+    const cleared = qc.approved + qc.repaired;
+    const hasIssues = QC_CHIPS.some(c => qc[c.key] > 0);
+    return (
+        <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="text-[11px] font-black text-slate-600 tabular-nums">{cleared}/{qc.total} {unit} cleared</span>
+            {hasIssues
+                ? <QcIssues counts={qc} long className="text-[11px]" />
+                : <span className="text-[10px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">all checked</span>}
+        </span>
+    );
+};
+
+// One quiet row per roll: roll + colour, a thin cleared bar, and the issue
+// text. Part breakdown only on tap. The section heading already says
+// WIP / Ready / Forwarded, so no per-row tag.
+const RollRow = ({ roll, qc, qcUnit, qcLoading, showQc = false }) => {
+    const [open, setOpen] = useState(false);
+    const cleared = qc ? qc.approved + qc.repaired : 0;
+    const pct = qc?.total ? Math.round((cleared / qc.total) * 100) : 0;
+    const hasIssues = !!qc && QC_CHIPS.some(c => qc[c.key] > 0);
+    const partIssues = (qc?.parts || []).filter(p => QC_CHIPS.some(c => p[c.key] > 0));
+    const canExpand = showQc && partIssues.length > 0;
+    const edge = showQc && (qc?.rejected > 0 || qc?.rejected_upstream > 0) ? 'border-l-rose-400'
+        : showQc && (qc?.needs_rework > 0 || qc?.rework_upstream > 0) ? 'border-l-amber-400'
+        : 'border-l-transparent';
+
+    return (
+        <div className={`border-b border-slate-100 last:border-0 border-l-4 ${edge}`}>
+            <div
+                onClick={canExpand ? () => setOpen(o => !o) : undefined}
+                className={`flex items-center gap-4 px-3 py-2 ${canExpand ? 'cursor-pointer hover:bg-slate-50' : ''}`}
+            >
+                <div className="w-44 shrink-0 min-w-0">
+                    <span className="font-black text-sm text-slate-800">Roll #{roll.roll_id}</span>
+                    <span className="block text-[11px] text-slate-400 truncate">{roll.color_name}{roll.color_number ? ` · ${roll.color_number}` : ''}</span>
+                </div>
+
+                {showQc && (
+                    qcLoading ? (
+                        <Loader size={12} className="animate-spin text-slate-300" />
+                    ) : qc ? (
+                        <>
+                            <div className="flex items-center gap-2 w-40 shrink-0">
+                                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                    <div className={`h-full ${hasIssues ? 'bg-blue-400' : 'bg-emerald-500'}`} style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="text-[11px] font-bold text-slate-500 tabular-nums">{cleared}/{qc.total}</span>
+                            </div>
+                            {hasIssues
+                                ? <QcIssues counts={qc} className="min-w-0 truncate" />
+                                : <CheckCircle2 size={15} className="text-emerald-500 shrink-0" />}
+                        </>
+                    ) : null
+                )}
+
+                <span className="ml-auto flex items-center gap-2 shrink-0 text-[11px] text-slate-400 font-bold">
+                    <SizeProgressBadge sizeProgress={roll.size_progress} />
+                    {roll.primary_pieces_cut > 0 && <span>{roll.primary_pieces_cut} pcs</span>}
+                    <span>{roll.meter}m</span>
+                    {canExpand && (open ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+                </span>
+            </div>
+
+            {open && canExpand && (
+                <div className="px-3 pb-2 pl-[12.5rem] flex flex-wrap gap-x-5 gap-y-1">
+                    {partIssues.map(p => (
+                        <span key={p.part_name} className="text-xs">
+                            <span className="font-black text-slate-700">{p.part_name}</span>{' '}
+                            <QcIssues counts={p} />
+                        </span>
+                    ))}
+                </div>
+            )}
+            <div className="px-3"><SizeBreakdownPills sizes={roll.sizes} /></div>
+        </div>
+    );
+};
+
+// Size Mode (MODE_2) equivalent of RollRow — one quiet row per SIZE on this
+// stage: rolls done here, a cleared bar + issue text for the size across all
+// its rolls. Tap to see which parts have issues and each roll's state for
+// this size (green = done here, blue = still in progress).
+const SizeRow = ({ group, qc, qcUnit, qcLoading, showQc = false }) => {
+    const [open, setOpen] = useState(false);
+    const cleared = qc ? qc.approved + qc.repaired : 0;
+    const pct = qc?.total ? Math.round((cleared / qc.total) * 100) : 0;
+    const hasIssues = !!qc && QC_CHIPS.some(c => qc[c.key] > 0);
+    const partIssues = (qc?.parts || []).filter(p => QC_CHIPS.some(c => p[c.key] > 0));
+    const edge = showQc && (qc?.rejected > 0 || qc?.rejected_upstream > 0) ? 'border-l-rose-400'
+        : showQc && (qc?.needs_rework > 0 || qc?.rework_upstream > 0) ? 'border-l-amber-400'
+        : 'border-l-transparent';
+
+    return (
+        <div className={`border-b border-slate-100 last:border-0 border-l-4 ${edge}`}>
+            <div onClick={() => setOpen(o => !o)} className="flex items-center gap-4 px-3 py-2 cursor-pointer hover:bg-slate-50">
+                <div className="w-44 shrink-0 min-w-0">
+                    <span className="font-black text-sm text-violet-800">Size {group.size}</span>
+                    <span className="block text-[11px] text-slate-400">
+                        {group.rollsDone}/{group.rollsTotal} roll{group.rollsTotal !== 1 ? 's' : ''} done here
+                    </span>
+                </div>
+
+                {showQc && (
+                    qcLoading ? (
+                        <Loader size={12} className="animate-spin text-slate-300" />
+                    ) : qc ? (
+                        <>
+                            <div className="flex items-center gap-2 w-40 shrink-0">
+                                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                    <div className={`h-full ${hasIssues ? 'bg-blue-400' : 'bg-emerald-500'}`} style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="text-[11px] font-bold text-slate-500 tabular-nums">{cleared}/{qc.total}</span>
+                            </div>
+                            {hasIssues
+                                ? <QcIssues counts={qc} className="min-w-0 truncate" />
+                                : <CheckCircle2 size={15} className="text-emerald-500 shrink-0" />}
+                        </>
+                    ) : null
+                )}
+
+                <span className="ml-auto flex items-center gap-2 shrink-0 text-[11px] text-slate-400 font-bold">
+                    {showQc && qc && <span>{qcUnit}</span>}
+                    {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </span>
+            </div>
+
+            {open && (
+                <div className="px-3 pb-2 pl-[12.5rem] space-y-1.5">
+                    {showQc && partIssues.length > 0 && (
+                        <div className="flex flex-wrap gap-x-5 gap-y-1">
+                            {partIssues.map(p => (
+                                <span key={p.part_name} className="text-xs">
+                                    <span className="font-black text-slate-700">{p.part_name}</span>{' '}
+                                    <QcIssues counts={p} />
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                    <div className="flex flex-wrap gap-1">
+                        {group.rolls.map(r => {
+                            const rq = qc?.rolls?.[r.roll_id];
+                            const issues = rq ? QC_CHIPS.filter(c => rq[c.key] > 0).map(c => `${rq[c.key]} ${c.label}`).join(', ') : '';
+                            const done = r.status === 'COMPLETED';
+                            return (
+                                <span key={r.roll_id}
+                                    title={`Roll #${r.roll_id} — ${done ? 'done here' : 'in progress'}${issues ? ` · ${issues}` : ''}`}
+                                    className={`text-[10px] font-black px-1.5 py-0.5 rounded border ${done ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
+                                    #{r.roll_id}{showQc && issues ? <span className="text-amber-700"> · {issues}</span> : null}
+                                </span>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const StageDetailModal = ({ batch, stage, prevStage = null, progress, onClose, onRefresh, onAssign, onAssignSizes, onChangeLine, readyRolls, readySizes = [] }) => {
     const isMode2 = batch?.piece_sequencing_mode === 'MODE_2';
-    const wipRolls = progress?.wip_roll_ids ?? [];
+    const wipRolls = useMemo(() => progress?.wip_roll_ids ?? [], [progress]);
     const completedRolls = progress?.completed_roll_ids ?? [];
     const dispatchedRolls = progress?.dispatched_roll_ids ?? [];
-    const summary = progress?.roll_summary ?? {};
+    const summary = (isMode2 ? progress?.size_summary : progress?.roll_summary) ?? {};
 
-    const sections = [
-        { label: 'In Progress (WIP)', rolls: wipRolls, badge: 'WIP', badgeClass: 'bg-blue-100 text-blue-700' },
-        { label: 'Completed — Ready to Forward', rolls: completedRolls.filter(r => !dispatchedRolls.find(d => d.roll_id === r.roll_id)), badge: 'READY', badgeClass: 'bg-amber-100 text-amber-700' },
-        { label: 'Forwarded to Next Stage', rolls: dispatchedRolls, badge: 'FORWARDED', badgeClass: 'bg-emerald-100 text-emerald-700' },
-    ].filter(s => s.rolls.length > 0);
+    // Per-roll pending / rework / rejected at this stage — shown on WIP rolls.
+    const [rollQc, setRollQc] = useState(null);   // { unit, rolls: { [roll_id]: counts } }
+    const [qcLoading, setQcLoading] = useState(false);
+    const [qcError, setQcError] = useState('');
+    const [qcReloadKey, setQcReloadKey] = useState(0);
+    const hasProgress = !!progress;
+    useEffect(() => {
+        if (!hasProgress || !batch?.batch_id || !stage?.id) return;
+        setQcLoading(true);
+        setQcError('');
+        lineLoaderApi.getStageRollQc(batch.batch_id, stage.id)
+            .then(res => setRollQc(res.data))
+            .catch(err => setQcError(err.response?.data?.error || 'Could not load piece status.'))
+            .finally(() => setQcLoading(false));
+    }, [hasProgress, batch?.batch_id, stage?.id, qcReloadKey]);
+
+    // Status of each READY roll at the stage it's coming from (shown in the
+    // Ready to Assign list).
+    const [readyQc, setReadyQc] = useState(null);
+    const [readyQcLoading, setReadyQcLoading] = useState(false);
+    const hasReadyRolls = !isMode2 && readyRolls.length > 0 && !!onAssign;
+    useEffect(() => {
+        if (!hasReadyRolls || !prevStage?.id || !batch?.batch_id) return;
+        setReadyQcLoading(true);
+        lineLoaderApi.getStageRollQc(batch.batch_id, prevStage.id)
+            .then(res => setReadyQc(res.data))
+            .catch(() => setReadyQc(null))
+            .finally(() => setReadyQcLoading(false));
+    }, [hasReadyRolls, prevStage?.id, batch?.batch_id, qcReloadKey]);
+
+    // Refresh: re-pull just this batch (the modal reads live batch data, so it
+    // updates in place) and the per-roll QC breakdown.
+    const [refreshing, setRefreshing] = useState(false);
+    const [refreshError, setRefreshError] = useState('');
+    const [lastUpdated, setLastUpdated] = useState(() => new Date());
+    const handleRefresh = async () => {
+        if (refreshing || !onRefresh) return;
+        setRefreshing(true);
+        setRefreshError('');
+        try {
+            await onRefresh();
+            setQcReloadKey(k => k + 1);
+            setLastUpdated(new Date());
+        } catch {
+            setRefreshError('Refresh failed — try again.');
+        } finally {
+            setRefreshing(false);
+        }
+    };
+
+
+    // Size Mode: regroup this stage's rolls by SIZE. Each roll carries its
+    // per-size status on this line (roll.sizes); a size is READY once it's
+    // complete on every roll that carries it (progress.ready_sizes) and
+    // FORWARDED once it's reached the next stage (progress.dispatched_sizes).
+    const sizeGroups = useMemo(() => {
+        if (!isMode2 || !progress) return [];
+        const readySet = new Set((progress.ready_sizes || []).map(sz => String(sz.size)));
+        const dispatchedSet = new Set((progress.dispatched_sizes || []).map(String));
+        const bySize = new Map();
+        [...(progress.wip_roll_ids || []), ...(progress.completed_roll_ids || []), ...(progress.dispatched_roll_ids || [])]
+            .forEach(roll => (roll.sizes || []).forEach(sz => {
+                const key = String(sz.size);
+                if (!bySize.has(key)) bySize.set(key, new Map());
+                bySize.get(key).set(String(roll.roll_id), { roll_id: roll.roll_id, status: sz.status });
+            }));
+        return [...bySize.entries()]
+            .map(([size, rollMap]) => {
+                const rolls = [...rollMap.values()].sort((a, b) => a.roll_id - b.roll_id);
+                const state = dispatchedSet.has(size) ? 'FORWARDED' : readySet.has(size) ? 'READY' : 'WIP';
+                return { size, rolls, state, rollsTotal: rolls.length, rollsDone: rolls.filter(r => r.status === 'COMPLETED').length };
+            })
+            .sort((a, b) => (parseInt(a.size, 10) || 0) - (parseInt(b.size, 10) || 0) || a.size.localeCompare(b.size));
+    }, [isMode2, progress]);
+
+    // Header colour per section: in progress = yellow, ready to forward =
+    // green, forwarded = blue.
+    const SECTION_TONE = {
+        'In Progress (WIP)':            { box: 'border-yellow-300',  head: 'bg-yellow-50 border-yellow-200',   text: 'text-yellow-800' },
+        'Completed — Ready to Forward': { box: 'border-emerald-300', head: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-800' },
+        'Forwarded to Next Stage':      { box: 'border-blue-300',    head: 'bg-blue-50 border-blue-200',       text: 'text-blue-800' },
+    };
+
+    // Every section shows QC — a completed/forwarded roll or size can still
+    // carry rejections (or rework) that the line loader needs to see.
+    const sections = (isMode2
+        ? [
+            { label: 'In Progress (WIP)',            sizes: sizeGroups.filter(g => g.state === 'WIP') },
+            { label: 'Completed — Ready to Forward', sizes: sizeGroups.filter(g => g.state === 'READY') },
+            { label: 'Forwarded to Next Stage',      sizes: sizeGroups.filter(g => g.state === 'FORWARDED') },
+        ].filter(s => s.sizes.length > 0)
+        : [
+            { label: 'In Progress (WIP)', rolls: wipRolls },
+            { label: 'Completed — Ready to Forward', rolls: completedRolls.filter(r => !dispatchedRolls.find(d => d.roll_id === r.roll_id)) },
+            { label: 'Forwarded to Next Stage', rolls: dispatchedRolls },
+        ].filter(s => s.rolls.length > 0)
+    ).map(s => ({
+        ...s,
+        showQc: true,
+        totals: rollQc
+            ? sumQc(s.sizes ? s.sizes.map(g => rollQc.sizes?.[g.size]) : s.rolls.map(r => rollQc.rolls?.[r.roll_id]))
+            : null,
+    }));
 
     return (
         <div className="p-2">
             {/* Batch info banner */}
-            {batch && <BatchInfoBanner batch={batch} activeStage={stage} />}
+            {batch && <BatchInfoBanner batch={batch} />}
 
             {/* Header */}
-            <div className="flex items-center justify-between mb-5">
-                <div>
+            <div className="flex items-center justify-between gap-2 mb-5">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
                     <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">{stage.line_type_name}</h3>
-                    {progress?.line_name && <p className="text-sm font-bold text-slate-500 mt-0.5">{progress.line_name}</p>}
+                    {progress?.line_name && (
+                        <span className="text-xs font-bold text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-lg">
+                            {progress.line_name}
+                        </span>
+                    )}
                 </div>
-                <button onClick={onClose} className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-95 transition-all">
-                    <X size={18} className="text-slate-600" />
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                    {refreshError && <span className="text-[11px] font-bold text-rose-600">{refreshError}</span>}
+                    {onRefresh && (
+                        <button onClick={handleRefresh} disabled={refreshing}
+                            title={`Last updated ${lastUpdated.toLocaleTimeString()}`}
+                            className="px-3 py-2 bg-white border-2 border-slate-300 text-slate-700 font-black rounded-xl hover:bg-slate-50 active:scale-95 disabled:opacity-60 transition-all flex items-center gap-1.5 text-xs uppercase tracking-widest">
+                            <Loader size={13} className={refreshing ? 'animate-spin' : ''} />
+                            {refreshing ? 'Refreshing…' : 'Refresh'}
+                            <span className="normal-case tracking-normal font-bold text-slate-400 hidden sm:inline">· {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </button>
+                    )}
+                    {onChangeLine && progress && (
+                        <button onClick={onChangeLine}
+                            className="px-3 py-2 bg-white border-2 border-slate-300 text-slate-700 font-black rounded-xl hover:bg-slate-50 active:scale-95 transition-all flex items-center gap-1.5 text-xs uppercase tracking-widest">
+                            <RefreshCw size={13} /> Change Line
+                        </button>
+                    )}
+                    <button onClick={onClose} className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-95 transition-all">
+                        <X size={18} className="text-slate-600" />
+                    </button>
+                </div>
             </div>
 
             {/* Assign action */}
@@ -858,21 +1139,52 @@ const StageDetailModal = ({ batch, stage, progress, onClose, onAssign, onAssignS
                     </button>
                 )
             ) : (
-                readyRolls.length > 0 && onAssign && (
-                    <button onClick={onAssign}
-                        className="w-full py-3 mb-5 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-700 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest">
-                        <Zap size={16} /> Assign {readyRolls.length} Roll{readyRolls.length !== 1 ? 's' : ''} to Line
-                    </button>
+                hasReadyRolls && (
+                    <div className="mb-5 border-2 border-amber-300 rounded-xl overflow-hidden">
+                        <div className="bg-amber-50 px-4 py-2.5 border-b border-amber-200 flex flex-wrap items-center gap-x-3 gap-y-2">
+                            <span className="text-xs font-black uppercase tracking-widest text-amber-800">
+                                Ready to Assign ({readyRolls.length})
+                            </span>
+                            {prevStage && (
+                                <span className="text-[11px] font-bold text-amber-700">
+                                    finished at {prevStage.line_type_name} ·{' '}
+                                    {readyRolls.reduce((sum, r) => sum + parseFloat(r.meter || 0), 0).toFixed(2)}m
+                                </span>
+                            )}
+                            <button onClick={onAssign}
+                                className="ml-auto px-4 py-2 bg-slate-900 text-white font-black rounded-lg hover:bg-slate-700 active:scale-95 transition-all flex items-center gap-1.5 text-xs uppercase tracking-widest">
+                                <Zap size={14} /> Assign {readyRolls.length} Roll{readyRolls.length !== 1 ? 's' : ''} to Line
+                            </button>
+                        </div>
+                        <div className="divide-y divide-slate-100 bg-white">
+                            {readyRolls.map(roll => (
+                                <div key={roll.roll_id} className="flex flex-wrap lg:flex-nowrap items-center gap-x-4 gap-y-1 px-4 py-2">
+                                    <div className="w-44 shrink-0 min-w-0">
+                                        <span className="font-black text-sm text-slate-800">Roll #{roll.roll_id}</span>
+                                        <span className="block text-[11px] text-slate-400 truncate">{roll.fabric_type} · {roll.color_name}{roll.color_number ? ` · ${roll.color_number}` : ''}</span>
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <RollQcBadge qc={readyQc?.rolls?.[roll.roll_id]} unit={readyQc?.unit || 'pieces'} loading={readyQcLoading} />
+                                    </div>
+                                    <span className="ml-auto flex items-center gap-2 shrink-0 text-[11px] text-slate-400 font-bold">
+                                        {roll.primary_pieces_cut > 0 && <span>{roll.primary_pieces_cut} pcs</span>}
+                                        <span>{roll.meter}m</span>
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 )
             )}
 
             {/* Summary chips */}
             {progress && (
                 <div className="flex flex-wrap gap-2 mb-5">
-                    <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">WIP: {summary.wip ?? wipRolls.length}</span>
-                    <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">Completed: {summary.completed ?? completedRolls.length}</span>
-                    <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">Forwarded: {summary.dispatched_forward ?? dispatchedRolls.length}</span>
-                    <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 border border-slate-200">Total on Line: {summary.total_on_line ?? wipRolls.length + completedRolls.length}</span>
+                    {isMode2 && <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-200">Sizes</span>}
+                    <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-yellow-50 text-yellow-800 border border-yellow-200">WIP: {summary.wip ?? (isMode2 ? sizeGroups.filter(g => g.state === 'WIP').length : wipRolls.length)}</span>
+                    <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">Completed: {summary.completed ?? (isMode2 ? sizeGroups.filter(g => g.state !== 'WIP').length : completedRolls.length)}</span>
+                    <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">Forwarded: {summary.dispatched_forward ?? (isMode2 ? sizeGroups.filter(g => g.state === 'FORWARDED').length : dispatchedRolls.length)}</span>
+                    <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 border border-slate-200">Total on Line: {summary.total_on_line ?? (isMode2 ? sizeGroups.length : wipRolls.length + completedRolls.length)}</span>
                 </div>
             )}
 
@@ -897,30 +1209,38 @@ const StageDetailModal = ({ batch, stage, progress, onClose, onAssign, onAssignS
                 </div>
             ) : sections.length === 0 ? (
                 <div className="bg-slate-50 rounded-xl p-6 border border-slate-200 text-center mb-5">
-                    <p className="text-sm font-bold text-slate-500">No rolls on this stage yet.</p>
+                    <p className="text-sm font-bold text-slate-500">No {isMode2 ? 'sizes' : 'rolls'} on this stage yet.</p>
                 </div>
             ) : (
-                <div className="space-y-4 mb-5 max-h-[45vh] overflow-y-auto pr-1">
-                    {sections.map(({ label, rolls, badge, badgeClass }) => (
-                        <div key={label} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                            <div className="bg-slate-50 px-4 py-2 border-b border-slate-200">
-                                <span className="text-xs font-black uppercase tracking-widest text-slate-500">{label} ({rolls.length})</span>
+                <div className="space-y-3 mb-5">
+                    {sections.map(({ label, rolls, sizes, showQc, totals }) => {
+                        const tone = SECTION_TONE[label] || { box: 'border-slate-200', head: 'bg-slate-50 border-slate-200', text: 'text-slate-500' };
+                        return (
+                        <div key={label} className={`bg-white border ${tone.box} rounded-xl overflow-hidden`}>
+                            <div className={`${tone.head} px-4 py-2 border-b flex flex-wrap items-center gap-2`}>
+                                <span className={`text-xs font-black uppercase tracking-widest ${tone.text}`}>
+                                    {label} ({sizes ? `${sizes.length} size${sizes.length !== 1 ? 's' : ''}` : rolls.length})
+                                </span>
+                                {showQc && totals && <QcIssues counts={totals} className="ml-auto" />}
+                                {showQc && qcError && <span className="text-[11px] font-bold text-rose-600">{qcError}</span>}
                             </div>
-                            {rolls.map(roll => <RollRow key={roll.roll_id} roll={roll} badge={badge} badgeClass={badgeClass} />)}
+                            <div>
+                                {sizes
+                                    ? sizes.map(group => (
+                                        <SizeRow key={group.size} group={group}
+                                            showQc={showQc} qc={rollQc?.sizes?.[group.size]} qcUnit={rollQc?.unit || 'pieces'} qcLoading={qcLoading} />
+                                    ))
+                                    : rolls.map(roll => (
+                                        <RollRow key={roll.roll_id} roll={roll}
+                                            showQc={showQc} qc={rollQc?.rolls?.[roll.roll_id]} qcUnit={rollQc?.unit || 'pieces'} qcLoading={qcLoading} />
+                                    ))}
+                            </div>
                         </div>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
 
-            {/* Action buttons */}
-            {onChangeLine && progress && (
-                <div className="pt-4 border-t border-slate-200 flex flex-col gap-2">
-                    <button onClick={onChangeLine}
-                        className="w-full py-2.5 bg-white border-2 border-slate-300 text-slate-700 font-black rounded-xl hover:bg-slate-50 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest">
-                        <RefreshCw size={14} /> Change Line
-                    </button>
-                </div>
-            )}
         </div>
     );
 };
@@ -1138,11 +1458,13 @@ const CompletionNode = ({ type, summary, loading }) => {
 // ============================================================================
 // BATCH PIPELINE CARD
 // ============================================================================
-const BatchPipelineCard = ({ batch, wipMap, onAssign, onAssignSizes, onRefresh }) => {
+const BatchPipelineCard = ({ batch, wipMap, onAssign, onAssignSizes, onRefresh, onRefreshBatch }) => {
     const isMode2 = batch?.piece_sequencing_mode === 'MODE_2';
     const [modalData, setModalData] = useState(null);
     const [sizeModalData, setSizeModalData] = useState(null);
-    const [detailData, setDetailData] = useState(null); // { stage, progress, readyRolls, readySizes }
+    // Only WHICH stage is open — everything shown is derived from the live
+    // batch prop at render time, so any dashboard refresh updates the modal.
+    const [detailData, setDetailData] = useState(null); // { stageIndex }
     const [changeLineData, setChangeLineData] = useState(null); // { stage, progress }
     const [checkingStageId, setCheckingStageId] = useState(null);
 
@@ -1183,13 +1505,7 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onAssignSizes, onRefresh }
         return ready.filter(s => !dispatchedSet.has(String(s.size)));
     };
 
-    const handleOpenDetail = (stageIndex) => {
-        const cf = cycleFlow[stageIndex];
-        const progress = progressMap[cf.id] ?? null;
-        const readyRolls = getReadyRolls(stageIndex);
-        const readySizes = getReadySizes(stageIndex);
-        setDetailData({ stage: cf, progress, readyRolls, readySizes, stageIndex, batch });
-    };
+    const handleOpenDetail = (stageIndex) => setDetailData({ stageIndex });
 
     const handleActivate = (stageIndex) => {
         const cf = cycleFlow[stageIndex];
@@ -1384,25 +1700,34 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onAssignSizes, onRefresh }
             )}
 
             {/* Stage detail panel */}
-            {detailData && (
-                <Modal title="" onClose={() => setDetailData(null)}>
-                    <StageDetailModal
-                        batch={detailData.batch}
-                        stage={detailData.stage}
-                        progress={detailData.progress}
-                        readyRolls={detailData.readyRolls}
-                        readySizes={detailData.readySizes}
-                        onClose={() => setDetailData(null)}
-                        onAssign={detailData.readyRolls.length > 0 && detailData.stageIndex !== 0 ? () => handleActivate(detailData.stageIndex) : null}
-                        onAssignSizes={detailData.readySizes.length > 0 && detailData.stageIndex !== 0 ? () => handleActivateSizes(detailData.stageIndex) : null}
-                        onChangeLine={detailData.progress ? () => handleOpenChangeLine(detailData.stageIndex) : null}
-                    />
-                </Modal>
-            )}
+            {detailData && cycleFlow[detailData.stageIndex] && (() => {
+                const i = detailData.stageIndex;
+                const stage = cycleFlow[i];
+                const progress = progressMap[stage.id] ?? null;
+                const readyRolls = getReadyRolls(i);
+                const readySizes = getReadySizes(i);
+                return (
+                    <Modal title="" fullScreen hideCloseButton onClose={() => setDetailData(null)}>
+                        <StageDetailModal
+                            batch={batch}
+                            stage={stage}
+                            progress={progress}
+                            readyRolls={readyRolls}
+                            readySizes={readySizes}
+                            onClose={() => setDetailData(null)}
+                            prevStage={i > 0 ? cycleFlow[i - 1] : null}
+                            onRefresh={() => onRefreshBatch(batch.batch_id)}
+                            onAssign={readyRolls.length > 0 && i !== 0 ? () => handleActivate(i) : null}
+                            onAssignSizes={readySizes.length > 0 && i !== 0 ? () => handleActivateSizes(i) : null}
+                            onChangeLine={progress ? () => handleOpenChangeLine(i) : null}
+                        />
+                    </Modal>
+                );
+            })()}
 
             {/* Line assignment modal — MODE_1: rolls */}
             {modalData && (
-                <Modal title="" onClose={() => setModalData(null)}>
+                <Modal title="" fullScreen onClose={() => setModalData(null)}>
                     <LineSelectionModal
                         batchId={batch.batch_id}
                         cycleFlow={modalData.cycleFlow}
@@ -1418,7 +1743,7 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onAssignSizes, onRefresh }
 
             {/* Line assignment modal — MODE_2: sizes (across all rolls) */}
             {sizeModalData && (
-                <Modal title="" onClose={() => setSizeModalData(null)}>
+                <Modal title="" fullScreen onClose={() => setSizeModalData(null)}>
                     <SizeSelectionModal
                         batchId={batch.batch_id}
                         cycleFlow={sizeModalData.cycleFlow}
@@ -1433,7 +1758,7 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onAssignSizes, onRefresh }
 
             {/* Change line modal */}
             {changeLineData && (
-                <Modal title="" onClose={() => setChangeLineData(null)}>
+                <Modal title="" fullScreen onClose={() => setChangeLineData(null)}>
                     <ChangeLineModal
                         batch={changeLineData.batch}
                         batchId={batch.batch_id}
@@ -1721,6 +2046,22 @@ const LineLoaderDashboardPage = () => {
         }
     }, []);
 
+    // Re-pull ONE batch (?batch_id=) and swap it into the list in place — the
+    // Stage Detail modal's Refresh. No full-page spinner, no other batches
+    // touched; line WIP is re-read too since it drives the assign/change-line
+    // capacity checks. Throws so the modal can show the failure.
+    const refreshBatch = useCallback(async (batchId) => {
+        const [batchRes, wipRes] = await Promise.all([
+            lineLoaderApi.getDashboardData({ batch_id: batchId }),
+            lineLoaderApi.getAllActiveLineWip().catch(() => null),
+        ]);
+        const fresh = (batchRes.data || [])[0];
+        if (fresh) {
+            setAllBatches(prev => prev.map(b => (String(b.batch_id) === String(batchId) ? fresh : b)));
+        }
+        if (wipRes) setWipMap(wipRes.data || {});
+    }, []);
+
     useEffect(() => { fetchData(); }, [fetchData]);
 
     const loadMore = useCallback(async () => {
@@ -1801,7 +2142,7 @@ const LineLoaderDashboardPage = () => {
             ) : (
                 <div className="space-y-6">
                     {allBatches.map(batch => (
-                        <BatchPipelineCard key={batch.batch_id} batch={batch} wipMap={wipMap} onAssign={handleAssign} onAssignSizes={handleAssignSizes} onRefresh={fetchData} />
+                        <BatchPipelineCard key={batch.batch_id} batch={batch} wipMap={wipMap} onAssign={handleAssign} onAssignSizes={handleAssignSizes} onRefresh={fetchData} onRefreshBatch={refreshBatch} />
                     ))}
                     {hasMore && (
                         <div ref={sentinelRef} className="flex justify-center py-6">

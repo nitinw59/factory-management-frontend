@@ -279,8 +279,9 @@ export default function InwardReviewModal({
     // boxed line's box breakdown. These read off `summary`, so they reflect
     // exactly what will be posted.
 
-    // Merge roll fragments of the same physical bale back together (FCFS
-    // distribution may split one bale across requirements) for a clean bale list.
+    // Merge rolls sharing a bale_no into one row for a clean bale list.
+    // distributeRolls no longer splits bales, so this only combines genuinely
+    // duplicate bale numbers the user typed.
     const mergeRolls = (rolls) => {
         const byBale = new Map();
         const anon = [];

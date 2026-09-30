@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { LuClock, LuLayers, LuChevronRight, LuDownload, LuLoader, LuCircleCheck, LuX } from 'react-icons/lu';
 import { universalApi } from '../../api/universalApi';
+import { useSupervisorPinPrompt, withSupervisorPin } from '../../shared/SupervisorPinPrompt';
 import PriorityChip from '../../shared/PriorityChip';
 import { materialReplacementApi } from '../../api/materialReplacementApi';
 import { MaterialReplacementRequestModal, MaterialReplacementStatusModal } from './MaterialReplacementModals';
@@ -15,11 +16,9 @@ import {
     ShieldAlert, ShieldCheck, RefreshCw, Ruler, Lock, RotateCcw, PackageX, AlertTriangle, Flag,
 } from 'lucide-react';
 
-// TEMPORARY FIX: hardcoded supervisor override password to un-reject a
-// QC_REJECTED piece straight to REPAIRED. Replace with a real
-// role-gated/backend-verified check before this goes to more than a
-// handful of trusted supervisors.
-const REJECT_UNLOCK_PASSWORD = 'RAJESH2026';
+// Supervisor overrides (unlock a rejected piece / revert an approval) are
+// verified SERVER-side against each line supervisor's own override password
+// (set in the Sewing Manager portal) and logged with who authorised them.
 
 const PART_FILTER_LS_KEY = 'ws-part-filter';
 const BATCH_FILTER_LS_KEY = 'ws-selected-batch';
@@ -575,8 +574,30 @@ const checkEntityStatus = (entity) => {
     const previously_rejected = pieces.filter(p => p.qc_status === 'PREVIOUSLY_REJECTED').length;
     const total_processed = total_validated + total_rejected + total_repaired + previously_rejected;
     const isComplete = (total_processed + pending_alter) >= total_cut && total_cut > 0 && pending_alter === 0 && upstream_rework === 0;
+    // Rejected at an EARLIER stage (defect raised on another line type) — part
+    // of total_rejected, but not this checker's doing; highlighted separately.
+    const earlier = pieces.filter(p => p.qc_status === 'QC_REJECTED' && p.is_upstream_defect);
+    const rejected_earlier = earlier.length;
+    const rejected_earlier_lines = [...new Set(earlier.map(p => p.defect_origin_line).filter(Boolean))];
+    const rejected_earlier_seqs = earlier.map(p => p.piece_sequence).sort((a, b) => a - b);
 
-    return { total_cut, total_processed, pending_alter, upstream_rework, isComplete, total_validated, total_rejected, total_repaired, previously_rejected };
+    return { total_cut, total_processed, pending_alter, upstream_rework, isComplete, total_validated, total_rejected, total_repaired, previously_rejected, rejected_earlier, rejected_earlier_lines, rejected_earlier_seqs };
+};
+
+// "⚑ 2 rejected at PREPRATION · #28, #29" — pieces rejected at an earlier
+// stage, shown on roll / part / size rows. Everything is visible text: the
+// portal runs on tablets, where hover tooltips never appear.
+const MAX_SEQS = 6;
+const seqList = (seqs) => `#${seqs.slice(0, MAX_SEQS).join(', #')}${seqs.length > MAX_SEQS ? ` +${seqs.length - MAX_SEQS}` : ''}`;
+const RejectedEarlierBadge = ({ status, className = '' }) => {
+    if (!status?.rejected_earlier) return null;
+    const where = status.rejected_earlier_lines.length ? status.rejected_earlier_lines.join(', ') : 'earlier stage';
+    return (
+        <span className={`inline-flex flex-wrap items-center gap-x-1 text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-300 rounded-md px-1.5 py-0.5 ${className}`}>
+            <Flag className="w-3 h-3" /> {status.rejected_earlier} rejected at {where}
+            <span className="normal-case tracking-normal font-bold text-rose-600">· {seqList(status.rejected_earlier_seqs)}</span>
+        </span>
+    );
 };
 
 // Regroups the roll-first hierarchy (roll -> parts_details -> size_details ->
@@ -704,6 +725,10 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     const blockedBundleIds = new Set(pieces.filter(p => p.upstream_status === 'BLOCKING').map(p => p.bundle_id ?? itemInfo.bundle_id));
     const upstreamBlockedCount = pieces.filter(p => p.upstream_status === 'BLOCKING').length;
     const upstreamRejectedPieces = pieces.filter(p => p.upstream_status === 'REJECTED');
+    // Pieces whose defect was raised at an EARLIER line (rejected or needing
+    // rework there) — listed with line + reason in a visible panel, since the
+    // tile tooltips carrying that detail never show on the tablets this runs on.
+    const earlierDefectPieces = pieces.filter(p => p.is_upstream_defect && (p.qc_status === 'QC_REJECTED' || p.qc_status === 'NEEDS_REWORK'));
     const upstreamStage = itemInfo.upstream_stage || pieces.find(p => p.upstream_stage)?.upstream_stage || 'previous stage';
     const actionablePieces = pieces.filter(p => (p.qc_status === 'PENDING' || !p.qc_status) && !blockedBundleIds.has(p.bundle_id ?? itemInfo.bundle_id));
     const reworkPieces = pieces.filter(isOwnRework);
@@ -813,21 +838,15 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
         }
     };
 
-    // TEMPORARY FIX: a QC_REJECTED piece is normally a terminal, locked
-    // state with no repair path. This lets a supervisor who knows the
-    // override password force one piece back to REPAIRED (resolves its
-    // defect + flips its tracking-table status) by reusing the same
-    // approveAlteredPieces endpoint the normal rework flow already uses.
+    // Supervisor override: a QC_REJECTED piece is a terminal state — only a
+    // line supervisor can pass it (back to REPAIRED). Their password goes to
+    // the server with the request; a wrong one re-opens the dialog.
+    const [pinDialog, askSupervisorPin] = useSupervisorPinPrompt();
     const handleUnlockRejectedPiece = async (piece) => {
-        const password = window.prompt('Supervisor password required to unlock this rejected piece:');
-        if (password === null) return; // cancelled
-        if (password !== REJECT_UNLOCK_PASSWORD) {
-            alert('Incorrect password.');
-            return;
-        }
         setIsSubmitting(true);
         try {
-            await onRepairSubmit({ pieceIds: [piece.id], status: 'APPROVED', defectCodeIds: [] });
+            await withSupervisorPin(askSupervisorPin, `Unlock rejected piece #${piece.piece_sequence}`,
+                (supervisorPin) => onRepairSubmit({ pieceIds: [piece.id], status: 'APPROVED', defectCodeIds: [], supervisorPin }));
         } catch {
             // onRepairSubmit (handleApproveAlterSubmit) already shows an alert on failure
         } finally {
@@ -835,19 +854,13 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
         }
     };
 
-    // Same supervisor-password gate as handleUnlockRejectedPiece above, for
-    // the opposite mistake: an APPROVED piece that shouldn't have been.
-    // Reverts it to PENDING so it can be re-inspected.
+    // Same supervisor override for the opposite mistake: an APPROVED piece
+    // that shouldn't have been. Reverts it to PENDING so it can be re-inspected.
     const handleRevertApprovedPiece = async (piece) => {
-        const password = window.prompt('Supervisor password required to revert this approved piece back to pending:');
-        if (password === null) return; // cancelled
-        if (password !== REJECT_UNLOCK_PASSWORD) {
-            alert('Incorrect password.');
-            return;
-        }
         setIsSubmitting(true);
         try {
-            await onRevertToPending({ pieceIds: [piece.id] });
+            await withSupervisorPin(askSupervisorPin, `Revert approved piece #${piece.piece_sequence} to pending`,
+                (supervisorPin) => onRevertToPending({ pieceIds: [piece.id], supervisorPin }));
         } catch {
             // onRevertToPending (handleRevertToPending) already shows an alert on failure
         } finally {
@@ -1153,8 +1166,29 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                     </div>
 
                     <div className="flex-grow p-8 overflow-y-auto">
-                        {(upstreamBlockedCount > 0 || upstreamRejectedPieces.length > 0) && (
+                        {pinDialog}
+                        {(upstreamBlockedCount > 0 || upstreamRejectedPieces.length > 0 || earlierDefectPieces.length > 0) && (
                             <div className="mb-6 space-y-2">
+                                {earlierDefectPieces.length > 0 && (
+                                    <div className="px-4 py-3 rounded-xl border-2 border-rose-300 bg-rose-50 text-rose-900">
+                                        <p className="text-sm font-black uppercase tracking-widest flex items-center gap-2 mb-2">
+                                            <Flag className="w-4 h-4" /> From earlier stages ({earlierDefectPieces.length})
+                                        </p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {earlierDefectPieces.map(p => {
+                                                const rejected = p.qc_status === 'QC_REJECTED';
+                                                return (
+                                                    <span key={p.id} className={`text-xs font-bold px-2.5 py-1 rounded-lg border ${rejected ? 'bg-white border-rose-300 text-rose-800' : 'bg-amber-50 border-amber-300 text-amber-900'}`}>
+                                                        <span className="font-black font-mono">#{p.piece_sequence}</span>
+                                                        {p._displayGroup && p._displayGroup !== 'Default' ? <span className="text-slate-500"> · {p._displayGroup}</span> : null}
+                                                        {' · '}<span className="font-black uppercase">{rejected ? 'Rejected' : 'Rework'} @ {p.defect_origin_line || 'earlier stage'}</span>
+                                                        {p.defect_reason ? <span> — {p.defect_reason}</span> : null}
+                                                    </span>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
                                 {upstreamBlockedCount > 0 && (
                                     <div className="flex items-start gap-3 px-4 py-3 rounded-xl border-2 border-amber-300 bg-amber-50 text-amber-900">
                                         <Lock className="w-5 h-5 shrink-0 mt-0.5" />
@@ -1185,7 +1219,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                             const isRework = isOwnRework(piece);
                                             const isUpRework = isUpstreamRework(piece);
                                             const isUpBlocked = piece.upstream_status === 'BLOCKING';
-                                            const isUpRejected = piece.upstream_status === 'REJECTED';
+                                            const isUpRejected = piece.upstream_status === 'REJECTED' || (piece.qc_status === 'QC_REJECTED' && !!piece.is_upstream_defect);
                                             const isRejected = piece.qc_status === 'QC_REJECTED';
                                             const isApproved = piece.qc_status === 'APPROVED';
                                             const isHighlighted = highlightPieceId != null && String(piece.id) === String(highlightPieceId);
@@ -1200,7 +1234,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                                     ref={isHighlighted ? highlightRef : undefined}
                                                     disabled={isUpRework || (!isRejected && !isApproved && piece.qc_status !== 'PENDING' && piece.qc_status && piece.qc_status !== 'NEEDS_REWORK')}
                                                     onClick={() => isRejected ? handleUnlockRejectedPiece(piece) : isApproved ? handleRevertApprovedPiece(piece) : togglePiece(piece)}
-                                                    title={isUpRework ? `Needs rework at ${piece.defect_origin_line || upstreamStage}${piece.defect_reason ? ` — ${piece.defect_reason}` : ''}` : isUpBlocked ? `Not cleared at ${upstreamStage} — bundle can't be approved yet` : isUpRejected ? `Rejected at ${upstreamStage}` : isRejected ? 'Rejected — click to unlock with supervisor password' : isApproved ? 'Approved — click to revert to pending with supervisor password' : undefined}
+                                                    title={isUpRework ? `Needs rework at ${piece.defect_origin_line || upstreamStage}${piece.defect_reason ? ` — ${piece.defect_reason}` : ''}` : isUpBlocked ? `Not cleared at ${upstreamStage} — bundle can't be approved yet` : isUpRejected ? `Rejected at ${piece.defect_origin_line || upstreamStage}${piece.defect_reason ? ` — ${piece.defect_reason}` : ''}` : isRejected ? 'Rejected — click to unlock with supervisor password' : isApproved ? 'Approved — click to revert to pending with supervisor password' : undefined}
                                                     className={`relative aspect-square rounded-2xl border-4 font-mono font-black text-3xl flex items-center justify-center transition-all active:scale-95 ${isRejected ? 'cursor-pointer hover:border-rose-600' : ''} ${isApproved ? 'cursor-pointer hover:border-emerald-500' : ''} ${isSelected ? selClass : unselClass} ${isHighlighted ? 'animate-pulse ring-4 ring-offset-2 ring-blue-500 z-20' : ''}`}>
                                                     {piece.piece_sequence}
                                                     {isSelected && <Check className={`absolute top-2 right-2 w-8 h-8 rounded-full p-1 shadow-md ${isRework ? 'bg-amber-700 text-white' : 'bg-indigo-500 text-white'}`} strokeWidth={4} />}
@@ -1210,7 +1244,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                                     {piece.qc_status === 'FOR_REPLACEMENT' && <PackageX className="absolute top-2 right-2 w-5 h-5 text-violet-400" />}
                                                     {isUpRework && <span className="absolute bottom-1 left-1 right-1 text-[9px] leading-tight font-sans font-black uppercase tracking-wide text-amber-900 bg-amber-200 rounded px-1 truncate">Rework @ {piece.defect_origin_line || upstreamStage}</span>}
                                                     {!isUpRework && isUpBlocked && <span className="absolute bottom-1 left-1 right-1 text-[9px] leading-tight font-sans font-black uppercase tracking-wide text-amber-900 bg-amber-200 rounded px-1 truncate">Not cleared @ {upstreamStage}</span>}
-                                                    {isUpRejected && <span className="absolute bottom-1 left-1 right-1 text-[9px] leading-tight font-sans font-black uppercase tracking-wide text-white bg-rose-600 rounded px-1 truncate">Rejected @ {upstreamStage}</span>}
+                                                    {isUpRejected && <span className="absolute bottom-1 left-1 right-1 text-[9px] leading-tight font-sans font-black uppercase tracking-wide text-white bg-rose-600 rounded px-1 truncate">Rejected @ {piece.defect_origin_line || upstreamStage}</span>}
                                                 </button>
                                             );
                                         })}
@@ -1373,6 +1407,7 @@ const PartAccordion = ({ batch, roll, part, setModalState, allowMultiple, onRequ
                     <Component className="w-6 h-6 mr-3 text-indigo-500" />
                     <h4 className="font-black text-slate-800 text-xl tracking-tight uppercase">{part.part_name}</h4>
                     <span className="ml-5 text-xs font-bold text-slate-500 bg-slate-200 px-3 py-1.5 rounded-lg uppercase tracking-widest">{status.total_processed} / {status.total_cut} Processed</span>
+                    <RejectedEarlierBadge status={status} className="ml-3" />
                 </div>
                 <div className="flex items-center space-x-3 ml-12 md:ml-0">
                     {status.pending_alter > 0 && (
@@ -1434,6 +1469,7 @@ const PartAccordionBySize = ({ batch, size, part, setModalState, allowMultiple, 
                     <Component className="w-6 h-6 mr-3 text-indigo-500" />
                     <h4 className="font-black text-slate-800 text-xl tracking-tight uppercase">{part.part_name}</h4>
                     <span className="ml-5 text-xs font-bold text-slate-500 bg-slate-200 px-3 py-1.5 rounded-lg uppercase tracking-widest">{status.total_processed} / {status.total_cut} Processed</span>
+                    <RejectedEarlierBadge status={status} className="ml-3" />
                 </div>
                 <div className="flex items-center space-x-3 ml-12 md:ml-0">
                     {status.pending_alter > 0 && (
@@ -1469,7 +1505,8 @@ const PartAccordionBySize = ({ batch, size, part, setModalState, allowMultiple, 
 // DYNAMIC PROGRESS ROWS
 // ============================================================================
 const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect, onRepair, canApproveBundle, onQuickApprove, isApproveBlocked, onRequestReplacement }) => {
-    const { total_cut, total_processed, pending_alter, upstream_rework, isComplete, total_validated, total_rejected, total_repaired } = checkEntityStatus(entity);
+    const rowStatus = checkEntityStatus(entity);
+    const { total_cut, total_processed, pending_alter, upstream_rework, isComplete, total_validated, total_rejected, total_repaired, rejected_earlier } = rowStatus;
     if (total_cut === 0) return null;
     const upstreamStage = entity.upstream_stage || 'previous stage';
     const upstreamBlocked = entity.upstream_blocked || 0;
@@ -1480,15 +1517,16 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
     const hasReplacementActivity = (entity.pieces || []).some(p => p.qc_status === 'FOR_REPLACEMENT');
 
     return (
-        <div className="p-4 bg-white border-2 border-slate-200 rounded-2xl shadow-sm flex flex-col md:flex-row md:items-center md:justify-between hover:border-indigo-300 transition-colors">
+        <div className={`p-4 bg-white border-2 border-slate-200 rounded-2xl shadow-sm flex flex-col md:flex-row md:items-center md:justify-between hover:border-indigo-300 transition-colors ${rejected_earlier > 0 ? 'border-l-8 border-l-rose-400' : ''}`}>
             <div className="flex items-center w-full md:w-1/3 mb-3 md:mb-0">
                 <div className="p-3 bg-slate-100 text-indigo-600 rounded-xl mr-4"><Icon size={24}/></div>
                 <div>
                     <span className="font-black text-slate-800 tracking-tight block text-lg">{label}</span>
                     {subLabel && <span className="text-xs text-indigo-500 font-black uppercase tracking-widest">{subLabel}</span>}
                     <span className="text-xs text-slate-500 font-bold uppercase tracking-widest">{total_processed} / {total_cut} pieces</span>
-                    {(upstreamBlocked > 0 || upstream_rework > 0 || upstreamRejected.length > 0) && (
+                    {(upstreamBlocked > 0 || upstream_rework > 0 || upstreamRejected.length > 0 || rejected_earlier > 0) && (
                         <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {upstreamRejected.length === 0 && <RejectedEarlierBadge status={rowStatus} />}
                             {upstreamBlocked > 0 && (
                                 <span title={`${upstreamBlocked} piece(s) pending or in rework at ${upstreamStage} — bundle can't be approved`} className="inline-flex items-center text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 rounded-md px-1.5 py-0.5">
                                     <Lock className="w-3 h-3 mr-1" /> Blocked by {upstreamStage} ({upstreamBlocked})
@@ -1500,8 +1538,11 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
                                 </span>
                             )}
                             {upstreamRejected.length > 0 && (
-                                <span title={upstreamRejected.map(upstreamRejectedLabel).join(', ')} className="inline-flex items-center text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-300 rounded-md px-1.5 py-0.5">
-                                    <Flag className="w-3 h-3 mr-1" /> {upstreamRejected.length} rejected at {upstreamStage}
+                                <span className="inline-flex flex-wrap items-center gap-x-1 text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-300 rounded-md px-1.5 py-0.5">
+                                    <Flag className="w-3 h-3" /> {upstreamRejected.length} rejected at {upstreamStage}
+                                    <span className="normal-case tracking-normal font-bold text-rose-600">
+                                        · {upstreamRejected.slice(0, MAX_SEQS).map(upstreamRejectedLabel).join(', ')}{upstreamRejected.length > MAX_SEQS ? ` +${upstreamRejected.length - MAX_SEQS}` : ''}
+                                    </span>
                                 </span>
                             )}
                         </div>
@@ -1513,7 +1554,8 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
                 <div className="bg-emerald-500" style={{ width: `${(total_validated/total_cut)*100}%` }}></div>
                 <div className="bg-teal-400" style={{ width: `${(total_repaired/total_cut)*100}%` }}></div>
                 <div className="bg-amber-400" style={{ width: `${(pending_alter/total_cut)*100}%` }}></div>
-                <div className="bg-rose-500" style={{ width: `${(total_rejected/total_cut)*100}%` }}></div>
+                <div className="bg-rose-500" style={{ width: `${((total_rejected - rejected_earlier)/total_cut)*100}%` }}></div>
+                <div className="bg-rose-300" title="Rejected at an earlier stage" style={{ width: `${(rejected_earlier/total_cut)*100}%` }}></div>
             </div>
 
             <div className="w-full md:w-1/3 flex justify-start md:justify-end items-center space-x-3">
@@ -1527,7 +1569,7 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
                     <>
                         <button onClick={() => onInspect(entity)} className="px-6 py-2 text-sm bg-white text-slate-800 border-2 border-slate-300 rounded-xl hover:border-indigo-500 hover:text-indigo-700 font-black shadow-sm active:scale-95 flex items-center transition-all">INSPECT</button>
                         {canApproveBundle && (
-                            <button onClick={() => onQuickApprove(entity)} disabled={isApproveBlocked || upstreamBlocked > 0 || upstream_rework > 0} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it via Repair or Reject before approving new pieces.' : (upstreamBlocked > 0 || upstream_rework > 0) ? `Blocked — pieces not cleared at ${upstreamStage}` : undefined} className="px-4 py-2 text-sm bg-emerald-100 text-emerald-800 border-2 border-emerald-200 rounded-xl hover:bg-emerald-200 font-black shadow-sm active:scale-95 flex items-center transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100">
+                            <button onClick={() => onQuickApprove(entity)} disabled={isApproveBlocked || upstreamBlocked > 0 || upstream_rework > 0 || pending_alter > 0} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it via Repair or Reject before approving new pieces.' : (upstreamBlocked > 0 || upstream_rework > 0) ? `Blocked — pieces not cleared at ${upstreamStage}` : pending_alter > 0 ? 'Fix or reject the rework pieces first' : undefined} className="px-4 py-2 text-sm bg-emerald-100 text-emerald-800 border-2 border-emerald-200 rounded-xl hover:bg-emerald-200 font-black shadow-sm active:scale-95 flex items-center transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100">
                                 <CheckCircle2 className="w-4 h-4 mr-2" /> QUICK APPROVE
                             </button>
                         )}
@@ -2293,32 +2335,34 @@ const UniversalWorkstationDashboard = () => {
         }
     };
 
-    const handleApproveAlterSubmit = async ({ pieceIds, status, defectCodeIds }) => {
+    const isPinError = (err) => ['SUPERVISOR_PIN_REQUIRED', 'SUPERVISOR_PIN_INVALID'].includes(err.response?.data?.code);
+
+    const handleApproveAlterSubmit = async ({ pieceIds, status, defectCodeIds, supervisorPin }) => {
         setIsProcessing(true); // 🚨 Global Full-Screen Lock ON
         try {
-            await universalApi.approveAlteredPieces({ batchId: modalState.batchId, pieceIds, status, defectCodeIds });
+            await universalApi.approveAlteredPieces({ batchId: modalState.batchId, pieceIds, status, defectCodeIds, supervisorPin });
             const newBatches = await fetchQueue();
             refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
             refreshTodayApproved();
             checkReworkBacklog(await loadStats()); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
         } catch (err) {
-            alert(err.response?.data?.error || `Error: ${err.message}`);
+            if (!isPinError(err)) alert(err.response?.data?.error || `Error: ${err.message}`);
             throw err;
         } finally {
             setIsProcessing(false); // 🚨 Global Full-Screen Lock OFF
         }
     };
 
-    const handleRevertToPending = async ({ pieceIds }) => {
+    const handleRevertToPending = async ({ pieceIds, supervisorPin }) => {
         setIsProcessing(true); // 🚨 Global Full-Screen Lock ON
         try {
-            await universalApi.revertPieceToPending({ batchId: modalState.batchId, bundleId: modalState.bundle_id, pieceIds });
+            await universalApi.revertPieceToPending({ batchId: modalState.batchId, bundleId: modalState.bundle_id, pieceIds, supervisorPin });
             const newBatches = await fetchQueue();
             refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
             refreshTodayApproved();
             loadStats();
         } catch (err) {
-            alert(err.response?.data?.error || `Error: ${err.message}`);
+            if (!isPinError(err)) alert(err.response?.data?.error || `Error: ${err.message}`);
             throw err;
         } finally {
             setIsProcessing(false); // 🚨 Global Full-Screen Lock OFF
@@ -2459,11 +2503,15 @@ const UniversalWorkstationDashboard = () => {
                             <span className="text-sm font-black tabular-nums text-teal-600">{stats == null ? '—' : (stats.today_resolved ?? 0)}</span>
                         </div>
                         <span className="text-gray-200 hidden sm:inline">│</span>
-                        {stats?.processing_mode === 'BUNDLE' ? (
-                            // BUNDLE-mode: "approved" is a confusing indirect number here
-                            // (every primary part's pieces counted together, not garments) —
-                            // see getCheckerStats' complete_sets_today comment. Show the real
-                            // figure instead; full calculation is in the same modal.
+                        {stats != null ? (
+                            // Raw "approved" is a confusing indirect number for ANY multi-part
+                            // line, not just BUNDLE mode — a checker here typically only
+                            // approves SOME of a garment's primary parts (piece count runs
+                            // ahead of real production), and for BUNDLE mode it's literally a
+                            // bundle count, not a piece count. complete_sets_today is the one
+                            // figure that's always correct across PIECE/BUNDLE/SERIALIZED — see
+                            // getCheckerStats' complete_sets_today comment. Full calculation is
+                            // in the same modal.
                             <button
                                 type="button"
                                 onClick={handleOpenApprovedModal}
@@ -2489,7 +2537,7 @@ const UniversalWorkstationDashboard = () => {
                                 <ThumbsUp size={13} className="text-emerald-500 shrink-0" />
                                 <span className="text-xs text-gray-500">Today's Approved</span>
                                 <span className="text-sm font-black tabular-nums text-emerald-600">
-                                    {todayApprovedPieces != null ? todayApprovedPieces : stats == null ? '—' : (stats.today_approved ?? 0)}
+                                    {todayApprovedPieces != null ? todayApprovedPieces : '—'}
                                 </span>
                                 {loadingWork && !showApprovedModal && <Loader2 size={11} className="animate-spin text-emerald-500" />}
                             </button>
@@ -2643,6 +2691,7 @@ const UniversalWorkstationDashboard = () => {
                                                                     <h3 className="font-black text-black flex items-center text-base uppercase tracking-widest bg-slate-100 px-3 py-1.5 rounded-lg w-max border border-slate-300">
                                                                         <Ruler className="w-4 h-4 mr-2 text-violet-600" /> SIZE {sizeGroup.size}
                                                                     </h3>
+                                                                    <RejectedEarlierBadge status={sizeStatus} />
                                                                     {allowRoll && !sizeStatus.isComplete && (
                                                                         <button onClick={() => setModalState({ type: 'validate', isBundle: true, isRollInspect: false, batchId: batch.batch_id, batchCode: batch.batch_code, size: sizeGroup.size, partName: 'ALL PARTS', pieces: allSizePieces, titleOverride: `Bulk Inspect: Size ${sizeGroup.size}`, allowMultiple })} className="px-4 py-2 bg-black hover:bg-slate-800 text-white text-sm font-black rounded-lg shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
                                                                             <CheckCircle2 className="w-4 h-4 mr-2 text-amber-400" /> INSPECT WHOLE SIZE
@@ -2668,7 +2717,7 @@ const UniversalWorkstationDashboard = () => {
                                                                                     {ps.total_validated > 0 && <span className="text-emerald-600">{ps.total_validated} approved</span>}
                                                                                     {ps.total_repaired > 0 && <span className="text-teal-600">{ps.total_repaired} repaired</span>}
                                                                                     {ps.pending_alter  > 0 && <span className="text-amber-600">{ps.pending_alter} rework</span>}
-                                                                                    {ps.total_rejected > 0 && <span className="text-red-600">{ps.total_rejected} rejected</span>}
+                                                                                    {ps.total_rejected > 0 && <span className="text-red-600">{ps.total_rejected} rejected{ps.rejected_earlier > 0 ? ` (${ps.rejected_earlier} earlier)` : ''}</span>}
                                                                                     <span className="text-slate-400 font-normal">{ps.total_processed}/{ps.total_cut}</span>
                                                                                     {ps.isComplete && <Check className="w-3.5 h-3.5 text-emerald-500" />}
                                                                                 </div>
@@ -2714,6 +2763,7 @@ const UniversalWorkstationDashboard = () => {
                                                                     <h3 className="font-black text-black flex items-center text-base uppercase tracking-widest bg-slate-100 px-3 py-1.5 rounded-lg w-max border border-slate-300">
                                                                         <Layers className="w-4 h-4 mr-2 text-indigo-600" /> ROLL #{rollId}
                                                                     </h3>
+                                                                    <RejectedEarlierBadge status={rollStatus} />
                                                                     <div className="flex items-center gap-2">
                                                                         {allowRoll && !rollStatus.isComplete && (
                                                                             <button onClick={() => setModalState({ type: 'validate', isBundle: true, isRollInspect: true, batchId: batch.batch_id, batchCode: batch.batch_code, rollId, partName: 'ALL PARTS', pieces: allRollPieces, titleOverride: `Bulk Inspect: Roll #${rollId}`, allowMultiple })} className="px-4 py-2 bg-black hover:bg-slate-800 text-white text-sm font-black rounded-lg shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
@@ -2742,7 +2792,7 @@ const UniversalWorkstationDashboard = () => {
                                                                                     {ps.total_validated > 0 && <span className="text-emerald-600">{ps.total_validated} approved</span>}
                                                                                     {ps.total_repaired > 0 && <span className="text-teal-600">{ps.total_repaired} repaired</span>}
                                                                                     {ps.pending_alter  > 0 && <span className="text-amber-600">{ps.pending_alter} rework</span>}
-                                                                                    {ps.total_rejected > 0 && <span className="text-red-600">{ps.total_rejected} rejected</span>}
+                                                                                    {ps.total_rejected > 0 && <span className="text-red-600">{ps.total_rejected} rejected{ps.rejected_earlier > 0 ? ` (${ps.rejected_earlier} earlier)` : ''}</span>}
                                                                                     <span className="text-slate-400 font-normal">{ps.total_processed}/{ps.total_cut}</span>
                                                                                     {ps.isComplete && <Check className="w-3.5 h-3.5 text-emerald-500" />}
                                                                                 </div>
@@ -2778,6 +2828,7 @@ const UniversalWorkstationDashboard = () => {
                                                                     <h3 className="font-black text-black flex items-center text-base uppercase tracking-widest bg-slate-100 px-3 py-1.5 rounded-lg w-max border border-slate-300">
                                                                         <Ruler className="w-4 h-4 mr-2 text-violet-600" /> SIZE {sizeGroup.size}
                                                                     </h3>
+                                                                    <RejectedEarlierBadge status={sizeStatus} />
                                                                     {allowRoll && !sizeStatus.isComplete && (
                                                                         <button onClick={() => {
                                                                             setModalState({ type: 'validate', isBundle: false, isRollInspect: false, batchId: batch.batch_id, batchCode: batch.batch_code, size: sizeGroup.size, partName: 'ALL PARTS', pieces: allSizePieces, titleOverride: `Bulk Inspect: Size ${sizeGroup.size}`, allowMultiple });
@@ -2801,6 +2852,7 @@ const UniversalWorkstationDashboard = () => {
                                                                 <h3 className="font-black text-black flex items-center text-base uppercase tracking-widest bg-slate-100 px-3 py-1.5 rounded-lg w-max border border-slate-300">
                                                                     <Layers className="w-4 h-4 mr-2 text-indigo-600" /> ROLL #{roll.roll_id}
                                                                 </h3>
+                                                                <RejectedEarlierBadge status={checkEntityStatus({ pieces: roll.parts_details.flatMap(pt => pt.size_details.flatMap(sz => sz.pieces)) })} />
                                                                 <div className="flex items-center gap-2">
                                                                     {allowRoll && (
                                                                         <button onClick={() => {

@@ -41,4 +41,7 @@ export const lineLoaderApi = {
   getCompletedBatches: () => api.get('/line-loader/completed-batches'),
   changeLine: (batchId, cycleFlowId, newLineId) =>
     api.post(`/line-loader/batch/${batchId}/stage/${cycleFlowId}/change-line`, { newLineId }),
+  // Per-roll pending / needs-rework / rejected breakdown for one stage
+  getStageRollQc: (batchId, cycleFlowId) =>
+    api.get(`/line-loader/batch/${batchId}/stage/${cycleFlowId}/roll-qc`),
 };

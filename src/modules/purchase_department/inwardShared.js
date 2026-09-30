@@ -108,32 +108,37 @@ export const mapRolls = (rolls) => (rolls || [])
     }));
 
 // Distribute physical fabric rolls across ordered targets (requirements or PO
-// items) in FCFS order, capped by each target's pending qty. A roll that
-// straddles a cap boundary is split into fragments that keep the same
-// bale_no/uom, so every received metre stays tied to a real bale instead of
-// being collapsed into one anonymous total. The final target absorbs any
-// over-receipt (its cap is treated as unbounded) so no metres are ever dropped
-// — approval downstream catches the excess. Targets are [{ id, cap }]; returns
-// { [id]: [{ _k, bale_no, meter, uom }] } with only the non-empty buckets.
+// items) in FCFS order by each target's pending qty. A roll is NEVER split:
+// each bale the store manager entered becomes exactly one fabric_rolls row.
+// A target keeps taking whole rolls while it still has pending qty, so the
+// roll that crosses its cap goes to it whole (over-filling it) rather than
+// being cut at the boundary. The final target absorbs whatever is left so no
+// metres are ever dropped — approval downstream catches the excess. Targets
+// are [{ id, cap }]; returns { [id]: [{ _k, bale_no, meter, uom }] } with only
+// the non-empty buckets.
 export const distributeRolls = (rolls, targets) => {
     const out = {};
-    const queue = mapRolls(rolls).map(r => ({ ...r })); // { bale_no:string|null, meter:number, uom }
+    const queue = mapRolls(rolls);
     let qi = 0;
     (targets || []).forEach((t, idx) => {
         const isLast = idx === targets.length - 1;
         let cap = isLast ? Infinity : Math.max(0, t.cap || 0);
         const bucket = [];
         while (qi < queue.length && cap > 1e-6) {
-            const roll = queue[qi];
-            const take = Math.min(roll.meter, cap);
-            bucket.push({ _k: rk(), bale_no: roll.bale_no ?? '', meter: String(take), uom: roll.uom || 'meter' });
-            roll.meter -= take;
-            cap -= take;
-            if (roll.meter <= 1e-6) qi += 1;
+            const roll = queue[qi++];
+            bucket.push({ _k: rk(), bale_no: roll.bale_no ?? '', meter: String(roll.meter), uom: roll.uom || 'meter' });
+            cap -= roll.meter;
         }
         if (bucket.length > 0) out[t.id] = bucket;
     });
     return out;
+};
+
+// Metres each target would receive from distributeRolls — for previews that
+// must show the same whole-roll allocation the submission will use.
+export const distributeRollMeters = (rolls, targets) => {
+    const dist = distributeRolls(rolls, targets);
+    return Object.fromEntries(Object.entries(dist).map(([id, b]) => [id, sumRolls(b)]));
 };
 
 // ── Box helpers (trim) ───────────────────────────────────────────────────────

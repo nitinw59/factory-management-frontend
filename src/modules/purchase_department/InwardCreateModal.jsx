@@ -15,7 +15,7 @@ import {
     reqTotal, reqUnit, reqLabel,
     newRoll, sumRolls, rk,
     sumTrimBoxes,
-    distributeRolls,
+    distributeRolls, distributeRollMeters,
     pendingByReqMap, pendingByPoItemMap,
     buildItemsFromState, labelFromGroup,
 } from './inwardShared';
@@ -672,8 +672,8 @@ export default function InwardCreateModal({
             const groupPrice = unitPriceByGroup[group.id];
             if (group.item_type === 'fabric') {
                 // Spread the actual rolls (with their bale numbers) across the
-                // group's requirements — splitting a bale only when it straddles
-                // a pending-qty boundary — so roll-level detail reaches the BE.
+                // group's requirements as WHOLE rolls — a bale is never split
+                // on inward — so roll-level detail reaches the BE.
                 const rolls = fabricRollsByGroup[group.id] || [];
                 const dist = distributeRolls(rolls, reqs.map(r => ({ id: r.id, cap: pendingByReq[r.id] || 0 })));
                 reqs.forEach(r => {
@@ -932,13 +932,9 @@ export default function InwardCreateModal({
                                 const rolls = fabricRollsByGroup[group.id] || [];
                                 const sum = sumRolls(rolls);
                                 const over = sum > totalPending + 0.001;
-                                let distRem = sum;
-                                const distribution = activeReqs.map(r => {
-                                    const cap = pendingByReq[r.id] || 0;
-                                    const allocated = Math.min(distRem, cap);
-                                    distRem = Math.max(0, distRem - allocated);
-                                    return { r, allocated };
-                                });
+                                // Whole-roll allocation — same as handleReview submits (rolls are never split).
+                                const allocByReq = distributeRollMeters(rolls, activeReqs.map(r => ({ id: r.id, cap: pendingByReq[r.id] || 0 })));
+                                const distribution = activeReqs.map(r => ({ r, allocated: allocByReq[r.id] || 0 }));
                                 return (
                                     <div key={group.id} className="border border-slate-200 rounded-xl overflow-hidden">
                                         <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
@@ -1160,13 +1156,9 @@ export default function InwardCreateModal({
                                     const rolls = freeFormFabricRollsByVar[key] || [];
                                     const sum = sumRolls(rolls);
                                     const over = sum > totalPending + 0.001;
-                                    let distRem = sum;
-                                    const distribution = activeItems.map(g => {
-                                        const cap = pendingByPoItem[g.id] || 0;
-                                        const allocated = Math.min(distRem, cap);
-                                        distRem = Math.max(0, distRem - allocated);
-                                        return { g, allocated };
-                                    });
+                                    // Whole-roll allocation — same as handleReview submits (rolls are never split).
+                                    const allocByItem = distributeRollMeters(rolls, activeItems.map(g => ({ id: g.id, cap: pendingByPoItem[g.id] || 0 })));
+                                    const distribution = activeItems.map(g => ({ g, allocated: allocByItem[g.id] || 0 }));
                                     return (
                                         <div key={`varfab-${key}`} className="border border-slate-200 rounded-xl overflow-hidden">
                                             <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
