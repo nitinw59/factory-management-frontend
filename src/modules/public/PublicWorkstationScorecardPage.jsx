@@ -109,18 +109,18 @@ const LABEL_RATIO = 0.07;
 const STAT_TEXT_BOOST = 2;
 
 // Shared column template — every row is its own CSS Grid using these exact
-// percentages, so Approved/Repaired/Rework/Rejected/DHU/Complete-Sets/Today
-// line up in identical X positions from row to row. Name is locked to 26%;
-// the other seven columns split the remaining 74% (six equal + Today
-// slightly wider). NO grid gap: the percentages already sum to 100% of the
+// percentages, so Approved/Repaired/Rework/Rejected/DHU/Complete Sets line up
+// in identical X positions from row to row. Name takes 20.8%; the headline
+// Complete Sets column (which replaced the old per-person "Today" total)
+// takes 18%, and the five equal stat columns share the remaining 61.2%. NO grid gap: the percentages already sum to 100% of the
 // row's content box, so any gap would push the last column past the right
 // edge. Spacing comes from per-cell padding instead (CELL_PAD_X etc. below,
 // which the width-fit maths also subtracts).
-const ROW_GRID_COLS = '26% 10% 10% 10% 10% 10% 10% 14%';
-const COL_FRAC = { name: 0.26, stat: 0.10, today: 0.14 };
+const ROW_GRID_COLS = '20.8% 12.24% 12.24% 12.24% 12.24% 12.24% 18%';
+const COL_FRAC = { name: 0.208, stat: 0.1224, today: 0.18 };
 const ROW_PAD_X    = 32; // px-8 on the row, each side
 const CELL_PAD_X   = 8;  // px-2 on stat cells, each side
-const TODAY_PAD_X  = 12; // px-3 on the Today cell, each side
+const TODAY_PAD_X  = 12; // px-3 on the headline (Complete Sets) cell, each side
 const NAME_PAD_R   = 16; // pr-4 on the name cell
 const DIGIT_EM     = 0.62; // approx width of a font-black tabular digit, in em
 const LABEL_EM     = 0.85; // approx width of an uppercase tracking-widest label char, in em
@@ -139,7 +139,7 @@ const computeSizes = (rowH, containerW, nameCpl) => {
         value:      Math.min(rowH * VALUE_RATIO, fit(statW,  6, DIGIT_EM)),   // e.g. "12,345"
         today:      Math.min(rowH * NAME_RATIO,  fit(todayW, 6, DIGIT_EM)),
         label:      Math.min(rowH * LABEL_RATIO, fit(statW,  8, LABEL_EM)),   // "APPROVED"
-        todayLabel: Math.min(rowH * LABEL_RATIO, fit(todayW, 5, LABEL_EM)),
+        todayLabel: Math.min(rowH * LABEL_RATIO, fit(todayW, 13, LABEL_EM)),  // "COMPLETE SETS"
     };
 };
 
@@ -190,28 +190,6 @@ const DhuBlock = ({ dhu, sz, k = 1 }) => (
     </div>
 );
 
-// The TRUE today's-production figure (complete garment sets — every primary
-// part approved today, not just one part's own count). Flashes (wls-flash,
-// defined in the page's own <style> below) whenever it's actually produced
-// something today, so it reads as the headline number it is instead of
-// blending in with the other columns.
-const CompleteSetsBlock = ({ value, sz, k = 1 }) => (
-    <div className="min-w-0 overflow-hidden px-2 flex flex-col items-center justify-center">
-        <span
-            className="uppercase tracking-widest font-bold text-gray-500 mb-1 leading-tight whitespace-nowrap"
-            style={{ fontSize: sz.label * k * STAT_TEXT_BOOST }}
-        >
-            Complete Sets
-        </span>
-        <span
-            className={`leading-none font-black tabular-nums whitespace-nowrap ${value > 0 ? `${STAT_COLORS.completed} wls-flash` : 'text-gray-700'}`}
-            style={{ fontSize: sz.value * k * STAT_TEXT_BOOST }}
-        >
-            {(value ?? 0).toLocaleString()}
-        </span>
-    </div>
-);
-
 const WorkstationRow = ({ w, sz, ts }) => (
     <div
         className="flex-1 grid items-center px-8 border-b border-gray-800 last:border-b-0"
@@ -233,19 +211,22 @@ const WorkstationRow = ({ w, sz, ts }) => (
         <StatBlock label="Rework"   value={w.today_rework}   cls={STAT_COLORS.rework}   sz={sz} k={ts.rework} />
         <StatBlock label="Rejected" value={w.today_rejected} cls={STAT_COLORS.rejected} sz={sz} k={ts.rejected} />
         <DhuBlock dhu={computeDhu(w)} sz={sz} k={ts.dhu} />
-        <CompleteSetsBlock value={w.complete_sets_today} sz={sz} k={ts.completed} />
+        {/* Headline: complete garment sets today (every part this stage handles,
+            approved/repaired) — the TRUE production figure, replacing the old
+            per-person piece total. Flashes (wls-flash, defined in the page's
+            <style> below) once the line has produced something today. */}
         <div className="min-w-0 overflow-hidden px-3 flex flex-col items-center justify-center border-l border-gray-800 h-full">
             <span
                 className="uppercase tracking-widest font-bold text-gray-500 mb-1 leading-tight whitespace-nowrap"
                 style={{ fontSize: sz.todayLabel * ts.today }}
             >
-                Today
+                Complete Sets
             </span>
             <span
-                className="leading-none font-black text-white tabular-nums whitespace-nowrap"
+                className={`leading-none font-black tabular-nums whitespace-nowrap ${w.complete_sets_today > 0 ? `${STAT_COLORS.completed} wls-flash` : 'text-gray-700'}`}
                 style={{ fontSize: sz.today * ts.today }}
             >
-                {(w.today_output ?? 0).toLocaleString()}
+                {(w.complete_sets_today ?? 0).toLocaleString()}
             </span>
         </div>
     </div>
@@ -290,35 +271,27 @@ const MobileDhu = ({ dhu }) => (
     </div>
 );
 
-// No <style>-defined wls-flash here (that block only renders on the desktop
-// layout) — Tailwind's built-in animate-pulse gives the same "flash" read on
-// a phone screen without needing the custom keyframe.
-const MobileCompleteSets = ({ value }) => (
-    <div className="flex flex-col items-center">
-        <span className="text-[9px] uppercase tracking-wider font-bold text-gray-500">Sets</span>
-        <span className={`text-sm font-black tabular-nums ${value > 0 ? `${STAT_COLORS.completed} animate-pulse` : 'text-gray-700'}`}>
-            {(value ?? 0).toLocaleString()}
-        </span>
-    </div>
-);
-
 const MobileWorkstationRow = ({ w }) => (
     <div className="px-4 py-3 border-b border-gray-800">
         <div className="flex items-center justify-between mb-2 gap-2">
             <p className="text-base font-black text-white truncate">
                 {w.user_name || <span className="text-gray-600">Unassigned</span>}
             </p>
-            <span className="text-2xl font-black text-white tabular-nums shrink-0">
-                {(w.today_output ?? 0).toLocaleString()}
+            {/* Headline = complete sets (Tailwind animate-pulse: the desktop
+                wls-flash keyframe isn't defined on the mobile layout). */}
+            <span className="flex flex-col items-end shrink-0">
+                <span className="text-[9px] uppercase tracking-wider font-bold text-gray-500">Complete Sets</span>
+                <span className={`text-2xl font-black tabular-nums ${w.complete_sets_today > 0 ? `${STAT_COLORS.completed} animate-pulse` : 'text-gray-700'}`}>
+                    {(w.complete_sets_today ?? 0).toLocaleString()}
+                </span>
             </span>
         </div>
-        <div className="grid grid-cols-6 gap-1">
+        <div className="grid grid-cols-5 gap-1">
             <MobileStat label="Appr" value={w.today_approved} cls={STAT_COLORS.approved} />
             <MobileStat label="Rep"  value={w.today_repaired} cls={STAT_COLORS.repaired} />
             <MobileStat label="Rwk"  value={w.today_rework}   cls={STAT_COLORS.rework} />
             <MobileStat label="Rej"  value={w.today_rejected} cls={STAT_COLORS.rejected} />
             <MobileDhu dhu={computeDhu(w)} />
-            <MobileCompleteSets value={w.complete_sets_today} />
         </div>
     </div>
 );
