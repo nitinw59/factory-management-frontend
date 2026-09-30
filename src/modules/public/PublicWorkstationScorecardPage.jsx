@@ -106,7 +106,12 @@ const LABEL_RATIO = 0.07;
 // always visibly doubles it, at the cost of relying on the column's
 // overflow-hidden to clip an unusually wide number instead of guaranteeing
 // it never happens.
-const STAT_TEXT_BOOST = 2;
+const STAT_TEXT_BOOST = 1.8; // was 2 — stat text reduced 10% on request
+
+// Name text on top of its auto-fit size (+10% on request). The name cell
+// clamps to two lines with overflow hidden, so a long name still can't spill
+// into the stat columns.
+const NAME_TEXT_BOOST = 1.1;
 
 // Shared column template — every row is its own CSS Grid using these exact
 // percentages, so Approved/Repaired/Rework/Rejected/DHU/Complete Sets line up
@@ -199,7 +204,7 @@ const WorkstationRow = ({ w, sz, ts }) => (
             <p
                 className="font-black text-white break-words"
                 style={{
-                    fontSize: sz.name * ts.name, lineHeight: 1.15,
+                    fontSize: sz.name * ts.name * NAME_TEXT_BOOST, lineHeight: 1.15,
                     display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden',
                 }}
             >

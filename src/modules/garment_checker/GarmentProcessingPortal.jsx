@@ -1325,6 +1325,19 @@ const AssemblyProcessingPortal = () => {
                                         </div>
                                     )}
 
+                                    {/* Warn-only checks (server switches ENFORCE_ROLL_ARRIVAL /
+                                        ENFORCE_STAGE_CLEARANCE are off): the garment can still be
+                                        processed, but the checker sees what hasn't been cleared. */}
+                                    {(garment.stage_warning || garment.roll_not_dispatched) && (
+                                        <div className="mx-10 mt-6 px-5 py-4 rounded-2xl border-2 border-amber-300 bg-amber-50 text-amber-900 space-y-1">
+                                            <p className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                                                <AlertCircle size={14} /> Check before approving
+                                            </p>
+                                            {garment.stage_warning && <p className="text-sm font-bold">{garment.stage_warning}</p>}
+                                            {garment.roll_not_dispatched && <p className="text-sm font-bold">{garment.roll_not_dispatched}</p>}
+                                        </div>
+                                    )}
+
                                     <div className="p-10">
                                         <div className="flex items-center justify-between mb-8">
                                             <h3 className="font-black text-slate-400 text-xs uppercase tracking-[0.2em] flex items-center">
@@ -1569,6 +1582,11 @@ const AssemblyProcessingPortal = () => {
                                     return Object.entries(byRoll).map(([rollId, pieces]) => {
                                         const sortedPieces = [...pieces].sort((a, b) => (a.piece_sequence ?? 0) - (b.piece_sequence ?? 0));
                                         const partRejectedPieces = sortedPieces.filter(p => +p.rejected_component_count > 0 && p.status !== 'APPROVED' && p.status !== 'QC_REJECTED');
+                                        // Warnings (never blocks): roll not dispatched to this stage in the
+                                        // line loader; parts not yet cleared at the previous stage.
+                                        const notDispatched = pieces.filter(p => p.roll_dispatched === false).length;
+                                        const unclearedOpen = sortedPieces.filter(p => p.uncleared_parts && p.status !== 'APPROVED' && p.status !== 'QC_REJECTED');
+                                        const unclearedStage = pieces.find(p => p.uncleared_stage)?.uncleared_stage || 'previous stage';
                                         return (
                                         <div key={rollId} className="bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-200">
                                             <div className="flex items-center gap-3 mb-5 flex-wrap">
@@ -1578,6 +1596,16 @@ const AssemblyProcessingPortal = () => {
                                                 {partRejectedPieces.length > 0 && (
                                                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-300">
                                                         {partRejectedPieces.length} with rejected parts
+                                                    </span>
+                                                )}
+                                                {notDispatched > 0 && (
+                                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                                                        ⚠ not dispatched to this stage in line loader
+                                                    </span>
+                                                )}
+                                                {unclearedOpen.length > 0 && (
+                                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                                                        ⚠ {unclearedOpen.length} not cleared at {unclearedStage}
                                                     </span>
                                                 )}
                                             </div>
@@ -1609,6 +1637,9 @@ const AssemblyProcessingPortal = () => {
                                                     const rejectedParts = (st !== 'APPROVED' && st !== 'QC_REJECTED' && +piece.rejected_component_count > 0)
                                                         ? [...new Set((piece.rejected_components || []).map(rc => rc.part_name))] : [];
                                                     if (rejectedParts.length > 0) { cls = "bg-rose-50 border-rose-400 border-dashed text-rose-700 hover:border-rose-600"; icon = <X size={12} />; }
+                                                    // Warning only: parts not cleared at the previous stage (still processable).
+                                                    const unclearedWarn = rejectedParts.length === 0 && st !== 'APPROVED' && st !== 'QC_REJECTED' && piece.uncleared_parts;
+                                                    if (unclearedWarn) cls += " border-amber-400 border-dashed";
                                                     if (isSelected) cls += " ring-2 ring-indigo-500 ring-offset-1";
 
                                                     const tooltipLines = [
@@ -1631,6 +1662,9 @@ const AssemblyProcessingPortal = () => {
                                                             {isLoadingThis ? <RefreshCw size={12} className="animate-spin" /> : icon}
                                                             {rejectedParts.length > 0 && (
                                                                 <span className="mt-1 text-[9px] font-black uppercase leading-tight text-rose-700 truncate max-w-full">{rejectedParts.join(', ')} ✗</span>
+                                                            )}
+                                                            {unclearedWarn && (
+                                                                <span className="mt-1 text-[9px] font-black uppercase leading-tight text-amber-700 truncate max-w-full">{piece.uncleared_parts} ⚠</span>
                                                             )}
                                                         </button>
                                                     );
