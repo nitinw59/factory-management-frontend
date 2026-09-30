@@ -409,6 +409,9 @@ const AssemblyProcessingPortal = () => {
     // Batch Mode State
     const [activeBatches, setActiveBatches] = useState([]);
     const [selectedBatch, setSelectedBatch] = useState(null);
+    // Batch view shows ONE roll at a time (roll tabs) so the page never grows
+    // taller than the screen — see the fixed-height layout below.
+    const [activeRollId, setActiveRollId] = useState(null);
     const [batchPieces, setBatchPieces] = useState([]);
     const [workstationInfo, setWorkstationInfo] = useState(null);
     const [recentScans, setRecentScans] = useState([]);
@@ -561,6 +564,7 @@ const AssemblyProcessingPortal = () => {
 
     // --- NEW: BATCH MODE FETCHING ---
     const handleBatchClick = async (batch) => {
+        setActiveRollId(null);
         setIsLoading(true);
         setSelectedBatch(batch);
         try {
@@ -859,7 +863,9 @@ const AssemblyProcessingPortal = () => {
     };
 
     return (
-        <div className="min-h-screen bg-[#F8FAFC] p-4 md:p-10 font-inter select-none">
+        // Fixed screen-height layout (factory tablets): the top bar stays put and
+        // each view fills the remaining height; only small inner areas scroll.
+        <div className="h-screen overflow-hidden bg-[#F8FAFC] p-3 md:p-4 font-inter select-none flex flex-col">
             {pinDialog}
             {/* Global Loader for Batch Selection only */}
             {isLoading && viewMode === 'BATCH' && !selectedBatch && (
@@ -871,7 +877,7 @@ const AssemblyProcessingPortal = () => {
             {/* BATCH NOT LOADED ALERT — batch isn't IN_PROGRESS on this line */}
             {batchInactive && (
                 <div className="fixed inset-0 z-[400] bg-rose-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-                    <div className="bg-white border-[8px] border-rose-500 rounded-[3rem] p-10 md:p-14 max-w-xl w-full text-center shadow-2xl animate-in zoom-in-95">
+                    <div className="bg-white border-[8px] border-rose-500 rounded-[3rem] p-8 md:p-10 max-w-xl w-full max-h-[92vh] overflow-y-auto text-center shadow-2xl animate-in zoom-in-95">
                         <div className="w-24 h-24 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-6">
                             <AlertCircle className="w-14 h-14 text-rose-600" />
                         </div>
@@ -898,7 +904,7 @@ const AssemblyProcessingPortal = () => {
                 stages so it's clear where it actually is instead of a bare "not found" */}
             {notAtStage && (
                 <div className="fixed inset-0 z-[400] bg-amber-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-                    <div className="bg-white border-[8px] border-amber-400 rounded-[3rem] p-10 md:p-14 max-w-2xl w-full text-center shadow-2xl animate-in zoom-in-95">
+                    <div className="bg-white border-[8px] border-amber-400 rounded-[3rem] p-8 md:p-10 max-w-2xl w-full max-h-[92vh] overflow-y-auto text-center shadow-2xl animate-in zoom-in-95">
                         <div className="w-24 h-24 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-6">
                             <Clock className="w-14 h-14 text-amber-600" />
                         </div>
@@ -906,6 +912,26 @@ const AssemblyProcessingPortal = () => {
                             {notAtStage.error === 'Already Passed This Stage' ? 'ALREADY PASSED THIS STAGE' : 'NOT AT THIS STAGE YET'}
                         </h2>
                         <p className="text-slate-500 font-bold text-lg mb-6">{notAtStage.message}</p>
+                        {/* Waiting for the previous piece stage (e.g. BF SEWING): one chip per
+                            part — green = scanned/cleared there, red = still pending. */}
+                        {notAtStage.waiting_parts?.length > 0 && (
+                            <div className="mb-6">
+                                <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                                    Parts at {notAtStage.waiting_stage_name}
+                                </p>
+                                <div className="flex flex-wrap justify-center gap-2">
+                                    {notAtStage.waiting_parts.map((p, i) => (
+                                        <span key={i}
+                                            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border-2 font-black text-sm uppercase tracking-wide ${p.cleared
+                                                ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                                                : 'bg-rose-50 border-rose-300 text-rose-700'}`}>
+                                            {p.cleared ? <Check size={14} strokeWidth={3} /> : <X size={14} strokeWidth={3} />}
+                                            {p.part_name}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                         {notAtStage.batch_id != null && (
                             <div className="bg-amber-50 border-2 border-amber-100 rounded-3xl p-6 mb-6 text-left">
                                 <div className="flex justify-between items-center">
@@ -932,7 +958,7 @@ const AssemblyProcessingPortal = () => {
             {/* ALREADY APPROVED ALERT — piece was scanned again after passing QC */}
             {garment && garment.qc_status === STATUS.APPROVED && (
                 <div className="fixed inset-0 z-[400] bg-emerald-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-                    <div className="bg-white border-[8px] border-emerald-400 rounded-[3rem] p-10 md:p-14 max-w-xl w-full text-center shadow-2xl animate-in zoom-in-95">
+                    <div className="bg-white border-[8px] border-emerald-400 rounded-[3rem] p-8 md:p-10 max-w-xl w-full max-h-[92vh] overflow-y-auto text-center shadow-2xl animate-in zoom-in-95">
                         <div className="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
                             <ShieldCheck className="w-14 h-14 text-emerald-500" />
                         </div>
@@ -987,11 +1013,11 @@ const AssemblyProcessingPortal = () => {
                 </div>
             )}
 
-            <div className="max-w-6xl mx-auto">
-                
+            <div className="w-full max-w-7xl mx-auto flex-1 min-h-0 flex flex-col">
+
                 {/* API ERROR BANNER */}
                 {apiError && (
-                    <div className="mb-4 flex items-center justify-between gap-3 bg-rose-50 border border-rose-200 text-rose-700 px-4 py-2.5 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="mb-2 flex items-center justify-between gap-3 bg-rose-50 border border-rose-200 text-rose-700 px-4 py-2 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-200 shrink-0">
                         <div className="flex items-center gap-2 text-sm font-bold">
                             <ShieldAlert size={16} className="shrink-0" />
                             <span>{apiError}</span>
@@ -1002,77 +1028,64 @@ const AssemblyProcessingPortal = () => {
                     </div>
                 )}
 
-                {/* STATS BAR */}
-                <div className="mb-6 grid grid-cols-2 md:grid-cols-5 gap-3">
-                    <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-amber-500 mb-0.5">Pending Rework</p>
-                        <p className="text-2xl font-black text-amber-700">{stats?.pending_rework ?? '—'}</p>
-                    </div>
-                    <div className="bg-indigo-50 border border-indigo-200 rounded-2xl px-4 py-3">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-0.5">Today's Rework</p>
-                        <p className="text-2xl font-black text-indigo-700">{stats?.today_rework ?? '—'}</p>
-                    </div>
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500 mb-0.5">Today's Approved</p>
-                        <p className="text-2xl font-black text-emerald-700">{stats?.today_approved ?? '—'}</p>
-                    </div>
-                    <div className="bg-sky-50 border border-sky-200 rounded-2xl px-4 py-3">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-sky-500 mb-0.5 flex items-center gap-1">
-                            <Clock size={10} /> Checked This Hour
-                        </p>
-                        <p className="text-2xl font-black text-sky-700">{stats?.checked_this_hour ?? '—'}</p>
-                    </div>
-                    <button onClick={handleOpenModal}
-                        className="bg-white border border-slate-200 rounded-2xl px-4 py-3 hover:border-indigo-400 hover:bg-indigo-50 transition-all text-left flex items-center gap-3">
-                        <FileText size={20} className="text-indigo-500 shrink-0" />
-                        <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Work Log</p>
-                            <p className="text-sm font-black text-slate-700">Today's Work</p>
+                {/* TOP BAR — station, today's stats, view toggle, last action: one row */}
+                <header className="mb-3 shrink-0 flex flex-wrap items-center gap-2 md:gap-3 bg-white px-3 py-2 rounded-2xl shadow-sm border border-slate-200">
+                    <div className="flex items-center gap-2 mr-1">
+                        <div className="p-2 bg-indigo-600 rounded-xl text-white shadow">
+                            <HardDrive size={18} />
                         </div>
-                    </button>
-                </div>
-
-                {/* STATION HEADER WITH NEW TOGGLE */}
-                <header className="mb-10 flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-6 rounded-[2rem] shadow-sm border border-slate-200">
-                    <div className="flex items-center gap-4">
-                        <div className="p-3 bg-indigo-600 rounded-2xl text-white shadow-lg">
-                            <HardDrive size={28} />
-                        </div>
-                        <div>
-                            <h1 className="text-2xl font-black text-slate-900 tracking-tight">{workstationInfo?.line_name || 'Assembly Station'}</h1>
-                            <div className="flex items-center gap-2">
-                                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                                <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">Live Validations</p>
+                        <div className="leading-tight">
+                            <h1 className="text-base font-black text-slate-900 tracking-tight">{workstationInfo?.line_name || 'Assembly Station'}</h1>
+                            <div className="flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                                <p className="text-slate-500 font-bold uppercase text-[9px] tracking-widest">Live</p>
                             </div>
                         </div>
                     </div>
 
-                    {/* NEW: VIEW MODE TOGGLE */}
-                    <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner">
-                        <button 
-                            onClick={() => { setViewMode('SCANNER'); setSelectedBatch(null); }}
-                            className={`flex items-center px-6 py-3 rounded-xl font-black text-sm transition-all ${
-                                viewMode === 'SCANNER' ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-400 hover:text-slate-600'
-                            }`}
-                        >
-                            <Barcode size={18} className="mr-2" /> SCANNER
-                        </button>
-                        <button 
-                            onClick={() => setViewMode('BATCH')}
-                            className={`flex items-center px-6 py-3 rounded-xl font-black text-sm transition-all ${
-                                viewMode === 'BATCH' ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-400 hover:text-slate-600'
-                            }`}
-                        >
-                            <List size={18} className="mr-2" /> BATCH LIST
-                        </button>
-                    </div>
+                    {/* Stats — compact pills */}
+                    {[
+                        { label: 'Pending Rework', val: stats?.pending_rework, cls: 'bg-amber-50 border-amber-200 text-amber-700' },
+                        { label: "Today's Rework", val: stats?.today_rework, cls: 'bg-indigo-50 border-indigo-200 text-indigo-700' },
+                        { label: "Today's Approved", val: stats?.today_approved, cls: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
+                        { label: 'This Hour', val: stats?.checked_this_hour, cls: 'bg-sky-50 border-sky-200 text-sky-700' },
+                    ].map(st => (
+                        <div key={st.label} className={`flex items-center gap-2 border rounded-xl px-3 py-1.5 ${st.cls}`}>
+                            <span className="text-[9px] font-black uppercase tracking-widest opacity-70 leading-tight">{st.label}</span>
+                            <span className="text-lg font-black tabular-nums leading-none">{st.val ?? '—'}</span>
+                        </div>
+                    ))}
+                    <button onClick={handleOpenModal}
+                        className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-1.5 hover:border-indigo-400 hover:bg-indigo-50 transition-all">
+                        <FileText size={14} className="text-indigo-500 shrink-0" />
+                        <span className="text-xs font-black text-slate-700">Work Log</span>
+                    </button>
 
-                    <div className="flex gap-3">
+                    <div className="ml-auto flex items-center gap-2">
                         {lastAction && (
-                            <div className="bg-emerald-50 text-emerald-700 px-6 py-3 rounded-2xl border-2 border-emerald-100 flex items-center font-black text-sm animate-in fade-in slide-in-from-right-4">
-                                <CheckCircle2 className="w-5 h-5 mr-3" /> {lastAction.uid} {lastAction.status}
+                            <div className="bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-xl border border-emerald-200 flex items-center font-black text-xs animate-in fade-in slide-in-from-right-4">
+                                <CheckCircle2 className="w-4 h-4 mr-1.5" /> {lastAction.uid} {lastAction.status}
                             </div>
                         )}
+                        {/* VIEW MODE TOGGLE */}
+                        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
+                            <button
+                                onClick={() => { setViewMode('SCANNER'); setSelectedBatch(null); }}
+                                className={`flex items-center px-4 py-2 rounded-lg font-black text-xs transition-all ${
+                                    viewMode === 'SCANNER' ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-400 hover:text-slate-600'
+                                }`}
+                            >
+                                <Barcode size={15} className="mr-1.5" /> SCANNER
+                            </button>
+                            <button
+                                onClick={() => setViewMode('BATCH')}
+                                className={`flex items-center px-4 py-2 rounded-lg font-black text-xs transition-all ${
+                                    viewMode === 'BATCH' ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-400 hover:text-slate-600'
+                                }`}
+                            >
+                                <List size={15} className="mr-1.5" /> BATCH LIST
+                            </button>
+                        </div>
                     </div>
                 </header>
 
@@ -1080,13 +1093,13 @@ const AssemblyProcessingPortal = () => {
                     MODE A: EXISTING SCANNER INTERFACE 
                 ========================================= */}
                 {viewMode === 'SCANNER' && (
-                    <div className="animate-in fade-in zoom-in-95 duration-200">
+                    <div className="animate-in fade-in zoom-in-95 duration-200 flex-1 min-h-0 flex flex-col">
                         
                         {/* IDLE SCAN STATE WITH SCANNED TEXT VISUAL */}
                         {!garment && !mismatch && !dnaDefect && !batchInactive && !notAtStage && (
-                            <div className="text-center py-32 bg-white rounded-[3rem] border-4 border-dashed border-slate-200 shadow-inner">
-                                <div className="relative inline-block mb-8">
-                                    <QrCode size={140} className="text-slate-100" />
+                            <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-center py-6 px-4 bg-white rounded-[2rem] border-4 border-dashed border-slate-200 shadow-inner overflow-hidden">
+                                <div className="relative inline-block mb-4 shrink-0">
+                                    <QrCode size={96} className="text-slate-100" />
                                     {isLoading ? (
                                         <div className="absolute inset-0 flex items-center justify-center">
                                             <RefreshCw size={44} className="text-indigo-400 animate-spin" />
@@ -1106,22 +1119,22 @@ const AssemblyProcessingPortal = () => {
                                         </span>
                                     </div>
                                 ) : (
-                                    <h2 className="text-4xl font-black text-slate-300 tracking-tighter uppercase">Ready for Scan</h2>
+                                    <h2 className="text-3xl font-black text-slate-300 tracking-tighter uppercase">Ready for Scan</h2>
                                 )}
                                 
                                 <p className="text-slate-400 font-bold mt-4 uppercase text-xs tracking-[0.2em]">Hardware Wedge Active • QR Code • Retsol D 5015</p>
                                 
                                 {error && (
-                                    <div className="mt-12 max-w-md mx-auto p-5 bg-rose-50 border-2 border-rose-100 rounded-3xl text-rose-700 font-black flex items-center justify-center shadow-sm animate-in shake">
+                                    <div className="mt-5 max-w-md mx-auto p-4 bg-rose-50 border-2 border-rose-100 rounded-3xl text-rose-700 font-black flex items-center justify-center shadow-sm animate-in shake">
                                         <ShieldAlert className="mr-3 shrink-0" /> {error}
                                     </div>
                                 )}
 
                                 {/* Recent scans feed */}
                                 {!error && recentScans.length > 0 && (
-                                    <div className="mt-12 max-w-2xl mx-auto">
-                                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 mb-3">Recent Scans</p>
-                                        <div className="space-y-1.5">
+                                    <div className="mt-5 w-full max-w-2xl mx-auto min-h-0 flex flex-col">
+                                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 mb-2 shrink-0">Recent Scans</p>
+                                        <div className="space-y-1.5 min-h-0 overflow-y-auto pr-1">
                                             {recentScans.map((s, i) => (
                                                 <div key={s.id ?? i} className="flex items-center gap-3 bg-white border border-slate-100 rounded-2xl px-4 py-2.5 shadow-sm text-left">
                                                     <span className={`w-2 h-2 rounded-full shrink-0 ${
@@ -1148,19 +1161,19 @@ const AssemblyProcessingPortal = () => {
 
                         {/* DNA DEFECT BLOCK */}
                         {dnaDefect && (
-                            <div className="bg-white border-[8px] border-rose-400 rounded-[4rem] p-12 shadow-2xl animate-in zoom-in-95">
-                                <div className="flex flex-col items-center text-center mb-8">
-                                    <div className="w-24 h-24 bg-rose-100 rounded-full flex items-center justify-center mb-6">
-                                        <ShieldAlert className="w-14 h-14 text-rose-500" />
+                            <div className="flex-1 min-h-0 overflow-y-auto bg-white border-[6px] border-rose-400 rounded-[2.5rem] p-6 md:p-8 shadow-2xl animate-in zoom-in-95 flex flex-col justify-center">
+                                <div className="flex flex-col items-center text-center mb-5">
+                                    <div className="w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center mb-3">
+                                        <ShieldAlert className="w-10 h-10 text-rose-500" />
                                     </div>
-                                    <h2 className="text-5xl font-black text-slate-900 tracking-tight mb-3">DNA DEFECT</h2>
-                                    <p className="text-slate-500 text-xl font-bold max-w-xl">{dnaDefect.message}</p>
+                                    <h2 className="text-3xl font-black text-slate-900 tracking-tight mb-2">DNA DEFECT</h2>
+                                    <p className="text-slate-500 text-lg font-bold max-w-xl">{dnaDefect.message}</p>
                                     {dnaDefect.garment && (
                                         <p className="mt-2 font-mono font-black text-indigo-500 text-lg">{dnaDefect.garment.garment_uid}</p>
                                     )}
                                 </div>
                                 {dnaDefect.garment?.components?.length > 0 && (
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-xl mx-auto mb-10">
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-3xl w-full mx-auto mb-6">
                                         {dnaDefect.garment.components.map((comp, i) => {
                                             const isApproving = approvingPieceId === comp.cut_piece_log_id;
                                             const clickable = comp.has_active_defect && !!comp.cut_piece_log_id;
@@ -1177,14 +1190,14 @@ const AssemblyProcessingPortal = () => {
                                                     key={i}
                                                     onClick={clickable ? () => openComponentInfo(comp) : undefined}
                                                     title={clickable ? 'Click for piece details' : undefined}
-                                                    className={`px-4 py-3 rounded-2xl border-2 flex items-center gap-3 ${isBad ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-100'} ${clickable ? 'cursor-pointer hover:border-rose-400 hover:bg-rose-100 transition-colors' : ''}`}
+                                                    className={`px-4 py-3 rounded-2xl border-2 flex items-center gap-3 ${isBad ? 'bg-rose-50 border-rose-300' : 'bg-emerald-50 border-emerald-200'} ${clickable ? 'cursor-pointer hover:border-rose-400 hover:bg-rose-100 transition-colors' : ''}`}
                                                 >
-                                                    <div className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${isBad ? 'bg-rose-500 text-white' : 'bg-white text-slate-700 border border-slate-200'}`}>
+                                                    <div className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${isBad ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'}`}>
                                                         {isApproving
                                                             ? <Loader2 size={14} className="animate-spin" />
                                                             : isBad ? <X size={14} strokeWidth={3}/> : <Check size={14} strokeWidth={3}/>}
                                                     </div>
-                                                    <span className={`font-bold text-sm ${isBad ? 'text-rose-700' : 'text-slate-600'}`}>
+                                                    <span className={`font-bold text-sm ${isBad ? 'text-rose-700' : 'text-emerald-700'}`}>
                                                         {comp.part_name}
                                                         {stageNote && <span className={`block text-[10px] font-black uppercase tracking-wider ${stageBlocked ? 'text-rose-500' : 'text-slate-400'}`}>{stageNote}</span>}
                                                     </span>
@@ -1197,7 +1210,7 @@ const AssemblyProcessingPortal = () => {
                                     </div>
                                 )}
                                 <div className="flex justify-center">
-                                    <button onClick={() => setDnaDefect(null)} className="px-14 py-6 bg-slate-900 text-white font-black rounded-3xl hover:bg-black active:scale-95 transition-all shadow-xl">
+                                    <button onClick={() => setDnaDefect(null)} className="px-12 py-4 bg-slate-900 text-white font-black rounded-2xl hover:bg-black active:scale-95 transition-all shadow-xl">
                                         RETURN TO SCANNER
                                     </button>
                                 </div>
@@ -1267,60 +1280,57 @@ const AssemblyProcessingPortal = () => {
 
                         {/* DEPARTMENT MISMATCH WARNING */}
                         {mismatch && (
-                            <div className="bg-white border-[8px] border-amber-400 rounded-[4rem] p-16 text-center shadow-2xl animate-in zoom-in-95">
-                                <div className="w-24 h-24 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-8">
-                                    <AlertCircle className="w-14 h-14 text-amber-500" />
+                            <div className="flex-1 min-h-0 overflow-y-auto bg-white border-[6px] border-amber-400 rounded-[2.5rem] p-8 text-center shadow-2xl animate-in zoom-in-95 flex flex-col items-center justify-center">
+                                <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <AlertCircle className="w-10 h-10 text-amber-500" />
                                 </div>
-                                <h2 className="text-5xl font-black text-slate-900 tracking-tight mb-4">WRONG LINE</h2>
-                                <p className="text-slate-500 text-xl font-bold mb-12 max-w-xl mx-auto">{mismatch.message}</p>
-                                <button onClick={() => setMismatch(null)} className="px-14 py-6 bg-slate-900 text-white font-black rounded-3xl hover:bg-black active:scale-95 transition-all shadow-xl">
+                                <h2 className="text-3xl font-black text-slate-900 tracking-tight mb-3">WRONG LINE</h2>
+                                <p className="text-slate-500 text-lg font-bold mb-8 max-w-xl mx-auto">{mismatch.message}</p>
+                                <button onClick={() => setMismatch(null)} className="px-12 py-4 bg-slate-900 text-white font-black rounded-2xl hover:bg-black active:scale-95 transition-all shadow-xl">
                                     RETURN TO SCANNER
                                 </button>
                             </div>
                         )}
 
-                        {/* GARMENT VERIFICATION VIEW */}
+                        {/* GARMENT VERIFICATION VIEW — fits one screen: info + parts on the
+                            left, a tall APPROVE with REWORK / REJECT side by side on the right. */}
                         {garment && garment.qc_status !== STATUS.APPROVED && (
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in slide-in-from-bottom-10">
-                                {/* LEFT: DNA COMPONENT MAP */}
-                                <div className="lg:col-span-2 bg-white rounded-[3.5rem] shadow-xl border border-slate-200 overflow-hidden">
-                                    <div className="bg-slate-900 p-10 text-white">
-                                        <div className="flex justify-between items-start">
-                                            <div>
-                                                <div className="flex items-center gap-3 mb-2">
-                                                    <span className="bg-indigo-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest">DNA OK</span>
-                                                    <h2 className="text-4xl font-black tracking-tighter">{garment.garment_uid}</h2>
+                            <div className="flex-1 min-h-0 grid grid-cols-1 grid-rows-[minmax(0,1fr)_auto] md:grid-cols-3 md:grid-rows-[minmax(0,1fr)] gap-3 animate-in slide-in-from-bottom-10">
+                                {/* LEFT: garment info + DNA component map */}
+                                <div className="md:col-span-2 min-h-0 bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden flex flex-col">
+                                    <div className="bg-slate-900 px-5 py-4 text-white shrink-0">
+                                        <div className="flex justify-between items-start gap-3">
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                    <span className="bg-indigo-600 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest">DNA OK</span>
+                                                    <h2 className="text-2xl font-black tracking-tighter truncate">{garment.garment_uid}</h2>
                                                 </div>
-                                                <p className="text-slate-400 font-bold text-lg">{garment.product_name}</p>
+                                                <p className="text-slate-400 font-bold text-sm truncate">{garment.product_name}</p>
                                                 {(garment.fabric_color_number || garment.fabric_color_name || garment.fabric_roll_id != null || garment.fabric_color_id != null) && (
-                                                    <div className="flex items-center gap-2 mt-3 flex-wrap text-[11px] font-mono">
+                                                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap text-[10px] font-mono">
                                                         {(garment.fabric_color_number || garment.fabric_color_name) && (
-                                                            <span className="bg-white/10 px-2.5 py-1 rounded-lg text-white font-bold">
+                                                            <span className="bg-white/10 px-2 py-0.5 rounded-md text-white font-bold">
                                                                 {[garment.fabric_color_number, garment.fabric_color_name].filter(Boolean).join(' · ')}
                                                             </span>
                                                         )}
                                                         {garment.fabric_roll_id != null && (
-                                                            <span className="bg-white/5 px-2.5 py-1 rounded-lg text-slate-400">
-                                                                Roll #{garment.fabric_roll_id}
-                                                            </span>
+                                                            <span className="bg-white/5 px-2 py-0.5 rounded-md text-slate-400">Roll #{garment.fabric_roll_id}</span>
                                                         )}
                                                         {garment.fabric_color_id != null && (
-                                                            <span className="bg-white/5 px-2.5 py-1 rounded-lg text-slate-400">
-                                                                FC {garment.fabric_color_id}
-                                                            </span>
+                                                            <span className="bg-white/5 px-2 py-0.5 rounded-md text-slate-400">FC {garment.fabric_color_id}</span>
                                                         )}
                                                     </div>
                                                 )}
                                             </div>
-                                            <div className="bg-white/10 px-6 py-3 rounded-2xl text-right">
-                                                <span className="block text-[10px] font-bold opacity-50 mb-1">SIZE</span>
-                                                <span className="text-3xl font-black">{garment.size}</span>
+                                            <div className="bg-white/10 px-4 py-2 rounded-xl text-right shrink-0">
+                                                <span className="block text-[9px] font-bold opacity-50">SIZE</span>
+                                                <span className="text-2xl font-black leading-none">{garment.size}</span>
                                             </div>
                                         </div>
                                     </div>
 
                                     {garment.stage_progress && (
-                                        <div className="px-10 py-6 bg-slate-50 border-b border-slate-100">
+                                        <div className="px-5 py-2.5 bg-slate-50 border-b border-slate-100 shrink-0">
                                             <StageProgressStepper stages={garment.stage_progress} />
                                         </div>
                                     )}
@@ -1328,81 +1338,76 @@ const AssemblyProcessingPortal = () => {
                                     {/* A garment already worked here whose parts still aren't cleared
                                         at the previous stage — a note for the checker, not a block. */}
                                     {garment.stage_warning && (
-                                        <div className="mx-10 mt-6 px-5 py-4 rounded-2xl border-2 border-amber-300 bg-amber-50 text-amber-900 space-y-1">
-                                            <p className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
-                                                <AlertCircle size={14} /> Check before approving
+                                        <div className="mx-4 mt-3 px-4 py-2.5 rounded-xl border-2 border-amber-300 bg-amber-50 text-amber-900 shrink-0">
+                                            <p className="text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5">
+                                                <AlertCircle size={12} /> Check before approving
                                             </p>
-                                            <p className="text-sm font-bold">{garment.stage_warning}</p>
+                                            <p className="text-xs font-bold">{garment.stage_warning}</p>
                                         </div>
                                     )}
 
-                                    <div className="p-10">
-                                        <div className="flex items-center justify-between mb-8">
-                                            <h3 className="font-black text-slate-400 text-xs uppercase tracking-[0.2em] flex items-center">
-                                                <Package className="w-4 h-4 mr-3" /> Component Integrity Map
+                                    <div className="p-4 flex-1 min-h-0 overflow-y-auto">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h3 className="font-black text-slate-400 text-[10px] uppercase tracking-[0.2em] flex items-center">
+                                                <Package className="w-3.5 h-3.5 mr-2" /> Component Integrity Map
                                             </h3>
                                             <span className="text-[10px] font-mono font-bold text-slate-300">ID: {garment.garment_id}</span>
                                         </div>
-                                        
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                                             {garment.components.map((comp, i) => (
-                                                <div key={i} className={`p-6 rounded-[2rem] border-2 flex items-center justify-between transition-all ${comp.has_active_defect ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-100'}`}>
-                                                    <div className="flex items-center gap-4">
-                                                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black shadow-sm ${comp.has_active_defect ? 'bg-rose-500 text-white' : 'bg-white text-slate-900'}`}>
+                                                <div key={i} className={`px-3 py-2.5 rounded-xl border-2 flex items-center justify-between gap-2 ${comp.has_active_defect ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${comp.has_active_defect ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'}`}>
                                                             {i + 1}
                                                         </div>
-                                                        <span className="font-black text-slate-700 text-sm">{comp.part_name}</span>
+                                                        <span className="font-black text-slate-700 text-sm truncate">{comp.part_name}</span>
                                                     </div>
-                                                    {comp.has_active_defect ? <X className="text-rose-500" strokeWidth={4} /> : <Check className="text-emerald-500" strokeWidth={4} />}
+                                                    {comp.has_active_defect ? <X size={16} className="text-rose-500 shrink-0" strokeWidth={4} /> : <Check size={16} className="text-emerald-500 shrink-0" strokeWidth={4} />}
                                                 </div>
                                             ))}
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* RIGHT: COMMAND CONSOLE */}
-                                <div className="flex flex-col gap-6">
+                                {/* RIGHT: COMMAND CONSOLE — button heights follow the screen height (vh),
+                                    so APPROVE never pushes REWORK / REJECT off screen. */}
+                                <div className="min-h-0 overflow-y-auto flex flex-col gap-2 md:gap-3">
                                     {garment.qc_status === 'NEEDS_REWORK' ? (
                                         /* ── REPAIR VALIDATION MODE ── */
                                         <>
-                                            {/* Rework alert banner */}
-                                            <div className="bg-amber-50 border-2 border-amber-300 rounded-[2rem] p-6 text-center">
-                                                <div className="flex items-center justify-center gap-2 mb-3">
-                                                    <Hammer size={22} className="text-amber-600" />
-                                                    <span className="text-amber-700 font-black text-sm uppercase tracking-widest">Previously Flagged for Rework</span>
+                                            <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-3 text-center shrink-0">
+                                                <div className="flex items-center justify-center gap-2 mb-1.5">
+                                                    <Hammer size={16} className="text-amber-600" />
+                                                    <span className="text-amber-700 font-black text-xs uppercase tracking-widest">Previously Flagged for Rework</span>
                                                 </div>
                                                 {reworkHistory && reworkHistory.length > 0 && (
-                                                    <div className="flex flex-wrap justify-center gap-2">
+                                                    <div className="flex flex-wrap justify-center gap-1.5">
                                                         {reworkHistory.slice(0, 6).map((h, i) => (
-                                                            <span key={i} className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 text-[10px] font-black px-2.5 py-1 rounded-full border border-amber-200">
+                                                            <span key={i} className="inline-flex items-center bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-200">
                                                                 {h.defect_code || h.defect_description || 'Defect'}
                                                             </span>
                                                         ))}
                                                     </div>
                                                 )}
                                             </div>
-
-                                            {/* Repair action buttons */}
                                             <button
                                                 onClick={() => handleAction(STATUS.REPAIRED)}
                                                 disabled={isProcessingAction}
-                                                className="flex-1 bg-teal-600 text-white rounded-[3rem] shadow-2xl shadow-teal-200/50 flex flex-col items-center justify-center p-10 hover:bg-teal-700 transition-all active:scale-95 disabled:grayscale disabled:opacity-50 disabled:cursor-not-allowed group"
+                                                className="shrink-0 h-[clamp(88px,26vh,260px)] bg-teal-600 text-white rounded-[2rem] shadow-xl flex flex-col items-center justify-center p-3 hover:bg-teal-700 transition-all active:scale-95 disabled:grayscale disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
-                                                <ShieldCheck size={70} className="mb-4 group-hover:scale-110 transition-transform" />
-                                                <span className="text-3xl font-black">REPAIRED</span>
-                                                <span className="text-[11px] font-bold opacity-60 mt-2 uppercase tracking-widest">Defect Fixed ✓</span>
+                                                <ShieldCheck className="w-[clamp(24px,5vh,44px)] h-[clamp(24px,5vh,44px)] mb-1" />
+                                                <span className="text-[length:clamp(1.1rem,3.2vh,1.5rem)] font-black">REPAIRED</span>
+                                                <span className="text-[10px] font-bold opacity-60 mt-1 uppercase tracking-widest">Defect Fixed ✓</span>
                                             </button>
-
                                             <button
                                                 onClick={() => setShowDefectModal('REJECT')}
                                                 disabled={isProcessingAction}
-                                                className="bg-rose-600 text-white rounded-[2.5rem] shadow-xl shadow-rose-200/50 flex items-center justify-center p-8 hover:bg-rose-700 transition-all active:scale-95 group"
+                                                className="shrink-0 h-[clamp(56px,11vh,110px)] bg-rose-600 text-white rounded-2xl shadow-lg flex items-center justify-center hover:bg-rose-700 transition-all active:scale-95"
                                             >
-                                                <X size={32} className="mr-4 group-hover:scale-90 transition-transform" />
-                                                <span className="text-xl font-black">STILL DEFECTIVE</span>
+                                                <X size={22} className="mr-2" />
+                                                <span className="text-lg font-black">STILL DEFECTIVE</span>
                                             </button>
-
-                                            <button onClick={() => setGarment(null)} className="py-4 text-slate-400 font-bold hover:text-slate-600 transition-colors uppercase text-xs tracking-widest">
+                                            <button onClick={() => setGarment(null)} className="shrink-0 py-2 text-slate-400 font-bold hover:text-slate-600 transition-colors uppercase text-xs tracking-widest">
                                                 Cancel Scan
                                             </button>
                                         </>
@@ -1410,48 +1415,45 @@ const AssemblyProcessingPortal = () => {
                                         /* ── NORMAL QC MODE ── */
                                         <>
                                             {garment.qc_status === 'QC_REJECTED' && (
-                                                <div className="bg-rose-50 border-2 border-rose-300 rounded-[2rem] p-5 text-center">
-                                                    <div className="flex items-center justify-center gap-2 mb-1">
-                                                        <ShieldAlert size={20} className="text-rose-600" />
-                                                        <span className="text-rose-700 font-black text-sm uppercase tracking-widest">Rejected garment</span>
+                                                <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-3 text-center shrink-0">
+                                                    <div className="flex items-center justify-center gap-1.5 mb-0.5">
+                                                        <ShieldAlert size={16} className="text-rose-600" />
+                                                        <span className="text-rose-700 font-black text-xs uppercase tracking-widest">Rejected garment</span>
                                                     </div>
-                                                    <p className="text-xs font-bold text-rose-600">This garment was rejected. Changing it needs a line supervisor's password — the override is recorded under their name.</p>
+                                                    <p className="text-[11px] font-bold text-rose-600">Changing it needs a line supervisor's password — recorded under their name.</p>
                                                 </div>
                                             )}
                                             <button
                                                 onClick={() => handleAction(STATUS.APPROVED)}
                                                 disabled={isProcessingAction || garment.components.some(c => c.has_active_defect)}
-                                                className="flex-1 bg-emerald-600 text-white rounded-[3rem] shadow-2xl shadow-emerald-200/50 flex flex-col items-center justify-center p-10 hover:bg-emerald-700 transition-all active:scale-95 disabled:grayscale disabled:opacity-50 disabled:cursor-not-allowed group"
+                                                className="shrink-0 h-[clamp(96px,30vh,300px)] bg-emerald-600 text-white rounded-[2rem] shadow-xl flex flex-col items-center justify-center p-3 hover:bg-emerald-700 transition-all active:scale-95 disabled:grayscale disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
-                                                <ShieldCheck size={70} className="mb-4 group-hover:scale-110 transition-transform" />
+                                                <ShieldCheck className="w-[clamp(22px,4.5vh,44px)] h-[clamp(22px,4.5vh,44px)] mb-1" />
                                                 {garment.batch_id && (
-                                                    <span className="font-mono font-black text-8xl opacity-80 mb-1 tracking-wider">{garment.batch_id}</span>
+                                                    <span className="font-mono font-black text-[length:clamp(1.5rem,6vh,3rem)] opacity-80 leading-none mb-1 tracking-wider">{garment.batch_id}</span>
                                                 )}
-                                                <span className="text-3xl font-black">APPROVE</span>
-                                                <span className="text-[11px] font-bold opacity-60 mt-2 uppercase tracking-widest">Pass to Quality</span>
+                                                <span className="text-[length:clamp(1.1rem,3.2vh,1.5rem)] font-black">APPROVE</span>
+                                                <span className="text-[10px] font-bold opacity-60 mt-0.5 uppercase tracking-widest">Pass to Quality</span>
                                             </button>
-
-                                            <div className="grid grid-cols-1 gap-4">
+                                            <div className="grid grid-cols-2 gap-3 shrink-0">
                                                 <button
                                                     onClick={() => setShowDefectModal('REWORK')}
                                                     disabled={isProcessingAction}
-                                                    className="bg-amber-500 text-white rounded-[2.5rem] shadow-xl shadow-amber-200/50 flex items-center justify-center p-8 hover:bg-amber-600 transition-all active:scale-95 group"
+                                                    className="h-[clamp(56px,11vh,110px)] bg-amber-500 text-white rounded-2xl shadow-lg flex items-center justify-center hover:bg-amber-600 transition-all active:scale-95"
                                                 >
-                                                    <Hammer size={32} className="mr-4 group-hover:rotate-12 transition-transform" />
-                                                    <span className="text-xl font-black">REWORK</span>
+                                                    <Hammer size={22} className="mr-2" />
+                                                    <span className="text-lg font-black">REWORK</span>
                                                 </button>
-
                                                 <button
                                                     onClick={() => setShowDefectModal('REJECT')}
                                                     disabled={isProcessingAction}
-                                                    className="bg-rose-600 text-white rounded-[2.5rem] shadow-xl shadow-rose-200/50 flex items-center justify-center p-8 hover:bg-rose-700 transition-all active:scale-95 group"
+                                                    className="h-[clamp(56px,11vh,110px)] bg-rose-600 text-white rounded-2xl shadow-lg flex items-center justify-center hover:bg-rose-700 transition-all active:scale-95"
                                                 >
-                                                    <X size={32} className="mr-4 group-hover:scale-90 transition-transform" />
-                                                    <span className="text-xl font-black">REJECT</span>
+                                                    <X size={22} className="mr-2" />
+                                                    <span className="text-lg font-black">REJECT</span>
                                                 </button>
                                             </div>
-
-                                            <button onClick={() => setGarment(null)} className="py-4 text-slate-400 font-bold hover:text-slate-600 transition-colors uppercase text-xs tracking-widest">
+                                            <button onClick={() => setGarment(null)} className="shrink-0 py-2 text-slate-400 font-bold hover:text-slate-600 transition-colors uppercase text-xs tracking-widest">
                                                 Cancel Scan
                                             </button>
                                         </>
@@ -1466,14 +1468,14 @@ const AssemblyProcessingPortal = () => {
                     MODE B: BATCH & PIECE SELECTION
                 ========================================= */}
                 {viewMode === 'BATCH' && (
-                    <div className="animate-in fade-in duration-200 space-y-6">
+                    <div className="animate-in fade-in duration-200 flex-1 min-h-0 flex flex-col">
 
                         {!selectedBatch ? (
-                            <div className="w-full bg-white rounded-[3rem] p-8 md:p-12 shadow-sm border border-slate-200">
-                                <h2 className="text-xl font-black text-slate-400 mb-8 uppercase tracking-widest flex items-center">
-                                    <List className="mr-3" size={24}/> Select Active Batch
+                            <div className="flex-1 min-h-0 flex flex-col bg-white rounded-[2rem] p-4 md:p-5 shadow-sm border border-slate-200">
+                                <h2 className="shrink-0 text-sm font-black text-slate-400 mb-3 uppercase tracking-widest flex items-center">
+                                    <List className="mr-2" size={18}/> Select Active Batch
                                 </h2>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                <div className="flex-1 min-h-0 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 content-start pr-1">
                                     {activeBatches.map(batch => {
                                         const approved = batch.approved_units ?? 0;
                                         const pending  = batch.pending_units ?? 0;
@@ -1485,41 +1487,32 @@ const AssemblyProcessingPortal = () => {
                                             <button
                                                 key={batch.batch_id}
                                                 onClick={() => handleBatchClick(batch)}
-                                                className="bg-slate-50 p-8 rounded-[2rem] text-left border-2 border-slate-100 hover:border-indigo-500 hover:shadow-lg transition-all group"
+                                                className="bg-slate-50 p-4 rounded-2xl text-left border-2 border-slate-100 hover:border-indigo-500 hover:shadow-lg transition-all group"
                                             >
-                                                <div className="flex items-center justify-between mb-4">
+                                                <div className="flex items-center justify-between mb-2">
                                                     <div className="flex items-center gap-2">
-                                                        <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-600 font-black text-[10px] uppercase rounded-lg">
-                                                            {batch.batch_id}
-                                                        </span>
+                                                        <span className="inline-block px-2.5 py-0.5 bg-indigo-100 text-indigo-600 font-black text-[10px] uppercase rounded-md">{batch.batch_id}</span>
                                                         {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
                                                     </div>
                                                     {velocity != null && (
-                                                        <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-sky-100 text-sky-700">
-                                                            {velocity}/hr
-                                                        </span>
+                                                        <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-sky-100 text-sky-700">{velocity}/hr</span>
                                                     )}
                                                 </div>
-                                                <h3 className="text-2xl font-black text-slate-800 mb-5 group-hover:text-indigo-600 transition-colors">{batch.product_name}</h3>
-
-                                                {/* Summary chips */}
-                                                <div className="flex gap-2 flex-wrap mb-4">
-                                                    <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-700">{approved} Approved</span>
-                                                    <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-slate-200 text-slate-600">{pending} Pending</span>
-                                                    {rework > 0 && <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-amber-100 text-amber-700">{rework} Rework</span>}
-                                                    {rejected > 0 && <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-rose-100 text-rose-700">{rejected} Rejected</span>}
+                                                <h3 className="text-lg font-black text-slate-800 mb-2 truncate group-hover:text-indigo-600 transition-colors">{batch.product_name}</h3>
+                                                <div className="flex gap-1.5 flex-wrap mb-2">
+                                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700">{approved} Approved</span>
+                                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-slate-200 text-slate-600">{pending} Pending</span>
+                                                    {rework > 0 && <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-amber-100 text-amber-700">{rework} Rework</span>}
+                                                    {rejected > 0 && <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-rose-100 text-rose-700">{rejected} Rejected</span>}
                                                 </div>
-
-                                                <div className="space-y-1.5">
-                                                    <div className="flex justify-between text-[10px] font-black uppercase text-slate-500">
-                                                        <span>Completion</span>
-                                                        <span className="text-indigo-600">{approved} / {total}</span>
-                                                    </div>
-                                                    <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden flex">
-                                                        <div className="bg-emerald-500 h-full" style={{ width: `${total > 0 ? (approved/total)*100 : 0}%` }} />
-                                                        <div className="bg-amber-400 h-full" style={{ width: `${total > 0 ? (rework/total)*100 : 0}%` }} />
-                                                        <div className="bg-rose-400 h-full" style={{ width: `${total > 0 ? (rejected/total)*100 : 0}%` }} />
-                                                    </div>
+                                                <div className="flex justify-between text-[10px] font-black uppercase text-slate-500 mb-1">
+                                                    <span>Completion</span>
+                                                    <span className="text-indigo-600">{approved} / {total}</span>
+                                                </div>
+                                                <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden flex">
+                                                    <div className="bg-emerald-500 h-full" style={{ width: `${total > 0 ? (approved/total)*100 : 0}%` }} />
+                                                    <div className="bg-amber-400 h-full" style={{ width: `${total > 0 ? (rework/total)*100 : 0}%` }} />
+                                                    <div className="bg-rose-400 h-full" style={{ width: `${total > 0 ? (rejected/total)*100 : 0}%` }} />
                                                 </div>
                                             </button>
                                         );
@@ -1531,83 +1524,99 @@ const AssemblyProcessingPortal = () => {
                                     )}
                                 </div>
                             </div>
-                        ) : (
-                            <div className={`animate-in slide-in-from-right-8 space-y-6 ${garment ? 'pb-64' : ''}`}>
-                                {/* Batch header */}
-                                <div className="w-full bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-200">
-                                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                                        <div>
-                                            <button onClick={() => { setSelectedBatch(null); setGarment(null); setSelectedPiece(null); }}
-                                                className="flex items-center text-slate-400 hover:text-indigo-600 font-bold text-sm mb-3 transition-colors">
-                                                <ArrowLeft size={16} className="mr-2" /> Back to Batches
-                                            </button>
-                                            <h2 className="text-2xl font-black text-slate-900">{selectedBatch.product_name}</h2>
-                                            <div className="flex items-center gap-2 mt-0.5">
-                                                <p className="text-indigo-600 font-black text-sm uppercase tracking-widest">{selectedBatch.batch_id}</p>
-                                                {selectedBatch.priority && <PriorityChip priority={selectedBatch.priority} size="xs" />}
-                                            </div>
-                                        </div>
-                                        {/* Summary */}
-                                        {(() => {
-                                            // Garments not yet available here (parts not cleared at the
-                                            // previous stage) are counted separately, not as Pending.
-                                            const availablePieces = batchPieces.filter(p => p.available !== false);
-                                            const waitingCount = batchPieces.length - availablePieces.length;
-                                            const waitingStage = batchPieces.find(p => p.uncleared_stage)?.uncleared_stage || 'previous stage';
-                                            const approved = availablePieces.filter(p => p.status === 'APPROVED').length;
-                                            const rejected = availablePieces.filter(p => p.status === 'QC_REJECTED').length;
-                                            const rework = availablePieces.filter(p => p.status === 'NEEDS_REWORK').length;
-                                            const pending = availablePieces.filter(p => !p.status || p.status === 'PENDING').length;
-                                            // Garments whose PIECES were rejected at an earlier stage
-                                            // (open piece defect) — the garment itself is still pending.
-                                            const partRejected = batchPieces.filter(p => +p.rejected_component_count > 0 && p.status !== 'APPROVED' && p.status !== 'QC_REJECTED').length;
-                                            return (
-                                                <div className="flex gap-3 flex-wrap">
-                                                    {partRejected > 0 && <span className="text-xs font-black px-4 py-2 rounded-xl bg-rose-100 text-rose-800 border-2 border-rose-300">{partRejected} with rejected parts</span>}
-                                                    <span className="text-xs font-black px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">{approved} Approved</span>
-                                                    <span className="text-xs font-black px-4 py-2 rounded-xl bg-slate-100 text-slate-600 border border-slate-200">{pending} Pending</span>
-                                                    {rework > 0 && <span className="text-xs font-black px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-200">{rework} Rework</span>}
-                                                    {rejected > 0 && <span className="text-xs font-black px-4 py-2 rounded-xl bg-rose-50 text-rose-700 border border-rose-200">{rejected} Rejected</span>}
-                                                    {waitingCount > 0 && <span className="text-xs font-black px-4 py-2 rounded-xl bg-slate-50 text-slate-400 border border-dashed border-slate-300">{waitingCount} waiting for {waitingStage}</span>}
-                                                </div>
-                                            );
-                                        })()}
+                        ) : (() => {
+                            // ── Selected batch: header row + roll tabs + ONE roll's tiles ──
+                            // Garments not yet available here (parts not cleared at the
+                            // previous stage) are counted separately, not as Pending.
+                            const isOpen = (p) => p.status !== 'APPROVED' && p.status !== 'QC_REJECTED';
+                            const availablePieces = batchPieces.filter(p => p.available !== false);
+                            const waitingCount = batchPieces.length - availablePieces.length;
+                            const waitingStage = batchPieces.find(p => p.uncleared_stage)?.uncleared_stage || 'previous stage';
+                            const approved = availablePieces.filter(p => p.status === 'APPROVED').length;
+                            const rejected = availablePieces.filter(p => p.status === 'QC_REJECTED').length;
+                            const rework = availablePieces.filter(p => p.status === 'NEEDS_REWORK').length;
+                            const pending = availablePieces.filter(p => !p.status || p.status === 'PENDING').length;
+                            // Garments whose PIECES were rejected at an earlier stage (open
+                            // piece defect) — the garment itself is still pending.
+                            const partRejected = batchPieces.filter(p => +p.rejected_component_count > 0 && isOpen(p)).length;
+
+                            const byRoll = batchPieces.reduce((acc, p) => {
+                                const key = String(p.fabric_roll_id || 'Unknown');
+                                (acc[key] ||= []).push(p);
+                                return acc;
+                            }, {});
+                            const rolls = Object.entries(byRoll)
+                                .map(([rollId, rollPieces]) => {
+                                    const pieces = rollPieces.filter(p => p.available !== false);
+                                    return {
+                                        rollId, rollPieces, pieces,
+                                        waiting: rollPieces.length - pieces.length,
+                                        pending: pieces.filter(p => !p.status || p.status === 'PENDING').length,
+                                        approved: pieces.filter(p => p.status === 'APPROVED').length,
+                                        partRejected: pieces.filter(p => +p.rejected_component_count > 0 && isOpen(p)).length,
+                                    };
+                                })
+                                .sort((a, b) => (parseInt(a.rollId, 10) || 0) - (parseInt(b.rollId, 10) || 0));
+                            const active = rolls.find(r => r.rollId === String(activeRollId))
+                                || rolls.find(r => r.pending > 0) || rolls[0];
+
+                            const sortedPieces = active ? [...active.pieces].sort((a, b) => (a.piece_sequence ?? 0) - (b.piece_sequence ?? 0)) : [];
+                            const partRejectedPieces = sortedPieces.filter(p => +p.rejected_component_count > 0 && isOpen(p));
+                            // Visible garments that still have something open upstream (e.g.
+                            // already worked here before BF finished) — a note, not a block.
+                            const unclearedOpen = sortedPieces.filter(p => p.uncleared_parts && isOpen(p));
+                            const unclearedStage = active?.rollPieces.find(p => p.uncleared_stage)?.uncleared_stage || 'previous stage';
+                            const drawerOpen = !!(garment || isPieceLoading || dnaDefect);
+
+                            return (
+                            <div className="flex-1 min-h-0 flex flex-col gap-2 animate-in slide-in-from-right-8">
+                                {/* Batch header — one row */}
+                                <div className="shrink-0 bg-white rounded-2xl px-3 py-2 shadow-sm border border-slate-200 flex flex-wrap items-center gap-2">
+                                    <button onClick={() => { setSelectedBatch(null); setGarment(null); setSelectedPiece(null); setActiveRollId(null); }}
+                                        className="flex items-center text-slate-500 hover:text-indigo-600 font-bold text-xs px-2 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+                                        <ArrowLeft size={14} className="mr-1" /> Batches
+                                    </button>
+                                    <span className="font-black text-slate-900 truncate max-w-[40%]">{selectedBatch.product_name}</span>
+                                    <span className="text-indigo-600 font-black text-xs uppercase tracking-widest">{selectedBatch.batch_id}</span>
+                                    {selectedBatch.priority && <PriorityChip priority={selectedBatch.priority} size="xs" />}
+                                    <div className="ml-auto flex gap-1.5 flex-wrap">
+                                        {partRejected > 0 && <span className="text-[11px] font-black px-2.5 py-1 rounded-lg bg-rose-100 text-rose-800 border border-rose-300">{partRejected} with rejected parts</span>}
+                                        <span className="text-[11px] font-black px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">{approved} Approved</span>
+                                        <span className="text-[11px] font-black px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 border border-slate-200">{pending} Pending</span>
+                                        {rework > 0 && <span className="text-[11px] font-black px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">{rework} Rework</span>}
+                                        {rejected > 0 && <span className="text-[11px] font-black px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200">{rejected} Rejected</span>}
+                                        {waitingCount > 0 && <span className="text-[11px] font-black px-2.5 py-1 rounded-lg bg-slate-50 text-slate-400 border border-dashed border-slate-300">{waitingCount} waiting for {waitingStage}</span>}
                                     </div>
                                 </div>
 
-                                {/* Pieces grouped by roll */}
-                                {(() => {
-                                    const byRoll = batchPieces.reduce((acc, p) => {
-                                        const key = p.fabric_roll_id || 'Unknown';
-                                        if (!acc[key]) acc[key] = [];
-                                        acc[key].push(p);
-                                        return acc;
-                                    }, {});
-                                    return Object.entries(byRoll).map(([rollId, rollPieces]) => {
-                                        // Not yet available here (parts not cleared at the previous
-                                        // stage) — hidden from the grid, counted in the header.
-                                        const pieces = rollPieces.filter(p => p.available !== false);
-                                        const waitingHere = rollPieces.length - pieces.length;
-                                        const sortedPieces = [...pieces].sort((a, b) => (a.piece_sequence ?? 0) - (b.piece_sequence ?? 0));
-                                        const partRejectedPieces = sortedPieces.filter(p => +p.rejected_component_count > 0 && p.status !== 'APPROVED' && p.status !== 'QC_REJECTED');
-                                        // Visible garments that still have something open upstream (e.g.
-                                        // already worked here before BF finished) — a note, not a block.
-                                        const unclearedOpen = sortedPieces.filter(p => p.uncleared_parts && p.status !== 'APPROVED' && p.status !== 'QC_REJECTED');
-                                        const unclearedStage = rollPieces.find(p => p.uncleared_stage)?.uncleared_stage || 'previous stage';
+                                {/* Roll tabs — one roll shown at a time */}
+                                <div className="shrink-0 flex gap-2 overflow-x-auto pb-1">
+                                    {rolls.map(r => {
+                                        const on = active && r.rollId === active.rollId;
                                         return (
-                                        <div key={rollId} className="bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-200">
-                                            <div className="flex items-center gap-3 mb-5 flex-wrap">
-                                                <Layers size={18} className="text-indigo-500" />
-                                                <span className="font-black text-slate-700 uppercase tracking-widest text-sm">Roll #{rollId}</span>
-                                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{pieces.length} pcs</span>
-                                                {waitingHere > 0 && (
+                                            <button key={r.rollId} onClick={() => setActiveRollId(r.rollId)}
+                                                className={`shrink-0 text-left px-3 py-2 rounded-xl border-2 transition-all ${on ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-700 hover:border-indigo-400'}`}>
+                                                <div className="flex items-center gap-1.5">
+                                                    <Layers size={13} className={on ? 'text-indigo-200' : 'text-indigo-500'} />
+                                                    <span className="font-black text-sm">Roll #{r.rollId}</span>
+                                                    {r.partRejected > 0 && <span className={`text-[10px] font-black px-1.5 rounded ${on ? 'bg-rose-500 text-white' : 'bg-rose-100 text-rose-700'}`}>✗{r.partRejected}</span>}
+                                                </div>
+                                                <div className={`text-[10px] font-bold mt-0.5 ${on ? 'text-indigo-100' : 'text-slate-400'}`}>
+                                                    {r.pending} pending · {r.approved}/{r.pieces.length} done{r.waiting > 0 ? ` · ${r.waiting} waiting` : ''}
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Active roll: notes + tile grid (the only area that scrolls) */}
+                                {active && (
+                                    <div className="flex-1 min-h-0 bg-white rounded-2xl p-3 shadow-sm border border-slate-200 flex flex-col">
+                                        {(active.waiting > 0 || partRejectedPieces.length > 0 || unclearedOpen.length > 0) && (
+                                            <div className="shrink-0 flex items-center gap-1.5 mb-2 flex-wrap">
+                                                {active.waiting > 0 && (
                                                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-50 text-slate-400 border border-dashed border-slate-300">
-                                                        {waitingHere} waiting for {unclearedStage}
-                                                    </span>
-                                                )}
-                                                {partRejectedPieces.length > 0 && (
-                                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-300">
-                                                        {partRejectedPieces.length} with rejected parts
+                                                        {active.waiting} waiting for {unclearedStage}
                                                     </span>
                                                 )}
                                                 {unclearedOpen.length > 0 && (
@@ -1616,21 +1625,26 @@ const AssemblyProcessingPortal = () => {
                                                     </span>
                                                 )}
                                             </div>
-                                            {/* Visible (not hover — tablets) list of which part was rejected where */}
-                                            {partRejectedPieces.length > 0 && (
-                                                <div className="mb-4 px-4 py-3 rounded-xl bg-rose-50 border border-rose-200 flex flex-wrap gap-2">
-                                                    {partRejectedPieces.map(g => (
-                                                        <span key={g.id} className="text-xs font-bold px-2.5 py-1 rounded-lg bg-white border border-rose-300 text-rose-800">
-                                                            <span className="font-black font-mono">#{g.piece_sequence}</span>
-                                                            <span className="text-slate-500"> · size {g.size}</span>
-                                                            {(g.rejected_components || []).map((rc, i) => (
-                                                                <span key={i}> · <span className="font-black uppercase">{rc.part_name}</span> rejected{rc.detected_line ? ` @ ${rc.detected_line}` : ''}{rc.defect_desc ? ` — ${rc.defect_desc}` : ''}</span>
-                                                            ))}
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            )}
-                                            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-12 gap-2">
+                                        )}
+                                        {/* Visible (not hover — tablets) list of which part was rejected where */}
+                                        {partRejectedPieces.length > 0 && (
+                                            <div className="shrink-0 mb-2 px-3 py-2 rounded-xl bg-rose-50 border border-rose-200 flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                                                {partRejectedPieces.map(g => (
+                                                    <span key={g.id} className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white border border-rose-300 text-rose-800">
+                                                        <span className="font-black font-mono">#{g.piece_sequence}</span>
+                                                        <span className="text-slate-500"> · size {g.size}</span>
+                                                        {(g.rejected_components || []).map((rc, i) => (
+                                                            <span key={i}> · <span className="font-black uppercase">{rc.part_name}</span> rejected{rc.detected_line ? ` @ ${rc.detected_line}` : ''}{rc.defect_desc ? ` — ${rc.defect_desc}` : ''}</span>
+                                                        ))}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className={`flex-1 min-h-0 overflow-y-auto pr-1 ${drawerOpen ? 'pb-56' : ''}`}>
+                                            {sortedPieces.length === 0 ? (
+                                                <p className="py-10 text-center text-sm font-bold text-slate-400">No garments available on this roll yet.</p>
+                                            ) : (
+                                            <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))' }}>
                                                 {sortedPieces.map(piece => {
                                                     const st = piece.status;
                                                     const isSelected = selectedPiece?.id === piece.id;
@@ -1641,11 +1655,11 @@ const AssemblyProcessingPortal = () => {
                                                     else if (st === 'NEEDS_REWORK') { cls = "bg-amber-50 border-amber-300 text-amber-700 hover:border-amber-500"; icon = <Hammer size={12} />; }
                                                     // A part of this garment was rejected at an earlier stage —
                                                     // the garment can't pass assembly (DNA block) until replaced.
-                                                    const rejectedParts = (st !== 'APPROVED' && st !== 'QC_REJECTED' && +piece.rejected_component_count > 0)
+                                                    const rejectedParts = (isOpen(piece) && +piece.rejected_component_count > 0)
                                                         ? [...new Set((piece.rejected_components || []).map(rc => rc.part_name))] : [];
                                                     if (rejectedParts.length > 0) { cls = "bg-rose-50 border-rose-400 border-dashed text-rose-700 hover:border-rose-600"; icon = <X size={12} />; }
                                                     // Warning only: parts not cleared at the previous stage (still processable).
-                                                    const unclearedWarn = rejectedParts.length === 0 && st !== 'APPROVED' && st !== 'QC_REJECTED' && piece.uncleared_parts;
+                                                    const unclearedWarn = rejectedParts.length === 0 && isOpen(piece) && piece.uncleared_parts;
                                                     if (unclearedWarn) cls += " border-amber-400 border-dashed";
                                                     if (isSelected) cls += " ring-2 ring-indigo-500 ring-offset-1";
 
@@ -1663,7 +1677,7 @@ const AssemblyProcessingPortal = () => {
                                                             title={tooltipLines}
                                                             onClick={() => handlePieceClick(piece)}
                                                             disabled={isPieceLoading}
-                                                            className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all active:scale-95 disabled:cursor-wait ${cls}`}
+                                                            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl border-2 transition-all active:scale-95 disabled:cursor-wait ${cls}`}
                                                         >
                                                             <span className="font-black text-base leading-none mb-1">{piece.piece_sequence}</span>
                                                             {isLoadingThis ? <RefreshCw size={12} className="animate-spin" /> : icon}
@@ -1677,13 +1691,13 @@ const AssemblyProcessingPortal = () => {
                                                     );
                                                 })}
                                             </div>
+                                            )}
                                         </div>
-                                        );
-                                    });
-                                })()}
-
+                                    </div>
+                                )}
                             </div>
-                        )}
+                            );
+                        })()}
                     </div>
                 )}
             </div>
@@ -1712,7 +1726,7 @@ const AssemblyProcessingPortal = () => {
                                 {dnaDefect.garment?.components?.length > 0 && (
                                     <div className="flex flex-wrap gap-2 mt-2">
                                         {dnaDefect.garment.components.map((comp, i) => (
-                                            <div key={i} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold ${comp.has_active_defect ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                                            <div key={i} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold ${comp.has_active_defect ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
                                                 {comp.has_active_defect ? <X size={10} strokeWidth={3}/> : <Check size={10} strokeWidth={3}/>}
                                                 {comp.part_name}
                                             </div>
