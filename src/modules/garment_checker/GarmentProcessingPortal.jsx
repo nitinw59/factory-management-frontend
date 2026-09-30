@@ -1325,16 +1325,14 @@ const AssemblyProcessingPortal = () => {
                                         </div>
                                     )}
 
-                                    {/* Warn-only checks (server switches ENFORCE_ROLL_ARRIVAL /
-                                        ENFORCE_STAGE_CLEARANCE are off): the garment can still be
-                                        processed, but the checker sees what hasn't been cleared. */}
-                                    {(garment.stage_warning || garment.roll_not_dispatched) && (
+                                    {/* A garment already worked here whose parts still aren't cleared
+                                        at the previous stage — a note for the checker, not a block. */}
+                                    {garment.stage_warning && (
                                         <div className="mx-10 mt-6 px-5 py-4 rounded-2xl border-2 border-amber-300 bg-amber-50 text-amber-900 space-y-1">
                                             <p className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
                                                 <AlertCircle size={14} /> Check before approving
                                             </p>
-                                            {garment.stage_warning && <p className="text-sm font-bold">{garment.stage_warning}</p>}
-                                            {garment.roll_not_dispatched && <p className="text-sm font-bold">{garment.roll_not_dispatched}</p>}
+                                            <p className="text-sm font-bold">{garment.stage_warning}</p>
                                         </div>
                                     )}
 
@@ -1551,10 +1549,15 @@ const AssemblyProcessingPortal = () => {
                                         </div>
                                         {/* Summary */}
                                         {(() => {
-                                            const approved = batchPieces.filter(p => p.status === 'APPROVED').length;
-                                            const rejected = batchPieces.filter(p => p.status === 'QC_REJECTED').length;
-                                            const rework = batchPieces.filter(p => p.status === 'NEEDS_REWORK').length;
-                                            const pending = batchPieces.filter(p => !p.status || p.status === 'PENDING').length;
+                                            // Garments not yet available here (parts not cleared at the
+                                            // previous stage) are counted separately, not as Pending.
+                                            const availablePieces = batchPieces.filter(p => p.available !== false);
+                                            const waitingCount = batchPieces.length - availablePieces.length;
+                                            const waitingStage = batchPieces.find(p => p.uncleared_stage)?.uncleared_stage || 'previous stage';
+                                            const approved = availablePieces.filter(p => p.status === 'APPROVED').length;
+                                            const rejected = availablePieces.filter(p => p.status === 'QC_REJECTED').length;
+                                            const rework = availablePieces.filter(p => p.status === 'NEEDS_REWORK').length;
+                                            const pending = availablePieces.filter(p => !p.status || p.status === 'PENDING').length;
                                             // Garments whose PIECES were rejected at an earlier stage
                                             // (open piece defect) — the garment itself is still pending.
                                             const partRejected = batchPieces.filter(p => +p.rejected_component_count > 0 && p.status !== 'APPROVED' && p.status !== 'QC_REJECTED').length;
@@ -1565,6 +1568,7 @@ const AssemblyProcessingPortal = () => {
                                                     <span className="text-xs font-black px-4 py-2 rounded-xl bg-slate-100 text-slate-600 border border-slate-200">{pending} Pending</span>
                                                     {rework > 0 && <span className="text-xs font-black px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-200">{rework} Rework</span>}
                                                     {rejected > 0 && <span className="text-xs font-black px-4 py-2 rounded-xl bg-rose-50 text-rose-700 border border-rose-200">{rejected} Rejected</span>}
+                                                    {waitingCount > 0 && <span className="text-xs font-black px-4 py-2 rounded-xl bg-slate-50 text-slate-400 border border-dashed border-slate-300">{waitingCount} waiting for {waitingStage}</span>}
                                                 </div>
                                             );
                                         })()}
@@ -1579,28 +1583,31 @@ const AssemblyProcessingPortal = () => {
                                         acc[key].push(p);
                                         return acc;
                                     }, {});
-                                    return Object.entries(byRoll).map(([rollId, pieces]) => {
+                                    return Object.entries(byRoll).map(([rollId, rollPieces]) => {
+                                        // Not yet available here (parts not cleared at the previous
+                                        // stage) — hidden from the grid, counted in the header.
+                                        const pieces = rollPieces.filter(p => p.available !== false);
+                                        const waitingHere = rollPieces.length - pieces.length;
                                         const sortedPieces = [...pieces].sort((a, b) => (a.piece_sequence ?? 0) - (b.piece_sequence ?? 0));
                                         const partRejectedPieces = sortedPieces.filter(p => +p.rejected_component_count > 0 && p.status !== 'APPROVED' && p.status !== 'QC_REJECTED');
-                                        // Warnings (never blocks): roll not dispatched to this stage in the
-                                        // line loader; parts not yet cleared at the previous stage.
-                                        const notDispatched = pieces.filter(p => p.roll_dispatched === false).length;
+                                        // Visible garments that still have something open upstream (e.g.
+                                        // already worked here before BF finished) — a note, not a block.
                                         const unclearedOpen = sortedPieces.filter(p => p.uncleared_parts && p.status !== 'APPROVED' && p.status !== 'QC_REJECTED');
-                                        const unclearedStage = pieces.find(p => p.uncleared_stage)?.uncleared_stage || 'previous stage';
+                                        const unclearedStage = rollPieces.find(p => p.uncleared_stage)?.uncleared_stage || 'previous stage';
                                         return (
                                         <div key={rollId} className="bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-200">
                                             <div className="flex items-center gap-3 mb-5 flex-wrap">
                                                 <Layers size={18} className="text-indigo-500" />
                                                 <span className="font-black text-slate-700 uppercase tracking-widest text-sm">Roll #{rollId}</span>
                                                 <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{pieces.length} pcs</span>
+                                                {waitingHere > 0 && (
+                                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-50 text-slate-400 border border-dashed border-slate-300">
+                                                        {waitingHere} waiting for {unclearedStage}
+                                                    </span>
+                                                )}
                                                 {partRejectedPieces.length > 0 && (
                                                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-300">
                                                         {partRejectedPieces.length} with rejected parts
-                                                    </span>
-                                                )}
-                                                {notDispatched > 0 && (
-                                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
-                                                        ⚠ not dispatched to this stage in line loader
                                                     </span>
                                                 )}
                                                 {unclearedOpen.length > 0 && (

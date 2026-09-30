@@ -263,10 +263,6 @@ const KIOSK_TEXT_TARGETS = [
     { key: 'rework',     label: 'Rework' },
     { key: 'rejected',   label: 'Rejected' },
     { key: 'dhu',        label: 'DHU' },
-    // 'today' still keys the headline column's size — it now shows Complete
-    // Sets (the separate Complete Sets column was folded into it), so the
-    // old 'completed' key has no column left to size.
-    { key: 'today',      label: 'Complete Sets (headline)' },
     { key: 'ticker',     label: 'Ticker (top bar)' },
 ];
 const TEXT_SCALE_MIN = 50, TEXT_SCALE_MAX = 200, TEXT_SCALE_STEP = 10;

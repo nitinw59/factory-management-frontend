@@ -794,7 +794,7 @@ const exportToXlsx = (rolls) => {
 
 const AllRollsTab = ({ rolls, colors, onRefresh }) => {
     const { user } = useAuth();
-    const canReturn = user?.role === 'purchase_manager' || user?.role === 'factory_admin';
+    const canReturn = user?.role === 'purchase_manager' || user?.role === 'factory_admin' || user?.role === 'merchandiser';
     const [search,   setSearch]   = useState('');
     const [editRoll, setEditRoll] = useState(null);
     const [expanded, setExpanded] = useState(new Set());

@@ -2722,10 +2722,18 @@ const ProductionWorkflowDashboard = () => {
 
     const canManage     = user && ['accountant', 'sales_manager', 'admin', 'factory_admin', 'store_manager'].includes(user.role);
     const canProduction = user && ['cutting_manager', 'production_manager', 'admin', 'factory_admin', 'store_manager'].includes(user.role);
-    const canInward     = user?.role === 'accountant' || user?.role === 'store_manager';
-    const canTrimOrders = user && ['production_manager', 'admin', 'factory_admin', 'store_manager'].includes(user.role);
+    // Merchandiser gets every action that happens ON this page (modals + APIs,
+    // all opened to 'merchandiser' on the backend). Create/Edit SO and
+    // Create/Edit Batch stay on canManage/canProduction/canEditBatch: they
+    // navigate to the Accounts / Production Manager portals, whose route
+    // guards don't admit merchandiser.
+    const isMerchandiser = user?.role === 'merchandiser';
+    const canAddPO      = canManage || isMerchandiser;
+    const canEndBit     = canProduction || isMerchandiser;
+    const canInward     = user?.role === 'accountant' || user?.role === 'store_manager' || isMerchandiser;
+    const canTrimOrders = user && ['production_manager', 'admin', 'factory_admin', 'store_manager', 'merchandiser'].includes(user.role);
     const canEditBatch  = user && ['production_manager', 'cutting_manager', 'store_manager'].includes(user.role);
-    const canSetPriority = user && ['production_manager', 'factory_admin'].includes(user.role);
+    const canSetPriority = user && ['production_manager', 'factory_admin', 'merchandiser'].includes(user.role);
 
     const handleInward      = (po) => setInwardPO({ ...po, id: po.po_id });
     const handleTrimOrders  = (batchId) => setTrimOrdersBatch(batchId);
@@ -2879,10 +2887,10 @@ const ProductionWorkflowDashboard = () => {
                                         so={so}
                                         onSODetails={setSelectedSO}
                                         onStageClick={handleStageClick}
-                                        onAddPO={canManage ? handleAddPO : null}
+                                        onAddPO={canAddPO ? handleAddPO : null}
                                         onAddSopPO={canManage ? (sop) => console.log('Add PO for SOP:', sop) : null}
                                         onCreateBatch={canProduction ? handleCreateBatch : null}
-                                        onOpenEndBitBatch={canProduction ? setEndBitModalSop : null}
+                                        onOpenEndBitBatch={canEndBit ? setEndBitModalSop : null}
                                         onSopDetails={setDetailsSop}
                                         onViewPODetails={setSelectedPOId}
                                         onInward={canInward ? handleInward : null}
