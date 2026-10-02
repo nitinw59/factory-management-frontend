@@ -587,7 +587,6 @@ const AssemblyProcessingPortal = () => {
         setSelectedPiece(piece);
         try {
             const res = await assemblyApi.getGarmentDetails(piece.garment_uid);
-            console.log('assemblyApi.getGarmentDetails raw data:', res.data);
             setGarment(res.data);
             playFeedback(res.data?.qc_status === STATUS.APPROVED ? 'already_approved' : 'success');
         } catch (err) {
@@ -635,7 +634,6 @@ const AssemblyProcessingPortal = () => {
 
         try {
             const res = await assemblyApi.getGarmentDetails(cleanUid);
-            console.log('assemblyApi.getGarmentDetails raw data:', res.data);
             setGarment(res.data);
             playFeedback(res.data?.qc_status === STATUS.APPROVED ? 'already_approved' : 'success');
             setScannedTextVisual('');

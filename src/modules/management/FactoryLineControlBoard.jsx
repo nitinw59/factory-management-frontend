@@ -245,7 +245,6 @@ const OperatorDetailView = ({ operator, stationName, onBack }) => {
         // Fetch real hourly breakdown from backend
         warRoomApi.getOperatorAnalytics(operator.emp_id)
             .then(res => setAnalytics(res.data || []))
-            .then(() => console.log("Fetched operator analytics", analytics))
             .catch(err => console.error("Failed to load operator stats", err))
             .finally(() => setLoadingStats(false));
     }, [operator]);
@@ -579,7 +578,6 @@ export default function FactoryLineControlBoard() {
         try {
             // Replace with actual configured API client
             const response = await warRoomApi.getFloorStatus(dateRange.from, dateRange.to);
-            console.log("Raw API Response:", response.data);
             // MOCKING FOR DEMONSTRATION OF MAPPED STRUCTURE
             // const response = await { data: { lines: [
             //     {

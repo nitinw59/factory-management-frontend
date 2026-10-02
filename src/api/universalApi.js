@@ -27,7 +27,8 @@ export const universalApi = {
     checkCompletion: (data) => api.post('/workstation-universal/check-completion', data),
 
     // Checker summary: pending rework count + today's rework count
-    getCheckerStats: () => api.get('/workstation-universal/checker-stats'),
+    // approvedDate (optional): the date today_approved_pieces is counted for
+    getCheckerStats: (approvedDate) => api.get('/workstation-universal/checker-stats', { params: approvedDate ? { approved_date: approvedDate } : {} }),
     // Today's work log for export (scans done by logged-in user today)
     getTodayWork: (date) => api.get('/workstation-universal/today-work', { params: date ? { date } : {} }),
 

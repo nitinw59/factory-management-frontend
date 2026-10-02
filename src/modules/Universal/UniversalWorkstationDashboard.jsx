@@ -2033,7 +2033,6 @@ const UniversalWorkstationDashboard = () => {
         setIsLoading(true);
         try {
             const res = await universalApi.getWorkstationData();
-            console.log("Fetched workstation data:", res.data); // Debug log to verify API response
             if (res.data.error) throw new Error(res.data.error);
             const newBatches = res.data.batches || [];
             setBatches(newBatches);
@@ -2059,7 +2058,6 @@ const UniversalWorkstationDashboard = () => {
             });
         });
         const result = [...names].sort();
-        console.log('[PartFilter] dropdown options:', result);
         return result;
     }, [batches]);
 
@@ -2184,8 +2182,20 @@ const UniversalWorkstationDashboard = () => {
     // ── Checker stats (auto-refresh) ──────────────────────────────────────────
     const loadStats = useCallback(async () => {
         try {
-            const res = await universalApi.getCheckerStats();
+            // Same date the approved tile always used (was sent to today-work).
+            const today = new Date().toISOString().split('T')[0];
+            const res = await universalApi.getCheckerStats(today);
             setStats(res.data);
+            // today_approved_pieces = the work log's APPROVED row count, so the
+            // whole log no longer has to be downloaded to count it. Older
+            // backend without the field → count from the work log as before.
+            if (res.data && 'today_approved_pieces' in res.data) {
+                setTodayApprovedPieces(res.data.today_approved_pieces);
+            } else {
+                universalApi.getTodayWork(today)
+                    .then(w => setTodayApprovedPieces((w.data?.rows ?? []).filter(r => r.action === 'APPROVED').length))
+                    .catch(() => { /* silent — stats fallback still shows */ });
+            }
             return res.data; // callers that need the FRESH value right away (not next render's stale-closure `stats`) use this
         // eslint-disable-next-line react-hooks/exhaustive-deps
         } catch (err) {
@@ -2222,25 +2232,16 @@ const UniversalWorkstationDashboard = () => {
     const checkReworkBacklog = (freshStats) => {
         if ((freshStats?.pending_rework ?? 0) >= reworkWarningThreshold) setShowReworkWarning(true);
     };
-    const refreshTodayApproved = useCallback(async () => {
-        try {
-            const today = new Date().toISOString().split('T')[0];
-            const res = await universalApi.getTodayWork(today);
-            const rows = res.data?.rows ?? [];
-            setTodayApprovedPieces(rows.filter(r => r.action === 'APPROVED').length);
-        } catch { /* silent — stats fallback still shows */ }
-    }, []);
     useEffect(() => {
-        loadStats();
-        refreshTodayApproved();
-        const iv = setInterval(() => { loadStats(); refreshTodayApproved(); }, STATS_REFRESH_MS);
+        loadStats(); // also refreshes the today-approved pieces tile
+        const iv = setInterval(loadStats, STATS_REFRESH_MS);
         return () => clearInterval(iv);
-    }, [loadStats, refreshTodayApproved]);
+    }, [loadStats]);
 
     // ── Work log fetch ────────────────────────────────────────────────────────
     const fetchWork = useCallback(async (date) => {
         setLoadingWork(true);
-        try { const res = await universalApi.getTodayWork(date); console.log("Fetched work data:", res.data); setWorkData(res.data); }
+        try { const res = await universalApi.getTodayWork(date); setWorkData(res.data); }
         // eslint-disable-next-line react-hooks/exhaustive-deps
         catch (err) { setWorkData(null); popApiError(err.response?.data?.error || err.message || 'Failed to load work log'); }
         finally { setLoadingWork(false); }
@@ -2328,8 +2329,7 @@ const UniversalWorkstationDashboard = () => {
             }
             const newBatches = await fetchQueue();
             refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
-            refreshTodayApproved();
-            checkReworkBacklog(await loadStats()); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
+            checkReworkBacklog(await loadStats()); // today_rework/pending_rework live in `stats`, not the today-approved count above — loadStats also refreshes the today-approved count
         } catch (err) {
             alert(err.response?.data?.error || `Error: ${err.message}`);
             throw err;
@@ -2346,8 +2346,7 @@ const UniversalWorkstationDashboard = () => {
             await universalApi.approveAlteredPieces({ batchId: modalState.batchId, pieceIds, status, defectCodeIds, supervisorPin });
             const newBatches = await fetchQueue();
             refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
-            refreshTodayApproved();
-            checkReworkBacklog(await loadStats()); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
+            checkReworkBacklog(await loadStats()); // today_rework/pending_rework live in `stats`, not the today-approved count above — loadStats also refreshes the today-approved count
         } catch (err) {
             if (!isPinError(err)) alert(err.response?.data?.error || `Error: ${err.message}`);
             throw err;
@@ -2362,7 +2361,6 @@ const UniversalWorkstationDashboard = () => {
             await universalApi.revertPieceToPending({ batchId: modalState.batchId, bundleId: modalState.bundle_id, pieceIds, supervisorPin });
             const newBatches = await fetchQueue();
             refreshLiveModalPieces(newBatches); // Push fresh DB state to modal grid
-            refreshTodayApproved();
             loadStats();
         } catch (err) {
             if (!isPinError(err)) alert(err.response?.data?.error || `Error: ${err.message}`);
@@ -2390,8 +2388,7 @@ const UniversalWorkstationDashboard = () => {
                 pieceIds: actionableIds, qcStatus: 'APPROVED', defectCodeId: null, bundleId: entity.bundle_id
             });
             await fetchQueue();
-            refreshTodayApproved();
-            checkReworkBacklog(await loadStats()); // today_rework/pending_rework live in `stats`, not the today-approved count above — refresh both after any submit
+            checkReworkBacklog(await loadStats()); // today_rework/pending_rework live in `stats`, not the today-approved count above — loadStats also refreshes the today-approved count
         } catch (err) { alert(err.response?.data?.error || `Error: ${err.message}`); }
         finally { setIsProcessing(false); }
     };

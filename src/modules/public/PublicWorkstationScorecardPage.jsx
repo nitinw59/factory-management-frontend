@@ -33,6 +33,7 @@ import AnimatedMatrixWordmark from './AnimatedMatrixWordmark';
 const ROWS_PER_PAGE = 3;
 const ROTATE_MS = 15000;
 const SAFETY_POLL_MS = 60000;
+const LIVE_MIN_GAP_MS = 5000; // fastest the board refetches on live scan events
 const GRID_MS = 60000;  // how long the scorecard grid shows before the logo
 const IDLE_MS = 12000;  // how long an idle animation shows before the grid returns
 const FADE_MS = 700;    // cross-fade between grid and idle screen
@@ -342,12 +343,23 @@ export default function PublicWorkstationScorecardPage() {
         return () => clearInterval(poll);
     }, [fetchRows]);
 
-    const wsDebounceRef = useRef(null);
+    // Live refresh on scan events, THROTTLED: at most one refetch per
+    // LIVE_MIN_GAP_MS; events arriving meanwhile fold into ONE trailing
+    // refetch, so the latest scan is always shown. (The old 800 ms debounce
+    // refetched after every quiet moment — and never fired at all while scans
+    // kept arriving < 800 ms apart, leaving only the 60 s safety poll.)
+    const wsTimerRef = useRef(null);
+    const lastLiveFetchRef = useRef(0);
     const handleEvent = useCallback(() => {
-        if (wsDebounceRef.current) clearTimeout(wsDebounceRef.current);
-        wsDebounceRef.current = setTimeout(fetchRows, 800);
+        if (wsTimerRef.current) return; // a refetch is already scheduled
+        const wait = Math.max(800, lastLiveFetchRef.current + LIVE_MIN_GAP_MS - Date.now());
+        wsTimerRef.current = setTimeout(() => {
+            wsTimerRef.current = null;
+            lastLiveFetchRef.current = Date.now();
+            fetchRows();
+        }, wait);
     }, [fetchRows]);
-    useEffect(() => () => { if (wsDebounceRef.current) clearTimeout(wsDebounceRef.current); }, []);
+    useEffect(() => () => { if (wsTimerRef.current) clearTimeout(wsTimerRef.current); }, []);
     const live = usePublicSocket(handleEvent);
 
     // Grid ⇄ idle-screen timer. `phase` is what's logically showing;

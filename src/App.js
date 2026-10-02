@@ -12,17 +12,9 @@ import ProductionManagerProtectedRoute from './shared/ProductionManagerProtected
 import InitialRedirect from './shared/InitialRedirect';
 import RedirectWithParams from './shared/RedirectWithParams';
 import TrimKitLinkResolver from './shared/TrimKitLinkResolver';
-import KitPickupQueuePage from './modules/trim_kits/KitPickupQueuePage';
-import KitOrderPage from './modules/trim_kits/KitOrderPage';
-import KitHistoryPage from './modules/trim_kits/KitHistoryPage';
-import WorkstationsPage from './modules/workstations/WorkstationsPage';
-import WorkstationTypesPage from './modules/workstations/WorkstationTypesPage';
-import PiecePartsPage from './modules/products/PiecePartsPage';
 import CuttingPortalLayout from './shared/CuttingPortalLayout'; // New
 import CuttingOperatorProtectedRoute from './shared/CuttingOperatorProtectedRoute'; // New
-import PortalManagementPage from './modules/portals/PortalManagementPage'; // New
 import LineLoaderProtectedRoute from './shared/LineLoaderProtectedRoute'; // New
-import LineLoaderDashboardPage from './modules/line_loader/LineLoaderDashboardPage'; // New
 import LineLoaderLayout from './shared/LineLoaderLayout'; // New  
 import CheckingPortalLayout from './shared/CheckingPortalLayout';
 import CheckingUserProtectedRoute from './shared/CheckingUserProtectedRoute';
@@ -43,177 +35,191 @@ import SalesAccessProtectedRoute from './shared/SalesAccessProtectedRoute'; // <
 
 // --- PUBLIC PAGES ---
 import LoginPage from './login/LoginPage';
-import PublicWorkstationScorecardPage from './modules/public/PublicWorkstationScorecardPage';
 import AuthCallbackPage from './login/AuthCallbackPage';
 import UnauthorizedPage from './login/UnauthorizedPage';
 
 // --- MODULE PAGES ---
-import CompanyProfilePage from './modules/admin/CompanyProfilePage';
-import TrimClustersPage from './modules/admin/TrimClustersPage';
-import DefectCodeLineTypePage from './modules/admin/DefectCodeLineTypePage';
-import QCAnalyticsDashboard from './modules/admin/QCAnalyticsDashboard';
-import UserManagementPage from './modules/users/UserManagementPage';
-import SupplierManagementPage from './modules/suppliers/SupplierManagementPage';
-import CustomerManagementPage from './modules/admin/CustomerManagementPage';
-import SizesPage from './modules/admin/SizesPage';
-import TrimsDashboardPage from './modules/trims/TrimsDashboardPage';
-import ProductionLinesPage from './modules/production/ProductionLinesPage';
-import FabricColorsPage from './modules/colors/FabricColorsPage';
-import FabricTypesPage from './modules/fabric/FabricTypesPage'; 
-import TrimItemsPage from './modules/trims/TrimItemsPage';
-import TrimItemVariantsPage from './modules/trims/TrimItemVariantsPage';
-import ProductManagementPage from './modules/products/ProductManagementPage';
-import ProductBrandsPage from './modules/products/ProductBrandsPage';
-import ProductTypesPage from './modules/products/ProductTypesPage';
-import ProductionLineTypesPage from './modules/production/ProductionLineTypesPage';
-import CuttingDashboardPage from './modules/cutting_portal/CuttingDashboardPage'; // New
-import FactoryLayoutPlannerPage from './modules/production/FactoryLayoutPlannerPage';
-import TrimManagementPage from './modules/store_manager/TrimManagementPage';
-import TrimOrdersPage from './modules/store_manager/TrimOrdersPage';
-import TrimOrderDetailPage from './modules/store_manager/TrimOrderDetailPage';
 import ValidationUserProtectedRoute from './shared/ValidationUserProtectedRoute';
 import ValidationPortalLayout from './shared/ValidationPortalLayout';
-import ValidationDashboardPage from './modules/validation_portal/ValidationDashboardPage';
-import CheckingWorkstationDashboardPage from './modules/checking_portal/CheckingWorkstationDashboardPage';
-import NumberingWorkstationDashboardPage from './modules/numbering_portal/NumberingWorkstationDashboardPage';
-import InitializationDashboardPortalPage from './modules/initialisation_portal/InitializationDashboardPortalPage';
-import AlterPiecesDashboardPage from './modules/initialisation_portal/AlterPiecesDashboardPage';
-import MaterialReplacementsPage from './modules/initialisation_portal/MaterialReplacementsPage';
-import ReadyToLoadPage from './modules/initialisation_portal/ReadyToLoadPage';
-import NumberingBatchDetailsPage from './modules/numbering_portal/NumberingBatchDetailsPage';
-import PreparationManagerDashboardPage from './modules/preparation_portal/PreparationManagerDashboardPage';
-import BatchCuttingDetailsPage from './modules/cutting_portal/BatchCuttingDetailsPage';
-import CreateProductionBatchForm from './modules/production/CreateProductionBatchForm'; // Assuming this exists for creating new batches
-import WorkstationManagement from './modules/workstations/WorkstationManagement'; 
 import PreparationManagerLayout from './shared/PreperationManagerLayout';
-import PreparationUnloadDashboardPage from './modules/preparation_portal/PreparationUnloadDashboard';
 import PreparationUnloadLayout from './shared/PreparationUnloadLayout'; 
-import AssetManagementPage from './modules/asset/AssetManagementPage';
 import SewingPartLayout from './shared/SewingPartLayout';
-import SewingPartDashboardPage from './modules/sewing_portal/SewingPartDashboardPage';
-import SewingManagerDashboardPage from './modules/sewing_portal/SewingManagerDashboardPage'; 
-import OverridePasswordPage from './modules/sewing_portal/OverridePasswordPage';
 // import AssemblyDashboardPage from './modules/sewing_portal/AssemblyDashboardPage';
-import TrimOrderSummaryPage from './modules/store_manager/TrimOrderSummaryPage';
-import NumberingCheckerSummaryPage from './modules/numbering_portal/NumberingCheckerSummaryPage';
-import SewingMachineComplaintPage from './modules/asset/SewingMachineComplaintPage';
-import CuttingManagerReportPage from './modules/initialisation_portal/CuttingManagerReportPage';
-import CreateSalesOrder from './modules/accounts/sales/CreateSalesOrder';
 //import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
-import ProductionWorkflowDashboard from './modules/production/ProductionWorkflowDashboard';
-import ProductionCapacityDashboard from './modules/production/ProductionCapacityDashboard';
-import SalesOrderListPage from './modules/accounts/sales/SalesOrderListPage';
-import CuttingDailyReportPage from './modules/initialisation_portal/CuttingDailyReportPage';
-import InterliningManagerPage from './modules/initialisation_portal/InterliningManagerPage';
-import FabricRollManagementPage from './modules/accounts/purchase/FabricIntakeForm';
-import PurchaseInvoicesPage from './modules/accounts/purchase/PurchaseInvoicesPage';
 
 import MechanicsLayout from './shared/MechanicsLayout';
 import MechanicsProtectedRoute from './shared/MechanicsProtectedRoute';
-import MechanicsDashboardPage from './modules/mechanics/MechanicsDashboardPage';
 
-import AdminMaintenanceDashboard from './modules/admin/AdminMaintenanceDashboard';
-import MaintenanceSchedulePage from './modules/maintenance/MaintenanceSchedulePage';
-import SparePartsPage from './modules/store_manager/SparePartsPage';
-import GeneralItemsPage from './modules/store_manager/GeneralItemsPage';
-import GeneralItemsMasterPage from './modules/admin/GeneralItemsMasterPage';
-import SparesAnalyticsPage from './modules/store_manager/SparesAnalyticsPage';
-import TrimReservationsPage from './modules/store_manager/TrimReservationsPage';
-import SupplierColorCodesPage from './modules/store_manager/SupplierColorCodesPage';
-import TrimStockLedgerPage from './modules/store_manager/TrimStockLedgerPage';
 
 
 import FabricStoreLayout from './shared/FabricStoreLayout';
 import FabricStoreProtectedRoute from './shared/FabricStoreProtectedRoute';
-import FabricRollsPage from './modules/fabric_store/FabricRollsPage';
-import FabricInwardsPage from './modules/fabric_store/FabricInwardsPage';
 
 import DispatchLayout from './shared/DispatchLayout';
 import DispatchProtectedRoute from './shared/DispatchProtectedRoute';
-import DispatchDashboardPage from './modules/depatch_portal/DispatchDashboardPage';
-import DispatchReceiptsPage from './modules/depatch_portal/DispatchReceiptsPage';
-import DispatchJobWorkPage from './modules/depatch_portal/DispatchJobWorkPage';
-import AccountsJobWorkPage from './modules/accounts/JobWorkPage';
 
-import SparesIssuanceDashboard from './modules/store_manager/SparesIssuanceDashboard';
 
 import MerchandiserProtectedRoute from './shared/MerchandiserProtectedRoute';
 import MerchandiserLayout from './shared/MerchandiserLayout';
-import BomDashboardPage from './modules/merchandiser/BomDashboardPage';
-import BomFormPage from './modules/merchandiser/BomFormPage';
-import GarmentMeasurementChartPage from './modules/merchandiser/GarmentMeasurementChartPage';
-import MerchandiserPlanningPage from './modules/merchandiser/MerchandiserPlanningPage';
-import ReleaseRecommendationsPage from './modules/merchandiser/ReleaseRecommendationsPage';
 
 import PurchaseDepartmentProtectedRoute from './shared/PurchaseDepartmentProtectedRoute';
 import PurchaseDepartmentLayout from './shared/PurchaseDepartmentLayout';
-import RequirementsPage from './modules/purchase_department/RequirementsPage';
-import RaiseRequirementPage from './modules/purchase_department/RaiseRequirementPage';
-import OrdersPage from './modules/purchase_department/OrdersPage';
-import TrimsLedgerPage from './modules/purchase_department/TrimsLedgerPage';
-import PurchaseFlowPage from './modules/purchase_department/PurchaseFlowPage';
-import InwardsPage from './modules/purchase_department/InwardsPage';
-import GrnInvoiceByDatePage from './modules/purchase_department/GrnInvoiceByDatePage';
 
 
 
 
 import HRLayout from './shared/HRLayout'; // Create a layout similar to AdminLayout with a sidebar
 import HRProtectedRoute from './shared/HRProtectedRoute'; // Restrict to 'hr_manager', 'factory_admin'
-import HRDataImportPage from './modules/hr_portal/HRDataImportPage';
-import DailyAttendancePage from './modules/hr_portal/DailyAttendancePage';
-import EmployeeDirectoryPage from './modules/hr_portal/EmployeeDirectoryPage';
-import ShiftConfigurationPage from './modules/hr_portal/ShiftConfigurationPage';
 
-import ProductionCostingDashboard from './modules/production/ProductionCostingDashboard';
 
 //  ... line manager imports ...
-import LineStaffCostingPage from './modules/lineManager/LineStaffCostingPage';
-import OutputLogsPage from './modules/lineManager/OutputLogsPage';
 
 
-import ProductionSettingsPage from './modules/production/ProductionSettingsPage';
-import ProductionTargetPage from './modules/production/ProductionTargetPage';
-import ScoreboardPage from './modules/production/ScoreboardPage';
-import ScorecardDetailedPage from './modules/production/ScorecardDetailedPage';
-import BomApprovalPage from './modules/production/BomApprovalPage';
-import JobWorkDashboardPage from './modules/production_manager/JobWorkDashboardPage';
 import ReceiverProtectedRoute from './shared/ReceiverProtectedRoute';
 import ReceiverLayout from './shared/ReceiverLayout';
-import ReceiverDashboardPage from './modules/receiver/ReceiverDashboardPage';
-
-import AdminLineConfigPage from './modules/asset/AdminLineConfigPage';
-
-import UniversalWorkstationDashboard from './modules/Universal/UniversalWorkstationDashboard';
 
 
-import GarmentProcessingPortal from './modules/garment_checker/GarmentProcessingPortal';
-import GarmentMonitor from './modules/garment_checker/GarmentMonitor';
 
 
-import ProductionAnalyticsDashboard from './modules/management/FactoryLineControlBoard';
+
+
 
 // Trim Loss (lost trim) exception
 import TrimLossProtectedRoute from './shared/TrimLossProtectedRoute';
 import TrimLossLayout from './shared/TrimLossLayout';
-import TrimLossRegisterPage from './modules/trim_loss/TrimLossRegisterPage';
-import CaseDetailPage from './modules/trim_loss/CaseDetailPage';
-import HrRecoveryQueuePage from './modules/trim_loss/HrRecoveryQueuePage';
 
 // QA Portal (QC analytics + Final QC pre-dispatch inspection)
 import QaPortalProtectedRoute from './shared/QaPortalProtectedRoute';
 import QaPortalLayout from './shared/QaPortalLayout';
-import FinalQcRegisterPage from './modules/final_qc/FinalQcRegisterPage';
-import FinalQcDetailPage from './modules/final_qc/FinalQcDetailPage';
-import LiveQcTrackingPage from './modules/qc_live/LiveQcTrackingPage';
+import { OfflineBanner } from './shared/NetworkStatus';
+import lazyPage, { registerPrefetchGroups } from './shared/lazyPage';
 
-import MyBugReportsPage from './modules/bug_reports/MyBugReportsPage';
-import BugReportDetailPage from './modules/bug_reports/BugReportDetailPage';
-import BugReportAdminDashboardPage from './modules/bug_reports/BugReportAdminDashboardPage';
+// ─── Pages load on demand (see shared/lazyPage.jsx) ───────────────────────────
+
+const KitPickupQueuePage = lazyPage(() => import('./modules/trim_kits/KitPickupQueuePage'));
+const KitOrderPage = lazyPage(() => import('./modules/trim_kits/KitOrderPage'));
+const KitHistoryPage = lazyPage(() => import('./modules/trim_kits/KitHistoryPage'));
+const WorkstationsPage = lazyPage(() => import('./modules/workstations/WorkstationsPage'));
+const WorkstationTypesPage = lazyPage(() => import('./modules/workstations/WorkstationTypesPage'));
+const PiecePartsPage = lazyPage(() => import('./modules/products/PiecePartsPage'));
+const PortalManagementPage = lazyPage(() => import('./modules/portals/PortalManagementPage'));  // New
+const LineLoaderDashboardPage = lazyPage(() => import('./modules/line_loader/LineLoaderDashboardPage'));  // New
+const PublicWorkstationScorecardPage = lazyPage(() => import('./modules/public/PublicWorkstationScorecardPage'));
+const CompanyProfilePage = lazyPage(() => import('./modules/admin/CompanyProfilePage'));
+const TrimClustersPage = lazyPage(() => import('./modules/admin/TrimClustersPage'));
+const DefectCodeLineTypePage = lazyPage(() => import('./modules/admin/DefectCodeLineTypePage'));
+const QCAnalyticsDashboard = lazyPage(() => import('./modules/admin/QCAnalyticsDashboard'));
+const UserManagementPage = lazyPage(() => import('./modules/users/UserManagementPage'));
+const SupplierManagementPage = lazyPage(() => import('./modules/suppliers/SupplierManagementPage'));
+const CustomerManagementPage = lazyPage(() => import('./modules/admin/CustomerManagementPage'));
+const SizesPage = lazyPage(() => import('./modules/admin/SizesPage'));
+const TrimsDashboardPage = lazyPage(() => import('./modules/trims/TrimsDashboardPage'));
+const ProductionLinesPage = lazyPage(() => import('./modules/production/ProductionLinesPage'));
+const FabricColorsPage = lazyPage(() => import('./modules/colors/FabricColorsPage'));
+const FabricTypesPage = lazyPage(() => import('./modules/fabric/FabricTypesPage'));
+const TrimItemsPage = lazyPage(() => import('./modules/trims/TrimItemsPage'));
+const TrimItemVariantsPage = lazyPage(() => import('./modules/trims/TrimItemVariantsPage'));
+const ProductManagementPage = lazyPage(() => import('./modules/products/ProductManagementPage'));
+const ProductBrandsPage = lazyPage(() => import('./modules/products/ProductBrandsPage'));
+const ProductTypesPage = lazyPage(() => import('./modules/products/ProductTypesPage'));
+const ProductionLineTypesPage = lazyPage(() => import('./modules/production/ProductionLineTypesPage'));
+const CuttingDashboardPage = lazyPage(() => import('./modules/cutting_portal/CuttingDashboardPage'));  // New
+const FactoryLayoutPlannerPage = lazyPage(() => import('./modules/production/FactoryLayoutPlannerPage'));
+const TrimManagementPage = lazyPage(() => import('./modules/store_manager/TrimManagementPage'));
+const TrimOrdersPage = lazyPage(() => import('./modules/store_manager/TrimOrdersPage'));
+const TrimOrderDetailPage = lazyPage(() => import('./modules/store_manager/TrimOrderDetailPage'));
+const ValidationDashboardPage = lazyPage(() => import('./modules/validation_portal/ValidationDashboardPage'));
+const CheckingWorkstationDashboardPage = lazyPage(() => import('./modules/checking_portal/CheckingWorkstationDashboardPage'));
+const NumberingWorkstationDashboardPage = lazyPage(() => import('./modules/numbering_portal/NumberingWorkstationDashboardPage'));
+const InitializationDashboardPortalPage = lazyPage(() => import('./modules/initialisation_portal/InitializationDashboardPortalPage'));
+const AlterPiecesDashboardPage = lazyPage(() => import('./modules/initialisation_portal/AlterPiecesDashboardPage'));
+const MaterialReplacementsPage = lazyPage(() => import('./modules/initialisation_portal/MaterialReplacementsPage'));
+const ReadyToLoadPage = lazyPage(() => import('./modules/initialisation_portal/ReadyToLoadPage'));
+const NumberingBatchDetailsPage = lazyPage(() => import('./modules/numbering_portal/NumberingBatchDetailsPage'));
+const PreparationManagerDashboardPage = lazyPage(() => import('./modules/preparation_portal/PreparationManagerDashboardPage'));
+const BatchCuttingDetailsPage = lazyPage(() => import('./modules/cutting_portal/BatchCuttingDetailsPage'));
+const CreateProductionBatchForm = lazyPage(() => import('./modules/production/CreateProductionBatchForm'));  // Assuming this exists for creating new batches
+const WorkstationManagement = lazyPage(() => import('./modules/workstations/WorkstationManagement'));
+const PreparationUnloadDashboardPage = lazyPage(() => import('./modules/preparation_portal/PreparationUnloadDashboard'));
+const AssetManagementPage = lazyPage(() => import('./modules/asset/AssetManagementPage'));
+const SewingPartDashboardPage = lazyPage(() => import('./modules/sewing_portal/SewingPartDashboardPage'));
+const SewingManagerDashboardPage = lazyPage(() => import('./modules/sewing_portal/SewingManagerDashboardPage'));
+const OverridePasswordPage = lazyPage(() => import('./modules/sewing_portal/OverridePasswordPage'));
+const TrimOrderSummaryPage = lazyPage(() => import('./modules/store_manager/TrimOrderSummaryPage'));
+const NumberingCheckerSummaryPage = lazyPage(() => import('./modules/numbering_portal/NumberingCheckerSummaryPage'));
+const SewingMachineComplaintPage = lazyPage(() => import('./modules/asset/SewingMachineComplaintPage'));
+const CuttingManagerReportPage = lazyPage(() => import('./modules/initialisation_portal/CuttingManagerReportPage'));
+const CreateSalesOrder = lazyPage(() => import('./modules/accounts/sales/CreateSalesOrder'));
+const ProductionWorkflowDashboard = lazyPage(() => import('./modules/production/ProductionWorkflowDashboard'));
+const ProductionCapacityDashboard = lazyPage(() => import('./modules/production/ProductionCapacityDashboard'));
+const SalesOrderListPage = lazyPage(() => import('./modules/accounts/sales/SalesOrderListPage'));
+const CuttingDailyReportPage = lazyPage(() => import('./modules/initialisation_portal/CuttingDailyReportPage'));
+const InterliningManagerPage = lazyPage(() => import('./modules/initialisation_portal/InterliningManagerPage'));
+const FabricRollManagementPage = lazyPage(() => import('./modules/accounts/purchase/FabricIntakeForm'));
+const PurchaseInvoicesPage = lazyPage(() => import('./modules/accounts/purchase/PurchaseInvoicesPage'));
+const MechanicsDashboardPage = lazyPage(() => import('./modules/mechanics/MechanicsDashboardPage'));
+const AdminMaintenanceDashboard = lazyPage(() => import('./modules/admin/AdminMaintenanceDashboard'));
+const MaintenanceSchedulePage = lazyPage(() => import('./modules/maintenance/MaintenanceSchedulePage'));
+const SparePartsPage = lazyPage(() => import('./modules/store_manager/SparePartsPage'));
+const GeneralItemsPage = lazyPage(() => import('./modules/store_manager/GeneralItemsPage'));
+const GeneralItemsMasterPage = lazyPage(() => import('./modules/admin/GeneralItemsMasterPage'));
+const SparesAnalyticsPage = lazyPage(() => import('./modules/store_manager/SparesAnalyticsPage'));
+const TrimReservationsPage = lazyPage(() => import('./modules/store_manager/TrimReservationsPage'));
+const SupplierColorCodesPage = lazyPage(() => import('./modules/store_manager/SupplierColorCodesPage'));
+const TrimStockLedgerPage = lazyPage(() => import('./modules/store_manager/TrimStockLedgerPage'));
+const FabricRollsPage = lazyPage(() => import('./modules/fabric_store/FabricRollsPage'));
+const FabricInwardsPage = lazyPage(() => import('./modules/fabric_store/FabricInwardsPage'));
+const DispatchDashboardPage = lazyPage(() => import('./modules/depatch_portal/DispatchDashboardPage'));
+const DispatchReceiptsPage = lazyPage(() => import('./modules/depatch_portal/DispatchReceiptsPage'));
+const DispatchJobWorkPage = lazyPage(() => import('./modules/depatch_portal/DispatchJobWorkPage'));
+const AccountsJobWorkPage = lazyPage(() => import('./modules/accounts/JobWorkPage'));
+const SparesIssuanceDashboard = lazyPage(() => import('./modules/store_manager/SparesIssuanceDashboard'));
+const BomDashboardPage = lazyPage(() => import('./modules/merchandiser/BomDashboardPage'));
+const BomFormPage = lazyPage(() => import('./modules/merchandiser/BomFormPage'));
+const GarmentMeasurementChartPage = lazyPage(() => import('./modules/merchandiser/GarmentMeasurementChartPage'));
+const MerchandiserPlanningPage = lazyPage(() => import('./modules/merchandiser/MerchandiserPlanningPage'));
+const ReleaseRecommendationsPage = lazyPage(() => import('./modules/merchandiser/ReleaseRecommendationsPage'));
+const RequirementsPage = lazyPage(() => import('./modules/purchase_department/RequirementsPage'));
+const RaiseRequirementPage = lazyPage(() => import('./modules/purchase_department/RaiseRequirementPage'));
+const OrdersPage = lazyPage(() => import('./modules/purchase_department/OrdersPage'));
+const TrimsLedgerPage = lazyPage(() => import('./modules/purchase_department/TrimsLedgerPage'));
+const PurchaseFlowPage = lazyPage(() => import('./modules/purchase_department/PurchaseFlowPage'));
+const InwardsPage = lazyPage(() => import('./modules/purchase_department/InwardsPage'));
+const GrnInvoiceByDatePage = lazyPage(() => import('./modules/purchase_department/GrnInvoiceByDatePage'));
+const HRDataImportPage = lazyPage(() => import('./modules/hr_portal/HRDataImportPage'));
+const DailyAttendancePage = lazyPage(() => import('./modules/hr_portal/DailyAttendancePage'));
+const EmployeeDirectoryPage = lazyPage(() => import('./modules/hr_portal/EmployeeDirectoryPage'));
+const ShiftConfigurationPage = lazyPage(() => import('./modules/hr_portal/ShiftConfigurationPage'));
+const ProductionCostingDashboard = lazyPage(() => import('./modules/production/ProductionCostingDashboard'));
+const LineStaffCostingPage = lazyPage(() => import('./modules/lineManager/LineStaffCostingPage'));
+const OutputLogsPage = lazyPage(() => import('./modules/lineManager/OutputLogsPage'));
+const ProductionSettingsPage = lazyPage(() => import('./modules/production/ProductionSettingsPage'));
+const ProductionTargetPage = lazyPage(() => import('./modules/production/ProductionTargetPage'));
+const ScoreboardPage = lazyPage(() => import('./modules/production/ScoreboardPage'));
+const ScorecardDetailedPage = lazyPage(() => import('./modules/production/ScorecardDetailedPage'));
+const BomApprovalPage = lazyPage(() => import('./modules/production/BomApprovalPage'));
+const JobWorkDashboardPage = lazyPage(() => import('./modules/production_manager/JobWorkDashboardPage'));
+const ReceiverDashboardPage = lazyPage(() => import('./modules/receiver/ReceiverDashboardPage'));
+const AdminLineConfigPage = lazyPage(() => import('./modules/asset/AdminLineConfigPage'));
+const UniversalWorkstationDashboard = lazyPage(() => import('./modules/Universal/UniversalWorkstationDashboard'));
+const GarmentProcessingPortal = lazyPage(() => import('./modules/garment_checker/GarmentProcessingPortal'));
+const GarmentMonitor = lazyPage(() => import('./modules/garment_checker/GarmentMonitor'));
+const ProductionAnalyticsDashboard = lazyPage(() => import('./modules/management/FactoryLineControlBoard'));
+const TrimLossRegisterPage = lazyPage(() => import('./modules/trim_loss/TrimLossRegisterPage'));
+const CaseDetailPage = lazyPage(() => import('./modules/trim_loss/CaseDetailPage'));
+const HrRecoveryQueuePage = lazyPage(() => import('./modules/trim_loss/HrRecoveryQueuePage'));
+const FinalQcRegisterPage = lazyPage(() => import('./modules/final_qc/FinalQcRegisterPage'));
+const FinalQcDetailPage = lazyPage(() => import('./modules/final_qc/FinalQcDetailPage'));
+const LiveQcTrackingPage = lazyPage(() => import('./modules/qc_live/LiveQcTrackingPage'));
+const MyBugReportsPage = lazyPage(() => import('./modules/bug_reports/MyBugReportsPage'));
+const BugReportDetailPage = lazyPage(() => import('./modules/bug_reports/BugReportDetailPage'));
+const BugReportAdminDashboardPage = lazyPage(() => import('./modules/bug_reports/BugReportAdminDashboardPage'));
 
 
-function App() {
-  return (
+
+// Route tree as a constant so lazyPage can read which pages belong to which
+// portal (background download of a portal's other pages).
+const appRoutes = (
     <Routes>
       {/* --- 1. PUBLIC ROUTES --- */}
       <Route path="/" element={<LoginPage />} />
@@ -584,6 +590,15 @@ function App() {
       {/* --- 3. CATCH-ALL REDIRECT --- */}
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
+);
+registerPrefetchGroups(appRoutes);
+
+function App() {
+  return (
+    <>
+      <OfflineBanner />
+      {appRoutes}
+    </>
   );
 }
 

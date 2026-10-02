@@ -1854,11 +1854,9 @@ const BatchStageDrilldownModal = ({ batchId, flowId, stageName, onClose }) => {
     useEffect(() => {
 
 
-        console.log('Fetching drilldownnnn for batchId:', batchId);
         productionManagerApi.getBatchDrilldownFull(batchId)
             .then(res => {
                 // handle both { data: {...} } and raw-body responses
-                console.log('getBatchDrilldownFull response:', res.data);
                 setDrilldown(res.data?.data ?? res.data);
             })
             .catch(err => setError(err?.response?.data?.error || err.message || 'Failed to load'))
