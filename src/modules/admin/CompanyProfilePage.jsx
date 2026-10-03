@@ -352,6 +352,8 @@ function SectionSaveBar({ label, dirty, saving, disabled, msg, onSave }) {
 
 function KioskScorecardOrderCard() {
     const [workstations, setWorkstations] = useState([]); // full active-workstation list, for names
+    const [lines,        setLines]        = useState([]); // active production lines (line-batches screen)
+    const [batchLines,   setBatchLines]   = useState([]); // line ids shown on the kiosk's line-batches screen
     const [order,        setOrder]        = useState([]); // workstation_id[] as strings
     const [hidden,       setHidden]       = useState(() => new Set()); // workstation_ids switched off for the public screen
     const [options,      setOptions]      = useState({ show_logo: true, show_wordmark: true, show_image: false, text_scale: DEFAULT_TEXT_SCALE }); // idle-screen animations + text sizes
@@ -380,6 +382,11 @@ function KioskScorecardOrderCard() {
                 const reconciled = savedOrder.filter(id => currentIds.includes(id));
                 currentIds.forEach(id => { if (!reconciled.includes(id)) reconciled.push(id); });
                 setWorkstations(ws);
+                const activeLines = res.data?.lines ?? [];
+                const loadedBatchLines = (res.data?.options?.batch_lines ?? []).map(String)
+                    .filter(id => activeLines.some(l => String(l.line_id) === id));
+                setLines(activeLines);
+                setBatchLines(loadedBatchLines);
                 setOrder(reconciled);
                 setHidden(new Set((res.data?.hidden ?? []).map(String).filter(id => currentIds.includes(id))));
                 const loadedOptions = {
@@ -396,6 +403,7 @@ function KioskScorecardOrderCard() {
                     hidden: loadedHidden,
                     idle: { show_logo: loadedOptions.show_logo, show_wordmark: loadedOptions.show_wordmark, show_image: loadedOptions.show_image },
                     text_scale: loadedOptions.text_scale,
+                    batch_lines: loadedBatchLines,
                 });
                 setMsgs({});
             })
@@ -477,6 +485,7 @@ function KioskScorecardOrderCard() {
             || JSON.stringify([...hidden].sort()) !== JSON.stringify([...saved.hidden].sort())),
         idle: !!saved && JSON.stringify(currentIdle) !== JSON.stringify(saved.idle),
         text: !!saved && JSON.stringify(options.text_scale) !== JSON.stringify(saved.text_scale),
+        lines: !!saved && JSON.stringify(batchLines) !== JSON.stringify(saved.batch_lines),
     };
 
     // Saves ONE section; the server merges options, so the others are untouched.
@@ -486,6 +495,9 @@ function KioskScorecardOrderCard() {
             if (key === 'rows') {
                 await adminApi.saveKioskScorecardOrder(order, [...hidden], undefined);
                 setSaved(sv => ({ ...sv, order: [...order], hidden: [...hidden] }));
+            } else if (key === 'lines') {
+                await adminApi.saveKioskScorecardOrder(undefined, undefined, { batch_lines: batchLines });
+                setSaved(sv => ({ ...sv, batch_lines: [...batchLines] }));
             } else if (key === 'idle') {
                 await adminApi.saveKioskScorecardOrder(undefined, undefined, currentIdle);
                 setSaved(sv => ({ ...sv, idle: { ...currentIdle } }));
@@ -646,6 +658,36 @@ function KioskScorecardOrderCard() {
                 )}
                 <SectionSaveBar label="Rows" dirty={dirty.rows} saving={savingKey === 'rows'}
                     disabled={!loaded || orderedWorkstations.length === 0} msg={msgs.rows} onSave={() => saveSection('rows')} />
+                </div>
+                <div className="space-y-2 border border-slate-200 rounded-xl p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Line batches screen</p>
+                    <p className="text-xs text-slate-500">
+                        After the idle screen, the TV shows the batches running on each line you switch on here, with % done
+                        at that line's stage and pending / total pieces (garments on garment lines). Lines appear in the order
+                        you switch them on. With none on, this screen is skipped.
+                    </p>
+                    {lines.length === 0 ? (
+                        <p className="text-xs text-slate-400 italic py-1">{loaded ? 'No active production lines.' : 'Loading…'}</p>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {lines.map(l => {
+                                const id = String(l.line_id);
+                                const on = batchLines.includes(id);
+                                return (
+                                    <ToggleSwitch
+                                        key={id}
+                                        icon={Tv}
+                                        checked={on}
+                                        onChange={v => setBatchLines(prev => (v ? [...prev.filter(x => x !== id), id] : prev.filter(x => x !== id)))}
+                                        label={l.line_name}
+                                        hint={on ? `${l.stage_name} · #${batchLines.indexOf(id) + 1} on the screen` : l.stage_name}
+                                    />
+                                );
+                            })}
+                        </div>
+                    )}
+                    <SectionSaveBar label="Line Screen" dirty={dirty.lines} saving={savingKey === 'lines'}
+                        disabled={!loaded} msg={msgs.lines} onSave={() => saveSection('lines')} />
                 </div>
                 <div className="flex items-center gap-2">
                     <button

@@ -17,7 +17,9 @@
 //
 // Idle-screen cycle (TV layout only): the grid shows for GRID_MS, then an
 // animated idle screen takes over for IDLE_MS, then back to the grid, and so
-// on. There are two idle screens — the animated MC logo and the "MATRIX
+// on (then, if an admin picked production lines, a "Line Progress" screen —
+// running batches per line with % done — before the grid returns). There are
+// two idle screens — the animated MC logo and the "MATRIX
 // OVERSEAS" wordmark — plus an optional image the admin uploads; each is
 // switched on/off by an admin on /admin/company-profile. Enabled ones take
 // turns (logo, wordmark, image, logo, …), one per
@@ -42,6 +44,11 @@ const LIVE_MIN_GAP_MS = 5000; // fastest the board refetches on live scan events
 const GRID_MS = 60000;  // how long the scorecard grid shows before the logo
 const IDLE_MS = 12000;  // how long an idle animation shows before the grid returns
 const FADE_MS = 700;    // cross-fade between grid and idle screen
+const LINES_PAGE_MS = 15000;   // each page of the line-batches screen
+const CARDS_PER_PAGE = 4;      // cards per page (2 × 2)
+const BATCHES_PER_CARD = 4;    // a line with more batches continues on further cards
+const LINE_BATCHES_POLL_MS = 60000;
+const PRIORITY_RANK = { HIGH: 0, MEDIUM: 1, LOW: 2 };
 
 const STAT_COLORS = {
     approved:  'text-emerald-400',
@@ -229,6 +236,102 @@ const WorkstationRow = ({ w, sz, ts }) => (
 // timed-rotation pages — a phone has no "someone standing across the room"
 // constraint, so there's no reason to hide rows behind a 15s rotation.
 // Per request: only the user's name is shown per row, not the workstation.
+// ─── Line batches screen ──────────────────────────────────────────────────────
+// One card per production line (CARDS_PER_PAGE per page; a busy line spans several cards): the batches
+// running there and each batch's progress at that line's stage — % done and
+// pending / total (pieces, or garments at garment stages). Sizes in vh/vw so
+// it reads from across the floor on any TV.
+const pctColor = (pct) => (pct >= 90 ? 'bg-emerald-500' : pct >= 50 ? 'bg-sky-500' : 'bg-amber-500');
+const pctText = (pct) => (pct >= 90 ? 'text-emerald-400' : pct >= 50 ? 'text-sky-400' : 'text-amber-400');
+const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString('en-IN'));
+
+// A line with more than BATCHES_PER_CARD batches is split over several cards
+// ("batches 1–4 of 19", "5–8 of 19", …) so every batch is shown, never hidden.
+const buildLineCards = (lines) => lines.flatMap(line => {
+    const batches = [...line.batches].sort((a, b) =>
+        (PRIORITY_RANK[a.priority] ?? 1) - (PRIORITY_RANK[b.priority] ?? 1) || Number(a.batch_id) - Number(b.batch_id));
+    if (batches.length === 0) return [{ key: line.line_id, line, batches, from: 0, to: 0, total: 0 }];
+    const cards = [];
+    for (let i = 0; i < batches.length; i += BATCHES_PER_CARD) {
+        const chunk = batches.slice(i, i + BATCHES_PER_CARD);
+        cards.push({ key: `${line.line_id}-${i}`, line, batches: chunk, from: i + 1, to: i + chunk.length, total: batches.length });
+    }
+    return cards;
+});
+
+function LineBatchCard({ card }) {
+    const { line, batches: shown, from, to, total } = card;
+    return (
+        <div className="bg-gray-900 border border-gray-700 rounded-2xl p-[1.6vh] flex flex-col min-h-0 overflow-hidden">
+            <div className="flex items-baseline gap-[1vw] mb-[1.2vh] min-w-0">
+                <span className="font-black text-white truncate" style={{ fontSize: '3.4vh' }}>{line.line_name}</span>
+                <span className="font-bold uppercase tracking-widest text-gray-500 truncate" style={{ fontSize: '1.7vh' }}>{line.stage_name}</span>
+                <span className="ml-auto font-bold text-gray-400 shrink-0" style={{ fontSize: '1.8vh' }}>
+                    {total > BATCHES_PER_CARD
+                        ? `batches ${from}–${to} of ${total}`
+                        : `${total} batch${total !== 1 ? 'es' : ''}`}
+                </span>
+            </div>
+            {total === 0 ? (
+                <p className="m-auto font-bold text-gray-600" style={{ fontSize: '2.2vh' }}>No batches running</p>
+            ) : (
+                <div className="flex flex-col gap-[1.1vh] min-h-0">
+                    {shown.map(b => {
+                        const started = b.total > 0;
+                        return (
+                            <div key={b.batch_id} className="min-w-0">
+                                <div className="flex items-baseline gap-[0.8vw] min-w-0">
+                                    <span className="font-black text-white shrink-0" style={{ fontSize: '2.3vh' }}>#{b.batch_id}</span>
+                                    {b.priority === 'HIGH' && (
+                                        <span className="font-black text-rose-300 bg-rose-900/60 rounded px-[0.4vw] shrink-0" style={{ fontSize: '1.4vh' }}>HIGH</span>
+                                    )}
+                                    <span className="font-bold text-gray-400 truncate" style={{ fontSize: '1.9vh' }}>{b.product_name}</span>
+                                    <span className={`ml-auto font-black tabular-nums shrink-0 ${started ? pctText(b.pct) : 'text-gray-600'}`} style={{ fontSize: '2.8vh' }}>
+                                        {started ? `${b.pct}%` : '—'}
+                                    </span>
+                                </div>
+                                <div className="h-[0.9vh] bg-gray-800 rounded-full overflow-hidden mt-[0.4vh]">
+                                    <div className={`h-full ${pctColor(b.pct)}`} style={{ width: `${started ? b.pct : 0}%` }} />
+                                </div>
+                                <div className="font-bold text-gray-500 tabular-nums mt-[0.3vh]" style={{ fontSize: '1.7vh' }}>
+                                    {started
+                                        ? <><span className="text-gray-300">{fmt(b.pending)}</span> pending / {fmt(b.total)} {b.unit || ''}</>
+                                        : 'Not started at this stage'}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function LineBatchesScreen({ cards, page, pageCount }) {
+    // Always the 2 × 2 grid when a page is full; a short last page keeps the
+    // same card size (no stretching one card over the whole screen).
+    const cols = 'grid-cols-2';
+    const rows = 'grid-rows-2';
+    return (
+        <div className="w-full h-full bg-black text-white flex flex-col p-[2.5vh]">
+            <div className="flex items-center gap-[1vw] mb-[2vh] shrink-0">
+                <span className="font-black uppercase tracking-widest text-gray-300" style={{ fontSize: '3vh' }}>Line Progress</span>
+                <span className="font-bold text-gray-600" style={{ fontSize: '1.8vh' }}>batches running on each line · % done at that stage</span>
+                {pageCount > 1 && (
+                    <span className="ml-auto flex gap-[0.5vw]">
+                        {Array.from({ length: pageCount }, (_, i) => (
+                            <span key={i} className={`rounded-full ${i === page ? 'bg-white' : 'bg-gray-700'}`} style={{ width: '1.2vh', height: '1.2vh' }} />
+                        ))}
+                    </span>
+                )}
+            </div>
+            <div className={`flex-1 min-h-0 grid ${cols} ${rows} gap-[2vh]`}>
+                {cards.map(c => <LineBatchCard key={c.key} card={c} />)}
+            </div>
+        </div>
+    );
+}
+
 const MOBILE_BREAKPOINT = 768;
 
 function useIsMobile(breakpoint = MOBILE_BREAKPOINT) {
@@ -291,7 +394,7 @@ export default function PublicWorkstationScorecardPage() {
     const [rowOrder, setRowOrder] = useState([]); // workstation_id[] as strings
     // Which idle animations an admin has left switched on (both default on,
     // and stay on if the setting can't be read).
-    const [options, setOptions] = useState({ show_logo: true, show_wordmark: true, show_image: false, idle_image_url: null, text_scale: normalizeTextScale(null) });
+    const [options, setOptions] = useState({ show_logo: true, show_wordmark: true, show_image: false, idle_image_url: null, batch_lines: [], text_scale: normalizeTextScale(null) });
 
     // Measured size of the rows container — ResizeObserver-driven so font
     // sizes (see computeSizes above) always resolve against real available
@@ -332,6 +435,7 @@ export default function PublicWorkstationScorecardPage() {
                         show_wordmark: o?.show_wordmark !== false,
                         show_image: o?.show_image === true,
                         idle_image_url: o?.idle_image_url || null,
+                        batch_lines: Array.isArray(o?.batch_lines) ? o.batch_lines.map(String) : [],
                         text_scale: normalizeTextScale(o?.text_scale),
                     };
                     // keep the same object when nothing changed, so a poll doesn't re-render the grid
@@ -371,7 +475,7 @@ export default function PublicWorkstationScorecardPage() {
 
     // Grid ⇄ idle-screen timer. `phase` is what's logically showing;
     // `idleMounted` lags it on the way OUT so the overlay can fade away
-    // instead of vanishing. `idleKind` holds which animation is up.
+    // instead of vanishing. `overlayKind` holds which screen is up.
     // Third idle screen: the admin-uploaded image (only when switched on AND
     // it actually loaded — a broken/missing file is skipped, never shown).
     const idleImageSrc = resolveUploadUrl(options.idle_image_url);
@@ -392,26 +496,68 @@ export default function PublicWorkstationScorecardPage() {
     ].filter(Boolean);
     const idleKindsRef = useRef(idleKinds);
     idleKindsRef.current = idleKinds;
-    const nextIdleRef = useRef(0);
-    const [phase, setPhase] = useState('grid'); // 'grid' | 'idle'
-    const [idleKind, setIdleKind] = useState(null); // 'logo' | 'wordmark' | 'image'
-    const [idleMounted, setIdleMounted] = useState(false);
-    const [windowN, setWindowN] = useState(0); // bumps to re-arm the grid timer when nothing is enabled
+    // Line-batches screen data (only fetched when an admin picked lines).
+    const batchLinesKey = options.batch_lines.join(',');
+    const [lineData, setLineData] = useState([]);
     useEffect(() => {
+        if (!batchLinesKey) { setLineData([]); return undefined; }
+        let alive = true;
+        const load = () => publicApi.getLineBatches()
+            .then(res => { if (alive) setLineData(Array.isArray(res.data) ? res.data : []); })
+            .catch(err => console.error('[PublicWorkstationScorecard] line-batches fetch error — keeping last data', err));
+        load();
+        const t = setInterval(load, LINE_BATCHES_POLL_MS);
+        return () => { alive = false; clearInterval(t); };
+    }, [batchLinesKey]);
+    const linePages = useMemo(() => {
+        const cards = buildLineCards(lineData);
+        const out = [];
+        for (let i = 0; i < cards.length; i += CARDS_PER_PAGE) out.push(cards.slice(i, i + CARDS_PER_PAGE));
+        return out;
+    }, [lineData]);
+    const linePagesRef = useRef(linePages);
+    linePagesRef.current = linePages;
+
+    // Cycle: grid → idle screen (if any switched on) → line batches (if any
+    // lines picked, one LINES_PAGE_MS window per page) → grid.
+    const nextIdleRef = useRef(0);
+    const [phase, setPhase] = useState('grid'); // 'grid' | 'idle' | 'lines'
+    const [overlayKind, setOverlayKind] = useState(null); // 'logo' | 'wordmark' | 'image' | 'lines'
+    const [linesPage, setLinesPage] = useState(0);
+    const [idleMounted, setIdleMounted] = useState(false);
+    const [windowN, setWindowN] = useState(0); // bumps to re-arm the timer
+    useEffect(() => {
+        const startIdle = () => {
+            const kinds = idleKindsRef.current; // read at fire time, so a settings change applies to the very next window
+            if (kinds.length === 0) return false;
+            setOverlayKind(kinds[nextIdleRef.current % kinds.length]);
+            nextIdleRef.current += 1;
+            setIdleMounted(true);
+            setPhase('idle');
+            return true;
+        };
+        const startLines = () => {
+            if (linePagesRef.current.length === 0) return false;
+            setLinesPage(0);
+            setOverlayKind('lines');
+            setIdleMounted(true);
+            setPhase('lines');
+            return true;
+        };
+        const dur = phase === 'grid' ? GRID_MS : phase === 'idle' ? IDLE_MS : LINES_PAGE_MS;
         const t = setTimeout(() => {
             if (phase === 'grid') {
-                const kinds = idleKindsRef.current; // read at fire time, so a settings change applies to the very next window
-                if (kinds.length === 0) { setWindowN(n => n + 1); return; }
-                setIdleKind(kinds[nextIdleRef.current % kinds.length]);
-                nextIdleRef.current += 1;
-                setIdleMounted(true);
-                setPhase('idle');
+                if (!startIdle() && !startLines()) setWindowN(n => n + 1);
+            } else if (phase === 'idle') {
+                if (!startLines()) setPhase('grid');
+            } else if (linesPage + 1 < linePagesRef.current.length) {
+                setLinesPage(p => p + 1);
             } else {
                 setPhase('grid');
             }
-        }, phase === 'grid' ? GRID_MS : IDLE_MS);
+        }, dur);
         return () => clearTimeout(t);
-    }, [phase, windowN]);
+    }, [phase, windowN, linesPage]);
     useEffect(() => {
         if (phase !== 'grid' || !idleMounted) return;
         const t = setTimeout(() => setIdleMounted(false), FADE_MS + 100);
@@ -442,6 +588,7 @@ export default function PublicWorkstationScorecardPage() {
         () => Object.fromEntries(TEXT_SCALE_KEYS.map(k => [k, options.text_scale[k] / 100])),
         [options.text_scale]
     );
+    const tickerH = Math.round(96 * ts.ticker); // also where the Line Progress overlay starts
 
     const pages = useMemo(() => {
         const out = [];
@@ -453,8 +600,8 @@ export default function PublicWorkstationScorecardPage() {
     // deactivated) leaving the index pointing past the new last page.
     useEffect(() => { setPageIdx(i => (pages.length ? i % pages.length : 0)); }, [pages.length]);
     useEffect(() => {
-        // Held while an idle animation is showing so no page is silently skipped behind it.
-        if (pages.length <= 1 || phase === 'idle') return;
+        // Held while an idle / line screen is showing so no page is silently skipped behind it.
+        if (pages.length <= 1 || phase !== 'grid') return;
         const t = setInterval(() => setPageIdx(i => (i + 1) % pages.length), ROTATE_MS);
         return () => clearInterval(t);
     }, [pages.length, phase]);
@@ -526,7 +673,7 @@ export default function PublicWorkstationScorecardPage() {
             {/* Ticker */}
             <div
                 className="shrink-0 bg-gray-950 border-b border-gray-800 flex items-center overflow-hidden relative"
-                style={{ height: Math.round(96 * ts.ticker) }}
+                style={{ height: tickerH }}
             >
                 <div className="shrink-0 px-5 h-full flex items-center bg-black border-r border-gray-800 z-10">
                     <span className="font-black uppercase tracking-widest text-gray-500 flex items-center gap-2" style={{ fontSize: 16 * ts.ticker }}>
@@ -576,12 +723,18 @@ export default function PublicWorkstationScorecardPage() {
                 the top on its next turn. */}
             {idleMounted && (
                 <div
-                    className="fixed inset-0 z-50 bg-black flex items-center justify-center overflow-hidden"
-                    style={{ animation: `${phase === 'idle' ? 'wls-idle-in' : 'wls-idle-out'} ${FADE_MS}ms ease forwards` }}
+                    className="fixed inset-x-0 bottom-0 z-50 bg-black flex items-center justify-center overflow-hidden"
+                    // Line Progress keeps the scorecard ticker visible and scrolling
+                    // above it; the logo / wordmark / image idle screens stay full-screen.
+                    style={{ top: overlayKind === 'lines' ? tickerH : 0, animation: `${phase !== 'grid' ? 'wls-idle-in' : 'wls-idle-out'} ${FADE_MS}ms ease forwards` }}
                 >
-                    {idleKind === 'image' && idleImageSrc
+                    {overlayKind === 'lines' ? (
+                        <div key={`lines-${linesPage}`} className="w-full h-full" style={{ animation: `wls-idle-in ${FADE_MS}ms ease forwards` }}>
+                            <LineBatchesScreen cards={linePages[linesPage] || []} page={linesPage} pageCount={linePages.length} />
+                        </div>
+                    ) : overlayKind === 'image' && idleImageSrc
                         ? <img src={idleImageSrc} alt="" className="w-full h-full object-contain" />
-                        : idleKind === 'wordmark' ? <AnimatedMatrixWordmark /> : <AnimatedMatrixLogo />}
+                        : overlayKind === 'wordmark' ? <AnimatedMatrixWordmark /> : <AnimatedMatrixLogo />}
                 </div>
             )}
         </div>

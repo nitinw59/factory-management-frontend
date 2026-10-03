@@ -11,4 +11,7 @@ export const publicApi = {
     // (adminApi.getKioskScorecardOrder / saveKioskScorecardOrder) — this is
     // just the kiosk page's own read of that same saved value.
     getWorkstationScorecardOrder: () => api.get('/public/workstation-scorecard-order'),
+    // Running batches + stage progress for the production lines an admin picked
+    // (kiosk "line batches" screen).
+    getLineBatches: () => api.get('/public/line-batches'),
 };
