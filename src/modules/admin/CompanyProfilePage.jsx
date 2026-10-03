@@ -325,15 +325,47 @@ function ToggleSwitch({ checked, onChange, label, hint, icon: Icon }) {
 // else to manage. Self-contained like MatchToleranceCard above: loads/saves
 // through its own endpoints (app_settings key kiosk_scorecard_row_order),
 // not through the company_profile row/form.
+// Save bar for one section of the kiosk card — each section saves on its own.
+function SectionSaveBar({ label, dirty, saving, disabled, msg, onSave }) {
+    return (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+            <button
+                type="button"
+                onClick={onSave}
+                disabled={disabled || saving || !dirty}
+                className="flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 px-3 py-2 rounded-lg transition"
+            >
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                Save {label}
+            </button>
+            {dirty && !saving && (
+                <span className="text-[11px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">Unsaved changes</span>
+            )}
+            {msg && (
+                <span className={`text-xs flex items-center gap-1 ${msg.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {msg.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />} {msg.text}
+                </span>
+            )}
+        </div>
+    );
+}
+
 function KioskScorecardOrderCard() {
     const [workstations, setWorkstations] = useState([]); // full active-workstation list, for names
     const [order,        setOrder]        = useState([]); // workstation_id[] as strings
     const [hidden,       setHidden]       = useState(() => new Set()); // workstation_ids switched off for the public screen
-    const [options,      setOptions]      = useState({ show_logo: true, show_wordmark: true, text_scale: DEFAULT_TEXT_SCALE }); // idle-screen animations + text sizes
+    const [options,      setOptions]      = useState({ show_logo: true, show_wordmark: true, show_image: false, text_scale: DEFAULT_TEXT_SCALE }); // idle-screen animations + text sizes
+    const [idleImageUrl, setIdleImageUrl] = useState(null);  // uploaded kiosk idle image ('/uploads/…'), saved immediately on upload
+    const [imageBusy,    setImageBusy]    = useState(false);
+    const imageInputRef = useRef(null);
     const [loaded,        setLoaded]       = useState(false);
-    const [saving,        setSaving]       = useState(false);
     const [dragId,        setDragId]       = useState(null);
-    const [msg,           setMsg]          = useState(null); // { ok: bool, text }
+    // Each section (rows / idle / text) saves on its own: what's on the server,
+    // which section is saving, and a message per section.
+    const [saved,         setSaved]        = useState(null); // { order, hidden[], idle{}, text_scale{} }
+    const [savingKey,     setSavingKey]    = useState(null); // 'rows' | 'idle' | 'text'
+    const [msgs,          setMsgs]         = useState({});   // { rows|idle|text|load: { ok, text } }
+    const setMsg = (key, m) => setMsgs(prev => ({ ...prev, [key]: m }));
 
     const load = useCallback(() => {
         setLoaded(false);
@@ -350,13 +382,24 @@ function KioskScorecardOrderCard() {
                 setWorkstations(ws);
                 setOrder(reconciled);
                 setHidden(new Set((res.data?.hidden ?? []).map(String).filter(id => currentIds.includes(id))));
-                setOptions({
+                const loadedOptions = {
                     show_logo:     res.data?.options?.show_logo     !== false,
                     show_wordmark: res.data?.options?.show_wordmark !== false,
+                    show_image:    res.data?.options?.show_image === true,
                     text_scale:    { ...DEFAULT_TEXT_SCALE, ...(res.data?.options?.text_scale ?? {}) },
+                };
+                const loadedHidden = (res.data?.hidden ?? []).map(String).filter(id => currentIds.includes(id));
+                setOptions(loadedOptions);
+                setIdleImageUrl(res.data?.options?.idle_image_url || null);
+                setSaved({
+                    order: reconciled,
+                    hidden: loadedHidden,
+                    idle: { show_logo: loadedOptions.show_logo, show_wordmark: loadedOptions.show_wordmark, show_image: loadedOptions.show_image },
+                    text_scale: loadedOptions.text_scale,
                 });
+                setMsgs({});
             })
-            .catch(() => setMsg({ ok: false, text: 'Failed to load workstation order.' }))
+            .catch(() => setMsg('load', { ok: false, text: 'Failed to load kiosk settings.' }))
             .finally(() => setLoaded(true));
     }, []);
 
@@ -387,15 +430,74 @@ function KioskScorecardOrderCard() {
         return next;
     });
 
-    const save = async () => {
-        setSaving(true); setMsg(null);
+    // The kiosk image uploads/removes straight away (its own endpoint) — the
+    // Show switch next to it is saved with the idle-screen section's Save.
+    const handleIdleImagePick = async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+            setMsg('idle', { ok: false, text: 'Kiosk image must be JPG, PNG or WEBP.' }); return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            setMsg('idle', { ok: false, text: 'Kiosk image is too large — maximum 5 MB.' }); return;
+        }
+        setImageBusy(true); setMsg('idle', null);
         try {
-            await adminApi.saveKioskScorecardOrder(order, [...hidden], options);
-            setMsg({ ok: true, text: 'Kiosk scorecard saved. The TV screen picks it up within a minute.' });
-        } catch (e) {
-            setMsg({ ok: false, text: e?.response?.data?.error || 'Failed to save kiosk row order.' });
+            const res = await adminApi.uploadKioskIdleImage(file);
+            setIdleImageUrl(res.data?.idle_image_url || null);
+            setMsg('idle', { ok: true, text: 'Image uploaded. Turn on "Show uploaded image" and press Save Idle Screens to put it on the TV.' });
+        } catch (err) {
+            setMsg('idle', { ok: false, text: err?.response?.data?.error || 'Failed to upload kiosk image.' });
         } finally {
-            setSaving(false);
+            setImageBusy(false);
+        }
+    };
+    const handleIdleImageRemove = async () => {
+        if (!window.confirm('Remove the kiosk image? It will stop showing on the TV.')) return;
+        setImageBusy(true); setMsg('idle', null);
+        try {
+            await adminApi.deleteKioskIdleImage();
+            setIdleImageUrl(null);
+            // Also switch it off in the saved settings, so nothing is left half-done.
+            await adminApi.saveKioskScorecardOrder(undefined, undefined, { show_image: false });
+            setOptions(o => ({ ...o, show_image: false }));
+            setSaved(sv => sv && ({ ...sv, idle: { ...sv.idle, show_image: false } }));
+            setMsg('idle', { ok: true, text: 'Kiosk image removed.' });
+        } catch (err) {
+            setMsg('idle', { ok: false, text: err?.response?.data?.error || 'Failed to remove kiosk image.' });
+        } finally {
+            setImageBusy(false);
+        }
+    };
+
+    const currentIdle = { show_logo: options.show_logo, show_wordmark: options.show_wordmark, show_image: options.show_image && !!idleImageUrl };
+    const dirty = {
+        rows: !!saved && (JSON.stringify(order) !== JSON.stringify(saved.order)
+            || JSON.stringify([...hidden].sort()) !== JSON.stringify([...saved.hidden].sort())),
+        idle: !!saved && JSON.stringify(currentIdle) !== JSON.stringify(saved.idle),
+        text: !!saved && JSON.stringify(options.text_scale) !== JSON.stringify(saved.text_scale),
+    };
+
+    // Saves ONE section; the server merges options, so the others are untouched.
+    const saveSection = async (key) => {
+        setSavingKey(key); setMsg(key, null);
+        try {
+            if (key === 'rows') {
+                await adminApi.saveKioskScorecardOrder(order, [...hidden], undefined);
+                setSaved(sv => ({ ...sv, order: [...order], hidden: [...hidden] }));
+            } else if (key === 'idle') {
+                await adminApi.saveKioskScorecardOrder(undefined, undefined, currentIdle);
+                setSaved(sv => ({ ...sv, idle: { ...currentIdle } }));
+            } else {
+                await adminApi.saveKioskScorecardOrder(undefined, undefined, { text_scale: options.text_scale });
+                setSaved(sv => ({ ...sv, text_scale: { ...options.text_scale } }));
+            }
+            setMsg(key, { ok: true, text: 'Saved. The TV picks it up within a minute.' });
+        } catch (e) {
+            setMsg(key, { ok: false, text: e?.response?.data?.error || 'Failed to save.' });
+        } finally {
+            setSavingKey(null);
         }
     };
 
@@ -407,17 +509,17 @@ function KioskScorecardOrderCard() {
             </div>
             <div className="px-5 py-4 space-y-3">
                 <p className="text-xs text-slate-500">
-                    Controls the order workstations appear in on the public TV scorecard
-                    (<span className="font-mono">/kiosk/workstation-scorecard</span>) — both the rotating rows
-                    and the top ticker follow this same order. Drag to rearrange; use the eye to show or
-                    hide a workstation on the public screen.
-                    {hidden.size > 0 && <span className="ml-1 font-semibold text-amber-600">{hidden.size} hidden.</span>}
+                    Settings for the public TV scorecard (<span className="font-mono">/kiosk/workstation-scorecard</span>).
+                    Each section below has its own Save button.
                 </p>
-                <div className="space-y-2">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Idle screen animations</p>
+                {msgs.load && (
+                    <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={13} /> {msgs.load.text}</p>
+                )}
+                <div className="space-y-2 border border-slate-200 rounded-xl p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Idle screens</p>
                     <p className="text-xs text-slate-500">
-                        After a minute on the scorecard the TV plays an animation for a few seconds, then returns.
-                        With both on they alternate; with both off the scorecard just stays up.
+                        After a minute on the scorecard the TV shows an idle screen for a few seconds, then returns.
+                        Switched-on screens take turns; with all off the scorecard just stays up.
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <ToggleSwitch
@@ -434,9 +536,44 @@ function KioskScorecardOrderCard() {
                             label="Show “MATRIX OVERSEAS” animation"
                             hint="The company name set like a logo"
                         />
+                        <ToggleSwitch
+                            icon={ImageIcon}
+                            checked={options.show_image && !!idleImageUrl}
+                            onChange={v => { if (idleImageUrl) setOptions(o => ({ ...o, show_image: v })); }}
+                            label="Show uploaded image"
+                            hint={idleImageUrl ? 'Shown full-screen, taking turns with the animations' : 'Upload an image below first'}
+                        />
+                        <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-dashed border-slate-300">
+                            {idleImageUrl ? (
+                                <img src={resolveAssetUrl(idleImageUrl)} alt="Kiosk idle"
+                                    className="w-24 h-14 object-contain bg-black rounded border border-slate-200 shrink-0" />
+                            ) : (
+                                <div className="w-24 h-14 rounded border border-slate-200 bg-slate-50 flex items-center justify-center shrink-0">
+                                    <ImageIcon size={18} className="text-slate-300" />
+                                </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-slate-700">Kiosk image</p>
+                                <p className="text-[11px] text-slate-400">JPG, PNG or WEBP · max 5 MB · landscape (16:9) fits a TV best</p>
+                            </div>
+                            <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleIdleImagePick} />
+                            <button type="button" onClick={() => imageInputRef.current?.click()} disabled={imageBusy}
+                                className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-300 px-3 py-2 rounded-lg transition bg-white disabled:opacity-50">
+                                {imageBusy ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                                {idleImageUrl ? 'Replace' : 'Upload'}
+                            </button>
+                            {idleImageUrl && (
+                                <button type="button" onClick={handleIdleImageRemove} disabled={imageBusy}
+                                    className="flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700 border border-rose-200 hover:border-rose-300 px-3 py-2 rounded-lg transition bg-white disabled:opacity-50">
+                                    <Trash2 size={12} /> Remove
+                                </button>
+                            )}
+                        </div>
                     </div>
+                    <SectionSaveBar label="Idle Screens" dirty={dirty.idle} saving={savingKey === 'idle'}
+                        disabled={!loaded || imageBusy} msg={msgs.idle} onSave={() => saveSection('idle')} />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 border border-slate-200 rounded-xl p-3">
                     <div className="flex items-center gap-2">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Text size</p>
                         <button
@@ -463,8 +600,16 @@ function KioskScorecardOrderCard() {
                             />
                         ))}
                     </div>
+                    <SectionSaveBar label="Text Size" dirty={dirty.text} saving={savingKey === 'text'}
+                        disabled={!loaded} msg={msgs.text} onSave={() => saveSection('text')} />
                 </div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 pt-1">Workstation rows</p>
+                <div className="space-y-2 border border-slate-200 rounded-xl p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Workstation rows</p>
+                <p className="text-xs text-slate-500">
+                    The order workstations appear in — both the rotating rows and the top ticker follow it. Drag to
+                    rearrange; use the eye to show or hide a workstation on the TV.
+                    {hidden.size > 0 && <span className="ml-1 font-semibold text-amber-600">{hidden.size} hidden.</span>}
+                </p>
                 {!loaded ? (
                     <div className="flex justify-center py-6"><Loader2 className="animate-spin h-5 w-5 text-indigo-500" /></div>
                 ) : orderedWorkstations.length === 0 ? (
@@ -499,29 +644,18 @@ function KioskScorecardOrderCard() {
                         })}
                     </div>
                 )}
+                <SectionSaveBar label="Rows" dirty={dirty.rows} saving={savingKey === 'rows'}
+                    disabled={!loaded || orderedWorkstations.length === 0} msg={msgs.rows} onSave={() => saveSection('rows')} />
+                </div>
                 <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={save}
-                        disabled={!loaded || saving || orderedWorkstations.length === 0}
-                        className="flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-3 py-2 rounded-lg transition"
-                    >
-                        {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                        Save Order
-                    </button>
                     <button
                         type="button"
                         onClick={load}
                         disabled={!loaded}
                         className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-300 px-3 py-2 rounded-lg transition bg-white disabled:opacity-50"
                     >
-                        <RefreshCw size={12} className={!loaded ? 'animate-spin' : ''} /> Reload
+                        <RefreshCw size={12} className={!loaded ? 'animate-spin' : ''} /> Reload (discard unsaved changes)
                     </button>
-                    {msg && (
-                        <span className={`text-xs flex items-center gap-1 ${msg.ok ? 'text-emerald-600' : 'text-red-600'}`}>
-                            {msg.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />} {msg.text}
-                        </span>
-                    )}
                 </div>
             </div>
         </section>

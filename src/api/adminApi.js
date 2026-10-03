@@ -25,6 +25,14 @@ export const adminApi = {
     // `hidden` = workstation_id[] switched off for the public screen;
     // `options` = { show_logo, show_wordmark } idle-animation switches.
     saveKioskScorecardOrder: (order, hidden, options) => api.put('/admin/company-profile/kiosk-scorecard-order', { order, hidden, options }),
+    // Kiosk idle-screen image (JPG/PNG/WEBP, max 5 MB). Shown on the TV only
+    // when options.show_image is on.
+    uploadKioskIdleImage: (file) => {
+        const fd = new FormData();
+        fd.append('image', file);
+        return api.post('/admin/company-profile/kiosk-scorecard-image', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+    },
+    deleteKioskIdleImage: () => api.delete('/admin/company-profile/kiosk-scorecard-image'),
 
     // Trim substitute clusters — reads open to merchandiser/cutting_manager/store_manager
     // too (BomFormPage.jsx's Color Cluster picker needs to list them); mutations

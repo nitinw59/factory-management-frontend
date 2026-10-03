@@ -764,23 +764,39 @@ const SizeProgressBadge = ({ sizeProgress }) => {
 // done", this says exactly which size(s): green = COMPLETED here, blue =
 // still IN_PROGRESS, gray = any other/unexpected status. Only worth showing
 // once a roll actually carries more than one size (MODE_2).
+// Colour = status of that size on this line, matching the tabs: solid green
+// = done here, yellow = in progress, dashed grey = not started yet.
 const SIZE_PILL_STYLE = {
-    COMPLETED:   'bg-emerald-50 text-emerald-700 border-emerald-200',
-    IN_PROGRESS: 'bg-blue-50 text-blue-700 border-blue-200',
+    COMPLETED:   'bg-emerald-500 text-white border-emerald-600',
+    IN_PROGRESS: 'bg-yellow-100 text-yellow-900 border-yellow-400',
+    PENDING:     'bg-white text-slate-400 border-slate-300 border-dashed',
+    // Size of this roll that hasn't been assigned to this line yet (still at
+    // an earlier stage) — shown so the row always lists every size.
+    NOT_HERE:    'bg-slate-200 text-slate-400 border-slate-300',
 };
-const SizeBreakdownPills = ({ sizes }) => {
-    if (!sizes || sizes.length <= 1) return null;
+const SIZE_PILL_FALLBACK = 'bg-slate-100 text-slate-500 border-slate-300';
+// allSizes = every size the batch is cut in (batch.all_sizes); sizes this
+// roll doesn't have on this line yet show grey, so the row always lists all.
+const SizeBreakdownPills = ({ sizes, allSizes = [], className = 'mt-2' }) => {
+    const here = new Map((sizes || []).map(sz => [String(sz.size), sz]));
+    const order = allSizes.length ? allSizes.map(String) : [...here.keys()];
+    here.forEach((_, k) => { if (!order.includes(k)) order.push(k); });
+    if (order.length <= 1) return null;
     return (
-        <div className="flex flex-wrap gap-1 mt-2">
-            {sizes.map(s => (
-                <span
-                    key={s.size}
-                    title={`Size ${s.size}: ${s.status.replace('_', ' ')}`}
-                    className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${SIZE_PILL_STYLE[s.status] || 'bg-slate-50 text-slate-500 border-slate-200'}`}
-                >
-                    {s.size}
-                </span>
-            ))}
+        <div className={`flex flex-wrap gap-1 ${className}`}>
+            {order.map(size => {
+                const sz = here.get(size);
+                const status = sz ? sz.status : 'NOT_HERE';
+                return (
+                    <span
+                        key={size}
+                        title={sz ? `Size ${size}: ${status.replace('_', ' ')}` : `Size ${size}: not on this line yet`}
+                        className={`text-[10px] font-black px-1.5 py-0.5 rounded border ${SIZE_PILL_STYLE[status] || SIZE_PILL_FALLBACK}`}
+                    >
+                        {status === 'COMPLETED' ? '✓ ' : ''}{size}
+                    </span>
+                );
+            })}
         </div>
     );
 };
@@ -838,7 +854,7 @@ const RollQcBadge = ({ qc, unit = 'pieces', loading }) => {
 // One quiet row per roll: roll + colour, a thin cleared bar, and the issue
 // text. Part breakdown only on tap. The section heading already says
 // WIP / Ready / Forwarded, so no per-row tag.
-const RollRow = ({ roll, qc, qcUnit, qcLoading, showQc = false }) => {
+const RollRow = ({ roll, allSizes = [], qc, qcUnit, qcLoading, showQc = false }) => {
     const [open, setOpen] = useState(false);
     const cleared = qc ? qc.approved + qc.repaired : 0;
     const pct = qc?.total ? Math.round((cleared / qc.total) * 100) : 0;
@@ -858,6 +874,11 @@ const RollRow = ({ roll, qc, qcUnit, qcLoading, showQc = false }) => {
                 <div className="w-44 shrink-0 min-w-0">
                     <span className="font-black text-sm text-slate-800">Roll #{roll.roll_id}</span>
                     <span className="block text-[11px] text-slate-400 truncate">{roll.color_name}{roll.color_number ? ` · ${roll.color_number}` : ''}</span>
+                </div>
+
+                {/* Per-size status, left of the cleared bar (fixed width so bars line up) */}
+                <div className="w-36 shrink-0">
+                    <SizeBreakdownPills sizes={roll.sizes} allSizes={allSizes} className="" />
                 </div>
 
                 {showQc && (
@@ -887,7 +908,7 @@ const RollRow = ({ roll, qc, qcUnit, qcLoading, showQc = false }) => {
             </div>
 
             {open && canExpand && (
-                <div className="px-3 pb-2 pl-[12.5rem] flex flex-wrap gap-x-5 gap-y-1">
+                <div className="px-3 pb-2 pl-[22rem] flex flex-wrap gap-x-5 gap-y-1">
                     {partIssues.map(p => (
                         <span key={p.part_name} className="text-xs">
                             <span className="font-black text-slate-700">{p.part_name}</span>{' '}
@@ -896,17 +917,43 @@ const RollRow = ({ roll, qc, qcUnit, qcLoading, showQc = false }) => {
                     ))}
                 </div>
             )}
-            <div className="px-3"><SizeBreakdownPills sizes={roll.sizes} /></div>
         </div>
     );
 };
 
 // Size Mode (MODE_2) equivalent of RollRow — one quiet row per SIZE on this
 // stage: rolls done here, a cleared bar + issue text for the size across all
-// its rolls. Tap to see which parts have issues and each roll's state for
-// this size (green = done here, blue = still in progress).
-const SizeRow = ({ group, qc, qcUnit, qcLoading, showQc = false }) => {
+// its rolls. Tap to see which parts have issues and EVERY roll of the batch
+// for this size: green ✓ = done here, yellow = garments/pieces still open
+// here, grey = none of it on this stage yet.
+//
+// Why not just group.rolls: at garment stages a (roll, size) only gets its
+// line record once every garment of it is checked (checkAndCompleteAssemblyRoll)
+// unless the line loader assigned the whole size — so rolls still being
+// worked on had no record and simply didn't show. Their live counts come
+// from the stage QC data (qc.rolls), which covers every roll on this stage.
+const sizeRollStates = (group, qc, batchRollIds) => {
+    const lineStatus = new Map(group.rolls.map(r => [String(r.roll_id), r.status]));
+    const ids = new Set([...batchRollIds.map(String), ...lineStatus.keys(), ...Object.keys(qc?.rolls || {})]);
+    return [...ids]
+        .sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0))
+        .map(id => {
+            const status = lineStatus.get(id);
+            const rq = qc?.rolls?.[id];
+            const open = rq ? Math.max(0, rq.total - rq.approved - rq.repaired - rq.rejected) : 0;
+            let state;
+            if (status === 'COMPLETED' || (rq && rq.total > 0 && open === 0)) state = 'COMPLETED';
+            else if (status || (rq && rq.total > 0)) state = 'IN_PROGRESS';
+            else state = 'NOT_HERE';
+            return { roll_id: id, state, open, rq };
+        });
+};
+
+const SizeRow = ({ group, qc, qcUnit, qcLoading, showQc = false, batchRollIds = [] }) => {
     const [open, setOpen] = useState(false);
+    const rollStates = useMemo(() => sizeRollStates(group, qc, batchRollIds), [group, qc, batchRollIds]);
+    const rollsDone = rollStates.filter(r => r.state === 'COMPLETED').length;
+    const rollsWaiting = rollStates.filter(r => r.state === 'NOT_HERE').length;
     const cleared = qc ? qc.approved + qc.repaired : 0;
     const pct = qc?.total ? Math.round((cleared / qc.total) * 100) : 0;
     const hasIssues = !!qc && QC_CHIPS.some(c => qc[c.key] > 0);
@@ -921,7 +968,8 @@ const SizeRow = ({ group, qc, qcUnit, qcLoading, showQc = false }) => {
                 <div className="w-44 shrink-0 min-w-0">
                     <span className="font-black text-sm text-violet-800">Size {group.size}</span>
                     <span className="block text-[11px] text-slate-400">
-                        {group.rollsDone}/{group.rollsTotal} roll{group.rollsTotal !== 1 ? 's' : ''} done here
+                        {rollsDone}/{rollStates.length} roll{rollStates.length !== 1 ? 's' : ''} done here
+                        {rollsWaiting > 0 && <span className="text-slate-400"> · {rollsWaiting} not here yet</span>}
                     </span>
                 </div>
 
@@ -962,15 +1010,16 @@ const SizeRow = ({ group, qc, qcUnit, qcLoading, showQc = false }) => {
                         </div>
                     )}
                     <div className="flex flex-wrap gap-1">
-                        {group.rolls.map(r => {
-                            const rq = qc?.rolls?.[r.roll_id];
-                            const issues = rq ? QC_CHIPS.filter(c => rq[c.key] > 0).map(c => `${rq[c.key]} ${c.label}`).join(', ') : '';
-                            const done = r.status === 'COMPLETED';
+                        {rollStates.map(r => {
+                            // pending is already said by "n open"; list only the problems
+                            const issues = r.rq ? QC_CHIPS.filter(c => c.key !== 'pending' && r.rq[c.key] > 0).map(c => `${r.rq[c.key]} ${c.label}`).join(', ') : '';
+                            const done = r.state === 'COMPLETED';
                             return (
                                 <span key={r.roll_id}
-                                    title={`Roll #${r.roll_id} — ${done ? 'done here' : 'in progress'}${issues ? ` · ${issues}` : ''}`}
-                                    className={`text-[10px] font-black px-1.5 py-0.5 rounded border ${done ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
-                                    #{r.roll_id}{showQc && issues ? <span className="text-amber-700"> · {issues}</span> : null}
+                                    className={`text-[10px] font-black px-1.5 py-0.5 rounded border ${SIZE_PILL_STYLE[r.state] || SIZE_PILL_FALLBACK}`}>
+                                    {done ? '✓ ' : ''}#{r.roll_id}
+                                    {r.state === 'IN_PROGRESS' && r.open > 0 && <span> · {r.open} open</span>}
+                                    {showQc && issues ? <span className="text-rose-700"> · {issues}</span> : null}
                                 </span>
                             );
                         })}
@@ -987,6 +1036,11 @@ const StageDetailModal = ({ batch, stage, prevStage = null, progress, onClose, o
     const completedRolls = progress?.completed_roll_ids ?? [];
     const dispatchedRolls = progress?.dispatched_roll_ids ?? [];
     const summary = (isMode2 ? progress?.size_summary : progress?.roll_summary) ?? {};
+    // Every roll of the batch — Size Mode lists each size's rolls in full.
+    const batchRollIds = useMemo(
+        () => (batch?.all_roll_ids || []).map(r => String(r?.roll_id ?? r)),
+        [batch?.all_roll_ids]
+    );
 
     // Per-roll pending / rework / rejected at this stage — shown on WIP rolls.
     const [rollQc, setRollQc] = useState(null);   // { unit, rolls: { [roll_id]: counts } }
@@ -1063,28 +1117,30 @@ const StageDetailModal = ({ batch, stage, prevStage = null, progress, onClose, o
             .sort((a, b) => (parseInt(a.size, 10) || 0) - (parseInt(b.size, 10) || 0) || a.size.localeCompare(b.size));
     }, [isMode2, progress]);
 
-    // Header colour per section: in progress = yellow, ready to forward =
-    // green, forwarded = blue.
+    // Tabs: In Progress (default) / Ready to Forward / Forwarded. Colour per
+    // tab: in progress = yellow, ready to forward = green, forwarded = blue.
+    const [activeTab, setActiveTab] = useState('WIP');
     const SECTION_TONE = {
-        'In Progress (WIP)':            { box: 'border-yellow-300',  head: 'bg-yellow-50 border-yellow-200',   text: 'text-yellow-800' },
-        'Completed — Ready to Forward': { box: 'border-emerald-300', head: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-800' },
-        'Forwarded to Next Stage':      { box: 'border-blue-300',    head: 'bg-blue-50 border-blue-200',       text: 'text-blue-800' },
+        WIP:       { label: 'In Progress',      on: 'bg-yellow-100 border-yellow-400 text-yellow-900', off: 'text-yellow-800', box: 'border-yellow-300' },
+        READY:     { label: 'Ready to Forward', on: 'bg-emerald-100 border-emerald-400 text-emerald-900', off: 'text-emerald-800', box: 'border-emerald-300' },
+        FORWARDED: { label: 'Forwarded',        on: 'bg-blue-100 border-blue-400 text-blue-900', off: 'text-blue-800', box: 'border-blue-300' },
     };
 
     // Every section shows QC — a completed/forwarded roll or size can still
     // carry rejections (or rework) that the line loader needs to see.
     const sections = (isMode2
         ? [
-            { label: 'In Progress (WIP)',            sizes: sizeGroups.filter(g => g.state === 'WIP') },
-            { label: 'Completed — Ready to Forward', sizes: sizeGroups.filter(g => g.state === 'READY') },
-            { label: 'Forwarded to Next Stage',      sizes: sizeGroups.filter(g => g.state === 'FORWARDED') },
-        ].filter(s => s.sizes.length > 0)
+            { key: 'WIP',       sizes: sizeGroups.filter(g => g.state === 'WIP') },
+            { key: 'READY',     sizes: sizeGroups.filter(g => g.state === 'READY') },
+            { key: 'FORWARDED', sizes: sizeGroups.filter(g => g.state === 'FORWARDED') },
+        ]
         : [
-            { label: 'In Progress (WIP)', rolls: wipRolls },
-            { label: 'Completed — Ready to Forward', rolls: completedRolls.filter(r => !dispatchedRolls.find(d => d.roll_id === r.roll_id)) },
-            { label: 'Forwarded to Next Stage', rolls: dispatchedRolls },
-        ].filter(s => s.rolls.length > 0)
+            { key: 'WIP',       rolls: wipRolls },
+            { key: 'READY',     rolls: completedRolls.filter(r => !dispatchedRolls.find(d => d.roll_id === r.roll_id)) },
+            { key: 'FORWARDED', rolls: dispatchedRolls },
+        ]
     ).map(s => ({
+        count: (s.sizes || s.rolls).length,
         ...s,
         showQc: true,
         totals: rollQc
@@ -1094,40 +1150,67 @@ const StageDetailModal = ({ batch, stage, prevStage = null, progress, onClose, o
 
     return (
         <div className="p-2">
-            {/* Batch info banner */}
-            {batch && <BatchInfoBanner batch={batch} />}
-
-            {/* Header */}
-            <div className="flex items-center justify-between gap-2 mb-5">
-                <div className="flex items-center gap-2 flex-wrap min-w-0">
-                    <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">{stage.line_type_name}</h3>
-                    {progress?.line_name && (
-                        <span className="text-xs font-bold text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-lg">
-                            {progress.line_name}
-                        </span>
-                    )}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                    {refreshError && <span className="text-[11px] font-bold text-rose-600">{refreshError}</span>}
-                    {onRefresh && (
-                        <button onClick={handleRefresh} disabled={refreshing}
-                            title={`Last updated ${lastUpdated.toLocaleTimeString()}`}
-                            className="px-3 py-2 bg-white border-2 border-slate-300 text-slate-700 font-black rounded-xl hover:bg-slate-50 active:scale-95 disabled:opacity-60 transition-all flex items-center gap-1.5 text-xs uppercase tracking-widest">
-                            <Loader size={13} className={refreshing ? 'animate-spin' : ''} />
-                            {refreshing ? 'Refreshing…' : 'Refresh'}
-                            <span className="normal-case tracking-normal font-bold text-slate-400 hidden sm:inline">· {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            {/* Header — stage (highlighted) + line + actions, batch details below */}
+            <div className="bg-slate-900 rounded-xl px-4 py-3 mb-5">
+                <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                        <h3 className="text-xl font-black uppercase tracking-tight bg-amber-400 text-slate-900 px-3 py-1 rounded-lg">
+                            {stage.line_type_name}
+                        </h3>
+                        {batch && (
+                            <span className="text-xl font-black tracking-tight bg-white text-slate-900 px-3 py-1 rounded-lg">
+                                BATCH #{batch.batch_id}
+                            </span>
+                        )}
+                        {progress?.line_name && (
+                            <span className="text-sm font-black text-white bg-white/10 border border-white/20 px-2.5 py-1 rounded-lg">
+                                {progress.line_name}
+                            </span>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                        {refreshError && <span className="text-[11px] font-bold text-rose-300">{refreshError}</span>}
+                        {onRefresh && (
+                            <button onClick={handleRefresh} disabled={refreshing}
+                                title={`Last updated ${lastUpdated.toLocaleTimeString()}`}
+                                className="px-3 py-2 bg-white/10 border border-white/20 text-white font-black rounded-xl hover:bg-white/20 active:scale-95 disabled:opacity-60 transition-all flex items-center gap-1.5 text-xs uppercase tracking-widest">
+                                <Loader size={13} className={refreshing ? 'animate-spin' : ''} />
+                                {refreshing ? 'Refreshing…' : 'Refresh'}
+                                <span className="normal-case tracking-normal font-bold text-slate-400 hidden sm:inline">· {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            </button>
+                        )}
+                        {onChangeLine && progress && (
+                            <button onClick={onChangeLine}
+                                className="px-3 py-2 bg-white/10 border border-white/20 text-white font-black rounded-xl hover:bg-white/20 active:scale-95 transition-all flex items-center gap-1.5 text-xs uppercase tracking-widest">
+                                <RefreshCw size={13} /> Change Line
+                            </button>
+                        )}
+                        <button onClick={onClose} className="p-2 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 transition-all">
+                            <X size={18} className="text-white" />
                         </button>
-                    )}
-                    {onChangeLine && progress && (
-                        <button onClick={onChangeLine}
-                            className="px-3 py-2 bg-white border-2 border-slate-300 text-slate-700 font-black rounded-xl hover:bg-slate-50 active:scale-95 transition-all flex items-center gap-1.5 text-xs uppercase tracking-widest">
-                            <RefreshCw size={13} /> Change Line
-                        </button>
-                    )}
-                    <button onClick={onClose} className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-95 transition-all">
-                        <X size={18} className="text-slate-600" />
-                    </button>
+                    </div>
                 </div>
+                {batch && (
+                    <div className="flex items-center gap-2 flex-wrap mt-2 pt-2 border-t border-white/10">
+                        <span className="font-mono text-xs font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">{batch.batch_code}</span>
+                        {batch.priority && <PriorityChip priority={batch.priority} size="xs" />}
+                        {isMode2 && (
+                            <span className="text-[10px] font-black uppercase tracking-widest bg-violet-900 text-violet-300 px-2 py-0.5 rounded border border-violet-700">
+                                Size Mode
+                            </span>
+                        )}
+                        <span className="text-slate-400 text-xs font-medium">{batch.product_name}</span>
+                        {batch.trim_orders?.length > 0 && (
+                            <span className="ml-auto flex gap-1 flex-wrap">
+                                {batch.trim_orders.map(to => (
+                                    <span key={to.id} className="text-[10px] font-bold bg-purple-900 text-purple-300 px-2 py-0.5 rounded border border-purple-700">
+                                        TO #{to.id}
+                                    </span>
+                                ))}
+                            </span>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Assign action */}
@@ -1140,23 +1223,28 @@ const StageDetailModal = ({ batch, stage, prevStage = null, progress, onClose, o
                 )
             ) : (
                 hasReadyRolls && (
-                    <div className="mb-5 border-2 border-amber-300 rounded-xl overflow-hidden">
-                        <div className="bg-amber-50 px-4 py-2.5 border-b border-amber-200 flex flex-wrap items-center gap-x-3 gap-y-2">
-                            <span className="text-xs font-black uppercase tracking-widest text-amber-800">
+                    // "Incoming" — not on this line yet, so styled apart from the
+                    // WIP (yellow) / Completed (green) / Forwarded (blue) sections.
+                    <div className="mb-5 border-2 border-dashed border-indigo-400 rounded-xl overflow-hidden">
+                        <div className="bg-indigo-600 px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+                            <span className="text-[10px] font-black uppercase tracking-widest bg-white/20 text-white px-2 py-0.5 rounded">
+                                Incoming
+                            </span>
+                            <span className="text-xs font-black uppercase tracking-widest text-white">
                                 Ready to Assign ({readyRolls.length})
                             </span>
                             {prevStage && (
-                                <span className="text-[11px] font-bold text-amber-700">
+                                <span className="text-[11px] font-bold text-indigo-100">
                                     finished at {prevStage.line_type_name} ·{' '}
                                     {readyRolls.reduce((sum, r) => sum + parseFloat(r.meter || 0), 0).toFixed(2)}m
                                 </span>
                             )}
                             <button onClick={onAssign}
-                                className="ml-auto px-4 py-2 bg-slate-900 text-white font-black rounded-lg hover:bg-slate-700 active:scale-95 transition-all flex items-center gap-1.5 text-xs uppercase tracking-widest">
+                                className="ml-auto px-4 py-2 bg-white text-indigo-700 font-black rounded-lg hover:bg-indigo-50 active:scale-95 transition-all flex items-center gap-1.5 text-xs uppercase tracking-widest">
                                 <Zap size={14} /> Assign {readyRolls.length} Roll{readyRolls.length !== 1 ? 's' : ''} to Line
                             </button>
                         </div>
-                        <div className="divide-y divide-slate-100 bg-white">
+                        <div className="divide-y divide-indigo-100 bg-indigo-50/40">
                             {readyRolls.map(roll => (
                                 <div key={roll.roll_id} className="flex flex-wrap lg:flex-nowrap items-center gap-x-4 gap-y-1 px-4 py-2">
                                     <div className="w-44 shrink-0 min-w-0">
@@ -1177,17 +1265,6 @@ const StageDetailModal = ({ batch, stage, prevStage = null, progress, onClose, o
                 )
             )}
 
-            {/* Summary chips */}
-            {progress && (
-                <div className="flex flex-wrap gap-2 mb-5">
-                    {isMode2 && <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-200">Sizes</span>}
-                    <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-yellow-50 text-yellow-800 border border-yellow-200">WIP: {summary.wip ?? (isMode2 ? sizeGroups.filter(g => g.state === 'WIP').length : wipRolls.length)}</span>
-                    <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">Completed: {summary.completed ?? (isMode2 ? sizeGroups.filter(g => g.state !== 'WIP').length : completedRolls.length)}</span>
-                    <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">Forwarded: {summary.dispatched_forward ?? (isMode2 ? sizeGroups.filter(g => g.state === 'FORWARDED').length : dispatchedRolls.length)}</span>
-                    <span className="text-xs font-black px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 border border-slate-200">Total on Line: {summary.total_on_line ?? (isMode2 ? sizeGroups.length : wipRolls.length + completedRolls.length)}</span>
-                </div>
-            )}
-
             {/* MODE_2 ready-sizes strip — informational; the Assign button above handles dispatch */}
             {isMode2 && readySizes.length > 0 && (
                 <div className="mb-5">
@@ -1202,44 +1279,64 @@ const StageDetailModal = ({ batch, stage, prevStage = null, progress, onClose, o
                 </div>
             )}
 
-            {/* Roll sections */}
+            {/* Roll / size tabs */}
             {!progress ? (
                 <div className="bg-slate-50 rounded-xl p-8 border-2 border-dashed border-slate-200 text-center mb-5">
                     <p className="text-sm font-bold text-slate-500">Stage not yet activated.</p>
                 </div>
-            ) : sections.length === 0 ? (
-                <div className="bg-slate-50 rounded-xl p-6 border border-slate-200 text-center mb-5">
-                    <p className="text-sm font-bold text-slate-500">No {isMode2 ? 'sizes' : 'rolls'} on this stage yet.</p>
-                </div>
-            ) : (
-                <div className="space-y-3 mb-5">
-                    {sections.map(({ label, rolls, sizes, showQc, totals }) => {
-                        const tone = SECTION_TONE[label] || { box: 'border-slate-200', head: 'bg-slate-50 border-slate-200', text: 'text-slate-500' };
-                        return (
-                        <div key={label} className={`bg-white border ${tone.box} rounded-xl overflow-hidden`}>
-                            <div className={`${tone.head} px-4 py-2 border-b flex flex-wrap items-center gap-2`}>
-                                <span className={`text-xs font-black uppercase tracking-widest ${tone.text}`}>
-                                    {label} ({sizes ? `${sizes.length} size${sizes.length !== 1 ? 's' : ''}` : rolls.length})
+            ) : (() => {
+                const current = sections.find(sec => sec.key === activeTab) || sections[0];
+                const tone = SECTION_TONE[current.key];
+                const unitWord = isMode2 ? 'size' : 'roll';
+                return (
+                    <div className="mb-5">
+                        <div className="flex flex-wrap items-end gap-2 mb-2">
+                            {sections.map(sec => {
+                                const t = SECTION_TONE[sec.key];
+                                const on = sec.key === current.key;
+                                return (
+                                    <button key={sec.key} type="button" onClick={() => setActiveTab(sec.key)}
+                                        className={`text-left px-4 py-2 rounded-xl border-2 transition-all active:scale-95 ${on ? `${t.on} shadow-sm` : `bg-white border-slate-200 ${t.off} hover:border-slate-300`}`}>
+                                        <span className="block text-xs font-black uppercase tracking-widest">
+                                            {t.label} <span className="tabular-nums">({sec.count})</span>
+                                        </span>
+                                        {sec.totals && QC_CHIPS.some(c => sec.totals[c.key] > 0) && (
+                                            <QcIssues counts={sec.totals} className="block text-[10px] mt-0.5" />
+                                        )}
+                                    </button>
+                                );
+                            })}
+                            <span className="ml-auto flex flex-wrap items-center gap-2 text-xs font-black text-slate-500">
+                                <span className="flex items-center gap-1 text-[10px] font-bold text-slate-500">
+                                    {isMode2 ? 'Rolls:' : 'Sizes:'}
+                                    <span className={`px-1.5 py-0.5 rounded border ${SIZE_PILL_STYLE.COMPLETED}`}>✓ done</span>
+                                    <span className={`px-1.5 py-0.5 rounded border ${SIZE_PILL_STYLE.IN_PROGRESS}`}>in progress</span>
+                                    <span className={`px-1.5 py-0.5 rounded border ${SIZE_PILL_STYLE.PENDING}`}>not started</span>
+                                    <span className={`px-1.5 py-0.5 rounded border ${SIZE_PILL_STYLE.NOT_HERE}`}>not on line yet</span>
                                 </span>
-                                {showQc && totals && <QcIssues counts={totals} className="ml-auto" />}
-                                {showQc && qcError && <span className="text-[11px] font-bold text-rose-600">{qcError}</span>}
-                            </div>
-                            <div>
-                                {sizes
-                                    ? sizes.map(group => (
-                                        <SizeRow key={group.size} group={group}
-                                            showQc={showQc} qc={rollQc?.sizes?.[group.size]} qcUnit={rollQc?.unit || 'pieces'} qcLoading={qcLoading} />
-                                    ))
-                                    : rolls.map(roll => (
-                                        <RollRow key={roll.roll_id} roll={roll}
-                                            showQc={showQc} qc={rollQc?.rolls?.[roll.roll_id]} qcUnit={rollQc?.unit || 'pieces'} qcLoading={qcLoading} />
-                                    ))}
-                            </div>
+                                {isMode2 && <span className="px-2 py-1 rounded-lg bg-violet-50 text-violet-700 border border-violet-200">Sizes</span>}
+                                Total on line: {summary.total_on_line ?? (isMode2 ? sizeGroups.length : wipRolls.length + completedRolls.length)}
+                            </span>
                         </div>
-                        );
-                    })}
-                </div>
-            )}
+                        {qcError && <p className="text-[11px] font-bold text-rose-600 mb-2">{qcError}</p>}
+                        <div className={`bg-white border-2 ${tone.box} rounded-xl overflow-hidden`}>
+                            {current.count === 0 ? (
+                                <p className="p-6 text-center text-sm font-bold text-slate-400">
+                                    No {unitWord}s {current.key === 'WIP' ? 'in progress' : current.key === 'READY' ? 'ready to forward' : 'forwarded yet'}.
+                                </p>
+                            ) : current.sizes
+                                ? current.sizes.map(group => (
+                                    <SizeRow key={group.size} group={group} batchRollIds={batchRollIds}
+                                        showQc={current.showQc} qc={rollQc?.sizes?.[group.size]} qcUnit={rollQc?.unit || 'pieces'} qcLoading={qcLoading} />
+                                ))
+                                : current.rolls.map(roll => (
+                                    <RollRow key={roll.roll_id} roll={roll} allSizes={batch?.all_sizes || []}
+                                        showQc={current.showQc} qc={rollQc?.rolls?.[roll.roll_id]} qcUnit={rollQc?.unit || 'pieces'} qcLoading={qcLoading} />
+                                ))}
+                        </div>
+                    </div>
+                );
+            })()}
 
         </div>
     );

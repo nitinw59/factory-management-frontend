@@ -18,9 +18,10 @@
 // Idle-screen cycle (TV layout only): the grid shows for GRID_MS, then an
 // animated idle screen takes over for IDLE_MS, then back to the grid, and so
 // on. There are two idle screens — the animated MC logo and the "MATRIX
-// OVERSEAS" wordmark — each switched on/off by an admin on /admin/company-
-// profile. When both are on they alternate (logo, wordmark, logo, …), one per
-// idle window; when both are off the grid simply stays up. The grid stays
+// OVERSEAS" wordmark — plus an optional image the admin uploads; each is
+// switched on/off by an admin on /admin/company-profile. Enabled ones take
+// turns (logo, wordmark, image, logo, …), one per
+// idle window; when all are off the grid simply stays up. The grid stays
 // mounted underneath (the idle screen is a fixed overlay) so its size
 // measurements, live data and websocket keep running — the grid is already
 // current the instant the overlay fades out.
@@ -29,6 +30,10 @@ import { publicApi } from '../../api/publicApi';
 import usePublicSocket from './usePublicSocket';
 import AnimatedMatrixLogo from './AnimatedMatrixLogo';
 import AnimatedMatrixWordmark from './AnimatedMatrixWordmark';
+import { IMAGE_BASE_URL } from '../../utils/api';
+
+// Server returns '/uploads/…'; IMAGE_BASE_URL already ends in /uploads.
+const resolveUploadUrl = (url) => (!url ? null : url.startsWith('http') ? url : `${IMAGE_BASE_URL.replace(/\/uploads$/, '')}${url}`);
 
 const ROWS_PER_PAGE = 3;
 const ROTATE_MS = 15000;
@@ -286,7 +291,7 @@ export default function PublicWorkstationScorecardPage() {
     const [rowOrder, setRowOrder] = useState([]); // workstation_id[] as strings
     // Which idle animations an admin has left switched on (both default on,
     // and stay on if the setting can't be read).
-    const [options, setOptions] = useState({ show_logo: true, show_wordmark: true, text_scale: normalizeTextScale(null) });
+    const [options, setOptions] = useState({ show_logo: true, show_wordmark: true, show_image: false, idle_image_url: null, text_scale: normalizeTextScale(null) });
 
     // Measured size of the rows container — ResizeObserver-driven so font
     // sizes (see computeSizes above) always resolve against real available
@@ -325,6 +330,8 @@ export default function PublicWorkstationScorecardPage() {
                     const next = {
                         show_logo: o?.show_logo !== false,
                         show_wordmark: o?.show_wordmark !== false,
+                        show_image: o?.show_image === true,
+                        idle_image_url: o?.idle_image_url || null,
                         text_scale: normalizeTextScale(o?.text_scale),
                     };
                     // keep the same object when nothing changed, so a poll doesn't re-render the grid
@@ -365,12 +372,29 @@ export default function PublicWorkstationScorecardPage() {
     // Grid ⇄ idle-screen timer. `phase` is what's logically showing;
     // `idleMounted` lags it on the way OUT so the overlay can fade away
     // instead of vanishing. `idleKind` holds which animation is up.
-    const idleKinds = [options.show_logo && 'logo', options.show_wordmark && 'wordmark'].filter(Boolean);
+    // Third idle screen: the admin-uploaded image (only when switched on AND
+    // it actually loaded — a broken/missing file is skipped, never shown).
+    const idleImageSrc = resolveUploadUrl(options.idle_image_url);
+    const [idleImageReady, setIdleImageReady] = useState(false);
+    useEffect(() => {
+        setIdleImageReady(false);
+        if (!options.show_image || !idleImageSrc) return;
+        const img = new Image(); // preload, so it appears instantly on its turn
+        img.onload = () => setIdleImageReady(true);
+        img.onerror = () => setIdleImageReady(false);
+        img.src = idleImageSrc;
+        return () => { img.onload = null; img.onerror = null; };
+    }, [options.show_image, idleImageSrc]);
+    const idleKinds = [
+        options.show_logo && 'logo',
+        options.show_wordmark && 'wordmark',
+        options.show_image && idleImageReady && 'image',
+    ].filter(Boolean);
     const idleKindsRef = useRef(idleKinds);
     idleKindsRef.current = idleKinds;
     const nextIdleRef = useRef(0);
     const [phase, setPhase] = useState('grid'); // 'grid' | 'idle'
-    const [idleKind, setIdleKind] = useState(null); // 'logo' | 'wordmark'
+    const [idleKind, setIdleKind] = useState(null); // 'logo' | 'wordmark' | 'image'
     const [idleMounted, setIdleMounted] = useState(false);
     const [windowN, setWindowN] = useState(0); // bumps to re-arm the grid timer when nothing is enabled
     useEffect(() => {
@@ -555,7 +579,9 @@ export default function PublicWorkstationScorecardPage() {
                     className="fixed inset-0 z-50 bg-black flex items-center justify-center overflow-hidden"
                     style={{ animation: `${phase === 'idle' ? 'wls-idle-in' : 'wls-idle-out'} ${FADE_MS}ms ease forwards` }}
                 >
-                    {idleKind === 'wordmark' ? <AnimatedMatrixWordmark /> : <AnimatedMatrixLogo />}
+                    {idleKind === 'image' && idleImageSrc
+                        ? <img src={idleImageSrc} alt="" className="w-full h-full object-contain" />
+                        : idleKind === 'wordmark' ? <AnimatedMatrixWordmark /> : <AnimatedMatrixLogo />}
                 </div>
             )}
         </div>
