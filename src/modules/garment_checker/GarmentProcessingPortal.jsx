@@ -772,6 +772,40 @@ const AssemblyProcessingPortal = () => {
         }
     };
 
+    // QA / supervisor override: approve a garment that its parts block — parts
+    // rejected or not cleared at an earlier stage, or an open part defect. The
+    // server asks for a supervisor or QA password, closes those parts' open
+    // defects, approves the garment and logs who authorised it.
+    const handleQaOverrideApprove = async (garmentId, garmentUid) => {
+        if (!garmentId || isProcessingAction) return;
+        setIsProcessingAction(true);
+        try {
+            const sent = await withSupervisorPin(askSupervisorPin, `QA override: approve garment ${garmentUid}`,
+                (supervisorPin) => assemblyApi.processGarmentStatus({
+                    garmentId, status: STATUS.APPROVED, defectCodeId: null, defectCodeIds: [], supervisorPin,
+                }), '');
+            if (sent === null) return; // dialog cancelled
+            setDnaDefect(null);
+            setNotAtStage(null);
+            setGarment(null);
+            setSelectedPiece(null);
+            setLastAction({ uid: garmentUid, status: STATUS.APPROVED });
+            playFeedback('success');
+            if (viewMode === 'BATCH' && selectedBatch) {
+                const res = await assemblyApi.getBatchGarments(selectedBatch.batch_id);
+                setBatchPieces(res.data);
+            }
+            loadRequiredData();
+            loadStats();
+            setTimeout(() => setLastAction(null), 4000);
+        } catch (err) {
+            playFeedback('error');
+            alert(err.response?.data?.error || 'QA override failed.');
+        } finally {
+            setIsProcessingAction(false);
+        }
+    };
+
     // Supervisor override: an APPROVED garment back to PENDING here (e.g.
     // approved by mistake). Refused by the server if the next stage has
     // already checked it.
@@ -942,6 +976,15 @@ const AssemblyProcessingPortal = () => {
                             <div className="bg-slate-50 border-2 border-slate-100 rounded-3xl p-6 mb-8">
                                 <StageProgressStepper stages={notAtStage.stage_progress} />
                             </div>
+                        )}
+                        {notAtStage.garment_id && notAtStage.error === 'Not Yet At This Stage' && (
+                            <button
+                                onClick={() => handleQaOverrideApprove(notAtStage.garment_id, notAtStage.garment_uid)}
+                                disabled={isProcessingAction}
+                                className="px-14 py-4 mb-3 bg-emerald-600 text-white font-black text-lg rounded-3xl hover:bg-emerald-700 active:scale-95 transition-all shadow-xl w-full disabled:opacity-50"
+                            >
+                                QA OVERRIDE: APPROVE GARMENT
+                            </button>
                         )}
                         <button
                             onClick={() => { setNotAtStage(null); setSelectedPiece(null); }}
@@ -1207,7 +1250,13 @@ const AssemblyProcessingPortal = () => {
                                         })}
                                     </div>
                                 )}
-                                <div className="flex justify-center">
+                                <div className="flex flex-wrap justify-center gap-3">
+                                    {dnaDefect.garment?.garment_id && (
+                                        <button onClick={() => handleQaOverrideApprove(dnaDefect.garment.garment_id, dnaDefect.garment.garment_uid)} disabled={isProcessingAction}
+                                            className="px-8 py-4 bg-emerald-600 text-white font-black rounded-2xl hover:bg-emerald-700 active:scale-95 transition-all shadow-xl disabled:opacity-50">
+                                            QA OVERRIDE: APPROVE GARMENT
+                                        </button>
+                                    )}
                                     <button onClick={() => setDnaDefect(null)} className="px-12 py-4 bg-slate-900 text-white font-black rounded-2xl hover:bg-black active:scale-95 transition-all shadow-xl">
                                         RETURN TO SCANNER
                                     </button>
@@ -1527,7 +1576,10 @@ const AssemblyProcessingPortal = () => {
                             // Garments not yet available here (parts not cleared at the
                             // previous stage) are counted separately, not as Pending.
                             const isOpen = (p) => p.status !== 'APPROVED' && p.status !== 'QC_REJECTED';
-                            const availablePieces = batchPieces.filter(p => p.available !== false);
+                            // Shown = available here, or held by a part REJECTED earlier
+                            // (it will never arrive on its own; QA can open and override it).
+                            const isShown = (p) => p.available !== false || +p.rejected_component_count > 0;
+                            const availablePieces = batchPieces.filter(isShown);
                             const waitingCount = batchPieces.length - availablePieces.length;
                             const waitingStage = batchPieces.find(p => p.uncleared_stage)?.uncleared_stage || 'previous stage';
                             const approved = availablePieces.filter(p => p.status === 'APPROVED').length;
@@ -1545,7 +1597,7 @@ const AssemblyProcessingPortal = () => {
                             }, {});
                             const rolls = Object.entries(byRoll)
                                 .map(([rollId, rollPieces]) => {
-                                    const pieces = rollPieces.filter(p => p.available !== false);
+                                    const pieces = rollPieces.filter(isShown);
                                     return {
                                         rollId, rollPieces, pieces,
                                         waiting: rollPieces.length - pieces.length,
@@ -1558,7 +1610,18 @@ const AssemblyProcessingPortal = () => {
                             const active = rolls.find(r => r.rollId === String(activeRollId))
                                 || rolls.find(r => r.pending > 0) || rolls[0];
 
-                            const sortedPieces = active ? [...active.pieces].sort((a, b) => (a.piece_sequence ?? 0) - (b.piece_sequence ?? 0)) : [];
+                            // By size, then garment number. Size Mode numbers garments per
+                            // SIZE, so the same number exists once in every size — tiles are
+                            // grouped under size headings and carry the size.
+                            const sizeKey = (sz) => { const n = parseFloat(sz); return Number.isFinite(n) ? n : Infinity; };
+                            const sortedPieces = active ? [...active.pieces].sort((a, b) =>
+                                sizeKey(a.size) - sizeKey(b.size) || String(a.size).localeCompare(String(b.size))
+                                || (a.piece_sequence ?? 0) - (b.piece_sequence ?? 0)) : [];
+                            const sizeGroups = sortedPieces.reduce((acc, p) => {
+                                const last = acc[acc.length - 1];
+                                if (last && last.size === p.size) last.pieces.push(p); else acc.push({ size: p.size, pieces: [p] });
+                                return acc;
+                            }, []);
                             const partRejectedPieces = sortedPieces.filter(p => +p.rejected_component_count > 0 && isOpen(p));
                             // Visible garments that still have something open upstream (e.g.
                             // already worked here before BF finished) — a note, not a block.
@@ -1642,8 +1705,14 @@ const AssemblyProcessingPortal = () => {
                                             {sortedPieces.length === 0 ? (
                                                 <p className="py-10 text-center text-sm font-bold text-slate-400">No garments available on this roll yet.</p>
                                             ) : (
+                                            <div className="space-y-3">
+                                            {sizeGroups.map(group => (
+                                            <div key={group.size}>
+                                            <p className="text-xs font-black uppercase tracking-widest text-violet-700 mb-1.5">
+                                                Size {group.size} <span className="text-slate-400 normal-case tracking-normal">· {group.pieces.length} garment{group.pieces.length !== 1 ? 's' : ''}</span>
+                                            </p>
                                             <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))' }}>
-                                                {sortedPieces.map(piece => {
+                                                {group.pieces.map(piece => {
                                                     const st = piece.status;
                                                     const isSelected = selectedPiece?.id === piece.id;
                                                     let cls = "bg-white border-slate-200 text-slate-500 hover:border-indigo-400 hover:shadow-md";
@@ -1677,7 +1746,8 @@ const AssemblyProcessingPortal = () => {
                                                             disabled={isPieceLoading}
                                                             className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl border-2 transition-all active:scale-95 disabled:cursor-wait ${cls}`}
                                                         >
-                                                            <span className="font-black text-base leading-none mb-1">{piece.piece_sequence}</span>
+                                                            <span className="font-black text-base leading-none">{piece.piece_sequence}</span>
+                                                            <span className="text-[9px] font-black text-slate-400 leading-none mt-0.5 mb-1">S {piece.size}</span>
                                                             {isLoadingThis ? <RefreshCw size={12} className="animate-spin" /> : icon}
                                                             {rejectedParts.length > 0 && (
                                                                 <span className="mt-1 text-[9px] font-black uppercase leading-tight text-rose-700 truncate max-w-full">{rejectedParts.join(', ')} ✗</span>
@@ -1688,6 +1758,9 @@ const AssemblyProcessingPortal = () => {
                                                         </button>
                                                     );
                                                 })}
+                                            </div>
+                                            </div>
+                                            ))}
                                             </div>
                                             )}
                                         </div>
@@ -1729,6 +1802,14 @@ const AssemblyProcessingPortal = () => {
                                                 {comp.part_name}
                                             </div>
                                         ))}
+                                    </div>
+                                )}
+                                {dnaDefect.garment?.garment_id && (
+                                    <div className="flex justify-end mt-3">
+                                        <button onClick={() => handleQaOverrideApprove(dnaDefect.garment.garment_id, dnaDefect.garment.garment_uid)} disabled={isProcessingAction}
+                                            className="px-5 py-2.5 bg-emerald-600 text-white text-sm font-black rounded-xl hover:bg-emerald-700 active:scale-95 transition-all disabled:opacity-50">
+                                            QA override: approve garment
+                                        </button>
                                     </div>
                                 )}
                             </div>
