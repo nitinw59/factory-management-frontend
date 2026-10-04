@@ -48,7 +48,6 @@ api.interceptors.request.use(
 // to call it. AuthContext owns the actual logout + redirect so React state stays
 // in sync (no hard window.location redirects that bypass the router).
 let sessionExpiryNotified = false;
-const ROLE_DENIED_PREFIX = 'Access denied. Requires one of these roles';
 
 api.interceptors.response.use(
   (response) => response,
@@ -58,12 +57,20 @@ api.interceptors.response.use(
     const hasToken = !!localStorage.getItem('factory_token');
     const message = error.response?.data?.message || '';
 
-    const isRoleDenied  = status === 403 && message.startsWith(ROLE_DENIED_PREFIX);
-    // A supervisor-password check (e.g. changing a rejected garment) answers
-    // 403 with a code; the portal then asks for the password. That's not an
-    // expired session — logging out here kicked the checker out instead.
-    const isSupervisorPin = status === 403 && String(error.response?.data?.code || '').startsWith('SUPERVISOR_PIN_');
-    const isAuthFailure = (status === 401 || status === 403) && !isRoleDenied && !isSupervisorPin;
+    // Only a REAL session problem logs out:
+    //   401                                   → no token
+    //   403 "Forbidden: Invalid token."       → checkRole: bad / expired JWT
+    //   403 with no JSON body ("Forbidden")   → isLoggedIn: bad / expired JWT
+    // Every other 403 is a business refusal that carries a JSON error/code —
+    // a supervisor password needed, "No workstation assigned", a role check,
+    // "Not authorized for this line" … — and is shown on the page instead.
+    // (Logging out on those threw checkers out when approving rejected pieces.)
+    const data = error.response?.data;
+    const isInvalidToken403 = status === 403 && (
+      message.startsWith('Forbidden: Invalid token') ||
+      data === null || typeof data !== 'object'
+    );
+    const isAuthFailure = status === 401 || isInvalidToken403;
     // Only treat it as an expired session if we thought we were logged in,
     // never for the auth endpoints themselves (avoids redirect loops), and never
     // for a request explicitly opted out (role-gated lookups a lower-privileged
