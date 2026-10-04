@@ -808,7 +808,7 @@ const QC_CHIPS = [
     { key: 'needs_rework',    label: 'rework',         longLabel: 'needs rework',            text: 'text-amber-600' },
     { key: 'rework_upstream', label: 'earlier rework', longLabel: 'rework at earlier stage', text: 'text-orange-600' },
     { key: 'rejected',        label: 'rejected',       longLabel: 'rejected',                text: 'text-rose-600' },
-    { key: 'rejected_upstream', label: 'rejected earlier', longLabel: 'rejected at earlier stage', text: 'text-rose-400' },
+    { key: 'rejected_upstream', label: 'rejected earlier', longLabel: 'rejected at earlier stage', text: 'text-rose-700' },
 ];
 
 // Sum the attention counts of several roll/size QC entries (section headers).
@@ -854,6 +854,44 @@ const RollQcBadge = ({ qc, unit = 'pieces', loading }) => {
 // One quiet row per roll: roll + colour, a thin cleared bar, and the issue
 // text. Part breakdown only on tap. The section heading already says
 // WIP / Ready / Forwarded, so no per-row tag.
+// The actual problem pieces (or garments) of a roll / size at this stage —
+// always visible on the row, in every tab: what, which size and number, why,
+// and where it was raised.
+const ISSUE_STYLE = {
+    rejected:          { label: 'Rejected',          cls: 'bg-rose-50 border-rose-300 text-rose-800' },
+    rejected_upstream: { label: 'Rejected earlier',  cls: 'bg-rose-50 border-rose-300 border-dashed text-rose-800' },
+    needs_rework:      { label: 'Rework',            cls: 'bg-amber-50 border-amber-300 text-amber-800' },
+    rework_upstream:   { label: 'Rework earlier',    cls: 'bg-orange-50 border-orange-300 border-dashed text-orange-800' },
+};
+const ISSUE_PREVIEW = 8;
+const IssueChips = ({ issues, showRoll = false }) => {
+    const [all, setAll] = useState(false);
+    if (!issues?.length) return null;
+    const shown = all ? issues : issues.slice(0, ISSUE_PREVIEW);
+    return (
+        <div className="flex flex-wrap gap-1.5 px-3 pb-2 pl-6">
+            {shown.map((it, i) => {
+                const st = ISSUE_STYLE[it.kind] || ISSUE_STYLE.rejected;
+                const what = it.uid || [it.part_name, `S ${it.size}`, it.seq != null ? `#${it.seq}` : null].filter(Boolean).join(' · ');
+                return (
+                    <span key={i} className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${st.cls}`}>
+                        <span className="font-black">{st.label}</span>
+                        {' · '}{showRoll && it.roll_id ? `Roll #${it.roll_id} · ` : ''}{what}
+                        {it.uid && it.part_name ? ` (${it.part_name})` : ''}
+                        {it.reason ? ` — ${it.reason}` : ''}
+                        {it.line ? ` @ ${it.line}` : ''}
+                    </span>
+                );
+            })}
+            {issues.length > ISSUE_PREVIEW && (
+                <button type="button" onClick={() => setAll(a => !a)} className="text-[11px] font-black text-slate-500 hover:text-slate-800 underline">
+                    {all ? 'show less' : `+${issues.length - ISSUE_PREVIEW} more`}
+                </button>
+            )}
+        </div>
+    );
+};
+
 const RollRow = ({ roll, allSizes = [], qc, qcUnit, qcLoading, showQc = false }) => {
     const [open, setOpen] = useState(false);
     const cleared = qc ? qc.approved + qc.repaired : 0;
@@ -907,6 +945,7 @@ const RollRow = ({ roll, allSizes = [], qc, qcUnit, qcLoading, showQc = false })
                 </span>
             </div>
 
+            {showQc && <IssueChips issues={qc?.issues} />}
             {open && canExpand && (
                 <div className="px-3 pb-2 pl-[22rem] flex flex-wrap gap-x-5 gap-y-1">
                     {partIssues.map(p => (
@@ -997,6 +1036,7 @@ const SizeRow = ({ group, qc, qcUnit, qcLoading, showQc = false, batchRollIds = 
                 </span>
             </div>
 
+            {showQc && <IssueChips issues={qc?.issues} showRoll />}
             {open && (
                 <div className="px-3 pb-2 pl-[12.5rem] space-y-1.5">
                     {showQc && partIssues.length > 0 && (
@@ -1117,9 +1157,11 @@ const StageDetailModal = ({ batch, stage, prevStage = null, progress, onClose, o
             .sort((a, b) => (parseInt(a.size, 10) || 0) - (parseInt(b.size, 10) || 0) || a.size.localeCompare(b.size));
     }, [isMode2, progress]);
 
-    // Tabs: In Progress (default) / Ready to Forward / Forwarded. Colour per
-    // tab: in progress = yellow, ready to forward = green, forwarded = blue.
-    const [activeTab, setActiveTab] = useState('WIP');
+    // Tabs: In Progress / Ready to Forward / Forwarded. Colour per tab: in
+    // progress = yellow, ready to forward = green, forwarded = blue. Until the
+    // user picks one, the first tab that HAS rolls/sizes is shown (a finished
+    // stage opens on Forwarded, not an empty In Progress).
+    const [activeTab, setActiveTab] = useState(null);
     const SECTION_TONE = {
         WIP:       { label: 'In Progress',      on: 'bg-yellow-100 border-yellow-400 text-yellow-900', off: 'text-yellow-800', box: 'border-yellow-300' },
         READY:     { label: 'Ready to Forward', on: 'bg-emerald-100 border-emerald-400 text-emerald-900', off: 'text-emerald-800', box: 'border-emerald-300' },
@@ -1285,11 +1327,39 @@ const StageDetailModal = ({ batch, stage, prevStage = null, progress, onClose, o
                     <p className="text-sm font-bold text-slate-500">Stage not yet activated.</p>
                 </div>
             ) : (() => {
-                const current = sections.find(sec => sec.key === activeTab) || sections[0];
+                const current = sections.find(sec => sec.key === activeTab)
+                    || sections.find(sec => sec.count > 0) || sections[0];
+                // Rejections / rework anywhere on this stage, per roll (or size),
+                // so they're never hidden behind a tab or pale text.
+                const ISSUE_KEYS = ['needs_rework', 'rework_upstream', 'rejected', 'rejected_upstream'];
+                const issueEntries = Object.entries((isMode2 ? rollQc?.sizes : rollQc?.rolls) || {})
+                    .filter(([, q]) => q && ISSUE_KEYS.some(k => q[k] > 0))
+                    .sort(([a], [b]) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
                 const tone = SECTION_TONE[current.key];
                 const unitWord = isMode2 ? 'size' : 'roll';
                 return (
                     <div className="mb-5">
+                        {issueEntries.length > 0 && (
+                            <div className="mb-3 border-2 border-rose-300 bg-rose-50 rounded-xl px-4 py-3">
+                                <p className="text-xs font-black uppercase tracking-widest text-rose-700 mb-1.5">
+                                    Rejections / rework on this stage
+                                </p>
+                                <div className="space-y-1">
+                                    {issueEntries.map(([key, q]) => {
+                                        const parts = (q.parts || []).filter(pt => ISSUE_KEYS.some(k => pt[k] > 0));
+                                        return (
+                                            <p key={key} className="text-sm">
+                                                <span className="font-black text-slate-800">{isMode2 ? `Size ${key}` : `Roll #${key}`}:</span>{' '}
+                                                <QcIssues counts={Object.fromEntries(QC_CHIPS.map(c => [c.key, c.key === 'pending' ? 0 : (q[c.key] || 0)]))} long />
+                                                {parts.length > 0 && (
+                                                    <span className="text-xs font-bold text-slate-500"> ({parts.map(pt => `${pt.part_name} ${ISSUE_KEYS.reduce((n, k) => n + (pt[k] || 0), 0)}`).join(' · ')})</span>
+                                                )}
+                                            </p>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                         <div className="flex flex-wrap items-end gap-2 mb-2">
                             {sections.map(sec => {
                                 const t = SECTION_TONE[sec.key];

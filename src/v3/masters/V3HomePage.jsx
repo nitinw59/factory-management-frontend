@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom';
-import { Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, Shirt, Route } from 'lucide-react';
+import { stylesApi } from '../api/stylesApi';
 import { PageHeader, useMastersPermissions } from '../components/ui';
 
 const TILES = [
@@ -9,13 +11,18 @@ const TILES = [
     { to: 'masters/trim-items', title: 'Trim items & stock', text: 'One item per vendor item (brand + code), units and stock.', icon: Package, area: 'trims' },
     { to: 'masters/opening-stock', title: 'Opening stock', text: 'Enter the physical count once per item.', icon: ClipboardList, area: 'stock' },
     { to: 'masters/fabric-items', title: 'Fabric items', text: 'Mill + article + shade, with composition, GSM and width.', icon: Layers, area: 'fabric' },
+    { to: 'styles', title: 'Styles', text: 'Size range, pattern parts and production route per style.', icon: Shirt, area: 'styles' },
+    { to: 'stage-types', title: 'Stage types', text: 'Production stages that style routes are built from.', icon: Route, area: 'stages' },
 ];
 
 export default function V3HomePage() {
-    const perms = useMastersPermissions();
+    const masterPerms = useMastersPermissions();
+    const [stylePerms, setStylePerms] = useState({ styles: false, stages: false });
+    useEffect(() => { stylesApi.permissions().then(res => setStylePerms(res.data)).catch(() => {}); }, []);
+    const perms = { ...masterPerms, ...stylePerms };
     return (
         <div>
-            <PageHeader title="Version 3.0" subtitle="Masters are the first part of 3.0. Orders, BOM and planning follow, portal by portal." />
+            <PageHeader title="Version 3.0" subtitle="Masters and styles are the first part of 3.0. BOM, orders and planning follow, portal by portal." />
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                 {TILES.map(t => (
                     <Link key={t.to} to={t.to} className="bg-white border border-slate-200 hover:border-indigo-400 rounded-xl p-4 flex gap-3 transition">

@@ -225,6 +225,11 @@ const V3TrimTypesPage = lazyPage(() => import('./v3/masters/TrimTypesPage'));
 const V3TrimItemsPage = lazyPage(() => import('./v3/masters/TrimItemsPage'));
 const V3OpeningStockPage = lazyPage(() => import('./v3/masters/OpeningStockPage'));
 const V3FabricItemsPage = lazyPage(() => import('./v3/masters/FabricItemsPage'));
+const V3StylesPage = lazyPage(() => import('./v3/styles/StylesPage'));
+const V3StyleDetailPage = lazyPage(() => import('./v3/styles/StyleDetailPage'));
+const V3StageTypesPage = lazyPage(() => import('./v3/styles/StageTypesPage'));
+const V3BomPage = lazyPage(() => import('./v3/boms/BomPage'));
+const V3BomApprovalsPage = lazyPage(() => import('./v3/boms/BomApprovalsPage'));
 
 
 
@@ -255,6 +260,11 @@ const appRoutes = (
           <Route path="masters/trim-items" element={<V3TrimItemsPage />} />
           <Route path="masters/opening-stock" element={<V3OpeningStockPage />} />
           <Route path="masters/fabric-items" element={<V3FabricItemsPage />} />
+          <Route path="styles" element={<V3StylesPage />} />
+          <Route path="styles/:id" element={<V3StyleDetailPage />} />
+          <Route path="stage-types" element={<V3StageTypesPage />} />
+          <Route path="boms/:id" element={<V3BomPage />} />
+          <Route path="bom-approvals" element={<V3BomApprovalsPage />} />
         </Route>
         <Route path="/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
         {/* Bug Reporting — any logged-in user can file/view their own reports */}

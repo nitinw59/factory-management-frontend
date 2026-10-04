@@ -1,7 +1,7 @@
 // Shell for every Version 3.0 page: top bar (version badge, switch back to
 // 2.0, change version, log out) + side navigation.
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Home, Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, ArrowLeftRight, LogOut } from 'lucide-react';
+import { Home, Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, ArrowLeftRight, LogOut, Shirt, Route, ClipboardCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const NAV = [
@@ -13,6 +13,10 @@ const NAV = [
     { to: '/v3/masters/trim-items', label: 'Trim items & stock', icon: Package },
     { to: '/v3/masters/opening-stock', label: 'Opening stock', icon: ClipboardList },
     { to: '/v3/masters/fabric-items', label: 'Fabric items', icon: Layers },
+    { section: 'Styles' },
+    { to: '/v3/styles', label: 'Styles', icon: Shirt },
+    { to: '/v3/stage-types', label: 'Stage types', icon: Route },
+    { to: '/v3/bom-approvals', label: 'BOM approvals', icon: ClipboardCheck },
 ];
 
 export default function V3Layout() {
