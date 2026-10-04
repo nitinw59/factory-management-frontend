@@ -11,9 +11,10 @@ const LoginPage = () => {
         window.location.href = `${API_BASE_URL}/api/auth/google`;
     };
 
-    // Already authenticated — go straight to the role-based portal redirect.
+    // Already authenticated — choose Version 2.0 or 3.0 first (2.0 then
+    // continues to the role-based portal redirect at /init).
     if (user) {
-        return <Navigate to="/init" replace />;
+        return <Navigate to="/choose-version" replace />;
     }
 
     return (

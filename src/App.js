@@ -215,6 +215,17 @@ const MyBugReportsPage = lazyPage(() => import('./modules/bug_reports/MyBugRepor
 const BugReportDetailPage = lazyPage(() => import('./modules/bug_reports/BugReportDetailPage'));
 const BugReportAdminDashboardPage = lazyPage(() => import('./modules/bug_reports/BugReportAdminDashboardPage'));
 
+// ─── Version 3.0 (built portal by portal; see backend docs/VERSION_3_OVERVIEW.md) ───
+const VersionChooserPage = lazyPage(() => import('./v3/VersionChooserPage'));
+const V3Layout = lazyPage(() => import('./v3/V3Layout'));
+const V3HomePage = lazyPage(() => import('./v3/masters/V3HomePage'));
+const V3GarmentColoursPage = lazyPage(() => import('./v3/masters/GarmentColoursPage'));
+const V3TrimSettingsPage = lazyPage(() => import('./v3/masters/TrimSettingsPage'));
+const V3TrimTypesPage = lazyPage(() => import('./v3/masters/TrimTypesPage'));
+const V3TrimItemsPage = lazyPage(() => import('./v3/masters/TrimItemsPage'));
+const V3OpeningStockPage = lazyPage(() => import('./v3/masters/OpeningStockPage'));
+const V3FabricItemsPage = lazyPage(() => import('./v3/masters/FabricItemsPage'));
+
 
 
 // Route tree as a constant so lazyPage can read which pages belong to which
@@ -233,6 +244,18 @@ const appRoutes = (
       <Route element={<ProtectedRoute />}>
         {/* The root path is the main entry point that redirects based on role */}
         <Route path="/init" element={<InitialRedirect />} />
+        {/* After login: choose Version 2.0 (/init → role portal) or 3.0 (/v3) */}
+        <Route path="/choose-version" element={<VersionChooserPage />} />
+        {/* Version 3.0 */}
+        <Route path="/v3" element={<V3Layout />}>
+          <Route index element={<V3HomePage />} />
+          <Route path="masters/garment-colours" element={<V3GarmentColoursPage />} />
+          <Route path="masters/trim-settings" element={<V3TrimSettingsPage />} />
+          <Route path="masters/trim-types" element={<V3TrimTypesPage />} />
+          <Route path="masters/trim-items" element={<V3TrimItemsPage />} />
+          <Route path="masters/opening-stock" element={<V3OpeningStockPage />} />
+          <Route path="masters/fabric-items" element={<V3FabricItemsPage />} />
+        </Route>
         <Route path="/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
         {/* Bug Reporting — any logged-in user can file/view their own reports */}
         <Route path="/bug-reports" element={<MyBugReportsPage />} />

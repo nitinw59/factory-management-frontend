@@ -16,9 +16,10 @@ const AuthCallbackPage = () => {
       login(token);
       console.log("AuthCallbackPage: Token saved to global state.");
       console.log("Login successful, token saved.");
-      // 2. Redirect ALL successful logins to the root of the protected app.
-      // The <InitialRedirect /> component will then handle the role-based logic.
-      navigate('/init', { replace: true });
+      // 2. Every successful login first chooses Version 2.0 or 3.0
+      // (/choose-version). 2.0 goes on to /init, where <InitialRedirect />
+      // applies the role-based logic as before.
+      navigate('/choose-version', { replace: true });
 
     } else {
       // If no token is found, redirect back to the login page.

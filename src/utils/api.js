@@ -59,7 +59,11 @@ api.interceptors.response.use(
     const message = error.response?.data?.message || '';
 
     const isRoleDenied  = status === 403 && message.startsWith(ROLE_DENIED_PREFIX);
-    const isAuthFailure = (status === 401 || status === 403) && !isRoleDenied;
+    // A supervisor-password check (e.g. changing a rejected garment) answers
+    // 403 with a code; the portal then asks for the password. That's not an
+    // expired session — logging out here kicked the checker out instead.
+    const isSupervisorPin = status === 403 && String(error.response?.data?.code || '').startsWith('SUPERVISOR_PIN_');
+    const isAuthFailure = (status === 401 || status === 403) && !isRoleDenied && !isSupervisorPin;
     // Only treat it as an expired session if we thought we were logged in,
     // never for the auth endpoints themselves (avoids redirect loops), and never
     // for a request explicitly opted out (role-gated lookups a lower-privileged
