@@ -1,7 +1,7 @@
 // Shell for every Version 3.0 page: top bar (version badge, switch back to
 // 2.0, change version, log out) + side navigation.
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Home, Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, ArrowLeftRight, LogOut, Shirt, Route, ClipboardCheck, FileText, Calculator, Settings2, Boxes, ShoppingCart, FileCheck, Gauge, Warehouse } from 'lucide-react';
+import { Home, Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, ArrowLeftRight, LogOut, Shirt, Route, ClipboardCheck, FileText, Calculator, Settings2, Boxes, ShoppingCart, FileCheck, Gauge, Warehouse, CalendarDays } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const NAV = [
@@ -24,6 +24,7 @@ const NAV = [
     { section: 'Planning' },
     { to: '/v3/planning', label: 'Material requirements', icon: Calculator, end: true },
     { to: '/v3/planning/readiness', label: 'Material readiness', icon: Gauge },
+    { to: '/v3/planning/milestones', label: 'Order milestones', icon: CalendarDays },
     { to: '/v3/planning/position', label: 'Material position', icon: Boxes },
     { to: '/v3/planning/buy-list', label: 'Buy list', icon: ShoppingCart },
     { to: '/v3/planning/purchase-requisitions', label: 'Purchase requisitions', icon: FileCheck },

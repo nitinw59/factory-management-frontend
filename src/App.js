@@ -241,6 +241,7 @@ const V3MaterialPositionPage = lazyPage(() => import('./v3/planning/MaterialPosi
 const V3ItemAllocationPage = lazyPage(() => import('./v3/planning/ItemAllocationPage'));
 const V3BuyListPage = lazyPage(() => import('./v3/planning/BuyListPage'));
 const V3ReadinessDashboardPage = lazyPage(() => import('./v3/planning/ReadinessDashboardPage'));
+const V3MilestoneCalendarPage = lazyPage(() => import('./v3/planning/MilestoneCalendarPage'));
 const V3PurchaseRequisitionsPage = lazyPage(() => import('./v3/planning/PurchaseRequisitionsPage'));
 const V3PurchaseRequisitionPage = lazyPage(() => import('./v3/planning/PurchaseRequisitionPage'));
 
@@ -289,6 +290,7 @@ const appRoutes = (
           <Route path="planning/position/:kind/:itemId" element={<V3ItemAllocationPage />} />
           <Route path="planning/buy-list" element={<V3BuyListPage />} />
           <Route path="planning/readiness" element={<V3ReadinessDashboardPage />} />
+          <Route path="planning/milestones" element={<V3MilestoneCalendarPage />} />
           <Route path="planning/purchase-requisitions" element={<V3PurchaseRequisitionsPage />} />
           <Route path="planning/purchase-requisitions/:id" element={<V3PurchaseRequisitionPage />} />
         </Route>

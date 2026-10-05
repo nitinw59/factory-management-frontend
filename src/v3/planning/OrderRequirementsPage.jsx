@@ -12,6 +12,7 @@ import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import AllocateModal from './AllocateModal';
+import OrderMilestonesPanel from './OrderMilestonesPanel';
 import { ReadinessChip, READY_STATUS, daysText } from './readinessShared';
 
 const fmt = (n, uom) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 2 });
@@ -161,7 +162,7 @@ export default function OrderRequirementsPage() {
             </div>
 
             <div className="flex gap-1 border-b border-slate-200 mb-4">
-                {[['FABRIC', `Fabric (${data.totals.fabric_items})`], ['TRIM', `Trims (${data.totals.trim_items})`], ['CHANGES', `Changes (${data.changes.length + data.allocation_log.length})`]].map(([k, label]) => (
+                {[['FABRIC', `Fabric (${data.totals.fabric_items})`], ['TRIM', `Trims (${data.totals.trim_items})`], ['CHANGES', `Changes (${data.changes.length + data.allocation_log.length})`], ...(approved ? [['MILESTONES', 'Milestones']] : [])].map(([k, label]) => (
                     <button key={k} type="button" onClick={() => setTab(k)}
                         className={`px-4 py-2 text-sm font-bold border-b-2 -mb-px ${tab === k ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{label}</button>
                 ))}
@@ -221,6 +222,8 @@ export default function OrderRequirementsPage() {
                     </div>
                 )
             )}
+
+            {tab === 'MILESTONES' && approved && <OrderMilestonesPanel orderId={orderId} canEdit={perms.plan} />}
 
             {tab === 'CHANGES' && (
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">

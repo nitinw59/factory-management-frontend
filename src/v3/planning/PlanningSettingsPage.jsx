@@ -1,6 +1,7 @@
 // Planning settings (one record): default cut allowance for newly planned
 // order lines, and lead days before ship (used for needed-by dates).
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { planningApi } from '../api/planningApi';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, Field, inputCls, PrimaryButton, ErrorBox, Loading } from '../components/ui';
@@ -12,6 +13,8 @@ export default function PlanningSettingsPage() {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const [saved, setSaved] = useState(false);
+    const [templates, setTemplates] = useState([]);
+    const [tplError, setTplError] = useState('');
 
     const apply = (s) => {
         setMeta(s);
@@ -20,11 +23,17 @@ export default function PlanningSettingsPage() {
     useEffect(() => {
         planningApi.settings().then(res => apply(res.data)).catch(err => setError(apiError(err, 'Failed to load settings.')));
         planningApi.permissions().then(res => setCanEdit(res.data.settings)).catch(() => {});
+        planningApi.milestoneTemplates().then(res => setTemplates(res.data)).catch(() => {});
     }, []);
 
     const save = async () => {
         setSaving(true); setError(''); setSaved(false);
         try { apply((await planningApi.saveSettings(form)).data); setSaved(true); } catch (err) { setError(apiError(err, 'Failed to save.')); } finally { setSaving(false); }
+    };
+
+    const saveTemplate = async (t, patch) => {
+        setTplError('');
+        try { setTemplates((await planningApi.saveMilestoneTemplate(t.code, patch)).data); } catch (err) { setTplError(apiError(err, 'Failed to save.')); }
     };
 
     if (!form) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
@@ -44,6 +53,27 @@ export default function PlanningSettingsPage() {
                 <ErrorBox text={error} />
                 {saved && <p className="text-sm font-semibold text-emerald-700">Saved.</p>}
                 {canEdit && <PrimaryButton onClick={save} busy={saving} disabled={saving}>Save</PrimaryButton>}
+            </div>
+            <div className="bg-white border border-slate-200 rounded-xl p-4 mt-4">
+                <p className="font-bold text-slate-800">Order milestones</p>
+                <p className="text-xs text-slate-500 mb-2">Planned dates count back from each order's first ship date. Materials milestones follow the lead days above and are recorded by the system. See <Link to="/v3/planning/milestones" className="text-indigo-700 font-semibold">Order milestones</Link>.</p>
+                <table className="w-full text-sm">
+                    <thead className="text-left text-xs text-slate-500"><tr><th className="py-1">Milestone</th><th>Planned</th><th>Actual from</th><th className="text-right">Active</th></tr></thead>
+                    <tbody>
+                        {templates.map(t => (
+                            <tr key={t.code} className="border-t border-slate-100">
+                                <td className="py-1.5 font-semibold">{t.name}</td>
+                                <td>{t.planned_rule === 'DAYS_BEFORE_SHIP'
+                                    ? <span className="inline-flex items-center gap-1"><input className={`${inputCls} !w-20 !py-1`} type="number" min="0" max="365" disabled={!canEdit} defaultValue={t.days_before_ship}
+                                        onBlur={e => { const v = Number(e.target.value); if (v !== t.days_before_ship) saveTemplate(t, { days_before_ship: v }); }} aria-label={`${t.name} days before ship`} /> days before ship</span>
+                                    : <span className="text-xs text-slate-500">{t.planned_rule === 'FABRIC_LEAD' ? 'fabric lead days' : t.planned_rule === 'TRIM_LEAD' ? 'trim lead days' : 'later of fabric / trims'}</span>}</td>
+                                <td className="text-xs text-slate-500">{t.actual_source === 'AUTO' ? 'system' : 'entered by hand'}</td>
+                                <td className="text-right"><input type="checkbox" disabled={!canEdit} checked={t.is_active} onChange={e => saveTemplate(t, { is_active: e.target.checked })} aria-label={`${t.name} active`} /></td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+                <ErrorBox text={tplError} />
             </div>
         </div>
     );
