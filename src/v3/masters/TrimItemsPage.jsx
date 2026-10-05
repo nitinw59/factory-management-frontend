@@ -2,7 +2,7 @@
 // usage unit, purchase unit and conversion, plus on-hand stock, the movement
 // ledger and stock adjustments.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Pencil, History } from 'lucide-react';
+import { Plus, Pencil, History, Copy } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { mastersApi, apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, ActiveBadge, Loading, fmtQty, useMastersPermissions } from '../components/ui';
@@ -51,6 +51,17 @@ export default function TrimItemsPage() {
         const t = types.find(x => x.is_active);
         setFormError('');
         setEditing({ trim_type_id: t ? String(t.id) : '', brand: '', code: '', description: '', specs: {}, usage_uom: t?.default_usage_uom || 'pcs', purchase_uom: 'pcs', usage_per_purchase_uom: 1, is_active: true });
+    };
+    // Copy: a new item pre-filled from an existing one (same type, brand,
+    // description, specs and units). Code is left blank (brand + code must be
+    // unique); stock is never copied.
+    const startCopy = (it) => {
+        setFormError('');
+        setEditing({
+            trim_type_id: String(it.trim_type_id), brand: it.brand, code: '', description: it.description || '',
+            specs: { ...(it.specs || {}) }, usage_uom: it.usage_uom, purchase_uom: it.purchase_uom,
+            usage_per_purchase_uom: it.usage_per_purchase_uom, is_active: true, copiedFrom: `${it.brand} ${it.code}`,
+        });
     };
 
     const save = async () => {
@@ -113,6 +124,7 @@ export default function TrimItemsPage() {
                                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
                                         <button type="button" onClick={() => setLedgerItem(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Stock history of ${it.brand} ${it.code}`}><History size={15} /></button>
                                         {perms.trims && <button type="button" onClick={() => { setFormError(''); setEditing({ ...it, trim_type_id: String(it.trim_type_id), description: it.description || '' }); }} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Edit ${it.brand} ${it.code}`}><Pencil size={15} /></button>}
+                                        {perms.trims && <button type="button" onClick={() => startCopy(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Copy ${it.brand} ${it.code} into a new item`} title="Copy into a new item"><Copy size={15} /></button>}
                                     </td>
                                 </tr>
                             ))}
@@ -122,11 +134,11 @@ export default function TrimItemsPage() {
             )}
 
             {editing && (
-                <Modal title={editing.id ? 'Edit trim item' : 'Add trim item'} onClose={() => setEditing(null)}>
+                <Modal title={editing.id ? 'Edit trim item' : editing.copiedFrom ? `Add trim item — copy of ${editing.copiedFrom}` : 'Add trim item'} onClose={() => setEditing(null)}>
                     <div className="space-y-4 w-[min(620px,85vw)]">
                         <div className="grid grid-cols-2 gap-3">
-                            <Field label="Brand / vendor *" hint='As written by the vendor, e.g. "Coats".'><input className={inputCls} value={editing.brand} onChange={e => setEditing({ ...editing, brand: e.target.value })} autoFocus /></Field>
-                            <Field label="Code *" hint='Vendor code incl. shade, e.g. "1234".'><input className={inputCls} value={editing.code} onChange={e => setEditing({ ...editing, code: e.target.value })} /></Field>
+                            <Field label="Brand / vendor *" hint='As written by the vendor, e.g. "Coats".'><input className={inputCls} value={editing.brand} onChange={e => setEditing({ ...editing, brand: e.target.value })} autoFocus={!editing.copiedFrom} /></Field>
+                            <Field label="Code *" hint='Vendor code incl. shade, e.g. "1234".'><input className={inputCls} value={editing.code} onChange={e => setEditing({ ...editing, code: e.target.value })} autoFocus={!!editing.copiedFrom} /></Field>
                         </div>
                         <Field label="Description" hint='e.g. "Navy", "Epic TKT 120".'><input className={inputCls} value={editing.description} onChange={e => setEditing({ ...editing, description: e.target.value })} /></Field>
                         <Field label="Trim type *">

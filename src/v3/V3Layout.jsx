@@ -1,7 +1,7 @@
 // Shell for every Version 3.0 page: top bar (version badge, switch back to
 // 2.0, change version, log out) + side navigation.
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Home, Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, ArrowLeftRight, LogOut, Shirt, Route, ClipboardCheck } from 'lucide-react';
+import { Home, Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, ArrowLeftRight, LogOut, Shirt, Route, ClipboardCheck, FileText, Calculator, Settings2, Boxes, ShoppingCart, FileCheck, Gauge, Warehouse } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const NAV = [
@@ -13,10 +13,22 @@ const NAV = [
     { to: '/v3/masters/trim-items', label: 'Trim items & stock', icon: Package },
     { to: '/v3/masters/opening-stock', label: 'Opening stock', icon: ClipboardList },
     { to: '/v3/masters/fabric-items', label: 'Fabric items', icon: Layers },
+    { to: '/v3/masters/fabric-stock', label: 'Fabric stock', icon: Warehouse },
     { section: 'Styles' },
     { to: '/v3/styles', label: 'Styles', icon: Shirt },
     { to: '/v3/stage-types', label: 'Stage types', icon: Route },
     { to: '/v3/bom-approvals', label: 'BOM approvals', icon: ClipboardCheck },
+    { section: 'Sales' },
+    { to: '/v3/sales-orders', label: 'Sales orders', icon: FileText },
+    { to: '/v3/sales-order-approvals', label: 'Order approvals', icon: ClipboardCheck },
+    { section: 'Planning' },
+    { to: '/v3/planning', label: 'Material requirements', icon: Calculator, end: true },
+    { to: '/v3/planning/readiness', label: 'Material readiness', icon: Gauge },
+    { to: '/v3/planning/position', label: 'Material position', icon: Boxes },
+    { to: '/v3/planning/buy-list', label: 'Buy list', icon: ShoppingCart },
+    { to: '/v3/planning/purchase-requisitions', label: 'Purchase requisitions', icon: FileCheck },
+    { to: '/v3/planning/purchase-requisitions?status=SUBMITTED', label: 'Requisition approvals', icon: ClipboardCheck },
+    { to: '/v3/planning/settings', label: 'Planning settings', icon: Settings2 },
 ];
 
 export default function V3Layout() {

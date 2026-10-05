@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, Shirt, Route } from 'lucide-react';
+import { Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, Shirt, Route, FileText, Warehouse } from 'lucide-react';
 import { stylesApi } from '../api/stylesApi';
+import { salesOrdersApi } from '../api/salesOrdersApi';
 import { PageHeader, useMastersPermissions } from '../components/ui';
 
 const TILES = [
@@ -11,18 +12,24 @@ const TILES = [
     { to: 'masters/trim-items', title: 'Trim items & stock', text: 'One item per vendor item (brand + code), units and stock.', icon: Package, area: 'trims' },
     { to: 'masters/opening-stock', title: 'Opening stock', text: 'Enter the physical count once per item.', icon: ClipboardList, area: 'stock' },
     { to: 'masters/fabric-items', title: 'Fabric items', text: 'Mill + article + shade, with composition, GSM and width.', icon: Layers, area: 'fabric' },
+    { to: 'masters/fabric-stock', title: 'Fabric stock', text: 'Rolls with dye lot and width; opening count and adjustments.', icon: Warehouse, area: 'fabricStock' },
     { to: 'styles', title: 'Styles', text: 'Size range, pattern parts and production route per style.', icon: Shirt, area: 'styles' },
     { to: 'stage-types', title: 'Stage types', text: 'Production stages that style routes are built from.', icon: Route, area: 'stages' },
+    { to: 'sales-orders', title: 'Sales orders', text: 'Orders by customer: styles with colour × size quantities.', icon: FileText, area: 'salesOrders' },
 ];
 
 export default function V3HomePage() {
     const masterPerms = useMastersPermissions();
     const [stylePerms, setStylePerms] = useState({ styles: false, stages: false });
-    useEffect(() => { stylesApi.permissions().then(res => setStylePerms(res.data)).catch(() => {}); }, []);
-    const perms = { ...masterPerms, ...stylePerms };
+    const [soEdit, setSoEdit] = useState(false);
+    useEffect(() => {
+        stylesApi.permissions().then(res => setStylePerms(res.data)).catch(() => {});
+        salesOrdersApi.permissions().then(res => setSoEdit(res.data.edit)).catch(() => {});
+    }, []);
+    const perms = { ...masterPerms, ...stylePerms, salesOrders: soEdit };
     return (
         <div>
-            <PageHeader title="Version 3.0" subtitle="Masters and styles are the first part of 3.0. BOM, orders and planning follow, portal by portal." />
+            <PageHeader title="Version 3.0" subtitle="Masters, styles, BOMs and sales orders are built. Planning follows, portal by portal." />
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                 {TILES.map(t => (
                     <Link key={t.to} to={t.to} className="bg-white border border-slate-200 hover:border-indigo-400 rounded-xl p-4 flex gap-3 transition">

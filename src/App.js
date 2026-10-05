@@ -225,11 +225,24 @@ const V3TrimTypesPage = lazyPage(() => import('./v3/masters/TrimTypesPage'));
 const V3TrimItemsPage = lazyPage(() => import('./v3/masters/TrimItemsPage'));
 const V3OpeningStockPage = lazyPage(() => import('./v3/masters/OpeningStockPage'));
 const V3FabricItemsPage = lazyPage(() => import('./v3/masters/FabricItemsPage'));
+const V3FabricStockPage = lazyPage(() => import('./v3/masters/FabricStockPage'));
 const V3StylesPage = lazyPage(() => import('./v3/styles/StylesPage'));
 const V3StyleDetailPage = lazyPage(() => import('./v3/styles/StyleDetailPage'));
 const V3StageTypesPage = lazyPage(() => import('./v3/styles/StageTypesPage'));
 const V3BomPage = lazyPage(() => import('./v3/boms/BomPage'));
 const V3BomApprovalsPage = lazyPage(() => import('./v3/boms/BomApprovalsPage'));
+const V3SalesOrdersPage = lazyPage(() => import('./v3/salesOrders/SalesOrdersPage'));
+const V3SalesOrderPage = lazyPage(() => import('./v3/salesOrders/SalesOrderPage'));
+const V3SalesOrderApprovalsPage = lazyPage(() => import('./v3/salesOrders/SalesOrderApprovalsPage'));
+const V3PlanningOrdersPage = lazyPage(() => import('./v3/planning/PlanningOrdersPage'));
+const V3OrderRequirementsPage = lazyPage(() => import('./v3/planning/OrderRequirementsPage'));
+const V3PlanningSettingsPage = lazyPage(() => import('./v3/planning/PlanningSettingsPage'));
+const V3MaterialPositionPage = lazyPage(() => import('./v3/planning/MaterialPositionPage'));
+const V3ItemAllocationPage = lazyPage(() => import('./v3/planning/ItemAllocationPage'));
+const V3BuyListPage = lazyPage(() => import('./v3/planning/BuyListPage'));
+const V3ReadinessDashboardPage = lazyPage(() => import('./v3/planning/ReadinessDashboardPage'));
+const V3PurchaseRequisitionsPage = lazyPage(() => import('./v3/planning/PurchaseRequisitionsPage'));
+const V3PurchaseRequisitionPage = lazyPage(() => import('./v3/planning/PurchaseRequisitionPage'));
 
 
 
@@ -260,11 +273,24 @@ const appRoutes = (
           <Route path="masters/trim-items" element={<V3TrimItemsPage />} />
           <Route path="masters/opening-stock" element={<V3OpeningStockPage />} />
           <Route path="masters/fabric-items" element={<V3FabricItemsPage />} />
+          <Route path="masters/fabric-stock" element={<V3FabricStockPage />} />
           <Route path="styles" element={<V3StylesPage />} />
           <Route path="styles/:id" element={<V3StyleDetailPage />} />
           <Route path="stage-types" element={<V3StageTypesPage />} />
           <Route path="boms/:id" element={<V3BomPage />} />
           <Route path="bom-approvals" element={<V3BomApprovalsPage />} />
+          <Route path="sales-orders" element={<V3SalesOrdersPage />} />
+          <Route path="sales-orders/:id" element={<V3SalesOrderPage />} />
+          <Route path="sales-order-approvals" element={<V3SalesOrderApprovalsPage />} />
+          <Route path="planning" element={<V3PlanningOrdersPage />} />
+          <Route path="planning/orders/:orderId" element={<V3OrderRequirementsPage />} />
+          <Route path="planning/settings" element={<V3PlanningSettingsPage />} />
+          <Route path="planning/position" element={<V3MaterialPositionPage />} />
+          <Route path="planning/position/:kind/:itemId" element={<V3ItemAllocationPage />} />
+          <Route path="planning/buy-list" element={<V3BuyListPage />} />
+          <Route path="planning/readiness" element={<V3ReadinessDashboardPage />} />
+          <Route path="planning/purchase-requisitions" element={<V3PurchaseRequisitionsPage />} />
+          <Route path="planning/purchase-requisitions/:id" element={<V3PurchaseRequisitionPage />} />
         </Route>
         <Route path="/sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
         {/* Bug Reporting — any logged-in user can file/view their own reports */}

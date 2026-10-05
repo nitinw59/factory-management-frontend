@@ -30,6 +30,11 @@ export const mastersApi = {
     fabricItems: (params) => api.get(`${base}/fabric-items`, { params }),
     createFabricItem: (data) => api.post(`${base}/fabric-items`, data),
     updateFabricItem: (id, data) => api.put(`${base}/fabric-items/${id}`, data),
+    fabricStock: (params) => api.get(`${base}/fabric-stock`, { params }),
+    fabricRolls: (params) => api.get(`${base}/fabric-rolls`, { params }),
+    postOpeningRolls: (rolls, note) => api.post(`${base}/fabric-rolls/opening`, { rolls, note }),
+    adjustRoll: (id, data) => api.post(`${base}/fabric-rolls/${id}/adjustment`, data),
+    rollLedger: (id) => api.get(`${base}/fabric-rolls/${id}/ledger`),
 };
 
 export const apiError = (err, fallback = 'Something went wrong.') =>
