@@ -5,7 +5,7 @@ import Modal from '../../shared/Modal';
 import { mastersApi, apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, ActiveBadge, Loading, useMastersPermissions } from '../components/ui';
 
-const empty = { mill: '', article_code: '', shade_code: '', shade_name: '', composition: '', gsm: '', width: '', width_unit: 'in', usage_uom: 'm', is_active: true };
+const empty = { mill: '', article_code: '', shade_code: '', shade_name: '', composition: '', gsm: '', width: '', width_unit: 'in', usage_uom: 'm', hsn_code: '', gst_pct: '', is_active: true };
 
 export default function FabricItemsPage() {
     const perms = useMastersPermissions();
@@ -71,7 +71,7 @@ export default function FabricItemsPage() {
                                     <td className="px-4 py-2.5 text-slate-600">{r.usage_uom}</td>
                                     <td className="px-4 py-2.5"><ActiveBadge active={r.is_active} /></td>
                                     <td className="px-4 py-2.5 text-right">
-                                        {perms.fabric && <button type="button" onClick={() => { setFormError(''); setEditing({ ...empty, ...Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v ?? ''])), gsm: r.gsm ? Number(r.gsm) : '', width: r.width ? Number(r.width) : '' }); }} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Edit ${r.mill} ${r.article_code} ${r.shade_code}`}><Pencil size={15} /></button>}
+                                        {perms.fabric && <button type="button" onClick={() => { setFormError(''); setEditing({ ...empty, ...Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v ?? ''])), gsm: r.gsm ? Number(r.gsm) : '', width: r.width ? Number(r.width) : '', gst_pct: r.gst_pct != null ? Number(r.gst_pct) : '' }); }} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Edit ${r.mill} ${r.article_code} ${r.shade_code}`}><Pencil size={15} /></button>}
                                     </td>
                                 </tr>
                             ))}
@@ -90,6 +90,10 @@ export default function FabricItemsPage() {
                             <Field label="Shade name" hint='e.g. "Black"'><input className={inputCls} value={editing.shade_name} onChange={set('shade_name')} /></Field>
                         </div>
                         <Field label="Composition" hint='e.g. "98% cotton 2% elastane"'><input className={inputCls} value={editing.composition} onChange={set('composition')} /></Field>
+                        <div className="grid grid-cols-2 gap-3">
+                            <Field label="HSN code" hint="4, 6 or 8 digits — printed on purchase orders."><input className={inputCls} inputMode="numeric" value={editing.hsn_code} onChange={set('hsn_code')} /></Field>
+                            <Field label="GST %" hint="Default GST on purchase orders, e.g. 5."><input className={inputCls} type="number" min="0" max="40" step="0.01" value={editing.gst_pct} onChange={set('gst_pct')} /></Field>
+                        </div>
                         <div className="grid grid-cols-4 gap-3">
                             <Field label="GSM"><input className={inputCls} type="number" min="0" step="any" value={editing.gsm} onChange={set('gsm')} /></Field>
                             <Field label="Width"><input className={inputCls} type="number" min="0" step="any" value={editing.width} onChange={set('width')} /></Field>

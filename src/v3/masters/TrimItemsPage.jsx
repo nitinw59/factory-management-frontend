@@ -50,7 +50,7 @@ export default function TrimItemsPage() {
     const startNew = () => {
         const t = types.find(x => x.is_active);
         setFormError('');
-        setEditing({ trim_type_id: t ? String(t.id) : '', brand: '', code: '', description: '', specs: {}, usage_uom: t?.default_usage_uom || 'pcs', purchase_uom: 'pcs', usage_per_purchase_uom: 1, is_active: true });
+        setEditing({ trim_type_id: t ? String(t.id) : '', brand: '', code: '', description: '', specs: {}, usage_uom: t?.default_usage_uom || 'pcs', purchase_uom: 'pcs', usage_per_purchase_uom: 1, hsn_code: '', gst_pct: '', is_active: true });
     };
     // Copy: a new item pre-filled from an existing one (same type, brand,
     // description, specs and units). Code is left blank (brand + code must be
@@ -60,7 +60,7 @@ export default function TrimItemsPage() {
         setEditing({
             trim_type_id: String(it.trim_type_id), brand: it.brand, code: '', description: it.description || '',
             specs: { ...(it.specs || {}) }, usage_uom: it.usage_uom, purchase_uom: it.purchase_uom,
-            usage_per_purchase_uom: it.usage_per_purchase_uom, is_active: true, copiedFrom: `${it.brand} ${it.code}`,
+            usage_per_purchase_uom: it.usage_per_purchase_uom, hsn_code: it.hsn_code || '', gst_pct: it.gst_pct != null ? Number(it.gst_pct) : '', is_active: true, copiedFrom: `${it.brand} ${it.code}`,
         });
     };
 
@@ -173,6 +173,10 @@ export default function TrimItemsPage() {
                             <Field label={`${UOM_LABEL[editing.usage_uom]} per ${editing.purchase_uom || 'unit'} *`} hint="e.g. 5000 m per cone, 144 pcs per gross.">
                                 <input className={inputCls} type="number" min="0" step="any" value={editing.usage_per_purchase_uom} onChange={e => setEditing({ ...editing, usage_per_purchase_uom: e.target.value })} />
                             </Field>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <Field label="HSN code" hint="4, 6 or 8 digits — printed on purchase orders."><input className={inputCls} inputMode="numeric" value={editing.hsn_code ?? ''} onChange={e => setEditing({ ...editing, hsn_code: e.target.value })} /></Field>
+                            <Field label="GST %" hint="Default GST on purchase orders, e.g. 12."><input className={inputCls} type="number" min="0" max="40" step="0.01" value={editing.gst_pct ?? ''} onChange={e => setEditing({ ...editing, gst_pct: e.target.value })} /></Field>
                         </div>
                         {editing.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={editing.is_active} onChange={e => setEditing({ ...editing, is_active: e.target.checked })} /> Active</label>}
                         <ErrorBox text={formError} />

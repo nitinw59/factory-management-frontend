@@ -242,6 +242,46 @@ const V3ItemAllocationPage = lazyPage(() => import('./v3/planning/ItemAllocation
 const V3BuyListPage = lazyPage(() => import('./v3/planning/BuyListPage'));
 const V3ReadinessDashboardPage = lazyPage(() => import('./v3/planning/ReadinessDashboardPage'));
 const V3MilestoneCalendarPage = lazyPage(() => import('./v3/planning/MilestoneCalendarPage'));
+const V3SuppliersPage = lazyPage(() => import('./v3/purchasing/SuppliersPage'));
+const V3PurchaseOrdersPage = lazyPage(() => import('./v3/purchasing/PurchaseOrdersPage'));
+const V3NewPurchaseOrderPage = lazyPage(() => import('./v3/purchasing/NewPurchaseOrderPage'));
+const V3PurchaseOrderPage = lazyPage(() => import('./v3/purchasing/PurchaseOrderPage'));
+const V3ReceiveGoodsPage = lazyPage(() => import('./v3/purchasing/ReceiveGoodsPage'));
+const V3GrnListPage = lazyPage(() => import('./v3/purchasing/GrnListPage'));
+const V3GrnPage = lazyPage(() => import('./v3/purchasing/GrnPage'));
+const V3ReturnNotesPage = lazyPage(() => import('./v3/purchasing/ReturnNotesPage'));
+const V3NewReturnNotePage = lazyPage(() => import('./v3/purchasing/NewReturnNotePage'));
+const V3ReturnNotePage = lazyPage(() => import('./v3/purchasing/ReturnNotePage'));
+const V3InvoicesPage = lazyPage(() => import('./v3/purchasing/InvoicesPage'));
+const V3NewInvoicePage = lazyPage(() => import('./v3/purchasing/NewInvoicePage'));
+const V3InvoicePage = lazyPage(() => import('./v3/purchasing/InvoicePage'));
+const V3PurchasingReportsPage = lazyPage(() => import('./v3/purchasing/PurchasingReportsPage'));
+const V3MaterialIssueHomePage = lazyPage(() => import('./v3/issue/MaterialIssueHomePage'));
+const V3IssueForOrderPage = lazyPage(() => import('./v3/issue/IssueForOrderPage'));
+const V3MaterialIssueSlipPage = lazyPage(() => import('./v3/issue/MaterialIssueSlipPage'));
+const V3CuttingHomePage = lazyPage(() => import('./v3/cutting/CuttingHomePage'));
+const V3NewCutBatchPage = lazyPage(() => import('./v3/cutting/NewCutBatchPage'));
+const V3CutBatchPage = lazyPage(() => import('./v3/cutting/CutBatchPage'));
+const V3StageCheckPage = lazyPage(() => import('./v3/production/StageCheckPage'));
+const V3RecutsPage = lazyPage(() => import('./v3/production/RecutsPage'));
+const V3LineLoadingPage = lazyPage(() => import('./v3/production/LineLoadingPage'));
+const V3UserAccessPage = lazyPage(() => import('./v3/access/UserAccessPage'));
+const V3BomListPage = lazyPage(() => import('./v3/boms/BomListPage'));
+const V3CustomersAdminPage = lazyPage(() => import('./v3/admin/CustomersPage'));
+const V3SizesAdminPage = lazyPage(() => import('./v3/admin/SizesPage'));
+const V3LinesAdminPage = lazyPage(() => import('./v3/admin/LinesPage'));
+const V3WorkstationsAdminPage = lazyPage(() => import('./v3/admin/WorkstationsPage'));
+const V3DefectCodesAdminPage = lazyPage(() => import('./v3/admin/DefectCodesPage'));
+const V3CompanyProfileAdminPage = lazyPage(() => import('./v3/admin/CompanyProfilePage'));
+const V3OrderTrackerPage = lazyPage(() => import('./v3/tracker/OrderTrackerPage'));
+const V3OrderTrackPage = lazyPage(() => import('./v3/tracker/OrderTrackPage'));
+const V3StoreItemsPage = lazyPage(() => import('./v3/store/StoreItemsPage'));
+const V3StoreItemPage = lazyPage(() => import('./v3/store/StoreItemPage'));
+const V3StoreOpeningStockPage = lazyPage(() => import('./v3/store/StoreOpeningStockPage'));
+const V3IssueSlipsPage = lazyPage(() => import('./v3/store/IssueSlipsPage'));
+const V3NewIssueSlipPage = lazyPage(() => import('./v3/store/NewIssueSlipPage'));
+const V3IssueSlipPage = lazyPage(() => import('./v3/store/IssueSlipPage'));
+const V3ReorderPage = lazyPage(() => import('./v3/store/ReorderPage'));
 const V3PurchaseRequisitionsPage = lazyPage(() => import('./v3/planning/PurchaseRequisitionsPage'));
 const V3PurchaseRequisitionPage = lazyPage(() => import('./v3/planning/PurchaseRequisitionPage'));
 
@@ -278,6 +318,7 @@ const appRoutes = (
           <Route path="styles" element={<V3StylesPage />} />
           <Route path="styles/:id" element={<V3StyleDetailPage />} />
           <Route path="stage-types" element={<V3StageTypesPage />} />
+          <Route path="boms" element={<V3BomListPage />} />
           <Route path="boms/:id" element={<V3BomPage />} />
           <Route path="bom-approvals" element={<V3BomApprovalsPage />} />
           <Route path="sales-orders" element={<V3SalesOrdersPage />} />
@@ -291,6 +332,48 @@ const appRoutes = (
           <Route path="planning/buy-list" element={<V3BuyListPage />} />
           <Route path="planning/readiness" element={<V3ReadinessDashboardPage />} />
           <Route path="planning/milestones" element={<V3MilestoneCalendarPage />} />
+          <Route path="purchasing/suppliers" element={<V3SuppliersPage />} />
+          <Route path="purchasing/orders" element={<V3PurchaseOrdersPage />} />
+          <Route path="purchasing/orders/new" element={<V3NewPurchaseOrderPage />} />
+          <Route path="purchasing/orders/:id" element={<V3PurchaseOrderPage />} />
+          <Route path="purchasing/receive" element={<V3ReceiveGoodsPage />} />
+          <Route path="purchasing/receive/:poId" element={<V3ReceiveGoodsPage />} />
+          <Route path="purchasing/grns" element={<V3GrnListPage />} />
+          <Route path="purchasing/grns/:id" element={<V3GrnPage />} />
+          <Route path="purchasing/return-notes" element={<V3ReturnNotesPage />} />
+          <Route path="purchasing/return-notes/new" element={<V3NewReturnNotePage />} />
+          <Route path="purchasing/return-notes/:id" element={<V3ReturnNotePage />} />
+          <Route path="purchasing/invoices" element={<V3InvoicesPage />} />
+          <Route path="purchasing/invoices/new" element={<V3NewInvoicePage />} />
+          <Route path="purchasing/invoices/:id" element={<V3InvoicePage />} />
+          <Route path="purchasing/reports" element={<V3PurchasingReportsPage />} />
+          <Route path="material-issue" element={<V3MaterialIssueHomePage />} />
+          <Route path="material-issue/orders/:orderId" element={<V3IssueForOrderPage />} />
+          <Route path="material-issue/issues/:id" element={<V3MaterialIssueSlipPage />} />
+          <Route path="cutting" element={<V3CuttingHomePage />} />
+          <Route path="cutting/lines/:lineId/new" element={<V3NewCutBatchPage />} />
+          <Route path="cutting/batches/:id" element={<V3CutBatchPage />} />
+          <Route path="production/check" element={<V3StageCheckPage />} />
+          <Route path="production/recuts" element={<V3RecutsPage />} />
+          <Route path="production/loading" element={<V3LineLoadingPage />} />
+          <Route path="admin/access" element={<V3UserAccessPage />} />
+          <Route path="admin/customers" element={<V3CustomersAdminPage />} />
+          <Route path="admin/sizes" element={<V3SizesAdminPage />} />
+          <Route path="admin/lines" element={<V3LinesAdminPage />} />
+          <Route path="admin/workstations" element={<V3WorkstationsAdminPage />} />
+          <Route path="admin/defect-codes" element={<V3DefectCodesAdminPage />} />
+          <Route path="admin/company-profile" element={<V3CompanyProfileAdminPage />} />
+          <Route path="tracker" element={<V3OrderTrackerPage />} />
+          <Route path="tracker/orders/:id" element={<V3OrderTrackPage />} />
+          <Route path="store/items" element={<V3StoreItemsPage />} />
+          <Route path="store/items/:id" element={<V3StoreItemPage />} />
+          <Route path="store/opening-stock" element={<V3StoreOpeningStockPage />} />
+          <Route path="store/issues" element={<V3IssueSlipsPage />} />
+          <Route path="store/issues/new" element={<V3NewIssueSlipPage />} />
+          <Route path="store/issues/:id" element={<V3IssueSlipPage />} />
+          <Route path="store/reorder" element={<V3ReorderPage />} />
+          <Route path="store/requisitions" element={<V3PurchaseRequisitionsPage purpose="STORE" />} />
+          <Route path="store/requisitions/:id" element={<V3PurchaseRequisitionPage />} />
           <Route path="planning/purchase-requisitions" element={<V3PurchaseRequisitionsPage />} />
           <Route path="planning/purchase-requisitions/:id" element={<V3PurchaseRequisitionPage />} />
         </Route>

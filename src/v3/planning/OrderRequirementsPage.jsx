@@ -4,7 +4,7 @@
 // from requirementsEngine.js and update automatically when the order changes.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Pencil, RefreshCw, FileSpreadsheet, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Pencil, RefreshCw, FileSpreadsheet, FileDown, AlertTriangle, ShieldCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Modal from '../../shared/Modal';
 import { planningApi } from '../api/planningApi';
@@ -13,12 +13,15 @@ import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } fr
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import AllocateModal from './AllocateModal';
 import OrderMilestonesPanel from './OrderMilestonesPanel';
+import TrimStatusGrid from './TrimStatusGrid';
+import { exportTrimReservationPdf } from './trimReservationPdf';
+import { useV3Access } from '../V3Access';
 import { ReadinessChip, READY_STATUS, daysText } from './readinessShared';
 
 const fmt = (n, uom) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 2 });
 const SOURCE = { EXACT: 'exact colour', TONE: 'by tone', ALL: 'all colours' };
 const COVER = { FULL: ['covered', 'bg-emerald-50 text-emerald-700 border-emerald-200'], PARTIAL: ['part', 'bg-amber-50 text-amber-800 border-amber-200'], NONE: ['none', 'bg-rose-50 text-rose-700 border-rose-200'] };
-const ALLOC_ACTION = { ALLOCATE: 'Allocated', RELEASE: 'Released', AUTO_RELEASE: 'Released automatically' };
+const ALLOC_ACTION = { ALLOCATE: 'Allocated', RELEASE: 'Released', AUTO_RELEASE: 'Released automatically', ISSUE: 'Issued to production', ISSUE_RETURN: 'Returned from production' };
 const CAUSE = { APPROVED: 'Approved', REVISED: 'Order revised', BOM_CHANGED: 'BOM changed', CANCELLED: 'Order cancelled', ALLOWANCE_CHANGED: 'Allowance changed', RECALCULATED: 'Recalculated' };
 
 function exportExcel(data) {
@@ -26,7 +29,7 @@ function exportExcel(data) {
     const grid = data.items.map(it => ({
         Type: it.kind === 'FABRIC' ? 'Fabric' : 'Trim', Item: it.label, 'Used as': it.usage.join(', '), Unit: it.uom,
         ...Object.fromEntries(data.colours.map(c => [c.name, it.by_colour[c.id] ? Number(it.by_colour[c.id]) : ''])),
-        Required: it.required_display, Allocated: it.allocated, Shortfall: it.shortfall, 'On requisition': it.pr_pending + it.pr_approved, 'Still to raise': it.to_raise, 'Purchase qty': it.purchase_qty ?? '', 'Purchase unit': it.purchase_uom || '',
+        Required: it.required_display, Allocated: it.allocated, Issued: it.issued || 0, Shortfall: it.shortfall, 'On requisition': it.pr_pending + it.pr_approved, 'Still to raise': it.to_raise, 'Purchase qty': it.purchase_qty ?? '', 'Purchase unit': it.purchase_uom || '',
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(grid), 'Requirements');
     const calc = [];
@@ -42,9 +45,14 @@ function exportExcel(data) {
 }
 
 export default function OrderRequirementsPage() {
+    const { me } = useV3Access();
     const { orderId } = useParams();
     const [data, setData] = useState(null);
     const [perms, setPerms] = useState({ plan: false, settings: false });
+    // Allocate / release / raise: the merchandiser for all material, each store for its own kind.
+    const myKinds = perms.plan_kinds || (perms.plan ? ['FABRIC', 'TRIM'] : []);
+    const anyKind = myKinds.length > 0;
+    const canKind = (k) => myKinds.includes(k);
     const [tab, setTab] = useState('FABRIC');
     const [error, setError] = useState('');
     const [cell, setCell] = useState(null);           // drill-down { item, colour }
@@ -92,9 +100,10 @@ export default function OrderRequirementsPage() {
             <div className="flex flex-wrap items-center gap-3 mb-1">
                 <h1 className="text-2xl font-black text-slate-900">{order.order_no}</h1>
                 <span className="text-sm text-slate-500">{order.customer_name}{order.buyer_po_no ? ` · PO ${order.buyer_po_no}` : ''} · first ship {fmtDate(order.first_ship_date)}{order.revision_no ? ` · rev ${order.revision_no}` : ''}</span>
-                <Link to={`/v3/sales-orders/${order.id}`} className="text-sm font-semibold text-indigo-700 hover:underline">Open sales order</Link>
+                {me.menu['sales.orders'] && <Link to={`/v3/sales-orders/${order.id}`} className="text-sm font-semibold text-indigo-700 hover:underline">Open sales order</Link>}
                 <span className="ml-auto flex gap-2">
                     <SecondaryButton onClick={() => exportExcel(data)} disabled={!data.items.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
+                    <SecondaryButton onClick={() => exportTrimReservationPdf(data, me?.user?.name)} disabled={!data.items.some(i => i.kind === 'TRIM')} title="Trims grouped by type and item, quantities merged — for the store to reserve"><FileDown size={14} /> Trim reservation PDF</SecondaryButton>
                     {perms.settings && approved && <SecondaryButton onClick={recalc} disabled={busy}><RefreshCw size={14} /> Recalculate</SecondaryButton>}
                 </span>
             </div>
@@ -168,7 +177,13 @@ export default function OrderRequirementsPage() {
                 ))}
             </div>
 
-            {(tab === 'FABRIC' || tab === 'TRIM') && (
+            {tab === 'TRIM' && (
+                <TrimStatusGrid data={data} approved={approved} canAct={canKind} orderId={order.id}
+                    onAllocate={(it) => setTarget({ mode: 'allocate', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })}
+                    onRelease={(it) => setTarget({ mode: 'release', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })} />
+            )}
+
+            {tab === 'FABRIC' && (
                 shown.length === 0 ? <p className="text-sm text-slate-400">No {tab === 'FABRIC' ? 'fabric' : 'trim'} requirements.</p> : (
                     <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
                         <table className="border-collapse text-sm min-w-full">
@@ -180,7 +195,7 @@ export default function OrderRequirementsPage() {
                                     {tab === 'TRIM' && <th className="px-3 py-2 text-right text-xs font-bold text-slate-500 min-w-[100px]">To buy in</th>}
                                     <th className="px-3 py-2 text-right text-xs font-bold text-slate-500 min-w-[120px]">Allocated</th>
                                     <th className="px-3 py-2 text-right text-xs font-bold text-slate-500 min-w-[100px]">Short</th>
-                                    {perms.plan && approved && <th className="px-3 py-2 w-40" />}
+                                    {anyKind && approved && <th className="px-3 py-2 w-40" />}
                                 </tr>
                             </thead>
                             <tbody>
@@ -201,19 +216,21 @@ export default function OrderRequirementsPage() {
                                         {tab === 'TRIM' && <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{it.purchase_qty != null ? <>{fmt(it.purchase_qty, 'pcs')} <span className="text-xs text-slate-500">{it.purchase_uom}</span></> : '—'}</td>}
                                         <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
                                             {fmt(it.allocated, it.uom)} <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded border ${COVER[it.cover][1]}`}>{COVER[it.cover][0]}</span>
+                                            {it.issued > 0 && <span className="block text-[11px] font-semibold text-indigo-700">+ {fmt(it.issued, it.uom)} issued</span>}
                                             {it.kind === 'TRIM' && <span className="block text-[11px] text-slate-400">free {fmt(it.free, it.uom)}</span>}
                                         </td>
                                         <td className={`px-3 py-2 text-right tabular-nums font-bold ${it.shortfall > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{it.shortfall > 0 ? fmt(it.shortfall, it.uom) : '—'}
                                             {it.pr_pending + it.pr_approved > 0 && <span className="block text-[11px] font-semibold text-slate-500">{fmt(it.pr_pending + it.pr_approved, it.uom)} on requisition{it.pr_approved > 0 ? ` (${fmt(it.pr_approved, it.uom)} approved)` : ''}</span>}
                                             {it.from_stock > 0 && <span className="block text-[11px] font-semibold text-emerald-700">{fmt(it.from_stock, it.uom)} in free stock — allocate</span>}
                                             {it.shortfall > 0 && it.to_raise > 0 && <span className="block text-[11px] font-semibold text-amber-700">{fmt(it.to_raise, it.uom)} still to raise</span>}</td>
-                                        {perms.plan && approved && (
-                                            <td className="px-3 py-2 text-right whitespace-nowrap">
+                                        {anyKind && approved && (
+                                            <td className="px-3 py-2 text-right whitespace-nowrap">{canKind(it.kind) && <>
+                                                {it.to_raise > 0 && <Link to={`/v3/planning/buy-list?order=${order.id}&kind=${it.kind}`} className="text-xs font-bold text-amber-700 hover:underline mr-3">Raise</Link>}
                                                 {it.shortfall > 0 && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline mr-3"
                                                     onClick={() => setTarget({ mode: 'allocate', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })}>Allocate</button>}
                                                 {it.allocated > 0 && <button type="button" className="text-xs font-bold text-slate-600 hover:underline"
                                                     onClick={() => setTarget({ mode: 'release', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })}>Release</button>}
-                                            </td>
+                                            </>}</td>
                                         )}
                                     </tr>
                                 ))}

@@ -4,7 +4,7 @@
 // orders and rounded up to purchase units, earliest needed-by first. Select
 // items → new requisition, or add them to a draft one.
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronDown, ChevronRight, FileSpreadsheet, Plus, AlertTriangle } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { planningApi } from '../api/planningApi';
@@ -18,20 +18,24 @@ const fmt = (v, uom) => Number(v || 0).toLocaleString('en-IN', { maximumFraction
 export default function BuyListPage() {
     const navigate = useNavigate();
     const [rows, setRows] = useState(null);
-    const [kind, setKind] = useState('');
+    const [params, setParams] = useSearchParams();
+    const orderFilter = params.get('order');   // from the order tracker: only this order's needs
+    const [kind, setKind] = useState(params.get('kind') || '');
     const [search, setSearch] = useState('');
     const [picked, setPicked] = useState(new Set());
     const [open, setOpen] = useState(new Set());
-    const [canPlan, setCanPlan] = useState(false);
+    const [kinds, setKinds] = useState([]);   // kinds this user plans: merchandiser both, each store its own
+    const canPlan = kinds.length > 0;
+    const mayPick = (r) => kinds.includes(r.kind);
     const [error, setError] = useState('');
     const [raising, setRaising] = useState(null); // { mode: 'new' | 'add', notes, prId, drafts }
     const [busy, setBusy] = useState(false);
     const [formError, setFormError] = useState('');
 
     const load = useCallback(() => planningApi.buyList({ kind: kind || undefined, q: search.trim() || undefined })
-        .then(res => { setRows(res.data); setPicked(new Set()); }).catch(err => setError(apiError(err, 'Failed to load the buy list.'))), [kind, search]);
+        .then(res => { setRows(orderFilter ? res.data.filter(r => r.orders.some(o => String(o.order_id) === orderFilter)) : res.data); setPicked(new Set()); }).catch(err => setError(apiError(err, 'Failed to load the buy list.'))), [kind, search, orderFilter]);
     useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
-    useEffect(() => { planningApi.permissions().then(res => setCanPlan(res.data.plan)).catch(() => {}); }, []);
+    useEffect(() => { planningApi.permissions().then(res => { const k = res.data.plan_kinds || (res.data.plan ? ['FABRIC', 'TRIM'] : []); setKinds(k); if (k.length === 1 && !params.get('kind')) setKind(k[0]); }).catch(() => {}); }, [params]);
 
     const toggle = (set, setter, key) => { const nx = new Set(set); if (nx.has(key)) nx.delete(key); else nx.add(key); setter(nx); };
     const items = () => rows.filter(r => picked.has(r.key)).map(r => ({ kind: r.kind, item_id: r.item_id }));
@@ -65,6 +69,7 @@ export default function BuyListPage() {
                         <option value="">Fabric and trims</option><option value="FABRIC">Fabric</option><option value="TRIM">Trims</option>
                     </select>
                     <SearchInput value={search} onChange={setSearch} placeholder="Item, brand, code, type" />
+            {orderFilter && <p className="mb-3 text-sm bg-indigo-50 text-indigo-800 rounded-lg px-3 py-2">Showing only what one order needs (from the order tracker). <button type="button" className="underline font-semibold" onClick={() => setParams({})}>Show all</button></p>}
                     <SecondaryButton onClick={() => exportBuyListExcel(rows || [])} disabled={!rows?.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                 </>} />
             <ErrorBox text={error} />
@@ -80,7 +85,7 @@ export default function BuyListPage() {
                     <table className="w-full text-sm min-w-[860px]">
                         <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider">
                             <tr className="text-left">
-                                <th className="px-3 py-2.5 w-10">{canPlan && rows.length > 0 && <input type="checkbox" aria-label="Select all" checked={picked.size === rows.length} onChange={e => setPicked(e.target.checked ? new Set(rows.map(r => r.key)) : new Set())} />}</th>
+                                <th className="px-3 py-2.5 w-10">{canPlan && rows.some(mayPick) && <input type="checkbox" aria-label="Select all" checked={picked.size > 0 && picked.size === rows.filter(mayPick).length} onChange={e => setPicked(e.target.checked ? new Set(rows.filter(mayPick).map(r => r.key)) : new Set())} />}</th>
                                 <th className="px-3 py-2.5">Item</th><th className="px-3 py-2.5 text-right">Still needed</th><th className="px-3 py-2.5 text-right">Buy</th><th className="px-3 py-2.5">Needed by</th><th className="px-3 py-2.5">Orders</th>
                             </tr>
                         </thead>
@@ -89,7 +94,7 @@ export default function BuyListPage() {
                             {rows.map(r => (
                                 <Fragment key={r.key}>
                                     <tr className="border-t border-slate-100 align-top">
-                                        <td className="px-3 py-2.5">{canPlan && <input type="checkbox" aria-label={`Select ${r.label}`} checked={picked.has(r.key)} onChange={() => toggle(picked, setPicked, r.key)} />}</td>
+                                        <td className="px-3 py-2.5">{canPlan && mayPick(r) && <input type="checkbox" aria-label={`Select ${r.label}`} checked={picked.has(r.key)} onChange={() => toggle(picked, setPicked, r.key)} />}</td>
                                         <td className="px-3 py-2.5">
                                             <Link to={`/v3/planning/position/${r.kind}/${r.item_id}`} className="font-semibold text-indigo-700 hover:underline">{r.label}</Link>
                                             <span className="block text-xs text-slate-500">{r.type_name}{!r.active && <span className="ml-1 font-bold text-rose-600">inactive</span>}</span>

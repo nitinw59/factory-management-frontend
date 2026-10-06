@@ -1,13 +1,21 @@
 // First page after login: continue in Version 2.0 (today's portals) or open
 // Version 3.0 (the new system, built portal by portal — see
-// docs/VERSION_3_OVERVIEW.md in the backend repo).
+// docs/VERSION_3_OVERVIEW.md in the backend repo). Shown to every user until 2.0 is
+// retired (decided); the 3.0 card lists what this user can open there.
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Factory, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { accessApi } from './api/accessApi';
+import { visibleNav } from './v3Nav';
 
 export default function VersionChooserPage() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
+    const [areas, setAreas] = useState(null);
+    useEffect(() => {
+        accessApi.me().then(res => setAreas(visibleNav(res.data.menu).filter(n => n.section).map(n => n.section))).catch(() => setAreas(null));
+    }, []);
 
     return (
         <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
@@ -42,7 +50,7 @@ export default function VersionChooserPage() {
                             <span className="text-xs font-black uppercase tracking-widest text-indigo-700">Version 3.0</span>
                         </div>
                         <h2 className="text-xl font-black text-slate-900 mb-1">New system</h2>
-                        <p className="text-sm text-slate-500 mb-4">Being built portal by portal. Available now: masters (trims, garment colours, fabric).</p>
+                        <p className="text-sm text-slate-500 mb-4">{areas === null ? 'Being built portal by portal.' : areas.length ? `For you: ${areas.join(', ')}.` : 'Nothing for your role in 3.0 yet — your work continues in 2.0.'}</p>
                         <span className="inline-flex items-center gap-1 text-sm font-bold text-indigo-700 group-hover:gap-2 transition-all">
                             Open 3.0 <ArrowRight size={16} />
                         </span>

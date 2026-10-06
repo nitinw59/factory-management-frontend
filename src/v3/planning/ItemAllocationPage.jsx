@@ -10,7 +10,7 @@ import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import AllocateModal from './AllocateModal';
 
 const fmt = (n, uom) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 3 });
-const ACTION = { ALLOCATE: 'Allocated', RELEASE: 'Released', AUTO_RELEASE: 'Released automatically' };
+const ACTION = { ALLOCATE: 'Allocated', RELEASE: 'Released', AUTO_RELEASE: 'Released automatically', ISSUE: 'Issued to production', ISSUE_RETURN: 'Returned from production' };
 
 export default function ItemAllocationPage() {
     const { kind, itemId } = useParams();
@@ -23,8 +23,8 @@ export default function ItemAllocationPage() {
         .catch(err => setError(apiError(err, 'Failed to load.'))), [kind, itemId]);
     useEffect(() => {
         load();
-        planningApi.permissions().then(res => setCanPlan(res.data.plan)).catch(() => {});
-    }, [load]);
+        planningApi.permissions().then(res => setCanPlan(Boolean(res.data.plan || (res.data.plan_kinds || []).includes(String(kind).toUpperCase())))).catch(() => {});
+    }, [load, kind]);
 
     if (!data) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
     const { item, stock } = data;
@@ -65,7 +65,7 @@ export default function ItemAllocationPage() {
                                 <td className="px-4 py-2 text-left">{o.customer_name}</td>
                                 <td className="px-4 py-2 text-left whitespace-nowrap">{fmtDate(o.ship_date)}</td>
                                 <td className="px-4 py-2">{fmt(o.required, item.uom)}</td>
-                                <td className="px-4 py-2">{fmt(o.allocated, item.uom)}</td>
+                                <td className="px-4 py-2">{fmt(o.allocated, item.uom)}{o.issued > 0 && <span className="block text-[11px] font-semibold text-indigo-700">+ {fmt(o.issued, item.uom)} issued</span>}</td>
                                 <td className={`px-4 py-2 font-bold ${o.open > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{o.open > 0 ? fmt(o.open, item.uom) : 'covered'}</td>
                                 <td className="px-4 py-2 text-xs text-left">
                                     {o.from_stock > 0 && <p className="text-emerald-700">{fmt(o.from_stock, item.uom)} free stock</p>}
