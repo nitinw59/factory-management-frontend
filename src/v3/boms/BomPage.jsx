@@ -13,7 +13,7 @@ import TrimCardTab from './TrimCardTab';
 import ApprovalPreviewModal from './ApprovalPreviewModal';
 
 const EDITABLE = ['DRAFT', 'REJECTED'];
-const TABS = [{ key: 'colours', label: 'Colours' }, { key: 'lines', label: 'Lines' }, { key: 'card', label: 'Trim card' }, { key: 'history', label: 'History' }];
+const TABS = [{ key: 'colours', label: 'Colours' }, { key: 'lines', label: 'Lines' }, { key: 'card', label: 'View BOM' }, { key: 'history', label: 'History' }];
 
 export default function BomPage() {
     const { id } = useParams();
@@ -62,7 +62,7 @@ export default function BomPage() {
             if (after) after(res); else apply(res.data);
         } catch (err) {
             setError(apiError(err, 'Action failed.'));
-            // Unresolved lines: the trim card lists each one.
+            // Unresolved lines: View BOM lists each one.
             if (err?.response?.data?.problems) setTab('card');
         } finally {
             setBusy(false);

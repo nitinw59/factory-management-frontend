@@ -1,4 +1,4 @@
-// Trim card: every BOM line × garment colour, with the item each cell
+// View BOM (formerly "Trim card"): every BOM line × garment colour, with the item each cell
 // resolves to and where it came from; unresolved cells are highlighted.
 // Same data gates submit / approve. Exports to PDF and Excel.
 import { useEffect, useState } from 'react';
@@ -27,7 +27,7 @@ export default function TrimCardTab({ bomId, refreshKey }) {
 
     useEffect(() => {
         setCard(null);
-        stylesApi.trimCard(bomId).then(res => setCard(res.data)).catch(err => setError(apiError(err, 'Failed to load the trim card.')));
+        stylesApi.trimCard(bomId).then(res => setCard(res.data)).catch(err => setError(apiError(err, 'Failed to load the BOM.')));
     }, [bomId, refreshKey]);
 
     if (!card) return error ? <ErrorBox text={error} /> : <Loading />;

@@ -71,6 +71,8 @@ export const productionManagerApi = {
   getBatchDrilldown: (batchId, flowId) => api.get(`/production-manager/batch/${batchId}/drilldown`, { params: flowId != null ? { flowId } : {} }),
   setBatchPriority: (batchId, priority) => api.patch(`/production-manager/batches/${batchId}/priority`, { priority }),
   getBatchDrilldownFull: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/drilldown`),
+  // One stage of a batch: pieces / garments sent to rework or rejected there, with defects and replacement requests.
+  getBatchStageDefects: (batchId, flowId) => api.get(`/production-batch-api/production-batches/${batchId}/stages/${flowId}/defects`),
   // Lightweight sibling of getBatchDrilldownFull — just per-stage done/total
   // garment counts, for the workflow graph's StagePipelineChip hover.
   getBatchStageQuantities: (batchId) => api.get(`/production-batch-api/production-batches/${batchId}/stage-quantities`),

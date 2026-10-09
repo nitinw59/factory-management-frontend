@@ -10,6 +10,8 @@ export const materialReplacementApi = {
     // Checker-side (also used by a line manager — see resolveRequesterLineIds
     // on the backend; createRequests/getMyLineRequests work unchanged for both)
     createRequests: (data) => api.post('/material-replacement/requests', data),
+    // Managers, from a batch's stage drill-down: { batchId, flowId, pieceIds, notes? }
+    createFromBatch: (data) => api.post('/material-replacement/requests/from-batch', data),
     getMyLineRequests: (status = 'REQUESTED') => api.get('/material-replacement/requests/my-line', { params: { status } }),
 
     // Line-manager-side — flat pending-rework list across every line this

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import StageDefectsPanel from '../production/StageDefectsPanel';
 import { lineLoaderApi } from '../../api/lineLoaderApi';
+import { productionManagerApi } from '../../api/productionManagerApi';
 import { Link } from 'react-router-dom';
 import Modal from '../../shared/Modal';
 import PriorityChip from '../../shared/PriorityChip';
@@ -833,6 +835,67 @@ const QcIssues = ({ counts, className = '', long = false }) => {
     );
 };
 
+// Rejections / rework on a stage, for the factory floor: one big tile per roll (or size) — the number,
+// then large coloured counts with a symbol (↻ rework, ✕ rejected; dashed border = from an earlier
+// stage), part names as small pills. Readable at a glance; tap a tile for the pieces.
+const ISSUE_TILES = [
+    { key: 'needs_rework',      sym: '↻', cls: 'bg-amber-400 text-amber-950 border-amber-500',                 tip: 'rework here' },
+    { key: 'rejected',          sym: '✕', cls: 'bg-rose-600 text-white border-rose-700',                       tip: 'rejected here' },
+    { key: 'rework_upstream',   sym: '↻', cls: 'bg-amber-50 text-amber-800 border-2 border-dashed border-amber-500', tip: 'rework at an earlier stage' },
+    { key: 'rejected_upstream', sym: '✕', cls: 'bg-rose-50 text-rose-700 border-2 border-dashed border-rose-600',     tip: 'rejected at an earlier stage' },
+];
+const IssueTiles = ({ entries, unitWord, onOpen }) => {
+    const [show, setShow] = useState(false);   // hidden until asked for (factory floor: keep the screen calm)
+    const total = entries.reduce((n, [, q]) => n + ISSUE_TILES.reduce((m, t) => m + (q[t.key] || 0), 0), 0);
+    if (!show) return (
+        <button type="button" onClick={() => setShow(true)} className="mb-3 w-full flex items-center gap-2 border-2 border-rose-300 bg-rose-50 rounded-xl px-3 py-2 text-left">
+            <span className="text-xs font-black uppercase tracking-widest text-rose-700">Problems on this stage</span>
+            <span className="text-lg font-black text-rose-700 tabular-nums">{total}</span>
+            <span className="text-xs font-bold text-slate-500">in {entries.length} {unitWord.toLowerCase()}{entries.length === 1 ? '' : 's'}</span>
+            <ChevronDown size={16} className="ml-auto text-rose-700" />
+        </button>
+    );
+    return (
+    <div className="mb-3 border-2 border-rose-300 bg-rose-50 rounded-xl p-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-2 text-xs font-black text-slate-600">
+            <button type="button" onClick={() => setShow(false)} className="inline-flex items-center gap-1 uppercase tracking-widest text-rose-700">Problems on this stage <ChevronUp size={14} /></button>
+            <span className="inline-flex items-center gap-1"><span className="w-5 h-5 rounded bg-amber-400 text-amber-950 flex items-center justify-center">↻</span> rework</span>
+            <span className="inline-flex items-center gap-1"><span className="w-5 h-5 rounded bg-rose-600 text-white flex items-center justify-center">✕</span> rejected</span>
+            <span className="inline-flex items-center gap-1"><span className="w-5 h-5 rounded border-2 border-dashed border-slate-500" /> earlier stage</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {entries.map(([key, q]) => {
+                const parts = (q.parts || []).filter(pt => ISSUE_TILES.some(t => pt[t.key] > 0));
+                return (
+                    <button key={key} type="button" onClick={onOpen} className="text-left bg-white rounded-xl border-2 border-slate-200 hover:border-rose-400 p-2.5 active:scale-95 transition">
+                        <div className="text-[11px] font-bold uppercase text-slate-400 leading-none">{unitWord}</div>
+                        <div className="text-2xl font-black text-slate-900 leading-tight mb-1.5">{key}</div>
+                        <div className="flex flex-wrap gap-1.5">
+                            {ISSUE_TILES.filter(t => q[t.key] > 0).map(t => (
+                                <span key={t.key} title={t.tip} className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border ${t.cls}`}>
+                                    <span className="text-base font-black leading-none">{t.sym}</span>
+                                    <span className="text-2xl font-black leading-none tabular-nums">{q[t.key]}</span>
+                                </span>
+                            ))}
+                        </div>
+                        {parts.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                                {parts.slice(0, 4).map(pt => (
+                                    <span key={pt.part_name} className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+                                        {String(pt.part_name).trim()} {ISSUE_TILES.reduce((n, t) => n + (pt[t.key] || 0), 0)}
+                                    </span>
+                                ))}
+                                {parts.length > 4 && <span className="text-[10px] font-black text-slate-500">+{parts.length - 4}</span>}
+                            </div>
+                        )}
+                    </button>
+                );
+            })}
+        </div>
+    </div>
+    );
+};
+
 // "72/77 pieces cleared" + only the counts needing attention, or a green
 // "all checked" tag — used in the Assign Rolls steps (status of each ready
 // roll at the stage it's coming FROM).
@@ -892,7 +955,72 @@ const IssueChips = ({ issues, showRoll = false }) => {
     );
 };
 
-const RollRow = ({ roll, allSizes = [], qc, qcUnit, qcLoading, showQc = false }) => {
+// Problem pieces of one roll (or size) on a stage card: ≤ 3 shown as chips, more as a summary that
+// opens the full list. Pieces come from the stage's rework / rejected detail (batchStageDefects).
+const PROBLEM_CATS = {
+    REWORK:           { sym: '↻', cls: 'bg-amber-400 text-amber-950 border-amber-500', label: 'Rework' },
+    REJECTED:         { sym: '✕', cls: 'bg-rose-600 text-white border-rose-700', label: 'Rejected' },
+    REJECTED_EARLIER: { sym: '✕', cls: 'bg-rose-50 text-rose-700 border-2 border-dashed border-rose-600', label: 'Rejected earlier' },
+    REPLACEMENT:      { sym: '⇄', cls: 'bg-violet-500 text-white border-violet-600', label: 'Replacement asked' },
+};
+const ProblemPieces = ({ pieces, onRequest, title }) => {
+    const [listOpen, setListOpen] = useState(false);
+    if (!pieces?.length) return null;
+    const chip = (p) => {
+        const c = PROBLEM_CATS[p.category];
+        return (
+            <span key={p.id} title={`${p.uid} · ${c.label}${p.rejected_earlier ? ` at ${p.rejected_earlier}` : ''}`}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-xs font-black ${c.cls}`}>
+                <span>{c.sym}</span><span className="tabular-nums">#{p.seq}</span><span className="uppercase text-[10px]">{p.part}</span>
+            </span>
+        );
+    };
+    const counts = Object.keys(PROBLEM_CATS).map(k => [k, pieces.filter(p => p.category === k).length]).filter(([, n]) => n > 0);
+    return (
+        <div className="px-3 pb-2 pl-[11.5rem] flex flex-wrap items-center gap-1.5">
+            {pieces.length <= 3 ? pieces.map(chip) : (
+                <button type="button" onClick={(e) => { e.stopPropagation(); setListOpen(true); }}
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border-2 border-slate-300 bg-white hover:border-rose-400">
+                    {counts.map(([k, n]) => (
+                        <span key={k} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-sm font-black ${PROBLEM_CATS[k].cls}`}>{PROBLEM_CATS[k].sym} {n}</span>
+                    ))}
+                    <span className="text-xs font-black text-slate-600">{pieces.length} pieces ›</span>
+                </button>
+            )}
+            {listOpen && (
+                <Modal title={`${title || `Roll #${pieces[0].roll_id}`} — ${pieces.length} pieces in rework / rejected`} onClose={() => setListOpen(false)}>
+                    <div className="max-h-[60vh] overflow-auto">
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-50 text-left text-xs text-slate-500 sticky top-0"><tr>
+                                <th className="px-2 py-1.5"></th><th className="px-2 py-1.5">Piece</th><th className="px-2 py-1.5">Part</th><th className="px-2 py-1.5">Size · no.</th><th className="px-2 py-1.5">Defect</th><th className="px-2 py-1.5">Found</th>
+                            </tr></thead>
+                            <tbody>{pieces.map(p => {
+                                const d = p.defects[p.defects.length - 1] || {};
+                                return (
+                                    <tr key={p.id} className="border-t border-slate-100">
+                                        <td className="px-2 py-1.5">{chip(p)}</td>
+                                        <td className="px-2 py-1.5 font-mono text-xs">{p.uid}</td>
+                                        <td className="px-2 py-1.5 uppercase font-bold">{p.part}</td>
+                                        <td className="px-2 py-1.5">{p.size} · {p.seq}</td>
+                                        <td className="px-2 py-1.5"><b>{d.code}</b> {d.description}{p.rejected_earlier ? <span className="block text-xs text-rose-700">at {p.rejected_earlier}</span> : null}</td>
+                                        <td className="px-2 py-1.5 text-xs text-slate-500">{d.detected_by || '—'}<span className="block">{d.at ? new Date(d.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</span></td>
+                                    </tr>
+                                );
+                            })}</tbody>
+                        </table>
+                    </div>
+                    {onRequest && (
+                        <div className="flex justify-end pt-3">
+                            <button type="button" onClick={() => { setListOpen(false); onRequest(); }} className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold">Request material replacement…</button>
+                        </div>
+                    )}
+                </Modal>
+            )}
+        </div>
+    );
+};
+
+const RollRow = ({ roll, allSizes = [], qc, qcUnit, qcLoading, showQc = false, problemPieces = null, onRequest }) => {
     const [open, setOpen] = useState(false);
     const cleared = qc ? qc.approved + qc.repaired : 0;
     const pct = qc?.total ? Math.round((cleared / qc.total) * 100) : 0;
@@ -945,7 +1073,8 @@ const RollRow = ({ roll, allSizes = [], qc, qcUnit, qcLoading, showQc = false })
                 </span>
             </div>
 
-            {showQc && <IssueChips issues={qc?.issues} />}
+            {/* Problem pieces as chips / summary; the old text list only if the piece data didn't load. */}
+            {showQc && (problemPieces === null ? <IssueChips issues={qc?.issues} /> : <ProblemPieces pieces={problemPieces} onRequest={onRequest} />)}
             {open && canExpand && (
                 <div className="px-3 pb-2 pl-[22rem] flex flex-wrap gap-x-5 gap-y-1">
                     {partIssues.map(p => (
@@ -988,7 +1117,7 @@ const sizeRollStates = (group, qc, batchRollIds) => {
         });
 };
 
-const SizeRow = ({ group, qc, qcUnit, qcLoading, showQc = false, batchRollIds = [] }) => {
+const SizeRow = ({ group, qc, qcUnit, qcLoading, showQc = false, batchRollIds = [], problemPieces = null, onRequest }) => {
     const [open, setOpen] = useState(false);
     const rollStates = useMemo(() => sizeRollStates(group, qc, batchRollIds), [group, qc, batchRollIds]);
     const rollsDone = rollStates.filter(r => r.state === 'COMPLETED').length;
@@ -1036,7 +1165,7 @@ const SizeRow = ({ group, qc, qcUnit, qcLoading, showQc = false, batchRollIds = 
                 </span>
             </div>
 
-            {showQc && <IssueChips issues={qc?.issues} showRoll />}
+            {showQc && (problemPieces === null ? <IssueChips issues={qc?.issues} showRoll /> : <ProblemPieces pieces={problemPieces} onRequest={onRequest} title={`Size ${group.size}`} />)}
             {open && (
                 <div className="px-3 pb-2 pl-[12.5rem] space-y-1.5">
                     {showQc && partIssues.length > 0 && (
@@ -1097,6 +1226,28 @@ const StageDetailModal = ({ batch, stage, prevStage = null, progress, onClose, o
             .catch(err => setQcError(err.response?.data?.error || 'Could not load piece status.'))
             .finally(() => setQcLoading(false));
     }, [hasProgress, batch?.batch_id, stage?.id, qcReloadKey]);
+
+    // Problem pieces (rework / rejected here or earlier, replacement asked) per roll, for the roll cards.
+    const [stageDefects, setStageDefects] = useState(null);
+    useEffect(() => {
+        if (!hasProgress || !batch?.batch_id || !stage?.id) return;
+        productionManagerApi.getBatchStageDefects(batch.batch_id, stage.id)
+            .then(res => setStageDefects(res.data)).catch(() => setStageDefects(null));
+    }, [hasProgress, batch?.batch_id, stage?.id, qcReloadKey]);
+    const [problemsByRoll, problemsBySize] = useMemo(() => {
+        const byRoll = new Map(), bySize = new Map();
+        const add = (m, k, p) => { if (!m.has(k)) m.set(k, []); m.get(k).push(p); };
+        for (const p of stageDefects?.unit === 'PIECE' ? stageDefects.items : []) {
+            if (!PROBLEM_CATS[p.category]) continue;
+            add(byRoll, String(p.roll_id), p);
+            add(bySize, String(p.size), p);
+        }
+        return [byRoll, bySize];
+    }, [stageDefects]);
+    const openDefectsPanel = useCallback(() => {
+        const el = document.getElementById('stage-defects-panel');
+        if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    }, []);
 
     // Status of each READY roll at the stage it's coming from (shown in the
     // Ready to Assign list).
@@ -1340,26 +1491,14 @@ const StageDetailModal = ({ batch, stage, prevStage = null, progress, onClose, o
                 return (
                     <div className="mb-5">
                         {issueEntries.length > 0 && (
-                            <div className="mb-3 border-2 border-rose-300 bg-rose-50 rounded-xl px-4 py-3">
-                                <p className="text-xs font-black uppercase tracking-widest text-rose-700 mb-1.5">
-                                    Rejections / rework on this stage
-                                </p>
-                                <div className="space-y-1">
-                                    {issueEntries.map(([key, q]) => {
-                                        const parts = (q.parts || []).filter(pt => ISSUE_KEYS.some(k => pt[k] > 0));
-                                        return (
-                                            <p key={key} className="text-sm">
-                                                <span className="font-black text-slate-800">{isMode2 ? `Size ${key}` : `Roll #${key}`}:</span>{' '}
-                                                <QcIssues counts={Object.fromEntries(QC_CHIPS.map(c => [c.key, c.key === 'pending' ? 0 : (q[c.key] || 0)]))} long />
-                                                {parts.length > 0 && (
-                                                    <span className="text-xs font-bold text-slate-500"> ({parts.map(pt => `${pt.part_name} ${ISSUE_KEYS.reduce((n, k) => n + (pt[k] || 0), 0)}`).join(' · ')})</span>
-                                                )}
-                                            </p>
-                                        );
-                                    })}
-                                </div>
-                            </div>
+                            <IssueTiles entries={issueEntries} unitWord={isMode2 ? 'Size' : 'Roll'}
+                                onOpen={() => { const el = document.getElementById('stage-defects-panel'); if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }} />
                         )}
+                        {/* Every piece sent to rework / rejected here, with defects; tick pieces in rework to request material replacement. */}
+                        <details id="stage-defects-panel" className="mb-3">
+                            <summary className="cursor-pointer text-xs font-black uppercase tracking-widest text-violet-700 mb-2">Rework &amp; rejected pieces — request material replacement</summary>
+                            <StageDefectsPanel batchId={batch.batch_id} flowId={stage.id} onChanged={() => setQcReloadKey(k => k + 1)} />
+                        </details>
                         <div className="flex flex-wrap items-end gap-2 mb-2">
                             {sections.map(sec => {
                                 const t = SECTION_TONE[sec.key];
@@ -1397,11 +1536,13 @@ const StageDetailModal = ({ batch, stage, prevStage = null, progress, onClose, o
                             ) : current.sizes
                                 ? current.sizes.map(group => (
                                     <SizeRow key={group.size} group={group} batchRollIds={batchRollIds}
-                                        showQc={current.showQc} qc={rollQc?.sizes?.[group.size]} qcUnit={rollQc?.unit || 'pieces'} qcLoading={qcLoading} />
+                                        showQc={current.showQc} qc={rollQc?.sizes?.[group.size]} qcUnit={rollQc?.unit || 'pieces'} qcLoading={qcLoading}
+                                        problemPieces={stageDefects ? problemsBySize.get(String(group.size)) || [] : null} onRequest={openDefectsPanel} />
                                 ))
                                 : current.rolls.map(roll => (
                                     <RollRow key={roll.roll_id} roll={roll} allSizes={batch?.all_sizes || []}
-                                        showQc={current.showQc} qc={rollQc?.rolls?.[roll.roll_id]} qcUnit={rollQc?.unit || 'pieces'} qcLoading={qcLoading} />
+                                        showQc={current.showQc} qc={rollQc?.rolls?.[roll.roll_id]} qcUnit={rollQc?.unit || 'pieces'} qcLoading={qcLoading}
+                                        problemPieces={stageDefects ? problemsByRoll.get(String(roll.roll_id)) || [] : null} onRequest={openDefectsPanel} />
                                 ))}
                         </div>
                     </div>

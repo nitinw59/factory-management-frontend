@@ -25,6 +25,7 @@ import PriorityChip from '../../shared/PriorityChip';
 import { generateProductionWorkflowExcel } from './productionWorkflowExcelExport';
 import ProductionWorkflowTableView from './ProductionWorkflowTableView';
 import BatchDrilldownModal from './BatchDrilldownModal';
+import StageDefectsPanel from './StageDefectsPanel';
 import BatchDispatchModal from '../depatch_portal/BatchDispatchModal';
 import EndBitBatchModal from '../initialisation_portal/EndBitBatchModal';
 
@@ -1917,7 +1918,7 @@ const BatchStageDrilldownModal = ({ batchId, flowId, stageName, onClose }) => {
     }));
 
     return (
-        <Modal title={title} onClose={onClose} size="max-w-3xl">
+        <Modal title={title} onClose={onClose} size="max-w-5xl">
             {/* Stage meta */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
                 {[
@@ -1997,6 +1998,9 @@ const BatchStageDrilldownModal = ({ batchId, flowId, stageName, onClose }) => {
                     </div>
                 );
             })()}
+
+            {/* Rework & rejected at this stage: pieces / garments, defects, material replacement */}
+            {mode !== 'ROLL' && <StageDefectsPanel batchId={batchId} flowId={flowId} />}
 
             {/* Roll accordion */}
             <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
