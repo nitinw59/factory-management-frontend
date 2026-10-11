@@ -14,6 +14,8 @@ export const labelPrintingApi = {
     getJob: (jobId) => api.get(`/label-printing/jobs/${jobId}`),
     printRoll: ({ batchId, rollId, printerId, reprint = false, reason }) =>
         api.post('/label-printing/jobs/roll', { batch_id: batchId, fabric_roll_id: rollId, printer_id: printerId || undefined, reprint, reason }),
+    printBatch: ({ batchId, printerId }) =>
+        api.post('/label-printing/jobs/batch', { batch_id: batchId, printer_id: printerId || undefined }),
     printSingle: ({ garmentUid, printerId, reason }) =>
         api.post('/label-printing/jobs/single', { garment_uid: garmentUid, printer_id: printerId || undefined, reason }),
     cancelJob: (jobId, reason) => api.post(`/label-printing/jobs/${jobId}/cancel`, { reason }),
@@ -25,11 +27,12 @@ export const labelPrintingApi = {
     createAgent: (name) => api.post('/label-printing/admin/agents', { name }),
     updateAgent: (agentId, data) => api.put(`/label-printing/admin/agents/${agentId}`, data),
     newAgentToken: (agentId) => api.post(`/label-printing/admin/agents/${agentId}/token`),
+    refreshAgentInventory: (agentId) => api.post(`/label-printing/admin/agents/${agentId}/inventory`),
     listAllPrinters: () => api.get('/label-printing/admin/printers'),
     createPrinter: (data) => api.post('/label-printing/admin/printers', data),
     updatePrinter: (printerId, data) => api.put(`/label-printing/admin/printers/${printerId}`, data),
 };
 
 export const LABEL_VIEW_ROLES = ['factory_admin', 'cutting_manager', 'cutting_operator', 'production_manager', 'store_manager'];
-export const LABEL_PRINT_ROLES = ['factory_admin', 'cutting_manager', 'cutting_operator', 'production_manager'];
+export const LABEL_PRINT_ROLES = ['factory_admin', 'cutting_manager', 'cutting_operator', 'production_manager', 'store_manager'];
 export const LABEL_VOID_ROLES = ['factory_admin', 'cutting_manager', 'production_manager'];

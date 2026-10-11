@@ -1,8 +1,8 @@
 // Admin: print agents (one per BarTender PC) and the label printers on them.
 // An agent's token is shown once, when created or renewed — it goes into the
 // agent's config.json on the BarTender PC.
-import React, { useCallback, useEffect, useState } from 'react';
-import { FiPrinter, FiServer, FiPlus, FiCopy, FiKey, FiEdit2, FiX, FiAlertTriangle } from 'react-icons/fi';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { FiPrinter, FiServer, FiPlus, FiCopy, FiKey, FiEdit2, FiX, FiAlertTriangle, FiLoader } from 'react-icons/fi';
 import { labelPrintingApi } from '../../api/labelPrintingApi';
 import { PrinterStatus, apiError, formatWhen } from './labelShared';
 
@@ -16,6 +16,33 @@ const Field = ({ label, hint, children }) => (
     </label>
 );
 const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300';
+
+// A list reported by the agent's PC, with "Other — type it" for anything not in it.
+const PickOrType = ({ options, value, onChange, placeholder, mono }) => {
+    const known = options.some(o => o.value === value);
+    const [manual, setManual] = useState(options.length === 0 || (!!value && !known));
+    useEffect(() => {
+        if (options.length > 0 && !value) setManual(false);
+        if (options.length === 0) setManual(true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [options.length]);
+    if (manual) {
+        return (
+            <div className="flex gap-2">
+                <input className={`${inputCls} ${mono ? 'font-mono' : ''}`} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
+                {options.length > 0 && <button type="button" onClick={() => setManual(false)} className="px-2 text-xs text-indigo-600 hover:underline whitespace-nowrap">Pick from list</button>}
+            </div>
+        );
+    }
+    return (
+        <select className={`${inputCls} ${mono ? 'font-mono' : ''}`} value={known ? value : ''}
+            onChange={e => { if (e.target.value === '__other__') { setManual(true); } else onChange(e.target.value); }}>
+            <option value="">Select…</option>
+            {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            <option value="__other__">Other — type it…</option>
+        </select>
+    );
+};
 
 const TokenBox = ({ token, agentName, onClose }) => {
     const serverUrl = (process.env.REACT_APP_API_URL || `http://${window.location.hostname}:5002`).replace(/\/api\/?$/, '');
@@ -54,10 +81,16 @@ const LabelPrinterSetupPage = () => {
     const [printers, setPrinters] = useState([]);
     const [error, setError] = useState(null);
     const [newAgentName, setNewAgentName] = useState('');
+    // Agent actions report here, next to the button — the page-level error is
+    // cleared by the 15-second refresh and sits off-screen at the top.
+    const [agentError, setAgentError] = useState(null);
+    const [adding, setAdding] = useState(false);
+    const agentInputRef = useRef(null);
     const [token, setToken] = useState(null);         // { token, name }
     const [form, setForm] = useState(null);           // printer being added / edited
     const [formError, setFormError] = useState(null);
     const [saving, setSaving] = useState(false);
+    const [refreshing, setRefreshing] = useState({});   // agentId → true while waiting for the PC's new list
 
     const load = useCallback(async () => {
         try {
@@ -68,22 +101,54 @@ const LabelPrinterSetupPage = () => {
     useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [load]);
 
     const addAgent = async () => {
-        if (!newAgentName.trim()) return;
+        if (!newAgentName.trim()) {
+            setAgentError('Type a name for the agent first, e.g. "Cutting BarTender PC".');
+            agentInputRef.current?.focus();
+            return;
+        }
+        setAdding(true); setAgentError(null);
         try {
             const r = await labelPrintingApi.createAgent(newAgentName.trim());
             setToken({ token: r.data.token, name: r.data.name }); setNewAgentName(''); load();
-        } catch (err) { setError(apiError(err, 'Could not add the agent.')); }
+        } catch (err) {
+            setAgentError(err.response?.status === 404
+                ? 'The server does not have label printing yet — deploy the latest backend.'
+                : apiError(err, 'Could not add the agent.'));
+        } finally { setAdding(false); }
     };
     const renewToken = async (agent) => {
         if (!window.confirm(`Issue a new token for "${agent.name}"? The old token stops working immediately — update config.json on the BarTender PC.`)) return;
         try {
             const r = await labelPrintingApi.newAgentToken(agent.id);
             setToken({ token: r.data.token, name: agent.name });
-        } catch (err) { setError(apiError(err, 'Could not issue a new token.')); }
+        } catch (err) { setAgentError(apiError(err, 'Could not issue a new token.')); }
     };
     const toggleAgent = async (agent) => {
         try { await labelPrintingApi.updateAgent(agent.id, { is_active: !agent.is_active }); load(); }
-        catch (err) { setError(apiError(err, 'Could not update the agent.')); }
+        catch (err) { setAgentError(apiError(err, 'Could not update the agent.')); }
+    };
+
+    // The agent picks the request up on its next heartbeat (~30s) and reports
+    // its printers and .btw files; follow it for up to 90s.
+    const refreshInventory = async (agent) => {
+        setAgentError(null);
+        try {
+            const { data: req } = await labelPrintingApi.refreshAgentInventory(agent.id);
+            setRefreshing(r => ({ ...r, [agent.id]: true }));
+            const asked = new Date(req.inventory_requested_at).getTime();
+            for (let i = 0; i < 30; i++) {
+                await new Promise(r => setTimeout(r, 3000));
+                const { data } = await labelPrintingApi.listAgents();
+                setAgents(data);
+                const a = data.find(x => String(x.id) === String(agent.id));
+                if (a?.inventory_at && new Date(a.inventory_at).getTime() >= asked) break;
+                if (i === 29) setAgentError(`"${agent.name}" did not report back within 90 seconds. Is the agent running on the BarTender PC?`);
+            }
+        } catch (err) {
+            setAgentError(apiError(err, 'Could not ask the agent for its printers.'));
+        } finally {
+            setRefreshing(r => ({ ...r, [agent.id]: false }));
+        }
     };
 
     const savePrinter = async () => {
@@ -97,6 +162,14 @@ const LabelPrinterSetupPage = () => {
         finally { setSaving(false); }
     };
 
+    const formAgent = form ? agents.find(a => String(a.id) === String(form.agent_id)) : null;
+    const printerOptions = (formAgent?.reported_printers || []).map(p => ({
+        value: p.name, label: `${p.name}${p.is_default ? ' (Windows default)' : ''}${p.port ? ` · ${p.port}` : ''}`,
+    }));
+    const fileOptions = (formAgent?.reported_label_files || []).map(f => ({
+        value: f.path, label: `${f.path}${f.modified ? ` · ${String(f.modified).slice(0, 10)}` : ''}`,
+    }));
+
     return (
         <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
             <div>
@@ -109,11 +182,14 @@ const LabelPrinterSetupPage = () => {
                 <div className="p-4 border-b flex flex-wrap justify-between items-center gap-3">
                     <h2 className="font-semibold text-gray-800 flex items-center gap-2"><FiServer className="text-gray-400" /> Print agents (BarTender PCs)</h2>
                     <div className="flex gap-2">
-                        <input value={newAgentName} onChange={e => setNewAgentName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addAgent(); }}
-                            placeholder="e.g. Cutting BarTender PC" className={`${inputCls} w-64`} />
-                        <button onClick={addAgent} className="px-3 py-2 text-sm font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 whitespace-nowrap"><FiPlus /> Add agent</button>
+                        <input ref={agentInputRef} value={newAgentName} onChange={e => { setNewAgentName(e.target.value); setAgentError(null); }} onKeyDown={e => { if (e.key === 'Enter') addAgent(); }}
+                            placeholder="Agent name, e.g. Cutting BarTender PC" className={`${inputCls} w-72`} />
+                        <button onClick={addAgent} disabled={adding} className="px-3 py-2 text-sm font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 whitespace-nowrap disabled:opacity-50">
+                            {adding ? <FiLoader className="animate-spin" /> : <FiPlus />} Add agent
+                        </button>
                     </div>
                 </div>
+                {agentError && <div className="px-4 py-2 text-sm bg-red-50 border-b border-red-100 text-red-700 flex items-center gap-2"><FiAlertTriangle className="shrink-0" /> {agentError}</div>}
                 <table className="min-w-full text-sm">
                     <thead className="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
                         <th className="py-2 px-3 text-left">Agent</th><th className="py-2 px-3 text-left">Status</th><th className="py-2 px-3 text-left">PC</th>
@@ -129,9 +205,17 @@ const LabelPrinterSetupPage = () => {
                                         : a.online ? <span className="text-emerald-700 font-medium">● Online</span>
                                             : <span className="text-amber-700 font-medium">● Offline{a.last_seen_at ? ` (last seen ${formatWhen(a.last_seen_at)})` : ' (never connected)'}</span>}
                                 </td>
-                                <td className="py-2 px-3 text-gray-600">{a.machine_name || '—'}{a.agent_version ? ` · v${a.agent_version}` : ''}</td>
+                                <td className="py-2 px-3 text-gray-600">
+                                    {a.machine_name || '—'}{a.agent_version ? ` · v${a.agent_version}` : ''}
+                                    <div className="text-xs text-gray-400">
+                                        {refreshing[a.id] ? 'asking the PC for its printers…'
+                                            : a.inventory_at ? `${a.reported_printers.length} printer(s) · ${a.reported_label_files.length} .btw file(s) · listed ${formatWhen(a.inventory_at)}`
+                                                : 'printers not reported yet'}
+                                    </div>
+                                </td>
                                 <td className="py-2 px-3 text-xs">{a.bartender_ok == null ? '—' : a.bartender_ok ? <span className="text-emerald-700">OK</span> : <span className="text-red-700">{a.bartender_message}</span>}</td>
                                 <td className="py-2 px-3 text-right whitespace-nowrap">
+                                    <button onClick={() => refreshInventory(a)} disabled={!!refreshing[a.id] || !a.is_active} className="px-2 py-0.5 text-xs rounded border border-gray-300 hover:bg-gray-100 mr-1.5 disabled:opacity-50">{refreshing[a.id] ? 'Refreshing…' : 'Refresh list'}</button>
                                     <button onClick={() => renewToken(a)} className="px-2 py-0.5 text-xs rounded border border-gray-300 hover:bg-gray-100 mr-1.5">New token</button>
                                     <button onClick={() => toggleAgent(a)} className="px-2 py-0.5 text-xs rounded border border-gray-300 hover:bg-gray-100">{a.is_active ? 'Disable' : 'Enable'}</button>
                                 </td>
@@ -182,8 +266,27 @@ const LabelPrinterSetupPage = () => {
                                     {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                                 </select>
                             </Field>
-                            <Field label="Windows printer name" hint='Exactly as Windows shows it, e.g. "Citizen CL-S631".'><input className={inputCls} value={form.windows_printer_name} onChange={e => setForm({ ...form, windows_printer_name: e.target.value })} /></Field>
-                            <Field label="Label file (.btw) on the BarTender PC" hint="Full path, e.g. C:\Labels\garment.btw — keep it off the Desktop."><input className={`${inputCls} font-mono`} value={form.btw_path} onChange={e => setForm({ ...form, btw_path: e.target.value })} /></Field>
+                            {formAgent && (
+                                <div className="text-xs text-gray-500 flex items-center justify-between gap-2 -mt-1">
+                                    <span>
+                                        {refreshing[formAgent.id] ? 'Asking the BarTender PC for its printers and label files…'
+                                            : formAgent.inventory_at ? `Lists from ${formAgent.machine_name || 'the PC'}, ${formatWhen(formAgent.inventory_at)}.`
+                                                : 'This agent has not reported its printers yet — install and start it on the BarTender PC, then Refresh.'}
+                                    </span>
+                                    <button type="button" onClick={() => refreshInventory(formAgent)} disabled={!!refreshing[formAgent.id]}
+                                        className="text-indigo-600 hover:underline whitespace-nowrap disabled:opacity-50 flex items-center gap-1">
+                                        {refreshing[formAgent.id] && <FiLoader className="animate-spin" size={11} />} Refresh list
+                                    </button>
+                                </div>
+                            )}
+                            <Field label="Windows printer" hint="Printers installed on the BarTender PC.">
+                                <PickOrType options={printerOptions} value={form.windows_printer_name} placeholder='Exactly as Windows shows it, e.g. "Citizen CL-S631"'
+                                    onChange={v => setForm(f => ({ ...f, windows_printer_name: v, name: f.name || v }))} />
+                            </Field>
+                            <Field label="Label file (.btw)" hint="Found in C:\Labels, Desktop and Documents on the BarTender PC. Keep the label in C:\Labels.">
+                                <PickOrType options={fileOptions} value={form.btw_path} mono placeholder="C:\Labels\garment.btw"
+                                    onChange={v => setForm(f => ({ ...f, btw_path: v }))} />
+                            </Field>
                             <Field label="Label's database connection name" hint="BarTender Designer → Database Connection Setup."><input className={inputCls} value={form.data_source_name} onChange={e => setForm({ ...form, data_source_name: e.target.value })} /></Field>
                             <Field label="Location (optional)"><input className={inputCls} value={form.location || ''} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="Cutting table 1" /></Field>
                             <div className="flex gap-5 text-sm">

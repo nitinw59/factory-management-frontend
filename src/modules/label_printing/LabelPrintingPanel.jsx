@@ -77,6 +77,17 @@ const LabelPrintingPanelInner = ({ batchId, user }) => {
         setBusyRoll(null);
     };
 
+    const printAll = async () => {
+        setBusyRoll('all');
+        await run(async () => {
+            const r = await labelPrintingApi.printBatch({ batchId, printerId });
+            const skipped = r.data.skipped.length ? ` Skipped: ${r.data.skipped.map(x => `roll ${x.fabric_roll_id} (${x.reason})`).join(', ')}.` : '';
+            setNotice({ type: 'ok', text: `${r.data.labels} label(s) in ${r.data.jobs.length} roll job(s) sent to the print queue.${skipped}` });
+        });
+        setBusyRoll(null);
+    };
+    const printAllCount = (data?.rolls || []).filter(r => r.can_print).reduce((n, r) => n + r.unprinted, 0);
+
     if (error) {
         return (
             <section className="bg-white rounded-lg shadow-sm border p-4 mb-6 text-sm text-red-700">
@@ -107,6 +118,12 @@ const LabelPrintingPanelInner = ({ batchId, user }) => {
                         <>
                             <PrinterStatus printer={printer} />
                             <PrinterSelect printers={printers} value={printerId} onChange={setPrinterId} />
+                            {printAllCount > 0 && (
+                                <button onClick={printAll} disabled={busyRoll === 'all' || !printerId}
+                                    className="px-3 py-1.5 text-sm font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1.5">
+                                    {busyRoll === 'all' ? <FiLoader className="animate-spin" size={14} /> : <FiPrinter size={14} />} Print all {printAllCount}
+                                </button>
+                            )}
                             <button onClick={() => setSingleOpen(true)} className="px-3 py-1.5 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 flex items-center gap-1.5">
                                 <FiPrinter size={14} /> Single label
                             </button>
