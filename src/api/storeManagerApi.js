@@ -68,8 +68,6 @@ export const storeManagerApi = {
     // variant_size, quantity_used, used_at }] }. Not implemented server-side yet.
     getTrimReservationUsage: (params) => api.get('/store-manager/trim-reservations/usage', { params }),
 
-    // Barcode
-    markBatchBarcodePrinted: (data) => api.post('/store-manager/batch-barcode-printed', data),
 
     //spares billing
     getPendingRequests: () => api.get('/spare-issuance/spares/pending-requests'),

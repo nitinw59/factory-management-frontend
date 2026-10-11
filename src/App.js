@@ -138,6 +138,8 @@ const ReadyToLoadPage = lazyPage(() => import('./modules/initialisation_portal/R
 const NumberingBatchDetailsPage = lazyPage(() => import('./modules/numbering_portal/NumberingBatchDetailsPage'));
 const PreparationManagerDashboardPage = lazyPage(() => import('./modules/preparation_portal/PreparationManagerDashboardPage'));
 const BatchCuttingDetailsPage = lazyPage(() => import('./modules/cutting_portal/BatchCuttingDetailsPage'));
+const LabelPrintQueuePage = lazyPage(() => import('./modules/label_printing/LabelPrintQueuePage'));
+const LabelPrinterSetupPage = lazyPage(() => import('./modules/label_printing/LabelPrinterSetupPage'));
 const CreateProductionBatchForm = lazyPage(() => import('./modules/production/CreateProductionBatchForm'));  // Assuming this exists for creating new batches
 const WorkstationManagement = lazyPage(() => import('./modules/workstations/WorkstationManagement'));
 const PreparationUnloadDashboardPage = lazyPage(() => import('./modules/preparation_portal/PreparationUnloadDashboard'));
@@ -403,7 +405,9 @@ const appRoutes = (
           <Route path="fabric-types" element={<FabricTypesPage />} />
           <Route path ="asset-management" element={<AssetManagementPage />} />  
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
-          <Route path="line-config" element={<AdminLineConfigPage />} />  
+          <Route path="line-config" element={<AdminLineConfigPage />} />
+          <Route path="label-printers" element={<LabelPrinterSetupPage />} />
+          <Route path="label-queue" element={<LabelPrintQueuePage />} />  
 
           
          
@@ -520,6 +524,7 @@ const appRoutes = (
           <Route path="dashboard" element={<CuttingDashboardPage />} />
           <Route path="batch-details/:batchId" element={<BatchCuttingDetailsPage />} />
           <Route path="sewing-machine-complaints" element={<SewingMachineComplaintPage />} />
+          <Route path="labels" element={<LabelPrintQueuePage />} />
 
           {/* Add this new route */}
           {/* <Route path="cut/:batchId/:rollId" element={<CuttingFormPage />} /> */}

@@ -124,12 +124,14 @@ const AdminLayout = () => {
 
                 <DesktopNavDropdown
                   title="Config & Portals"
-                  matchPaths={['/admin/workstation-types', '/admin/portal-management', '/admin/asset-management', '/admin/line-config']}
+                  matchPaths={['/admin/workstation-types', '/admin/portal-management', '/admin/asset-management', '/admin/line-config', '/admin/label-printers', '/admin/label-queue']}
                 >
                   <NavLink to="/admin/workstation-types" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Workstation Types</NavLink>
                   <NavLink to="/admin/portal-management" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Manage Portals</NavLink>
                   <NavLink to="/admin/asset-management"  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Asset Management</NavLink>
                   <NavLink to="/admin/line-config"       className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Line Config</NavLink>
+                  <NavLink to="/admin/label-printers"    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Label Printers</NavLink>
+                  <NavLink to="/admin/label-queue"       className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Label Print Queue</NavLink>
                 </DesktopNavDropdown>
 
                 <DesktopNavDropdown
@@ -244,6 +246,8 @@ const AdminLayout = () => {
                 <NavLink to="/admin/portal-management" onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Manage Portals</NavLink>
                 <NavLink to="/admin/asset-management"  onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Asset Management</NavLink>
                 <NavLink to="/admin/line-config"       onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Line Config</NavLink>
+                <NavLink to="/admin/label-printers"    onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Label Printers</NavLink>
+                <NavLink to="/admin/label-queue"       onClick={closeMenu} className="block py-2 text-sm text-gray-600 hover:text-blue-600">Label Print Queue</NavLink>
               </MobileNavDropdown>
 
               <MobileNavDropdown title="Maintenance">

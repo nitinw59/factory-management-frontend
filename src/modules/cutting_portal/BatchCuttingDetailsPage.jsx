@@ -10,6 +10,7 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import PriorityChip from '../../shared/PriorityChip';
+import LabelPrintingPanel from '../label_printing/LabelPrintingPanel';
 
 const Spinner = () => (
     <div className="flex justify-center items-center p-12">
@@ -583,6 +584,8 @@ const BatchCuttingDetailsPage = () => {
                     <p className={`text-2xl font-bold ${summaryStats.totalEndBits > 0 ? 'text-purple-500' : 'text-gray-700'}`}>{summaryStats.totalEndBits.toFixed(2)} m</p>
                  </div>
             </section>
+
+            <LabelPrintingPanel batchId={batchId} />
 
             {/* Interlining Requirements Section */}
             {details.interlining_requirements && details.interlining_requirements.length > 0 && (

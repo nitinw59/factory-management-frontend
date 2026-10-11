@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import PriorityChip from '../../shared/PriorityChip';
 import { cuttingPortalApi } from '../../api/cuttingPortalApi';
+import { labelPrintingApi } from '../../api/labelPrintingApi';
 import {
     CheckCircle, Loader2, Package, Filter, X, Eye,
     ChevronDown, Scissors, Ruler, AlertCircle, Box, CircleDashed,
-    Layers, Clock
+    Layers, Clock, Tag
 } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import CuttingForm from './CuttingForm';
@@ -12,7 +13,7 @@ import { Link } from 'react-router-dom';
 
 const Spinner = () => <div className="flex justify-center items-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div></div>;
 
-const BatchCard = ({ batch, onOpenCutForm }) => {
+const BatchCard = ({ batch, onOpenCutForm, labels }) => {
     // Logic: Batch is complete if EVERY roll is marked is_cut
     const isBatchComplete = useMemo(() => batch.rolls.every(r => r.is_cut), [batch.rolls]);
     
@@ -147,6 +148,22 @@ const BatchCard = ({ batch, onOpenCutForm }) => {
                 ))}
             </div>
 
+            {/* Garment labels (warning only — never blocks) */}
+            {labels && labels.garments > 0 && (
+                <Link
+                    to={`/cutting-portal/batch-details/${batch.id}#labels`}
+                    className={`mx-3 mb-1 mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border ${
+                        labels.failed_jobs > 0 ? 'bg-red-50 border-red-200 text-red-700'
+                        : labels.unprinted > 0 ? 'bg-amber-50 border-amber-200 text-amber-800'
+                        : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}
+                >
+                    <Tag size={12} />
+                    {labels.unprinted > 0 ? `${labels.unprinted} garment(s) without label` : 'All garments labelled'}
+                    {labels.open_jobs > 0 && <span className="ml-auto">printing…</span>}
+                    {labels.failed_jobs > 0 && <span className="ml-auto">{labels.failed_jobs} failed job(s)</span>}
+                </Link>
+            )}
+
             {/* Footer */}
             <div className="p-3 bg-white border-t border-slate-100 flex justify-center">
                  <Link 
@@ -203,6 +220,7 @@ const BatchStatusGroup = ({ title, count, statusColor, children, isOpen, onToggl
 // --- MAIN PAGE ---
 const CuttingDashboardPage = () => {
   const [allBatches, setAllBatches] = useState([]); 
+  const [labelSummaries, setLabelSummaries] = useState({});
   const [filteredBatches, setFilteredBatches] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -230,6 +248,11 @@ const CuttingDashboardPage = () => {
         console.log("Fetched Batches:", fetchedBatches);
         setAllBatches(fetchedBatches);
         setFilteredBatches(fetchedBatches);
+        if (fetchedBatches.length) {
+          labelPrintingApi.getBatchSummaries(fetchedBatches.map(b => b.id))
+            .then(r => setLabelSummaries(r.data))
+            .catch(() => setLabelSummaries({}));   // labels are a hint here — never block the queue
+        }
       })
       .catch((err) => {
           console.error("API Error:", err);
@@ -423,6 +446,7 @@ const CuttingDashboardPage = () => {
                                 key={batch.id} 
                                 batch={batch} 
                                 onOpenCutForm={handleOpenCutForm} 
+                                labels={labelSummaries[batch.id]}
                             />
                         ))}
                     </BatchStatusGroup>
@@ -442,6 +466,7 @@ const CuttingDashboardPage = () => {
                                 key={batch.id} 
                                 batch={batch} 
                                 onOpenCutForm={handleOpenCutForm} 
+                                labels={labelSummaries[batch.id]}
                             />
                         ))}
                     </BatchStatusGroup>

@@ -2,7 +2,7 @@ import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import MatrixBrand from './MatrixBrand';
-import { LuLogOut, LuScissors } from 'react-icons/lu';
+import { LuLogOut, LuScissors, LuPrinter } from 'react-icons/lu';
 import ReportBugButton from './ReportBugButton';
 
 const CuttingPortalLayout = () => {
@@ -24,6 +24,10 @@ const CuttingPortalLayout = () => {
                 <NavLink to="/cutting-portal/dashboard" className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
                     <LuScissors className="inline-block mr-1" />
                     My Cutting Queue
+                </NavLink>
+                <NavLink to="/cutting-portal/labels" className={({ isActive }) => `flex items-center text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'}`}>
+                    <LuPrinter className="inline-block mr-1" />
+                    Label Printing
                 </NavLink>
             </nav>
           </div>
