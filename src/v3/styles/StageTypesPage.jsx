@@ -42,7 +42,7 @@ export default function StageTypesPage() {
     return (
         <div>
             <PageHeader
-                title="Stage types"
+                title="Production stages"
                 subtitle="The production stages a style's route is built from. Only a factory admin can change them."
                 actions={canEdit && <PrimaryButton onClick={() => { setFormError(''); setEditing({ name: '', unit: 'PIECE', part_scope: 'ALL', sort_order: ((rows?.length || 0) + 1) * 10, is_active: true }); }}><Plus size={15} /> Add stage</PrimaryButton>}
             />

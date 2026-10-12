@@ -4,17 +4,21 @@
 // order, but each save needs a reason and becomes a numbered revision.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Plus, Pencil, Send, Undo2, CheckCircle2, XCircle, Ban, FileDown, FileSpreadsheet } from 'lucide-react';
+import { Plus, Pencil, Send, Undo2, CheckCircle2, XCircle, Ban, FileDown, FileSpreadsheet } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { salesOrdersApi } from '../api/salesOrdersApi';
 import { adminApi } from '../../api/adminApi';
 import { exportOrderPdf, exportOrderExcel } from './orderSheetExport';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
-import SalesOrderStatusBadge, { fmtDate } from './SalesOrderStatusBadge';
+import { fmtDate } from './SalesOrderStatusBadge';
 import OrderLineCard from './OrderLineCard';
+import OrderTabs from '../orders/OrderTabs';
 import OrderDocumentsTab from './OrderDocumentsTab';
 import { exportPpmTemplate } from './ppmTemplatePdf';
+import { exportPpmTemplateXlsx } from './ppmTemplateXlsx';
+import { planningApi } from '../api/planningApi';
+import { downloadMaterialSheet } from '../planning/materialSheetPdf';
 
 const EDITABLE = ['DRAFT', 'REJECTED'];
 const ACTION_LABEL = {
@@ -112,11 +116,12 @@ export default function SalesOrderPage() {
         try { company = (await adminApi.getCompanyProfile()).data; } catch { /* letterhead is optional */ }
         exportOrderPdf(order, company);
     };
-    // PPM template for one line, with the company name when a profile exists.
-    const ppmTemplate = async (l) => {
+    // PPM template for one line (PDF or Excel), with the company name when a profile exists.
+    const ppmTemplate = async (l, format = 'pdf') => {
         let company = null;
         try { company = (await adminApi.getCompanyProfile()).data; } catch { /* name is optional */ }
-        exportPpmTemplate(order, l, company);
+        if (format === 'xlsx') await exportPpmTemplateXlsx(order, l, company).catch(err => setError(err.message || 'Failed to make the Excel file.'));
+        else exportPpmTemplate(order, l, company);
     };
     const saveLine = async (lineId, data) => setOrder((await salesOrdersApi.updateLine(id, lineId, data)).data);
     const deleteLine = async (l) => {
@@ -126,12 +131,7 @@ export default function SalesOrderPage() {
 
     return (
         <div>
-            <Link to="/v3/sales-orders" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Sales orders</Link>
-            <div className="flex flex-wrap items-center gap-3 mb-2">
-                <h1 className="text-2xl font-black text-slate-900">{order.order_no}</h1>
-                <SalesOrderStatusBadge status={order.status} />
-                {order.revision_no > 0 && <span className="text-xs font-bold text-slate-500">revision {order.revision_no}</span>}
-            </div>
+            <OrderTabs orderId={id} active="order" />
             {order.status === 'REJECTED' && order.rejected_reason && (
                 <div className="mb-3 text-sm bg-rose-50 border border-rose-200 text-rose-800 rounded-lg px-3 py-2"><b>Rejected:</b> {order.rejected_reason}. Fix it, then submit again.</div>
             )}
@@ -150,6 +150,12 @@ export default function SalesOrderPage() {
                     <SecondaryButton onClick={() => askReason({ title: 'Reject order', label: 'Reason *', hint: 'Accounts see this and fix the order.', confirm: 'Reject', run: (r) => salesOrdersApi.reject(id, r) })} disabled={busy}><XCircle size={14} /> Reject</SecondaryButton>
                 </>}
                 <span className="ml-auto flex gap-2">
+                    {order.status !== 'CANCELLED' && activeLines.length > 0 && (
+                        <SecondaryButton disabled={busy} title={revising ? 'Fabric and trims per line and colour (the planned requirement)' : 'Estimate of fabric and trims from the BOMs — final once the order is approved'}
+                            onClick={() => { setError(''); downloadMaterialSheet(planningApi, adminApi, order.id).catch(err => setError(apiError(err, 'Failed to make the material PDF.'))); }}>
+                            <FileDown size={14} /> Material PDF{revising ? '' : ' (estimate)'}
+                        </SecondaryButton>
+                    )}
                     <SecondaryButton onClick={exportPdf} disabled={busy}><FileDown size={14} /> PDF</SecondaryButton>
                     <SecondaryButton onClick={() => exportOrderExcel(order)}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                 </span>
@@ -187,7 +193,7 @@ export default function SalesOrderPage() {
             {tab === 'lines' && (
                 <div className="space-y-3">
                     {order.lines.map(l => (
-                        <OrderLineCard key={lineKey(l)} line={l} orderId={id} onPpm={() => ppmTemplate(l)} ppmCount={(order.documents || []).filter(d => d.doc_type === 'PPM' && d.line_id === String(l.id)).length} onDocuments={() => setTab('documents')} editable={editable && l.status === 'ACTIVE'} canDelete={neverApproved} needsReason={revising}
+                        <OrderLineCard key={lineKey(l)} line={l} orderId={id} onPpm={(format) => ppmTemplate(l, format)} ppmCount={(order.documents || []).filter(d => d.doc_type === 'PPM' && d.line_id === String(l.id)).length} onDocuments={() => setTab('documents')} editable={editable && l.status === 'ACTIVE'} canDelete={neverApproved} needsReason={revising}
                             onSave={(data) => saveLine(l.id, data)} onDelete={() => deleteLine(l)}
                             onCancelLine={editable && revising && l.status === 'ACTIVE' && activeLines.length > 1
                                 ? () => askReason({ title: `Cancel line ${l.line_no} (${l.style_code})`, label: 'Reason *', hint: 'The line stays on the order, marked cancelled. This is saved as a revision.', confirm: 'Cancel line', danger: true, run: (r) => salesOrdersApi.cancelLine(id, l.id, r) })

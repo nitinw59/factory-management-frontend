@@ -67,7 +67,7 @@ export default function StoreItemsPage() {
 
     return (
         <div>
-            <PageHeader title="Store items" subtitle={`Spares and general items, with stock at average cost. Stock value shown: ₹${inr(totalValue)}.`}
+            <PageHeader title="Spares & general items" subtitle={`Spares and general items, with stock at average cost. Stock value shown: ₹${inr(totalValue)}.`}
                 actions={<>
                     <SecondaryButton onClick={() => exportStock(items || [], todayLocal())} disabled={!items?.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                     {perms.items && <SecondaryButton onClick={() => { setFormError(''); setCatForm({ list: true }); }}><Tags size={14} /> Categories</SecondaryButton>}

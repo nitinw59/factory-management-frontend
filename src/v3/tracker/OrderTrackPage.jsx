@@ -8,7 +8,8 @@
 // link to the page where the step is done (the tracker itself never acts).
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import OrderTabs from '../orders/OrderTabs';
+import { ArrowRight } from 'lucide-react';
 import { trackerApi } from '../api/trackerApi';
 import { apiError } from '../api/mastersApi';
 import { ErrorBox, Loading } from '../components/ui';
@@ -90,7 +91,7 @@ export default function OrderTrackPage() {
 
     return (
         <div>
-            <Link to="/v3/tracker" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={14} /> Order tracker</Link>
+            <OrderTabs orderId={id} active="overview" />
             <div className="flex flex-wrap items-end gap-3 mb-4">
                 <div>
                     <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2">{d.order_no} <RagChip rag={d.rag}>{lower(d.rag)}</RagChip></h1>

@@ -3,7 +3,7 @@
 // the same line makes v2, older versions stay listed). Other order documents the same way.
 // Removing hides a document from the order (kept on record, with the reason).
 import { useState } from 'react';
-import { FileDown, Upload, ExternalLink, Trash2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { FileDown, FileSpreadsheet, Upload, ExternalLink, Trash2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { API_BASE_URL } from '../../utils/api';
 import { salesOrdersApi } from '../api/salesOrdersApi';
@@ -51,7 +51,7 @@ export default function OrderDocumentsTab({ order, canUpload, onPpmTemplate, onC
         <div className="space-y-4">
             <section className="bg-white border border-slate-200 rounded-xl p-4">
                 <h2 className="font-black text-slate-800 mb-1">PPM sheets</h2>
-                <p className="text-xs text-slate-500 mb-3">Download the template for a line (buyer, style, order no., quantity, colours and delivery date are filled in), hold the pre-production meeting, then upload the signed scan.</p>
+                <p className="text-xs text-slate-500 mb-3">Download the template for a line as PDF or Excel (buyer, style, order no., quantity, colours and delivery date are filled in; the Excel boxes can be typed in), hold the pre-production meeting, then upload the signed scan.</p>
                 <div className="divide-y divide-slate-100">
                     {active.map(l => {
                         const mine = docs.filter(d => d.doc_type === 'PPM' && d.line_id === String(l.id));
@@ -63,7 +63,8 @@ export default function OrderDocumentsTab({ order, canUpload, onPpmTemplate, onC
                                         ? <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700"><CheckCircle2 size={13} /> uploaded</span>
                                         : <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700"><AlertTriangle size={13} /> not uploaded yet</span>}
                                     <span className="ml-auto flex gap-2">
-                                        <SecondaryButton onClick={() => onPpmTemplate(l)}><FileDown size={14} /> PPM template</SecondaryButton>
+                                        <SecondaryButton onClick={() => onPpmTemplate(l, 'pdf')}><FileDown size={14} /> PPM template PDF</SecondaryButton>
+                                        <SecondaryButton onClick={() => onPpmTemplate(l, 'xlsx')}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                                         {canUpload && !cancelled && <SecondaryButton onClick={() => open({ line_id: String(l.id) })}><Upload size={14} /> Upload signed PPM</SecondaryButton>}
                                     </span>
                                 </div>

@@ -10,7 +10,7 @@ const GRID = { lineWidth: PX * 1.5, lineColor: [0, 0, 0], fillColor: false, text
 const L = { fontStyle: 'bold', fontSize: 7 };   // printed labels
 
 // Left block: group → fields; right column: fields. Same rows as the paper form.
-const LEFT = [
+export const LEFT = [
     ['TRIMS DETAILS', ['Zipper', 'Thread shade', 'Label']],
     ['FABRIC DETAILS', ['Body fabric', 'Fabric contents', 'Shade', 'Shrinkage']],
     ['CUTTING DETAILS', ['Pocketing', 'Canvas', 'Emb. placement']],
@@ -18,13 +18,13 @@ const LEFT = [
     ['THREAD DETAILS TKT', ['O/L', 'T/S']],
     ['BARTACK / RUNTACK DETAILS', ['Bartack', 'Runtack']],
 ];
-const RIGHT = ['Button', 'Hook-eye', 'Metal tab', 'Lining', 'Wash', 'Press', 'Fusing', 'Gripper W/B', 'Binding', 'SPI', 'Fly',
+export const RIGHT = ['Button', 'Hook-eye', 'Metal tab', 'Lining', 'Wash', 'Press', 'Fusing', 'Gripper W/B', 'Binding', 'SPI', 'Fly',
     'No. of loops', 'Button attaching thread', 'Extra button', 'Safety stitch', 'Button shanking'];
-const COMMENTS = ['Measurement comments', 'Special comments', 'Other remarks', 'Trims remark for merchandiser', 'General comments', 'Risk analysis', 'Button shanking'];
-const QUALITY = ['HOD', 'QM', 'QA, Line QC', 'Cutting', 'Maintenance', 'Merchandiser'];
-const PRODUCTION = ['Sample', 'PM', 'Floor inch.', 'LE', 'Line sup.', 'C.A.D'];
+export const COMMENTS = ['Measurement comments', 'Special comments', 'Other remarks', 'Trims remark for merchandiser', 'General comments', 'Risk analysis', 'Button shanking'];
+export const QUALITY = ['HOD', 'QM', 'QA, Line QC', 'Cutting', 'Maintenance', 'Merchandiser'];
+export const PRODUCTION = ['Sample', 'PM', 'Floor inch.', 'LE', 'Line sup.', 'C.A.D'];
 
-const dmy = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('-') : '');
+export const dmy = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('-') : '');
 
 export function exportPpmTemplate(order, line, company) {
     const doc = new jsPDF({ orientation: 'portrait' });

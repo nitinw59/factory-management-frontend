@@ -59,11 +59,11 @@ export default function TrimSettingsPage() {
         }
     };
 
-    if (!tones || !colours) return <div><PageHeader title="Trim settings" /><ErrorBox text={error} />{!error && <Loading />}</div>;
+    if (!tones || !colours) return <div><PageHeader title="Colour tones" /><ErrorBox text={error} />{!error && <Loading />}</div>;
 
     return (
         <div className="space-y-6">
-            <PageHeader title="Trim settings" subtitle="Tones decide which trim a BY_TONE BOM line uses (e.g. dark garments → black fusing)." />
+            <PageHeader title="Colour tones" subtitle="Tones decide which trim a BY_TONE BOM line uses (e.g. dark garments → black fusing)." />
             <ErrorBox text={error} />
 
             <section className="bg-white border border-slate-200 rounded-xl p-4">

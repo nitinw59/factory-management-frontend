@@ -82,7 +82,10 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
                             <ClipboardList size={12} /> Trim card
                         </Link>
                         {onPpm && line.status === 'ACTIVE' && <>
-                            <button type="button" onClick={onPpm} className="ml-3 inline-flex items-center gap-1 font-semibold text-indigo-700 hover:underline"><FileDown size={12} /> PPM template</button>
+                            <span className="ml-3 inline-flex items-center gap-1 font-semibold text-slate-600"><FileDown size={12} /> PPM template:</span>
+                            <button type="button" onClick={() => onPpm('pdf')} className="ml-1 font-semibold text-indigo-700 hover:underline">PDF</button>
+                            <span className="text-slate-300">·</span>
+                            <button type="button" onClick={() => onPpm('xlsx')} className="font-semibold text-indigo-700 hover:underline">Excel</button>
                             <button type="button" onClick={onDocuments} className={`ml-2 font-semibold hover:underline ${ppmCount ? 'text-emerald-700' : 'text-amber-700'}`}>{ppmCount ? 'PPM uploaded' : 'PPM not uploaded'}</button>
                         </>}
                         {cancelled && <span className="ml-2 font-bold text-rose-700">Cancelled: {line.cancelled_reason}</span>}

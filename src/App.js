@@ -233,6 +233,8 @@ const V3StyleDetailPage = lazyPage(() => import('./v3/styles/StyleDetailPage'));
 const V3StageTypesPage = lazyPage(() => import('./v3/styles/StageTypesPage'));
 const V3BomPage = lazyPage(() => import('./v3/boms/BomPage'));
 const V3TrimCardDesignerPage = lazyPage(() => import('./v3/boms/TrimCardDesignerPage'));
+const V3ApprovalsPage = lazyPage(() => import('./v3/tracker/ApprovalsPage'));
+const V3OrderRedirectPage = lazyPage(() => import('./v3/orders/OrderTabs').then(m => ({ default: m.OrderRedirectPage })));
 const V3BomApprovalsPage = lazyPage(() => import('./v3/boms/BomApprovalsPage'));
 const V3SalesOrdersPage = lazyPage(() => import('./v3/salesOrders/SalesOrdersPage'));
 const V3SalesOrderPage = lazyPage(() => import('./v3/salesOrders/SalesOrderPage'));
@@ -324,6 +326,8 @@ const appRoutes = (
           <Route path="boms" element={<V3BomListPage />} />
           <Route path="boms/:id" element={<V3BomPage />} />
           <Route path="boms/:id/trim-card" element={<V3TrimCardDesignerPage />} />
+          <Route path="approvals" element={<V3ApprovalsPage />} />
+          <Route path="orders/:id" element={<V3OrderRedirectPage />} />
           <Route path="bom-approvals" element={<V3BomApprovalsPage />} />
           <Route path="sales-orders" element={<V3SalesOrdersPage />} />
           <Route path="sales-orders/:id" element={<V3SalesOrderPage />} />

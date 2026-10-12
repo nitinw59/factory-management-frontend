@@ -3,8 +3,9 @@
 // cell, the cut allowance per order line, and the change log. Numbers come
 // from requirementsEngine.js and update automatically when the order changes.
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Pencil, RefreshCw, FileSpreadsheet, FileDown, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import OrderTabs from '../orders/OrderTabs';
+import { Pencil, RefreshCw, FileSpreadsheet, FileDown, AlertTriangle, ShieldCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Modal from '../../shared/Modal';
 import { planningApi } from '../api/planningApi';
@@ -15,6 +16,8 @@ import AllocateModal from './AllocateModal';
 import OrderMilestonesPanel from './OrderMilestonesPanel';
 import TrimStatusGrid from './TrimStatusGrid';
 import { exportTrimReservationPdf } from './trimReservationPdf';
+import { downloadMaterialSheet } from './materialSheetPdf';
+import { adminApi } from '../../api/adminApi';
 import { useV3Access } from '../V3Access';
 import { ReadinessChip, READY_STATUS, daysText } from './readinessShared';
 
@@ -53,7 +56,8 @@ export default function OrderRequirementsPage() {
     const myKinds = perms.plan_kinds || (perms.plan ? ['FABRIC', 'TRIM'] : []);
     const anyKind = myKinds.length > 0;
     const canKind = (k) => myKinds.includes(k);
-    const [tab, setTab] = useState('FABRIC');
+    const [params] = useSearchParams();
+    const [tab, setTab] = useState(params.get('tab') === 'MILESTONES' ? 'MILESTONES' : 'FABRIC');
     const [error, setError] = useState('');
     const [cell, setCell] = useState(null);           // drill-down { item, colour }
     const [allowance, setAllowance] = useState(null); // { line, pct, reason }
@@ -96,12 +100,14 @@ export default function OrderRequirementsPage() {
 
     return (
         <div>
-            <Link to="/v3/planning" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Material requirements</Link>
+            <OrderTabs orderId={orderId} active={tab === 'MILESTONES' ? 'milestones' : 'materials'} />
             <div className="flex flex-wrap items-center gap-3 mb-1">
                 <h1 className="text-2xl font-black text-slate-900">{order.order_no}</h1>
                 <span className="text-sm text-slate-500">{order.customer_name}{order.buyer_po_no ? ` · PO ${order.buyer_po_no}` : ''} · first ship {fmtDate(order.first_ship_date)}{order.revision_no ? ` · rev ${order.revision_no}` : ''}</span>
                 {me.menu['sales.orders'] && <Link to={`/v3/sales-orders/${order.id}`} className="text-sm font-semibold text-indigo-700 hover:underline">Open sales order</Link>}
                 <span className="ml-auto flex gap-2">
+                    <SecondaryButton onClick={() => downloadMaterialSheet(planningApi, adminApi, order.id, me?.user?.name).catch(err => setError(apiError(err, 'Failed to make the material PDF.')))}
+                        title="Fabric and trims per line and colour, with the calculation — an estimate until the order is approved"><FileDown size={14} /> Material PDF</SecondaryButton>
                     <SecondaryButton onClick={() => exportExcel(data)} disabled={!data.items.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                     <SecondaryButton onClick={() => exportTrimReservationPdf(data, me?.user?.name)} disabled={!data.items.some(i => i.kind === 'TRIM')} title="Trims grouped by type and item, quantities merged — for the store to reserve"><FileDown size={14} /> Trim reservation PDF</SecondaryButton>
                     {perms.settings && approved && <SecondaryButton onClick={recalc} disabled={busy}><RefreshCw size={14} /> Recalculate</SecondaryButton>}

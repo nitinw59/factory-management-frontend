@@ -4,7 +4,7 @@
 // choices (their own ticks are for that print only).
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ArrowUp, ArrowDown, FileDown, Save, RotateCcw, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowUp, ArrowDown, FileDown, FileSpreadsheet, Save, RotateCcw, Plus, Trash2 } from 'lucide-react';
 import { stylesApi } from '../api/stylesApi';
 import { apiError } from '../api/mastersApi';
 import { adminApi } from '../../api/adminApi';
@@ -12,6 +12,7 @@ import { inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../
 import BomStatusBadge from './BomStatusBadge';
 import { SHOW_AS, SIZES_AS, BOTTOM_BOXES, lineKeys, variesBySize, defaultSettings, normalizeSettings, buildCard } from './trimCardLayout';
 import { exportTrimCardFactoryPdf } from './trimCardPdf';
+import { exportTrimCardXlsx } from './trimCardXlsx';
 
 const Section = ({ title, children, aside }) => (
     <section className="border-b border-slate-200 pb-3">
@@ -174,7 +175,8 @@ export default function TrimCardDesignerPage() {
                 <div className="ml-auto flex flex-wrap gap-2">
                     <SecondaryButton onClick={() => set(defaultSettings(card))}><RotateCcw size={14} /> Defaults</SecondaryButton>
                     {canSave && <SecondaryButton onClick={save} disabled={busy || !dirty}><Save size={14} /> Save choices</SecondaryButton>}
-                    <PrimaryButton onClick={() => exportTrimCardFactoryPdf(model)}><FileDown size={15} /> Download PDF</PrimaryButton>
+                    <SecondaryButton onClick={() => exportTrimCardXlsx(model).catch(err => setError(err.message || 'Failed to make the Excel file.'))} disabled={!model.colours.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
+                    <PrimaryButton onClick={() => exportTrimCardFactoryPdf(model)} disabled={!model.colours.length}><FileDown size={15} /> Download PDF</PrimaryButton>
                 </div>
             </div>
             <ErrorBox text={error} />

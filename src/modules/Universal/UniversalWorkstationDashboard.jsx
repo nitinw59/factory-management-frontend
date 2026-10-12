@@ -434,7 +434,7 @@ const ApprovedSummaryModal = ({ workData, loading, onClose, onDateChange }) => {
                             {drilldown?.type === 'complete' && (
                                 <div className="mt-3 pt-3 border-t border-violet-200 space-y-2">
                                     <p className="text-xs text-gray-600">
-                                        <span className="font-black text-gray-800">{touchedToday}</span> piece-sequences had at least one primary part approved today —
+                                        <span className="font-black text-gray-800">{touchedToday}</span> garments (roll + piece-sequence) had at least one primary part approved today —
                                         <span className="font-black text-emerald-600"> {workData.complete_sets_today} complete</span> (every primary part done) +
                                         <span className="font-black text-amber-600"> {incompleteToday.length}{touchedToday - workData.complete_sets_today > incompleteToday.length ? '+' : ''} incomplete</span> (still missing at least one).
                                     </p>
@@ -443,8 +443,8 @@ const ApprovedSummaryModal = ({ workData, loading, onClose, onDateChange }) => {
                                             {incompleteToday.map(inc => {
                                                 const missing = (inc.parts_expected || []).filter(p => !(inc.parts_done || []).includes(p));
                                                 return (
-                                                    <div key={`${inc.production_batch_id}-${inc.size}-${inc.piece_sequence}`} className="text-xs bg-white border border-amber-200 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2">
-                                                        <span className="font-mono text-gray-600">Batch #{inc.production_batch_id} · Size {inc.size} · #{inc.piece_sequence}</span>
+                                                    <div key={`${inc.production_batch_id}-${inc.fabric_roll_id}-${inc.size}-${inc.piece_sequence}`} className="text-xs bg-white border border-amber-200 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2">
+                                                        <span className="font-mono text-gray-600">Batch #{inc.production_batch_id} · Roll {inc.fabric_roll_id} · Size {inc.size} · #{inc.piece_sequence}</span>
                                                         <span className="text-right">
                                                             <span className="text-emerald-600 font-bold">{(inc.parts_done || []).join(', ')}</span>
                                                             <span className="text-gray-400"> done · </span>

@@ -2,8 +2,9 @@
 // quantity (trims) or rolls and metres (fabric) — never more than allocated.
 // Cutting needs the cutting gate; mixed dye lots need a confirmation.
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, PackageMinus, AlertTriangle } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
+import OrderTabs from '../orders/OrderTabs';
+import { PackageMinus, AlertTriangle } from 'lucide-react';
 import { materialIssueApi } from '../api/materialIssueApi';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, Field, inputCls, PrimaryButton, ErrorBox, Loading } from '../components/ui';
@@ -52,7 +53,7 @@ export default function IssueForOrderPage() {
 
     return (
         <div>
-            <Link to="/v3/material-issue" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Material issue</Link>
+            <OrderTabs orderId={orderId} active="issue" />
             <PageHeader title={`Issue for ${d.order.order_no}`} subtitle={`${d.order.customer_name} · ships ${fmtDate(d.order.ship_date)}. Only allocated material can be issued; ask planning to allocate the rest.`} />
             <div className={`mb-3 text-sm rounded-lg px-3 py-2 border ${d.cutting_gate.allowed ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
                 <b>Cutting gate:</b> {d.cutting_gate.allowed ? (d.cutting_gate.ready ? 'open — all materials covered.' : `open by override — ${d.cutting_gate.reason}`) : `closed — ${d.cutting_gate.reason}`}

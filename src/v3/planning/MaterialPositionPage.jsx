@@ -37,7 +37,7 @@ export default function MaterialPositionPage() {
 
     return (
         <div>
-            <PageHeader title="Material position" subtitle="Stock against what approved orders need. Allocation reserves stock for an order without moving it."
+            <PageHeader title="Stock position" subtitle="Stock against what approved orders need. Allocation reserves stock for an order without moving it."
                 actions={<>
                     <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={kind} onChange={e => setKind(e.target.value)} aria-label="Fabric or trims">
                         <option value="">Fabric and trims</option><option value="FABRIC">Fabric</option><option value="TRIM">Trims</option>

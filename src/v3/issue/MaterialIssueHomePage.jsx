@@ -22,7 +22,7 @@ export default function MaterialIssueHomePage() {
     }, [tab, search]);
     return (
         <div>
-            <PageHeader title="Material issue" subtitle="Fabric and trims go out to production only against what planning has allocated to the order. Issues to cutting must pass the cutting gate."
+            <PageHeader title="Issue to production" subtitle="Fabric and trims go out to production only against what planning has allocated to the order. Issues to cutting must pass the cutting gate."
                 actions={tab === 'slips' ? <SearchInput value={search} onChange={setSearch} placeholder="Slip, order, receiver" /> : null} />
             <div className="flex gap-1 mb-3 border-b border-slate-200">
                 {[['orders', 'Orders to issue'], ['slips', 'Issue slips']].map(([k, v]) => <button key={k} type="button" onClick={() => setParams(k === 'orders' ? {} : { tab: k })} className={`px-3 py-2 text-sm font-semibold border-b-2 -mb-px ${tab === k ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}>{v}</button>)}

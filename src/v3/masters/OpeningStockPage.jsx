@@ -55,13 +55,13 @@ export default function OpeningStockPage() {
     };
 
     if (!perms.stock) {
-        return <div><PageHeader title="Opening stock" /><p className="text-sm text-slate-500">Only the store manager or factory admin can enter opening stock.</p></div>;
+        return <div><PageHeader title="Trim opening stock" /><p className="text-sm text-slate-500">Only the store manager or factory admin can enter opening stock.</p></div>;
     }
 
     return (
         <div>
             <PageHeader
-                title="Opening stock"
+                title="Trim opening stock"
                 subtitle="Enter the physical count once per item. Items that already have stock movements aren't listed."
                 actions={<SearchInput value={search} onChange={setSearch} placeholder="Search items" />}
             />

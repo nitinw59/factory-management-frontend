@@ -73,7 +73,7 @@ export default function FabricStockPage() {
 
     return (
         <div>
-            <PageHeader title="Fabric stock" subtitle="Fabric held as rolls (roll no., dye lot, width). Planning allocates from what is in stock; the store picks rolls and dye lot when issuing to cutting."
+            <PageHeader title="Fabric rolls" subtitle="Fabric held as rolls (roll no., dye lot, width). Planning allocates from what is in stock; the store picks rolls and dye lot when issuing to cutting."
                 actions={<>
                     <SearchInput value={search} onChange={setSearch} placeholder="Mill, article, shade" />
                     {perms.fabricStock && <PrimaryButton onClick={openOpening}><Plus size={15} /> Opening roll count</PrimaryButton>}

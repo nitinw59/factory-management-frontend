@@ -7,6 +7,7 @@ export const planningApi = {
     saveSettings: (data) => api.put('/v3/planning/settings', data),
     orders: (params) => api.get('/v3/planning/orders', { params }),
     requirements: (orderId) => api.get(`/v3/planning/orders/${orderId}/requirements`),
+    materialSheet: (orderId) => api.get(`/v3/planning/orders/${orderId}/material-sheet`),   // approved: stored; else an estimate
     recalculate: (orderId, reason) => api.post(`/v3/planning/orders/${orderId}/recalculate`, { reason }),
     readiness: (params) => api.get('/v3/planning/readiness', { params }),
     orderReadiness: (orderId) => api.get(`/v3/planning/orders/${orderId}/readiness`),

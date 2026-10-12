@@ -4,7 +4,7 @@
 // One search box finds the order behind any number: order, buyer PO, customer,
 // PO, GRN, issue slip, cut batch, garment number or piece label.
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { trackerApi } from '../api/trackerApi';
 import { apiError } from '../api/mastersApi';
@@ -19,7 +19,8 @@ export default function OrderTrackerPage() {
     const navigate = useNavigate();
     const [rows, setRows] = useState(null);
     const [rag, setRag] = useState('');
-    const [mine, setMine] = useState(false);
+    const [params] = useSearchParams();
+    const [mine, setMine] = useState(params.get('mine') === '1');   // My work → "all in the order tracker"
     const [filter, setFilter] = useState('');
     const [q, setQ] = useState('');
     const [hits, setHits] = useState(null);
@@ -81,7 +82,7 @@ export default function OrderTrackerPage() {
                                 {PHASES.map(p => <th key={p.key} className="px-2 py-2 text-center">{p.label}</th>)}</tr>
                         </thead>
                         <tbody>{rows.length === 0 ? <tr><td colSpan={11} className="px-3 py-6 text-center text-slate-400">{mine ? 'Nothing waiting for you.' : 'No approved orders.'}</td></tr> : rows.map(o => (
-                            <tr key={o.order_id} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => navigate(`/v3/tracker/orders/${o.order_id}`)}>
+                            <tr key={o.order_id} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => navigate(`/v3/orders/${o.order_id}`)}>
                                 <td className="px-3 py-2"><span className="inline-flex items-center gap-2"><Dot rag={o.rag} title={`Overall: ${o.rag.toLowerCase()}`} /><b>{o.order_no}</b></span>
                                     <span className="block text-xs text-slate-500">{o.customer_name}{o.buyer_po_no ? ` · PO ${o.buyer_po_no}` : ''} · {o.styles}</span></td>
                                 <td className={`px-3 py-2 whitespace-nowrap ${o.days_to_ship != null && o.days_to_ship < 0 ? 'text-rose-700 font-bold' : ''}`}>{fmtDate(o.ship_date)}<span className="block text-xs text-slate-500">{daysText(o.days_to_ship)}</span></td>
