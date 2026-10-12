@@ -5,7 +5,7 @@
 // needs a reason (it becomes a revision); lines are cancelled, not deleted.
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Trash2, AlertTriangle, XCircle, RefreshCw } from 'lucide-react';
+import { Trash2, AlertTriangle, XCircle, RefreshCw, ClipboardList, FileDown } from 'lucide-react';
 import { inputCls, PrimaryButton, SecondaryButton, ErrorBox } from '../components/ui';
 import { apiError } from '../api/mastersApi';
 import { fmtDate } from './SalesOrderStatusBadge';
@@ -14,7 +14,7 @@ const keyOf = (cid, sid) => `${cid}:${sid}`;
 const toCells = (line) => Object.fromEntries(line.qty.map(x => [keyOf(x.garment_colour_id, x.size_id), String(x.qty)]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
 
-export default function OrderLineCard({ line, editable, canDelete, needsReason, onSave, onDelete, onCancelLine, onMoveBom }) {
+export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDocuments, editable, canDelete, needsReason, onSave, onDelete, onCancelLine, onMoveBom }) {
     const [cells, setCells] = useState(() => toCells(line));
     const [shipDate, setShipDate] = useState(line.ship_date || '');
     const [notes, setNotes] = useState(line.notes || '');
@@ -78,6 +78,13 @@ export default function OrderLineCard({ line, editable, canDelete, needsReason, 
                     </p>
                     <p className="text-xs text-slate-500">
                         BOM <Link to={`/v3/boms/${line.bom_id}`} className="font-semibold text-indigo-700 hover:underline">v{line.bom_version}</Link>
+                        <Link to={`/v3/boms/${line.bom_id}/trim-card${orderId ? `?order=${orderId}` : ''}`} className="ml-3 inline-flex items-center gap-1 font-semibold text-indigo-700 hover:underline">
+                            <ClipboardList size={12} /> Trim card
+                        </Link>
+                        {onPpm && line.status === 'ACTIVE' && <>
+                            <button type="button" onClick={onPpm} className="ml-3 inline-flex items-center gap-1 font-semibold text-indigo-700 hover:underline"><FileDown size={12} /> PPM template</button>
+                            <button type="button" onClick={onDocuments} className={`ml-2 font-semibold hover:underline ${ppmCount ? 'text-emerald-700' : 'text-amber-700'}`}>{ppmCount ? 'PPM uploaded' : 'PPM not uploaded'}</button>
+                        </>}
                         {cancelled && <span className="ml-2 font-bold text-rose-700">Cancelled: {line.cancelled_reason}</span>}
                     </p>
                 </div>

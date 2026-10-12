@@ -17,6 +17,18 @@ export const salesOrdersApi = {
     cancelLine: (id, lineId, reason) => api.post(`/v3/sales-orders/${id}/lines/${lineId}/cancel`, { reason }),
     moveLineBom: (id, lineId, reason) => api.post(`/v3/sales-orders/${id}/lines/${lineId}/move-bom`, { reason }),
 
+    // Documents (signed PPM sheets, other order documents)
+    uploadDocument: (id, { file, doc_type, line_id, display_name, notes }) => {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('doc_type', doc_type || 'PPM');
+        if (line_id) fd.append('line_id', line_id);
+        if (display_name) fd.append('display_name', display_name);
+        if (notes) fd.append('notes', notes);
+        return api.post(`/v3/sales-orders/${id}/documents`, fd);
+    },
+    removeDocument: (id, docId, reason) => api.post(`/v3/sales-orders/${id}/documents/${docId}/remove`, { reason }),
+
     // Flow
     submit: (id) => api.post(`/v3/sales-orders/${id}/submit`),
     withdraw: (id) => api.post(`/v3/sales-orders/${id}/withdraw`),

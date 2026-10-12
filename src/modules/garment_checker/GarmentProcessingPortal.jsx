@@ -654,7 +654,10 @@ const AssemblyProcessingPortal = () => {
                 setNotAtStage(errData);
             } else {
                 playFeedback('error');
-                setError(errData?.message || errData?.error || 'Invalid Scan: Check Barcode Integrity.');
+                // No error text from the server: say what was scanned and what came back,
+                // so a label that encodes more than the garment number is easy to spot.
+                const answer = status ? `server answered ${status}` : 'no answer from the server';
+                setError(errData?.message || errData?.error || `Invalid scan "${cleanUid}" (${answer}). Check the barcode.`);
             }
         } finally {
             setIsLoading(false);

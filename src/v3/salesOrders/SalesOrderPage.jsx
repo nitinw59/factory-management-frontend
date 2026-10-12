@@ -13,11 +13,13 @@ import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import SalesOrderStatusBadge, { fmtDate } from './SalesOrderStatusBadge';
 import OrderLineCard from './OrderLineCard';
+import OrderDocumentsTab from './OrderDocumentsTab';
+import { exportPpmTemplate } from './ppmTemplatePdf';
 
 const EDITABLE = ['DRAFT', 'REJECTED'];
 const ACTION_LABEL = {
     CREATED: 'Created', SUBMITTED: 'Submitted', WITHDRAWN: 'Withdrawn', APPROVED: 'Approved', REJECTED: 'Rejected',
-    REVISED: 'Revised', CANCELLED: 'Cancelled', BOM_CHANGED: 'BOM changed',
+    REVISED: 'Revised', CANCELLED: 'Cancelled', BOM_CHANGED: 'BOM changed', DOCUMENT: 'Document uploaded', DOCUMENT_REMOVED: 'Document removed',
 };
 // Remount a line card when its saved data changes, so it starts from the server copy.
 const lineKey = (l) => `${l.id}:${l.bom_id}:${l.ship_date}:${l.notes}:${l.status}:${JSON.stringify(l.qty)}`;
@@ -25,7 +27,7 @@ const lineKey = (l) => `${l.id}:${l.bom_id}:${l.ship_date}:${l.notes}:${l.status
 export default function SalesOrderPage() {
     const { id } = useParams();
     const [order, setOrder] = useState(null);
-    const [perms, setPerms] = useState({ edit: false, approve: false, cancelApproved: false });
+    const [perms, setPerms] = useState({ edit: false, approve: false, cancelApproved: false, documents: false });
     const [customers, setCustomers] = useState([]);
     const [styleOptions, setStyleOptions] = useState(null);
     const [tab, setTab] = useState('lines');
@@ -110,6 +112,12 @@ export default function SalesOrderPage() {
         try { company = (await adminApi.getCompanyProfile()).data; } catch { /* letterhead is optional */ }
         exportOrderPdf(order, company);
     };
+    // PPM template for one line, with the company name when a profile exists.
+    const ppmTemplate = async (l) => {
+        let company = null;
+        try { company = (await adminApi.getCompanyProfile()).data; } catch { /* name is optional */ }
+        exportPpmTemplate(order, l, company);
+    };
     const saveLine = async (lineId, data) => setOrder((await salesOrdersApi.updateLine(id, lineId, data)).data);
     const deleteLine = async (l) => {
         if (!window.confirm(`Delete line ${l.line_no} (${l.style_code})?`)) return;
@@ -168,7 +176,7 @@ export default function SalesOrderPage() {
             </div>
 
             <div className="flex gap-1 border-b border-slate-200 mb-4">
-                {[{ key: 'lines', label: `Lines (${activeLines.length})` }, { key: 'history', label: `History (${order.history.length})` }].map(t => (
+                {[{ key: 'lines', label: `Lines (${activeLines.length})` }, { key: 'documents', label: `Documents (${(order.documents || []).length})` }, { key: 'history', label: `History (${order.history.length})` }].map(t => (
                     <button key={t.key} type="button" onClick={() => setTab(t.key)}
                         className={`px-4 py-2 text-sm font-bold border-b-2 -mb-px ${tab === t.key ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
                         {t.label}
@@ -179,7 +187,7 @@ export default function SalesOrderPage() {
             {tab === 'lines' && (
                 <div className="space-y-3">
                     {order.lines.map(l => (
-                        <OrderLineCard key={lineKey(l)} line={l} editable={editable && l.status === 'ACTIVE'} canDelete={neverApproved} needsReason={revising}
+                        <OrderLineCard key={lineKey(l)} line={l} orderId={id} onPpm={() => ppmTemplate(l)} ppmCount={(order.documents || []).filter(d => d.doc_type === 'PPM' && d.line_id === String(l.id)).length} onDocuments={() => setTab('documents')} editable={editable && l.status === 'ACTIVE'} canDelete={neverApproved} needsReason={revising}
                             onSave={(data) => saveLine(l.id, data)} onDelete={() => deleteLine(l)}
                             onCancelLine={editable && revising && l.status === 'ACTIVE' && activeLines.length > 1
                                 ? () => askReason({ title: `Cancel line ${l.line_no} (${l.style_code})`, label: 'Reason *', hint: 'The line stays on the order, marked cancelled. This is saved as a revision.', confirm: 'Cancel line', danger: true, run: (r) => salesOrdersApi.cancelLine(id, l.id, r) })
@@ -191,6 +199,10 @@ export default function SalesOrderPage() {
                     {order.lines.length === 0 && <p className="text-sm text-slate-400">No lines yet.{editable ? ' Add a style to start.' : ''}</p>}
                     {editable && <SecondaryButton onClick={openAdd}><Plus size={14} /> Add style line</SecondaryButton>}
                 </div>
+            )}
+
+            {tab === 'documents' && (
+                <OrderDocumentsTab order={order} canUpload={perms.documents} onPpmTemplate={ppmTemplate} onChanged={setOrder} askReason={askReason} />
             )}
 
             {tab === 'history' && (

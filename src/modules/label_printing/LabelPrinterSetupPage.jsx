@@ -21,8 +21,9 @@ const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm foc
 const PickOrType = ({ options, value, onChange, placeholder, mono }) => {
     const known = options.some(o => o.value === value);
     const [manual, setManual] = useState(options.length === 0 || (!!value && !known));
+    // Switch to the list once the PC's list arrives (unless something else was typed).
     useEffect(() => {
-        if (options.length > 0 && !value) setManual(false);
+        if (options.length > 0 && (!value || known)) setManual(false);
         if (options.length === 0) setManual(true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [options.length]);
@@ -260,7 +261,9 @@ const LabelPrinterSetupPage = () => {
                             <button onClick={() => setForm(null)} className="p-1.5 rounded-lg hover:bg-gray-100"><FiX /></button>
                         </div>
                         <div className="p-5 grid grid-cols-1 gap-3">
-                            <Field label="Name"><input className={inputCls} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Cutting – Citizen" /></Field>
+                            <Field label="Name" hint="What users pick when printing. Add one entry per label design, e.g. “Citizen – Washcare 30x60”.">
+                                <input className={inputCls} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Citizen – Washcare matrix" />
+                            </Field>
                             <Field label="Print agent">
                                 <select className={inputCls} value={form.agent_id} onChange={e => setForm({ ...form, agent_id: e.target.value })}>
                                     {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}

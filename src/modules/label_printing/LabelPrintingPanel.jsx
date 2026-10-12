@@ -87,6 +87,8 @@ const LabelPrintingPanelInner = ({ batchId, user }) => {
         setBusyRoll(null);
     };
     const printAllCount = (data?.rolls || []).filter(r => r.can_print).reduce((n, r) => n + r.unprinted, 0);
+    const cutGarments = (data?.rolls || []).filter(r => r.lays > 0).reduce((n, r) => n + r.garments, 0);
+    const lastPrintedAt = (data?.jobs || []).filter(j => j.status === 'PRINTED').map(j => j.finished_at).sort().pop() || null;
 
     if (error) {
         return (
@@ -122,6 +124,13 @@ const LabelPrintingPanelInner = ({ batchId, user }) => {
                                 <button onClick={printAll} disabled={busyRoll === 'all' || !printerId}
                                     className="px-3 py-1.5 text-sm font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1.5">
                                     {busyRoll === 'all' ? <FiLoader className="animate-spin" size={14} /> : <FiPrinter size={14} />} Print all {printAllCount}
+                                </button>
+                            )}
+                            {data.totals.printed > 0 && (
+                                <button onClick={() => setDialog({ kind: 'batchReprint' })} disabled={!printerId}
+                                    className="px-3 py-1.5 text-sm font-bold rounded-lg border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50 flex items-center gap-1.5"
+                                    title="Print every garment of this batch again, including those that already have a label">
+                                    <FiRotateCcw size={14} /> Reprint complete batch
                                 </button>
                             )}
                             <button onClick={() => setSingleOpen(true)} className="px-3 py-1.5 text-sm font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 flex items-center gap-1.5">
@@ -257,7 +266,7 @@ const LabelPrintingPanelInner = ({ batchId, user }) => {
                 isOpen={dialog?.kind === 'reprint'}
                 title={`Reprint roll ${formatRollId(dialog?.roll?.fabric_roll_id)}`}
                 description={`Prints all ${dialog?.roll?.garments} labels of this roll again, plus the END label.`}
-                quickReasons={['Labels damaged', 'Labels lost', 'Printer jammed mid-roll', 'Misprinted']}
+                quickReasons={['Printer did not print (jam / out of labels / offline)', 'Printer jammed mid-roll', 'Labels damaged', 'Labels lost', 'Misprinted']}
                 confirmLabel="Reprint roll"
                 onClose={() => setDialog(null)}
                 onConfirm={async (reason) => {
@@ -296,6 +305,27 @@ const LabelPrintingPanelInner = ({ batchId, user }) => {
                     load();
                 }}
             />
+            <ReasonModal
+                isOpen={dialog?.kind === 'batchReprint'}
+                title="Reprint the complete batch?"
+                quickReasons={['Printer did not print (jam / out of labels / offline)', 'Labels damaged', 'Labels lost', 'Misprinted', 'Wrong label design']}
+                confirmLabel={`Print all ${cutGarments} labels again`}
+                confirmClass="bg-amber-600 hover:bg-amber-700"
+                onClose={() => setDialog(null)}
+                onConfirm={async (reason) => {
+                    const r = await labelPrintingApi.printBatch({ batchId, printerId, reprint: true, reason });
+                    setDialog(null);
+                    const skipped = r.data.skipped.length ? ` Skipped: ${r.data.skipped.map(x => `roll ${x.fabric_roll_id} (${x.reason})`).join(', ')}.` : '';
+                    setNotice({ type: 'ok', text: `Complete batch sent again: ${r.data.labels} label(s) in ${r.data.jobs.length} roll job(s).${skipped}` });
+                    load();
+                }}
+            >
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 space-y-1">
+                    <div className="font-bold flex items-center gap-2"><FiAlertTriangle /> {data.totals.printed} of {data.totals.garments} garments already have a printed label{lastPrintedAt ? ` (last printed ${formatWhen(lastPrintedAt)})` : ''}.</div>
+                    <div>This prints <b>all {cutGarments} labels</b> of the batch again, roll by roll, each roll ending with its END label. Labels already on the floor become duplicates — collect and destroy the old ones.</div>
+                    {hasOpenJobs && <div>Jobs still waiting in the queue for this batch are replaced; a roll printing right now is skipped.</div>}
+                </div>
+            </ReasonModal>
             <SingleLabelPrintModal isOpen={singleOpen} onClose={() => { setSingleOpen(false); load(); }} />
         </section>
     );

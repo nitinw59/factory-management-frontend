@@ -7,7 +7,8 @@ export const assemblyApi = {
      * if the batch is active on the user's current production line.
      * @param {string} garmentUid - The unique QR/Barcode serial of the garment.
      */
-    getGarmentDetails: (garmentUid) => api.get(`/assembly-portal/garment/${garmentUid}`),
+    // Encoded: a scanned value with "/", "%" or "#" must still reach this route.
+    getGarmentDetails: (garmentUid) => api.get(`/assembly-portal/garment/${encodeURIComponent(garmentUid)}`),
 
     /**
      * Finalizes the assembly check. Marks the garment status and logs 

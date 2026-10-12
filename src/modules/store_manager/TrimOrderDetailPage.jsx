@@ -10,8 +10,7 @@ import {
 import { Loader2, Info } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { labelPrintingApi } from '../../api/labelPrintingApi';
-import { PrinterSelect, PrinterStatus, JobStatusChip } from '../label_printing/labelShared';
-import SingleLabelPrintModal from '../label_printing/SingleLabelPrintModal';
+import LabelPrintingPanel from '../label_printing/LabelPrintingPanel';
 import { storeManagerApi } from '../../api/storeManagerApi';
 import { trimKitsApi } from '../../api/trimKitsApi';
 import { kitStatusOf } from '../trim_kits/kitStatusConfig';
@@ -26,60 +25,15 @@ import PriorityChip from '../../shared/PriorityChip';
 const Spinner = () => <div className="flex justify-center items-center p-12"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div></div>;
 
 // --- Garment labels for the order's batch ---
-// The store prints the whole batch in one click (one print job per cut roll,
-// roll by roll, each closed by an END label) or a single lost label. Labels
-// print on the BarTender PC through the print agent; a garment counts as
-// labelled only when the printer confirms. The CSV is a backup list only.
+// The full Garment Labels panel (same as the cutting batch page): print all /
+// per roll, reprint a roll with a reason (labels lost or the printer failed after
+// BarTender accepted the job), single label, retry / cancel jobs. Labels print on
+// the BarTender PC through the print agent. The CSV is a backup list only.
 const BarcodePrintModal = ({ isOpen, onClose, batchId }) => {
-    const [data, setData] = useState(null);
     const [error, setError] = useState(null);
-    const [notice, setNotice] = useState(null);
-    const [printers, setPrinters] = useState([]);
-    const [printerId, setPrinterId] = useState('');
-    const [printing, setPrinting] = useState(false);
-    const [singleOpen, setSingleOpen] = useState(false);
     const [downloading, setDownloading] = useState(false);
 
-    const load = useCallback(async () => {
-        if (!batchId) return;
-        try {
-            const [b, p] = await Promise.all([labelPrintingApi.getBatchLabels(batchId), labelPrintingApi.getPrinters()]);
-            setData(b.data);
-            setPrinters(p.data);
-            setPrinterId(prev => prev || String((p.data.find(x => x.is_default) || p.data[0] || {}).id || ''));
-            setError(null);
-        } catch (err) {
-            setError(err.response?.data?.error || 'Could not load label status.');
-        }
-    }, [batchId]);
-
-    useEffect(() => {
-        if (!isOpen) return;
-        setData(null); setError(null); setNotice(null);
-        load();
-    }, [isOpen, load]);
-
-    // Follow the batch while anything is waiting or printing.
-    const hasOpenJobs = !!data?.rolls?.some(r => r.open_job);
-    useEffect(() => {
-        if (!isOpen || !hasOpenJobs) return undefined;
-        const t = setInterval(load, 3000);
-        return () => clearInterval(t);
-    }, [isOpen, hasOpenJobs, load]);
-
-    const printBatch = async () => {
-        setPrinting(true); setNotice(null);
-        try {
-            const r = await labelPrintingApi.printBatch({ batchId, printerId });
-            const skipped = r.data.skipped.length ? ` Skipped: ${r.data.skipped.map(x => `roll ${x.fabric_roll_id} (${x.reason})`).join(', ')}.` : '';
-            setNotice({ type: 'ok', text: `${r.data.labels} label(s) in ${r.data.jobs.length} roll job(s) sent to the printer.${skipped}` });
-            await load();
-        } catch (err) {
-            setNotice({ type: 'error', text: err.response?.data?.error || 'Could not send the labels to the printer.' });
-        } finally {
-            setPrinting(false);
-        }
-    };
+    useEffect(() => { if (isOpen) setError(null); }, [isOpen]);
 
     const handleDownloadCSV = async () => {
         setDownloading(true);
@@ -105,103 +59,32 @@ const BarcodePrintModal = ({ isOpen, onClose, batchId }) => {
 
     if (!isOpen) return null;
 
-    const printer = printers.find(p => String(p.id) === String(printerId));
-    const printableRolls = (data?.rolls || []).filter(r => r.can_print);
-    const printableLabels = printableRolls.reduce((n, r) => n + r.unprinted, 0);
-    // Rolls held back for a reason other than their own print job (not cut, MODE_2 wait).
-    const waitingRolls = (data?.rolls || []).filter(r => r.unprinted > 0 && !r.can_print && !r.open_job && r.block_reason);
-    const openRolls = (data?.rolls || []).filter(r => r.open_job);
-
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg border border-gray-200 max-h-[92vh] overflow-y-auto">
-                <div className="flex items-center justify-between p-5 border-b border-gray-100">
+            <div className="bg-gray-50 rounded-xl shadow-2xl w-full max-w-6xl border border-gray-200 max-h-[94vh] flex flex-col">
+                <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-white rounded-t-xl">
                     <div className="flex items-center gap-2">
                         <LuPrinter className="h-5 w-5 text-indigo-600" />
                         <h2 className="text-base font-bold text-gray-900">Garment Labels — Batch #{batchId}</h2>
                     </div>
-                    <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-                        <LuX className="h-4 w-4 text-gray-500" />
-                    </button>
-                </div>
-
-                <div className="p-5 space-y-4">
-                    {!batchId && <p className="text-sm text-gray-500">This order has no production batch yet.</p>}
-                    {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-100">{error}</p>}
-                    {batchId && !data && !error && <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>}
-                    {data && (
-                        <>
-                            <div className="grid grid-cols-3 gap-2 text-center">
-                                <div className="rounded-lg border bg-gray-50 p-2"><div className="text-xs text-gray-500 uppercase font-bold">Garments</div><div className="text-xl font-bold text-gray-800">{data.totals.garments}</div></div>
-                                <div className="rounded-lg border bg-emerald-50 border-emerald-200 p-2"><div className="text-xs text-emerald-700 uppercase font-bold">Printed</div><div className="text-xl font-bold text-emerald-700">{data.totals.printed}</div></div>
-                                <div className={`rounded-lg border p-2 ${data.totals.unprinted ? 'bg-amber-50 border-amber-200' : 'bg-gray-50'}`}><div className="text-xs text-amber-700 uppercase font-bold">No label</div><div className="text-xl font-bold text-amber-700">{data.totals.unprinted}</div></div>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Printer</label>
-                                <div className="flex items-center gap-3 flex-wrap">
-                                    <PrinterSelect printers={printers} value={printerId} onChange={setPrinterId} />
-                                    <PrinterStatus printer={printer} />
-                                </div>
-                            </div>
-
-                            {notice && (
-                                <p className={`text-sm px-3 py-2 rounded-lg border ${notice.type === 'ok' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-100 text-red-700'}`}>{notice.text}</p>
-                            )}
-                            {waitingRolls.length > 0 && (
-                                <p className="text-xs text-gray-500">Waiting: {waitingRolls.map(r => `roll ${r.fabric_roll_id} — ${r.block_reason.toLowerCase()}`).join('; ')}.</p>
-                            )}
-
-                            <div className="max-h-56 overflow-y-auto border rounded-lg divide-y text-sm">
-                                {data.rolls.map(r => (
-                                    <div key={r.fabric_roll_id} className="flex justify-between items-center px-3 py-1.5 gap-2">
-                                        <span className="font-mono">{r.roll_sequence}. Roll {r.fabric_roll_id}</span>
-                                        {r.open_job ? <JobStatusChip status={r.open_job.status} />
-                                            : r.garments === 0 ? <span className="text-gray-400 text-xs">not cut</span>
-                                                : <span className={r.unprinted ? 'text-amber-700' : 'text-emerald-700'}>{r.printed}/{r.garments} printed</span>}
-                                    </div>
-                                ))}
-                            </div>
-                        </>
-                    )}
-                </div>
-
-                <div className="px-5 pb-5 space-y-2">
-                    {data && (
-                        <div className="flex gap-2">
-                            <button
-                                onClick={printBatch}
-                                disabled={printing || openRolls.length > 0 || printableLabels === 0 || !printerId}
-                                className="flex-1 px-4 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {printing || openRolls.length > 0 ? <Loader2 className="h-4 w-4 animate-spin" /> : <LuPrinter className="h-4 w-4" />}
-                                {openRolls.length > 0 ? `Printing ${openRolls.length} roll(s)…`
-                                    : printableLabels > 0 ? `Print batch — ${printableLabels} label(s), ${printableRolls.length} roll(s)`
-                                        : data.totals.garments > 0 && data.totals.unprinted === 0 ? 'All labels printed' : 'Nothing to print yet'}
-                            </button>
-                            <button
-                                onClick={() => setSingleOpen(true)}
-                                className="px-4 py-2.5 text-sm font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 rounded-lg transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
-                            >
-                                <LuTag className="h-4 w-4" /> Print 1 label
-                            </button>
-                        </div>
-                    )}
-                    <div className="flex gap-2">
-                        <button onClick={onClose} className="flex-1 px-4 py-2 text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
-                            Close
-                        </button>
+                    <div className="flex items-center gap-2">
                         <button
                             onClick={handleDownloadCSV}
-                            disabled={downloading || !data}
-                            className="flex-1 px-4 py-2 text-sm font-semibold text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={downloading || !batchId}
+                            className="px-3 py-1.5 text-sm font-semibold text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg flex items-center gap-2 disabled:opacity-50"
                         >
                             {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LuDownload className="h-4 w-4" />} Garment list (CSV)
                         </button>
+                        <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                            <LuX className="h-5 w-5 text-gray-500" />
+                        </button>
                     </div>
                 </div>
+                <div className="p-4 overflow-y-auto">
+                    {error && <p className="mb-3 text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-100">{error}</p>}
+                    {batchId ? <LabelPrintingPanel batchId={batchId} /> : <p className="text-sm text-gray-500">This order has no production batch yet.</p>}
+                </div>
             </div>
-            <SingleLabelPrintModal isOpen={singleOpen} onClose={() => { setSingleOpen(false); load(); }} />
         </div>
     );
 };

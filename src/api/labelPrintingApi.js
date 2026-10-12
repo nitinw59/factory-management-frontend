@@ -14,8 +14,9 @@ export const labelPrintingApi = {
     getJob: (jobId) => api.get(`/label-printing/jobs/${jobId}`),
     printRoll: ({ batchId, rollId, printerId, reprint = false, reason }) =>
         api.post('/label-printing/jobs/roll', { batch_id: batchId, fabric_roll_id: rollId, printer_id: printerId || undefined, reprint, reason }),
-    printBatch: ({ batchId, printerId }) =>
-        api.post('/label-printing/jobs/batch', { batch_id: batchId, printer_id: printerId || undefined }),
+    // reprint = true: every garment of the batch again (reason required).
+    printBatch: ({ batchId, printerId, reprint = false, reason }) =>
+        api.post('/label-printing/jobs/batch', { batch_id: batchId, printer_id: printerId || undefined, reprint, reason }),
     printSingle: ({ garmentUid, printerId, reason }) =>
         api.post('/label-printing/jobs/single', { garment_uid: garmentUid, printer_id: printerId || undefined, reason }),
     cancelJob: (jobId, reason) => api.post(`/label-printing/jobs/${jobId}/cancel`, { reason }),

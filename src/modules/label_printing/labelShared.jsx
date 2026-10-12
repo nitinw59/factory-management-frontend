@@ -46,6 +46,10 @@ export const PrinterStatus = ({ printer }) => {
     );
 };
 
+// "C:\\LABELS\\TF_WASHCARE_matrix_30x60.btw" → "TF_WASHCARE_matrix_30x60"
+export const labelFileName = (btwPath) => String(btwPath || '').split(/[\\/]/).pop().replace(/\.btw$/i, '');
+
+// One entry per printer + label file (Admin → Label Printers), so choosing it picks the label design too.
 export const PrinterSelect = ({ printers, value, onChange, className = '' }) => (
     <select
         value={value || ''}
@@ -54,7 +58,9 @@ export const PrinterSelect = ({ printers, value, onChange, className = '' }) => 
     >
         {printers.length === 0 && <option value="">No printer set up</option>}
         {printers.map(p => (
-            <option key={p.id} value={p.id}>{p.name}{p.location ? ` · ${p.location}` : ''}{p.is_default ? ' (default)' : ''}</option>
+            <option key={p.id} value={p.id}>
+                {p.name} — {labelFileName(p.btw_path)}{p.location ? ` · ${p.location}` : ''}{p.is_default ? ' (default)' : ''}
+            </option>
         ))}
     </select>
 );

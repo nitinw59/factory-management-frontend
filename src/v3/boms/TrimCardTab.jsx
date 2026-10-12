@@ -2,7 +2,8 @@
 // resolves to and where it came from; unresolved cells are highlighted.
 // Same data gates submit / approve. Exports to PDF and Excel.
 import { useEffect, useState } from 'react';
-import { FileDown, FileSpreadsheet, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { FileDown, FileSpreadsheet, AlertTriangle, CheckCircle2, ClipboardList } from 'lucide-react';
 import { stylesApi } from '../api/stylesApi';
 import { apiError } from '../api/mastersApi';
 import { SecondaryButton, ErrorBox, Loading } from '../components/ui';
@@ -81,7 +82,8 @@ export default function TrimCardTab({ bomId, refreshKey }) {
                     </div>
                 )}
                 <div className="ml-auto flex gap-2">
-                    <SecondaryButton onClick={() => exportTrimCardPdf(card)}><FileDown size={14} /> PDF</SecondaryButton>
+                    <Link to={`/v3/boms/${bomId}/trim-card`} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"><ClipboardList size={14} /> Trim card</Link>
+                    <SecondaryButton onClick={() => exportTrimCardPdf(card)}><FileDown size={14} /> BOM PDF</SecondaryButton>
                     <SecondaryButton onClick={() => exportTrimCardExcel(card)}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                 </div>
             </div>

@@ -32,6 +32,8 @@ export const stylesApi = {
     deleteBom: (id) => api.delete(`/v3/boms/${id}`),
     trimCard: (id) => api.get(`/v3/boms/${id}/trim-card`),
     approvalPreview: (id) => api.get(`/v3/boms/${id}/approval-preview`),
+    cardSettings: (id) => api.get(`/v3/boms/${id}/card-settings`),
+    saveCardSettings: (id, settings) => api.put(`/v3/boms/${id}/card-settings`, { settings }),
 
     // BOM lines
     bomLines: (bomId) => api.get(`/v3/boms/${bomId}/lines`),
