@@ -15,7 +15,7 @@ export default function BomApprovalsPage() {
 
     return (
         <div>
-            <PageHeader title="BOM approvals" subtitle="BOMs submitted and waiting for a decision. Open one to approve or reject it." />
+            <PageHeader title="Style BOM approvals" subtitle="Style BOMs submitted and waiting for a decision. Open one to approve or reject it." />
             <ErrorBox text={error} />
             {!rows ? (!error && <Loading />) : rows.length === 0 ? (
                 <p className="text-sm text-slate-400 py-6">Nothing waiting for approval.</p>

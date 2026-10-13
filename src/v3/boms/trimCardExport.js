@@ -3,6 +3,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import { drawPdfLetterhead, sheetWithLetterhead } from '../components/letterhead';
 
 export const SOURCE_LABEL = { EXACT: 'Exact colour', TONE: 'By tone', ALL: 'All colours' };
 
@@ -24,7 +25,7 @@ export function cellLines(cell, sizeName) {
     return [...out, ...cell.problems.map(p => `! ${p}`)];
 }
 
-const fileBase = (card) => `BOM-${card.bom.style_code}-v${card.bom.version_no}`.replace(/[^\w.-]+/g, '_');
+const fileBase = (card) => `Style-BOM-${card.bom.style_code}-v${card.bom.version_no}`.replace(/[^\w.-]+/g, '_');
 
 // ── BOM PDF: plain ruled grid ───────────────────────────────────────────────
 // Every cell 1px solid black, no fills; headers bold only. Title + meta rows, then one table per
@@ -43,7 +44,7 @@ function consumptionCell(l) {
 }
 const itemText = (l, g) => (l.kind === 'trim' ? (g.article || g.label) : g.label);
 
-export function exportTrimCardPdf(card) {
+export function exportTrimCardPdf(card, lh = null) {
     const sizeName = new Map(card.sizes.map(z => [z.id, z.name]));
     const doc = new jsPDF({ orientation: 'landscape' });
     const pageW = doc.internal.pageSize.getWidth();
@@ -62,9 +63,10 @@ export function exportTrimCardPdf(card) {
         { content: `Sizes: ${card.sizes.map(z => z.name).join(', ')}\nGenerated: ${generated}` },
     ]];
     if (!card.ready) meta.push([{ content: `NOT READY: ${card.problems.length} unresolved item(s) — marked "!" below`, colSpan: 3, styles: { fontStyle: 'bold' } }]);
+    const top = lh ? drawPdfLetterhead(doc, lh, { x: margin.left, y: 5, title: 'STYLE BOM' }) : margin.top;   // company left, title right
     autoTable(doc, {
-        ...base, startY: margin.top,
-        head: [[{ content: `BOM — ${card.bom.style_code} · v${card.bom.version_no}`, colSpan: 3, styles: { halign: 'center', fontSize: 12, fontStyle: 'bold' } }]],
+        ...base, startY: top,
+        head: [[{ content: `${lh ? '' : 'STYLE BOM — '}${card.bom.style_code} · v${card.bom.version_no}`, colSpan: 3, styles: { halign: 'center', fontSize: 12, fontStyle: 'bold' } }]],
         body: meta,
         columnStyles: { 0: { cellWidth: W * 0.36 }, 1: { cellWidth: W * 0.18 }, 2: { cellWidth: W * 0.46 } },
     });
@@ -136,7 +138,7 @@ export function exportTrimCardPdf(card) {
     return doc;
 }
 
-export function exportTrimCardExcel(card) {
+export function exportTrimCardExcel(card, lh = null) {
     const sizeName = new Map(card.sizes.map(s => [s.id, s.name]));
     const wb = XLSX.utils.book_new();
     // Grid: one row per line, one column per colour (like the printed card)
@@ -144,7 +146,7 @@ export function exportTrimCardExcel(card) {
         Type: l.kind === 'fabric' ? 'Fabric' : 'Trim', Line: l.title, Detail: lineDetail(l), Consumption: consumptionText(l),
         ...Object.fromEntries(card.colours.map(c => [c.name, cellLines(l.cells[c.id], sizeName).join(' | ')])),
     }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(grid), 'BOM');
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, grid, lh, 'STYLE BOM'), 'Style BOM');
     // Flat: one row per line × colour × size group — easy to filter / pivot
     const flat = [];
     for (const l of [...card.fabric, ...card.trims]) {
@@ -159,7 +161,7 @@ export function exportTrimCardExcel(card) {
             for (const p of cell.problems) flat.push({ Type: l.kind === 'fabric' ? 'Fabric' : 'Trim', Line: l.title, Colour: c.name, Tone: c.tone_name || '', Item: `UNRESOLVED: ${p}` });
         }
     }
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flat), 'By colour');
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, flat, lh, 'STYLE BOM'), 'By colour');
     if (card.problems.length) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(card.problems.map(p => ({ Line: p.line || '', Colour: p.colour || '', Problem: p.reason }))), 'Problems');
     }

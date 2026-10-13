@@ -44,7 +44,7 @@ export default function RecutsPage() {
                                     <td className="px-3 py-2"><Link to={`/v3/cutting/batches/${r.batch_id}`} className="text-indigo-700 hover:underline">{r.batch_code}</Link></td>
                                     <td className="px-3 py-2">{r.stage}<span className="block text-xs text-slate-500">{new Date(r.created_at).toLocaleString()}{r.requested_by_name ? ` · ${r.requested_by_name}` : ''}</span></td>
                                     <td className="px-3 py-2 text-xs">{r.defect || '—'}</td>
-                                    <td className="px-3 py-2 text-xs">{r.status === 'CUT' ? <>Cut from {r.roll_no} ({r.metres} m)<span className="block">{r.replacement_uid}</span></> : r.status === 'CANCELLED' ? `Cancelled: ${r.cancelled_reason}` : 'Open'}</td>
+                                    <td className="px-3 py-2 text-xs">{r.status === 'CUT' ? <>Cut from {r.roll_no} ({r.metres} {r.uom || 'm'})<span className="block">{r.replacement_uid}</span></> : r.status === 'CANCELLED' ? `Cancelled: ${r.cancelled_reason}` : 'Open'}</td>
                                     <td className="px-3 py-2 text-right whitespace-nowrap">{perms.manage && r.status === 'OPEN' && <>
                                         <SecondaryButton onClick={() => openCut(r)}>Cut replacement</SecondaryButton> <button type="button" className="text-xs text-slate-500 hover:underline ml-2" onClick={() => { setFormError(''); setCancel({ r, reason: '' }); }}>Cancel</button></>}</td>
                                 </tr>
@@ -58,8 +58,8 @@ export default function RecutsPage() {
                     <div className="space-y-3 w-[min(460px,88vw)]">
                         {cut.rolls.length === 0 ? <p className="text-sm text-rose-700">No roll of this fabric is free at cutting for the order. Issue fabric to cutting first (Material issue).</p> : (
                             <div className="grid grid-cols-2 gap-3">
-                                <Field label="Roll"><select className={inputCls} value={cut.roll} onChange={e => setCut({ ...cut, roll: e.target.value })}>{cut.rolls.map(x => <option key={x.id} value={x.id}>{x.roll_no}{x.dye_lot ? ` (lot ${x.dye_lot})` : ''} · {x.available} m free</option>)}</select></Field>
-                                <Field label="Metres used *"><input className={inputCls} type="number" min="0" step="any" value={cut.metres} onChange={e => setCut({ ...cut, metres: e.target.value })} autoFocus /></Field>
+                                <Field label="Roll"><select className={inputCls} value={cut.roll} onChange={e => setCut({ ...cut, roll: e.target.value })}>{cut.rolls.map(x => <option key={x.id} value={x.id}>{x.roll_no}{x.dye_lot ? ` (lot ${x.dye_lot})` : ''} · {x.available} {x.uom} free</option>)}</select></Field>
+                                <Field label={`Fabric used (${cut.rolls.find(x => x.id === cut.roll)?.uom || 'm'}) *`}><input className={inputCls} type="number" min="0" step="any" value={cut.metres} onChange={e => setCut({ ...cut, metres: e.target.value })} autoFocus /></Field>
                             </div>
                         )}
                         <ErrorBox text={formError} />

@@ -159,9 +159,40 @@ export default function TrimStatusGrid({ data, approved, canAct, onAllocate, onR
                                         {it.pr_pending + it.pr_approved > 0 && <p className="text-[11px] text-sky-700">{fmt(it.pr_pending + it.pr_approved, it.uom)} on requisition</p>}
                                         {it.to_raise > 0 && <p className="text-[11px] text-rose-700">{fmt(it.to_raise, it.uom)} to raise</p>}</div>
                                 </div>
+                                {/* How the whole order's requirement is covered — the parts add up to Total. */}
+                                {(() => {
+                                    const covered = Number(it.allocated) + Number(it.issued || 0);
+                                    const parts = [
+                                        ['Allocated / issued', covered, 'bg-emerald-500', 'text-emerald-700'],
+                                        ['Free stock — allocate now', it.from_stock || 0, 'bg-amber-400', 'text-amber-800'],
+                                        [`On requisition${it.pr_pending > 0 && !it.pr_approved ? ' (waiting approval)' : it.pr_approved > 0 && !it.pr_pending ? ' (approved)' : ''}`, Number(it.pr_pending) + Number(it.pr_approved), 'bg-sky-500', 'text-sky-700'],
+                                        ['Still to raise', it.to_raise || 0, 'bg-rose-500', 'text-rose-700'],
+                                    ];
+                                    const total = Number(it.required_display) || 1;
+                                    const why = st.key === 'COVERED' ? 'Green: all of it is allocated or issued.'
+                                        : st.key === 'RAISE' ? `Red: ${fmt(it.to_raise, it.uom)} ${it.uom} is neither in stock nor on a requisition — raise a requisition.`
+                                            : st.key === 'ALLOCATE' ? `Amber: ${fmt(it.from_stock, it.uom)} ${it.uom} is free in the store for this order but not reserved yet — allocate it.${Number(it.pr_pending) + Number(it.pr_approved) > 0 ? ` The rest is on requisition.` : ''}`
+                                                : st.key === 'ON_ORDER' ? 'Blue: the rest is on a requisition / PO — allocate it when the goods arrive.'
+                                                    : 'Red: short — not covered.';
+                                    return (
+                                        <div className="mt-2">
+                                            <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-100">
+                                                {parts.filter(x => x[1] > 0).map(([l, v, bg]) => <span key={l} className={bg} style={{ width: `${Math.min(100, (v / total) * 100)}%` }} title={`${l}: ${fmt(v, it.uom)}`} />)}
+                                            </div>
+                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1 mt-2 text-xs">
+                                                {parts.map(([l, v, bg, tx]) => (
+                                                    <span key={l} className="flex items-start gap-1.5"><span className={`w-2.5 h-2.5 rounded-sm mt-0.5 shrink-0 ${bg}`} />
+                                                        <span><span className="text-slate-500">{l}</span><b className={`block tabular-nums ${v > 0 ? tx : 'text-slate-300'}`}>{v > 0 ? `${fmt(v, it.uom)} ${it.uom}` : '—'}</b></span></span>
+                                                ))}
+                                            </div>
+                                            <p className="mt-2 text-xs font-semibold text-slate-700">{why}</p>
+                                            <p className="text-[11px] text-slate-400">In the store: {fmt(it.on_hand, it.uom)} {it.uom} on hand, {fmt(it.free, it.uom)} not allocated to any order.</p>
+                                        </div>
+                                    );
+                                })()}
                                 {act && (
                                     <div className="flex flex-wrap gap-2 mt-3">
-                                        {it.shortfall > 0 && <button type="button" className="px-3 py-1.5 rounded-lg text-sm font-bold bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => { setOpen(null); onAllocate(it); }}>Allocate</button>}
+                                        {it.shortfall > 0 && <button type="button" className="px-3 py-1.5 rounded-lg text-sm font-bold bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => { setOpen(null); onAllocate(it); }}>Allocate free stock</button>}
                                         {it.allocated > 0 && <button type="button" className="px-3 py-1.5 rounded-lg text-sm font-bold border border-slate-300 text-slate-700 hover:bg-slate-50" onClick={() => { setOpen(null); onRelease(it); }}>Release</button>}
                                         {it.to_raise > 0 && <Link to={`/v3/planning/buy-list?order=${orderId}&kind=TRIM`} className="px-3 py-1.5 rounded-lg text-sm font-bold border border-amber-400 text-amber-800 hover:bg-amber-50">Raise requisition</Link>}
                                     </div>

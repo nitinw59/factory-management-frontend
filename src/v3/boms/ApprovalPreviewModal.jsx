@@ -28,7 +28,7 @@ export default function ApprovalPreviewModal({ bomId, busy, onApprove, onClose }
         && !d.lines_added.length && !d.lines_removed.length && !d.lines_changed.length && !d.item_changes.length;
 
     return (
-        <Modal title="Approve BOM — preview" onClose={onClose}>
+        <Modal title="Approve style BOM — preview" onClose={onClose}>
             <div className="space-y-4 w-[min(760px,90vw)] max-h-[75vh] overflow-y-auto pr-1">
                 {!p ? (error ? <ErrorBox text={error} /> : <Loading />) : <>
                     <p className="text-sm text-slate-600">

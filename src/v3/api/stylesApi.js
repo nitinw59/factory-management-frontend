@@ -41,4 +41,6 @@ export const stylesApi = {
     deleteFabricLine: (bomId, lineId) => api.delete(`/v3/boms/${bomId}/fabric-lines/${lineId}`),
     saveTrimLine: (bomId, lineId, data) => (lineId ? api.put(`/v3/boms/${bomId}/trim-lines/${lineId}`, data) : api.post(`/v3/boms/${bomId}/trim-lines`, data)),
     deleteTrimLine: (bomId, lineId) => api.delete(`/v3/boms/${bomId}/trim-lines/${lineId}`),
+    dtmPreview: (bomId, lineId, data) => api.post(`/v3/boms/${bomId}/trim-lines/${lineId}/dtm-preview`, data),
+    dtmApply: (bomId, lineId, data) => api.post(`/v3/boms/${bomId}/trim-lines/${lineId}/dtm`, data),
 };

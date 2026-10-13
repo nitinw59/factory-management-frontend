@@ -1,10 +1,11 @@
-// Material requirement sheet (PDF) for one sales order — fabric and trims, per line and colour,
+// Order BOM (PDF) for one sales order — the bill of material with quantities (was "material requirement sheet") — fabric and trims, per line and colour,
 // with the calculation shown (ordered → planned pieces with cut allowance, consumption, wastage).
 // Input: GET /planning/orders/:id/material-sheet. Approved order = the stored requirements with
 // allocated / issued / short; otherwise an ESTIMATE (same calculation, nothing stored).
 // A4 landscape, ruled grid, header repeated per page — like the other 3.0 printouts.
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { loadLetterhead, drawPdfLetterhead } from '../components/letterhead';
 
 const PX = 0.2646;
 const GRID = { lineWidth: PX * 1.5, lineColor: [0, 0, 0], fillColor: false, textColor: [0, 0, 0], valign: 'middle', cellPadding: { top: 1, bottom: 1, left: 1.4, right: 1.4 }, fontSize: 7.5 };
@@ -33,16 +34,13 @@ function plannedByLine(items) {
     return out;
 }
 
-// Fetch the sheet (and the company name) and download it. Throws the API error for the caller to show.
+// Fetch the sheet (and the company letterhead) and download it. Throws the API error for the caller to show.
 export async function downloadMaterialSheet(planningApi, adminApi, orderId, printedBy) {
-    const [{ data }, company] = await Promise.all([
-        planningApi.materialSheet(orderId),
-        adminApi.getCompanyProfile().then(r => r.data).catch(() => null),
-    ]);
-    return exportMaterialSheetPdf(data, { company, printedBy });
+    const [{ data }, lh] = await Promise.all([planningApi.materialSheet(orderId), loadLetterhead()]);
+    return exportMaterialSheetPdf(data, { lh, printedBy });
 }
 
-export function exportMaterialSheetPdf(d, { company = null, printedBy = null } = {}) {
+export function exportMaterialSheetPdf(d, { lh = null, company = null, printedBy = null } = {}) {
     const o = d.order;
     const est = !!d.estimate;
     const doc = new jsPDF({ orientation: 'landscape' });
@@ -52,12 +50,15 @@ export function exportMaterialSheetPdf(d, { company = null, printedBy = null } =
     const W = pageW - margin.left - margin.right;
     const base = { theme: 'plain', margin, tableWidth: W, styles: { ...GRID }, headStyles: { ...GRID, fontStyle: 'bold', halign: 'center' }, bodyStyles: { ...GRID }, rowPageBreak: 'avoid' };
 
-    // Title
-    let y = margin.top + 5;
-    doc.setFont(undefined, 'bold'); doc.setFontSize(15); doc.text('MATERIAL REQUIREMENT', margin.left, y);
-    const name = company?.trade_name || company?.legal_name;
-    if (name) { doc.setFontSize(12); doc.text(name, pageW / 2 + 20, y, { align: 'center' }); }
-    if (est) { doc.setTextColor(...RED); doc.setFontSize(13); doc.text('ESTIMATE', pageW - margin.right, y, { align: 'right' }); doc.setTextColor(0); }
+    // Company letterhead (logo + name), then the title
+    // Company left, ORDER BOM right (ESTIMATE in red before approval); plain title without a profile.
+    let y = lh ? drawPdfLetterhead(doc, lh, { x: margin.left, y: 5, title: est ? 'ORDER BOM — ESTIMATE' : 'ORDER BOM', titleColor: est ? RED : null }) - 3 : margin.top + 5;
+    if (!lh) {
+        doc.setFont(undefined, 'bold'); doc.setFontSize(15); doc.text('ORDER BOM', margin.left, y);
+        const name = company?.trade_name || company?.legal_name;
+        if (name) { doc.setFontSize(12); doc.text(name, pageW / 2 + 20, y, { align: 'center' }); }
+        if (est) { doc.setTextColor(...RED); doc.setFontSize(13); doc.text('ESTIMATE', pageW - margin.right, y, { align: 'right' }); doc.setTextColor(0); }
+    }
     doc.setFont(undefined, 'normal');
     y += 3;
 
@@ -83,7 +84,7 @@ export function exportMaterialSheetPdf(d, { company = null, printedBy = null } =
     const active = d.lines.filter(l => l.status === 'ACTIVE');
     autoTable(doc, {
         ...base, startY: y + 2,
-        head: [['Line', 'Style', 'BOM', 'Ship date', 'Ordered pcs', 'Cut allowance', 'Planned pcs']],
+        head: [['Line', 'Style', 'Style BOM', 'Ship date', 'Ordered pcs', 'Cut allowance', 'Planned pcs']],
         body: active.map(l => [l.line_no, `${l.style_code}${l.style_name && l.style_name !== l.style_code ? ` — ${l.style_name}` : ''}`, `v${l.bom_version}`, dmy(l.ship_date),
             { content: fmt(l.ordered_pieces, 'pcs'), styles: { halign: 'right' } }, { content: `${fmt(l.cut_allowance_pct ?? 0, 'm')}%`, styles: { halign: 'right' } },
             { content: fmt(planned.get(String(l.line_no)) || 0, 'pcs'), styles: { halign: 'right', fontStyle: 'bold' } }]),
@@ -161,9 +162,9 @@ export function exportMaterialSheetPdf(d, { company = null, printedBy = null } =
     for (let p = 1; p <= pages; p++) {
         doc.setPage(p); doc.setFontSize(7.5); doc.setTextColor(110);
         doc.text('Required = planned pieces × consumption per piece × (1 + wastage %); planned pieces = ordered × (1 + cut allowance %), rounded up per size.', margin.left, pageH - 5);
-        doc.text(`${o.order_no} · material requirement${est ? ' (estimate)' : ''} · page ${p} of ${pages}`, pageW - margin.right, pageH - 5, { align: 'right' });
+        doc.text(`${o.order_no} · order BOM${est ? ' (estimate)' : ''} · page ${p} of ${pages}`, pageW - margin.right, pageH - 5, { align: 'right' });
         doc.setTextColor(0);
     }
-    doc.save(`Material-${est ? 'estimate-' : ''}${o.order_no}`.replace(/[^\w.-]+/g, '-') + '.pdf');
+    doc.save(`Order-BOM-${est ? 'estimate-' : ''}${o.order_no}`.replace(/[^\w.-]+/g, '-') + '.pdf');
     return doc;
 }

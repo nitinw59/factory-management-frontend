@@ -17,6 +17,8 @@ import OrderMilestonesPanel from './OrderMilestonesPanel';
 import TrimStatusGrid from './TrimStatusGrid';
 import { exportTrimReservationPdf } from './trimReservationPdf';
 import { downloadMaterialSheet } from './materialSheetPdf';
+import { downloadOrderBomV2 } from '../boms/bomV2';
+import { loadLetterhead, sheetWithLetterhead } from '../components/letterhead';
 import { adminApi } from '../../api/adminApi';
 import { useV3Access } from '../V3Access';
 import { ReadinessChip, READY_STATUS, daysText } from './readinessShared';
@@ -27,20 +29,20 @@ const COVER = { FULL: ['covered', 'bg-emerald-50 text-emerald-700 border-emerald
 const ALLOC_ACTION = { ALLOCATE: 'Allocated', RELEASE: 'Released', AUTO_RELEASE: 'Released automatically', ISSUE: 'Issued to production', ISSUE_RETURN: 'Returned from production' };
 const CAUSE = { APPROVED: 'Approved', REVISED: 'Order revised', BOM_CHANGED: 'BOM changed', CANCELLED: 'Order cancelled', ALLOWANCE_CHANGED: 'Allowance changed', RECALCULATED: 'Recalculated' };
 
-function exportExcel(data) {
+function exportExcel(data, lh = null) {
     const wb = XLSX.utils.book_new();
     const grid = data.items.map(it => ({
         Type: it.kind === 'FABRIC' ? 'Fabric' : 'Trim', Item: it.label, 'Used as': it.usage.join(', '), Unit: it.uom,
         ...Object.fromEntries(data.colours.map(c => [c.name, it.by_colour[c.id] ? Number(it.by_colour[c.id]) : ''])),
         Required: it.required_display, Allocated: it.allocated, Issued: it.issued || 0, Shortfall: it.shortfall, 'On requisition': it.pr_pending + it.pr_approved, 'Still to raise': it.to_raise, 'Purchase qty': it.purchase_qty ?? '', 'Purchase unit': it.purchase_uom || '',
     }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(grid), 'Requirements');
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, grid, lh, 'ORDER BOM'), 'Requirements');
     const calc = [];
     for (const it of data.items) for (const r of it.rows) for (const d of r.detail) {
         calc.push({ Item: it.label, Unit: it.uom, Line: r.line_no, Style: r.style_code, 'BOM line': r.bom_line, Colour: r.colour, From: SOURCE[r.source] || '',
             Size: d.size, Ordered: d.ordered, Planned: d.planned, 'Consumption / garment': d.consumption, 'Wastage %': d.wastage_pct, Required: d.qty });
     }
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(calc), 'Calculation');
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, calc, lh, 'ORDER BOM'), 'Calculation');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.changes.map(c => ({
         When: new Date(c.created_at).toLocaleString('en-IN'), Why: CAUSE[c.cause] || c.cause, Revision: c.revision_no || '', Item: c.item_label, Unit: c.uom, From: c.old_qty, To: c.new_qty, By: c.user_name || '',
     }))), 'Changes');
@@ -107,8 +109,12 @@ export default function OrderRequirementsPage() {
                 {me.menu['sales.orders'] && <Link to={`/v3/sales-orders/${order.id}`} className="text-sm font-semibold text-indigo-700 hover:underline">Open sales order</Link>}
                 <span className="ml-auto flex gap-2">
                     <SecondaryButton onClick={() => downloadMaterialSheet(planningApi, adminApi, order.id, me?.user?.name).catch(err => setError(apiError(err, 'Failed to make the material PDF.')))}
-                        title="Fabric and trims per line and colour, with the calculation — an estimate until the order is approved"><FileDown size={14} /> Material PDF</SecondaryButton>
-                    <SecondaryButton onClick={() => exportExcel(data)} disabled={!data.items.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
+                        title="Layout v1 (to be retired): fabric and trims per line and colour, with the calculation"><FileDown size={14} /> Order BOM PDF (v1)</SecondaryButton>
+                    <SecondaryButton onClick={() => downloadOrderBomV2(planningApi, order.id, 'pdf').catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.')))}
+                        title="Layout v2: the factory's order BOM layout"><FileDown size={14} /> Order BOM v2 PDF</SecondaryButton>
+                    <SecondaryButton onClick={() => downloadOrderBomV2(planningApi, order.id, 'xlsx').catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.')))}
+                        title="Layout v2 as Excel"><FileSpreadsheet size={14} /> v2 Excel</SecondaryButton>
+                    <SecondaryButton onClick={async () => exportExcel(data, await loadLetterhead())} disabled={!data.items.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                     <SecondaryButton onClick={() => exportTrimReservationPdf(data, me?.user?.name)} disabled={!data.items.some(i => i.kind === 'TRIM')} title="Trims grouped by type and item, quantities merged — for the store to reserve"><FileDown size={14} /> Trim reservation PDF</SecondaryButton>
                     {perms.settings && approved && <SecondaryButton onClick={recalc} disabled={busy}><RefreshCw size={14} /> Recalculate</SecondaryButton>}
                 </span>
@@ -153,7 +159,7 @@ export default function OrderRequirementsPage() {
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto my-4">
                 <table className="w-full text-sm min-w-[640px]">
                     <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
-                        <tr><th className="px-4 py-2">Line</th><th className="px-4 py-2">Style</th><th className="px-4 py-2">BOM</th><th className="px-4 py-2">Ship</th><th className="px-4 py-2 text-right">Ordered</th><th className="px-4 py-2 text-right">Cut allowance</th><th className="px-4 py-2 w-10" /></tr>
+                        <tr><th className="px-4 py-2">Line</th><th className="px-4 py-2">Style</th><th className="px-4 py-2">Style BOM</th><th className="px-4 py-2">Ship</th><th className="px-4 py-2 text-right">Ordered</th><th className="px-4 py-2 text-right">Cut allowance</th><th className="px-4 py-2 w-10" /></tr>
                     </thead>
                     <tbody>
                         {data.lines.map(l => (

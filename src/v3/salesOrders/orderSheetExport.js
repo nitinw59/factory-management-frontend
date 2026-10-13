@@ -70,7 +70,7 @@ export function exportOrderPdf(order, company) {
     // Summary of lines
     autoTable(doc, {
         startY: y,
-        head: [['Line', 'Style', 'BOM', 'Ship date', 'Pieces']],
+        head: [['Line', 'Style', 'Style BOM', 'Ship date', 'Pieces']],
         body: active.map(l => [l.line_no, `${l.style_code} — ${l.style_name}`, `v${l.bom_version}`, fmtDate(l.ship_date), fmt(l.total_qty)]),
         foot: [['', 'Total', '', '', fmt(order.total_qty)]],
         styles: { fontSize: 8.5 }, headStyles: { fillColor: [79, 70, 229] }, footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42] },
@@ -136,7 +136,7 @@ export function exportOrderExcel(order) {
         ['Buyer PO no.', order.buyer_po_no || ''], ['Order date', order.order_date], ['Total pieces', order.total_qty],
         ['Created by', order.created_by_name || ''], ['Approved', order.approved_at ? new Date(order.approved_at).toLocaleString('en-IN') : ''],
         ['Notes', order.notes || ''], [],
-        ['Line', 'Style', 'Style name', 'BOM version', 'Ship date', 'Pieces', 'Status', 'Notes / reason'],
+        ['Line', 'Style', 'Style name', 'Style BOM version', 'Ship date', 'Pieces', 'Status', 'Notes / reason'],
         ...order.lines.map(l => [l.line_no, l.style_code, l.style_name, `v${l.bom_version}`, l.ship_date || '', l.total_qty, l.status, l.status === 'CANCELLED' ? l.cancelled_reason : (l.notes || '')]),
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(head), 'Order');

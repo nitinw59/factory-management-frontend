@@ -21,7 +21,7 @@ export default function PlanningOrdersPage() {
 
     return (
         <div>
-            <PageHeader title="Order materials" subtitle="Approved sales orders and the exact fabric and trim items they need. Recalculated automatically when an order changes."
+            <PageHeader title="Order BOMs" subtitle="The bill of material for each approved order: the exact fabric and trim quantities (order pieces × style BOM consumption). Recalculated automatically when an order changes."
                 actions={<SearchInput value={search} onChange={setSearch} placeholder="Order no., PO, customer, style" />} />
             <ErrorBox text={error} />
             {!rows ? <Loading /> : (

@@ -10,7 +10,11 @@ export const CUT_STATUS = {
     CUT:       { label: 'Cut — to numbering', cls: 'bg-emerald-50 text-emerald-700 border-emerald-300' },
     CANCELLED: { label: 'Cancelled', cls: 'bg-slate-50 text-slate-400 border-slate-300' },
 };
-export const IN_TO_M = 0.0254;
+// Layer length is in inches; a roll counts in its fabric's unit (m or yd; kg has no lay length).
+export const LEN_PER_IN = { m: 0.0254, yd: 1 / 36 };
+export const IN_TO_M = LEN_PER_IN.m;
+export const perLay = (inches, uom) => (LEN_PER_IN[uom] && Number(inches) > 0 ? Number(inches) * LEN_PER_IN[uom] : null);
+export const layerText = (inches) => `${fmt(inches * LEN_PER_IN.m, 2)} m = ${fmt(inches * LEN_PER_IN.yd, 2)} yd`;
 export const fmt = (v, d = 3) => Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: d });
 
 export function useCuttingPermissions() {
@@ -58,10 +62,10 @@ export function exportCutSheet(b) {
     const doc = new jsPDF();
     doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.text(`CUT SHEET  ${b.batch_code}`, 14, 16); doc.setFont(undefined, 'normal'); doc.setFontSize(9);
     doc.text(`Order ${b.line.order_no} line ${b.line.line_no} · ${b.line.customer_name} · style ${b.line.style_code} ${b.line.style_name}`, 14, 23);
-    doc.text(`Numbering ${b.numbering_mode === 'MODE_2' ? 'continuous across rolls (MODE 2)' : 'per roll (MODE 1)'} · layer ${b.layer_length_in} in (${fmt(b.layer_length_in * IN_TO_M, 2)} m) · ratio ${b.ratios.map(r => `${r.size}:${r.ratio}`).join('  ')}`, 14, 28);
+    doc.text(`Numbering ${b.numbering_mode === 'MODE_2' ? 'continuous across rolls (MODE 2)' : 'per roll (MODE 1)'} · layer ${b.layer_length_in} in (${layerText(b.layer_length_in)}) · ratio ${b.ratios.map(r => `${r.size}:${r.ratio}`).join('  ')}`, 14, 28);
     autoTable(doc, {
-        startY: 33, head: [['#', 'Roll', 'Lot', 'Fabric', 'Colour', 'Parts', 'Metres', 'Lays', 'End bit', 'Pieces']],
-        body: b.rolls.map(r => [r.roll_sequence, r.roll_no, r.dye_lot || '', r.fabric_label, r.colour, r.parts.map(p => p.part_name).join(', '), fmt(r.metres), r.lays ?? '', r.end_bit_m ? fmt(r.end_bit_m) : '', r.pieces || '']),
+        startY: 33, head: [['#', 'Roll', 'Lot', 'Fabric', 'Colour', 'Parts', 'Taken', 'Lays', 'End bit', 'Pieces']],
+        body: b.rolls.map(r => [r.roll_sequence, r.roll_no, r.dye_lot || '', r.fabric_label, r.colour, r.parts.map(p => p.part_name).join(', '), `${fmt(r.metres)} ${r.uom || 'm'}`, r.lays ?? '', r.end_bit_m ? `${fmt(r.end_bit_m)} ${r.uom || 'm'}` : '', r.pieces || '']),
         styles: { fontSize: 7.5 }, headStyles: { fillColor: [79, 70, 229] },
     });
     autoTable(doc, {

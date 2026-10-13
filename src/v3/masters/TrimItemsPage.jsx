@@ -2,13 +2,16 @@
 // usage unit, purchase unit and conversion, plus on-hand stock, the movement
 // ledger and stock adjustments.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, Pencil, History, Copy } from 'lucide-react';
+import { DtmChip } from '../boms/dtmShared';
 import Modal from '../../shared/Modal';
 import { mastersApi, apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, ActiveBadge, Loading, fmtQty, useMastersPermissions } from '../components/ui';
 
 const PURCHASE_UNITS = ['pcs', 'cone', 'gross', 'box', 'roll', 'packet', 'dozen'];
 const UOM_LABEL = { pcs: 'pcs', m: 'm' };
+const DTM_FILTERS = [['', 'All items'], ['dtm', 'DTM items only'], ['plain', 'Without DTM items']];
 
 const conversionText = (it) => (it.purchase_uom === it.usage_uom && Number(it.usage_per_purchase_uom) === 1
     ? `bought in ${it.usage_uom}`
@@ -25,6 +28,8 @@ export default function TrimItemsPage() {
     const [types, setTypes] = useState([]);
     const [search, setSearch] = useState('');
     const [typeFilter, setTypeFilter] = useState('');
+    const [params, setParams] = useSearchParams();
+    const dtmFilter = params.get('dtm') || '';
     const [error, setError] = useState('');
     const [editing, setEditing] = useState(null);
     const [saving, setSaving] = useState(false);
@@ -42,8 +47,9 @@ export default function TrimItemsPage() {
         const q = search.trim().toLowerCase();
         return (items || []).filter(it =>
             (!typeFilter || String(it.trim_type_id) === typeFilter)
-            && (!q || `${it.brand} ${it.code} ${it.description || ''}`.toLowerCase().includes(q)));
-    }, [items, search, typeFilter]);
+            && (!dtmFilter || (dtmFilter === 'dtm') === Boolean(it.dtm_base_item_id))
+            && (!q || `${it.brand} ${it.code} ${it.description || ''} ${it.dtm_reference || ''}`.toLowerCase().includes(q)));
+    }, [items, search, typeFilter, dtmFilter]);
 
     const editingType = editing ? types.find(t => String(t.id) === String(editing.trim_type_id)) : null;
 
@@ -87,7 +93,10 @@ export default function TrimItemsPage() {
                         <option value="">All types</option>
                         {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                     </select>
-                    <SearchInput value={search} onChange={setSearch} placeholder="Search brand, code, description" />
+                    <select className={`${inputCls} w-44`} value={dtmFilter} onChange={e => setParams(e.target.value ? { dtm: e.target.value } : {})} aria-label="Filter DTM items">
+                        {DTM_FILTERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                    <SearchInput value={search} onChange={setSearch} placeholder="Search brand, code, description, DTM reference" />
                     {perms.trims && <PrimaryButton onClick={startNew} disabled={types.length === 0}><Plus size={15} /> Add item</PrimaryButton>}
                 </>}
             />
@@ -109,6 +118,7 @@ export default function TrimItemsPage() {
                                     <td className="px-4 py-2.5">
                                         <span className="font-semibold text-slate-800">{it.brand} · {it.code}</span>
                                         {it.description && <span className="block text-xs text-slate-500">{it.description}</span>}
+                                        {it.dtm_base_item_id && <span className="block mt-1 text-xs text-slate-600"><DtmChip /> dyed to match <b>{it.dtm_reference}</b> <span className="text-slate-500">· base {it.dtm_base_label}</span></span>}
                                     </td>
                                     <td className="px-4 py-2.5 text-slate-600">{it.trim_type_name}</td>
                                     <td className="px-4 py-2.5 text-xs text-slate-600">

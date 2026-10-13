@@ -2,7 +2,7 @@
 // archive / new version / delete draft) and Colours / Lines / History tabs.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Send, Undo2, CheckCircle2, XCircle, Archive, Copy, Trash2 } from 'lucide-react';
+import { ArrowLeft, Send, Undo2, CheckCircle2, XCircle, Archive, Copy, Trash2, Plus } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { stylesApi } from '../api/stylesApi';
 import { mastersApi, apiError } from '../api/mastersApi';
@@ -13,7 +13,7 @@ import TrimCardTab from './TrimCardTab';
 import ApprovalPreviewModal from './ApprovalPreviewModal';
 
 const EDITABLE = ['DRAFT', 'REJECTED'];
-const TABS = [{ key: 'colours', label: 'Colours' }, { key: 'lines', label: 'Lines' }, { key: 'card', label: 'View BOM' }, { key: 'history', label: 'History' }];
+const TABS = [{ key: 'colours', label: 'Colours' }, { key: 'lines', label: 'Lines' }, { key: 'card', label: 'View style BOM' }, { key: 'history', label: 'History' }];
 
 export default function BomPage() {
     const { id } = useParams();
@@ -49,10 +49,11 @@ export default function BomPage() {
     const coloursDirty = bom && JSON.stringify([...picked.entries()].sort()) !== JSON.stringify(bom.colours.map(c => [String(c.garment_colour_id), c.override_tone_id ? String(c.override_tone_id) : '']).sort());
     const notesDirty = bom && notes !== (bom.notes || '');
 
-    const shownColours = useMemo(() => {
+    // The BOM's own colours (also when inactive since), in name order; the rest only through the search.
+    const bomColourRows = useMemo(() => allColours.filter(c => picked.has(String(c.id))).sort((x, y) => x.name.localeCompare(y.name)), [allColours, picked]);
+    const addableColours = useMemo(() => {
         const q = search.trim().toLowerCase();
-        // active colours, plus any picked colour that has since gone inactive
-        return allColours.filter(c => (c.is_active || picked.has(String(c.id))) && (!q || c.name.toLowerCase().includes(q)));
+        return q ? allColours.filter(c => c.is_active && !picked.has(String(c.id)) && c.name.toLowerCase().includes(q)) : [];
     }, [allColours, picked, search]);
 
     const run = async (fn, after) => {
@@ -114,35 +115,52 @@ export default function BomPage() {
             <div className="bg-white border border-slate-200 rounded-xl p-4">
                 {tab === 'colours' && (
                     <div>
-                        <div className="flex flex-wrap items-center gap-2 mb-3">
-                            <p className="text-sm text-slate-500 flex-1 min-w-[240px]">Garment colours this BOM is for. Optionally override a colour's tone for this style only (e.g. grey counts as Dark).</p>
-                            <SearchInput value={search} onChange={setSearch} placeholder="Search colours" />
-                        </div>
-                        <div className="divide-y divide-slate-100 max-h-[55vh] overflow-y-auto border border-slate-100 rounded-lg">
-                            {shownColours.length === 0 && <p className="p-4 text-sm text-slate-400">No garment colours. Add them under Masters → Garment colours.</p>}
-                            {shownColours.map(c => {
+                        <p className="text-sm text-slate-500 mb-3">Garment colours this BOM is for{editable ? ' — add only the colours this style is made in' : ''}. Optionally override a colour's tone for this style only (e.g. grey counts as Dark).</p>
+                        {/* Only the BOM's own colours are listed; the factory's full colour list is searched to add one. */}
+                        <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg">
+                            {bomColourRows.length === 0 && <p className="p-4 text-sm text-slate-400">No colours on this BOM yet.{editable ? ' Add them below.' : ''}</p>}
+                            {bomColourRows.map(c => {
                                 const cid = String(c.id);
-                                const on = picked.has(cid);
                                 return (
-                                    <div key={c.id} className={`flex flex-wrap items-center gap-3 px-3 py-2 ${on ? 'bg-indigo-50/40' : ''}`}>
-                                        <label className="flex items-center gap-2 flex-1 min-w-[180px] text-sm font-semibold text-slate-800">
-                                            <input type="checkbox" disabled={!editable} checked={on}
-                                                onChange={e => setPicked(m => { const n = new Map(m); if (e.target.checked) n.set(cid, ''); else n.delete(cid); return n; })} />
+                                    <div key={cid} className="flex flex-wrap items-center gap-3 px-3 py-2">
+                                        <span className="flex-1 min-w-[180px] text-sm font-semibold text-slate-800">
                                             {c.name}
-                                            {!c.is_active && <span className="text-[11px] font-bold text-rose-600">inactive</span>}
-                                        </label>
+                                            {!c.is_active && <span className="ml-2 text-[11px] font-bold text-rose-600">inactive</span>}
+                                        </span>
                                         <span className="text-xs text-slate-500 w-32">tone: {c.tone_name || <span className="font-bold text-amber-600">not set</span>}</span>
-                                        {on && (
-                                            <select className={`${inputCls} w-48`} disabled={!editable} value={picked.get(cid)}
-                                                onChange={e => setPicked(m => new Map(m).set(cid, e.target.value))} aria-label={`Tone override for ${c.name}`}>
-                                                <option value="">No override</option>
-                                                {tones.map(t => <option key={t.id} value={t.id}>Override: {t.name}</option>)}
-                                            </select>
+                                        <select className={`${inputCls} w-48`} disabled={!editable} value={picked.get(cid)}
+                                            onChange={e => setPicked(m => new Map(m).set(cid, e.target.value))} aria-label={`Tone override for ${c.name}`}>
+                                            <option value="">No override</option>
+                                            {tones.map(t => <option key={t.id} value={t.id}>Override: {t.name}</option>)}
+                                        </select>
+                                        {editable && (
+                                            <button type="button" onClick={() => setPicked(m => { const n = new Map(m); n.delete(cid); return n; })}
+                                                className="p-1.5 rounded text-rose-500 hover:bg-rose-50" aria-label={`Remove ${c.name} from this BOM`} title="Remove from this BOM"><XCircle size={15} /></button>
                                         )}
                                     </div>
                                 );
                             })}
                         </div>
+                        {editable && (
+                            <div className="mt-3 border border-dashed border-slate-300 rounded-lg p-3">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-xs font-bold text-slate-600">Add a colour</span>
+                                    <div className="flex-1 min-w-[220px]"><SearchInput value={search} onChange={setSearch} placeholder="Type a colour name to find it…" /></div>
+                                </div>
+                                {search.trim() && (
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                        {addableColours.length === 0 ? <span className="text-xs text-slate-400">No colour matches "{search.trim()}" — add it under Setup → Garment colours.</span>
+                                            : addableColours.slice(0, 30).map(c => (
+                                                <button key={c.id} type="button" onClick={() => { setPicked(m => new Map(m).set(String(c.id), '')); setSearch(''); }}
+                                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-xs font-semibold text-slate-700">
+                                                    <Plus size={12} /> {c.name}{c.tone_name ? <span className="font-normal text-slate-400"> · {c.tone_name}</span> : null}
+                                                </button>
+                                            ))}
+                                        {addableColours.length > 30 && <span className="text-xs text-slate-400 self-center">… {addableColours.length - 30} more, keep typing</span>}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                         {editable && (
                             <div className="flex items-center gap-2 pt-3">
                                 <PrimaryButton onClick={saveColours} busy={busy} disabled={busy || !coloursDirty}>Save colours</PrimaryButton>
@@ -185,7 +203,7 @@ export default function BomPage() {
             )}
 
             {rejecting !== null && (
-                <Modal title="Reject BOM" onClose={() => setRejecting(null)}>
+                <Modal title="Reject style BOM" onClose={() => setRejecting(null)}>
                     <div className="space-y-3 w-[min(460px,85vw)]">
                         <Field label="Reason *" hint="The merchandiser sees this and fixes the BOM.">
                             <textarea className={`${inputCls} min-h-[90px]`} value={rejecting} onChange={e => setRejecting(e.target.value)} autoFocus />

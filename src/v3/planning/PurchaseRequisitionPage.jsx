@@ -18,7 +18,8 @@ import StoreItemPicker from '../store/StoreItemPicker';
 
 const EDITABLE = ['DRAFT', 'REJECTED'];
 const fmt = (v, uom) => Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 3 });
-const ACTION = { CREATED: 'Created', EDITED: 'Edited', SUBMITTED: 'Submitted', WITHDRAWN: 'Withdrawn', APPROVED: 'Approved', REJECTED: 'Rejected', CANCELLED: 'Cancelled' };
+const ACTION = { CREATED: 'Created', EDITED: 'Edited', SUBMITTED: 'Submitted', WITHDRAWN: 'Withdrawn', APPROVED: 'Approved', REJECTED: 'Rejected', CANCELLED: 'Cancelled', LINE_CLOSED: 'Line closed', NOTED: 'Marked handled' };
+const LINE_STATUS = { REJECTED: ['Rejected', 'bg-rose-100 text-rose-800 border-rose-200'], CLOSED: ['Closed', 'bg-slate-200 text-slate-700 border-slate-300'] };
 
 export default function PurchaseRequisitionPage() {
     const { id } = useParams();
@@ -31,6 +32,7 @@ export default function PurchaseRequisitionPage() {
     const [askText, setAskText] = useState('');
     const [busy, setBusy] = useState(false);
     const [formError, setFormError] = useState('');
+    const [deciding, setDeciding] = useState(null);   // approval with a decision per line: { [lineId]: { decision, qty, reason } }
 
     const load = useCallback(() => planningApi.pr(id).then(res => setPr(res.data)).catch(err => setError(apiError(err, 'Failed to load the requisition.'))), [id]);
     useEffect(() => {
@@ -82,7 +84,7 @@ export default function PurchaseRequisitionPage() {
                 {editable && <PrimaryButton onClick={() => act(() => planningApi.prAction(id, 'submit'))} busy={busy} disabled={busy || !pr.lines.length}><Send size={14} /> Submit for approval</PrimaryButton>}
                 {canEdit && pr.status === 'SUBMITTED' && <SecondaryButton onClick={() => act(() => planningApi.prAction(id, 'withdraw'))} disabled={busy}><Undo2 size={14} /> Withdraw</SecondaryButton>}
                 {perms.prApprove && pr.status === 'SUBMITTED' && <>
-                    <PrimaryButton onClick={() => { if (window.confirm(`Approve ${pr.pr_no}? Purchasing can then order it.`)) act(() => planningApi.prAction(id, 'approve')); }} busy={busy} disabled={busy}><CheckCircle2 size={14} /> Approve</PrimaryButton>
+                    <PrimaryButton onClick={() => { setFormError(''); setDeciding(Object.fromEntries(pr.lines.map(l => [l.id, { decision: 'APPROVE', qty: String(l.purchase_qty), reason: '' }]))); }} busy={busy} disabled={busy}><CheckCircle2 size={14} /> Approve…</PrimaryButton>
                     <SecondaryButton onClick={() => askReason({ title: `Reject ${pr.pr_no}`, confirm: 'Reject', run: (r) => planningApi.prAction(id, 'reject', r) })} disabled={busy}><XCircle size={14} /> Reject</SecondaryButton>
                 </>}
                 {editable && store && <SecondaryButton onClick={() => { setFormError(''); setAdding({ item: null, qty: '1' }); }}><Plus size={14} /> Add item</SecondaryButton>}
@@ -94,6 +96,16 @@ export default function PurchaseRequisitionPage() {
                 </span>
             </div>
             <ErrorBox text={error} />
+            {pr.sent_back_lines > 0 && (
+                <div className="mb-3 text-sm bg-rose-50 border border-rose-200 text-rose-900 rounded-lg px-3 py-2">
+                    <b>{pr.sent_back_lines} line(s) sent back by purchasing</b> — they no longer count as on order; their need is back {store ? 'on the reorder list' : 'on the buy list'}.
+                    <ul className="list-disc ml-5 mt-1 text-xs">{pr.lines.filter(l => l.line_status !== 'OPEN' && !l.noted_at).map(l => <li key={l.id}>Line {l.line_no} {l.label}: <b>{l.line_status.toLowerCase()}</b> — {l.decision_reason}</li>)}</ul>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                        <Link to={store ? '/v3/store/reorder' : '/v3/planning/buy-list'} className="px-3 py-1 rounded-lg text-xs font-bold bg-white border border-rose-300 text-rose-800 hover:bg-rose-100">{store ? 'Open the reorder list' : 'Open the buy list'} to raise again</Link>
+                        {canEdit && <button type="button" onClick={() => act(() => planningApi.notedPr(id))} className="px-3 py-1 rounded-lg text-xs font-bold bg-rose-700 text-white hover:bg-rose-800" disabled={busy}>Mark handled</button>}
+                    </div>
+                </div>
+            )}
             {pr.notes && <p className="text-sm text-slate-600 mb-3 whitespace-pre-line"><b>Notes:</b> {pr.notes}</p>}
 
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
@@ -108,8 +120,14 @@ export default function PurchaseRequisitionPage() {
                             <Fragment key={l.id}>
                                 <tr className="border-t border-slate-100 align-top">
                                     <td className="px-3 py-2.5">{l.line_no}</td>
-                                    <td className="px-3 py-2.5"><Link to={store ? `/v3/store/items/${l.item_id}` : `/v3/planning/position/${l.kind}/${l.item_id}`} className="font-semibold text-indigo-700 hover:underline">{l.label}</Link>
-                                        <span className="block text-xs text-slate-500">{l.type_name}{l.notes ? ` · ${l.notes}` : ''}</span></td>
+                                    <td className={`px-3 py-2.5 ${l.line_status !== 'OPEN' ? 'opacity-70' : ''}`}><Link to={store ? `/v3/store/items/${l.item_id}` : `/v3/planning/position/${l.kind}/${l.item_id}`} className={`font-semibold text-indigo-700 hover:underline ${l.line_status !== 'OPEN' ? 'line-through' : ''}`}>{l.label}</Link>
+                                        <span className="block text-xs text-slate-500">{l.type_name}{l.notes ? ` · ${l.notes}` : ''}</span>
+                                        {LINE_STATUS[l.line_status] && <span className="block mt-1 text-xs"><span className={`text-[10px] font-black px-1.5 py-0.5 rounded border ${LINE_STATUS[l.line_status][1]}`}>{LINE_STATUS[l.line_status][0]}</span> <span className="text-slate-600">{l.decision_reason}</span>{l.decided_by_name ? <span className="text-slate-400"> · {l.decided_by_name}</span> : null}{l.noted_at ? <span className="text-slate-400"> · handled</span> : null}</span>}
+                                        {l.requested_qty != null && <span className="block mt-1 text-xs text-amber-800"><b>Reduced</b> from {fmt(l.requested_qty, 'pcs')} {l.purchase_uom} — {l.decision_reason}{l.decided_by_name ? <span className="text-slate-400"> · {l.decided_by_name}</span> : null}</span>}
+                                        {perms.prApprove && pr.status === 'APPROVED' && l.line_status === 'OPEN' && !(l.on_po > 0) && !(l.purchase_orders || []).length && (
+                                            <button type="button" className="mt-1 text-[11px] font-bold text-rose-700 hover:underline"
+                                                onClick={() => askReason({ title: `Close line ${l.line_no} — ${l.label}`, confirm: 'Close line', run: (r) => planningApi.closePrLine(id, l.id, r) })}>Close line</button>
+                                        )}</td>
                                     <td className="px-3 py-2.5 text-right tabular-nums font-black whitespace-nowrap">{fmt(l.purchase_qty, 'pcs')} <span className="text-xs font-normal text-slate-500">{l.purchase_uom}</span></td>
                                     <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">{fmt(l.usage_qty, l.uom)} <span className="text-xs text-slate-500">{l.uom}</span></td>
                                     {!store && <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">{fmt(l.covers, l.uom)}
@@ -152,6 +170,57 @@ export default function PurchaseRequisitionPage() {
                     ))}
                 </div>
             </div>
+
+            {deciding && (
+                <Modal title={`Approve ${pr.pr_no} — decide each line`} onClose={() => setDeciding(null)}>
+                    <div className="space-y-3 w-[min(820px,94vw)]">
+                        <p className="text-sm text-slate-600">Approve a line as asked, approve a lower quantity, or reject it — with the reason. Rejected lines (and the cut quantity) go back {store ? 'on the reorder list' : 'on the buy list'}, and {pr.created_by_name || 'the person who raised it'} sees them on My work.</p>
+                        <div className="max-h-[55vh] overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+                            {pr.lines.map(l => {
+                                const d = deciding[l.id];
+                                const set = (patch) => setDeciding({ ...deciding, [l.id]: { ...d, ...patch } });
+                                return (
+                                    <div key={l.id} className={`p-3 ${d.decision === 'REJECT' ? 'bg-rose-50/60' : d.decision === 'REDUCE' ? 'bg-amber-50/60' : ''}`}>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <b className="text-slate-800">{l.line_no}. {l.label}</b>
+                                            <span className="text-sm text-slate-600 tabular-nums">{fmt(l.purchase_qty, 'pcs')} {l.purchase_uom} (= {fmt(l.usage_qty, l.uom)} {l.uom})</span>
+                                            <span className="ml-auto inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs font-bold">
+                                                {[['APPROVE', 'Approve'], ['REDUCE', 'Reduce'], ['REJECT', 'Reject']].map(([k, label]) => (
+                                                    <button key={k} type="button" onClick={() => set({ decision: k })}
+                                                        className={`px-3 py-1.5 ${d.decision === k ? (k === 'REJECT' ? 'bg-rose-600 text-white' : k === 'REDUCE' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white') : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{label}</button>
+                                                ))}
+                                            </span>
+                                        </div>
+                                        {d.decision !== 'APPROVE' && (
+                                            <div className="flex flex-wrap gap-2 mt-2">
+                                                {d.decision === 'REDUCE' && <input className={`${inputCls} !w-36 !py-1`} type="number" min="0" step="any" value={d.qty} onChange={e => set({ qty: e.target.value })} aria-label={`Approved quantity, line ${l.line_no}`} placeholder={`below ${l.purchase_qty}`} />}
+                                                <input className={`${inputCls} flex-1 min-w-[220px] !py-1`} value={d.reason} maxLength={1000} onChange={e => set({ reason: e.target.value })} placeholder={d.decision === 'REJECT' ? 'Why rejected * (e.g. not needed yet, wrong item)' : 'Why reduced * (e.g. stock in hand, MOQ)'} aria-label={`Reason, line ${l.line_no}`} />
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <ErrorBox text={formError} />
+                        {(() => {
+                            const ds = Object.values(deciding);
+                            const rej = ds.filter(d => d.decision === 'REJECT').length;
+                            const red = ds.filter(d => d.decision === 'REDUCE').length;
+                            const incomplete = Object.entries(deciding).some(([lid, d]) => d.decision !== 'APPROVE' && (!d.reason.trim() || (d.decision === 'REDUCE' && !(Number(d.qty) > 0 && Number(d.qty) < pr.lines.find(l => l.id === lid).purchase_qty))));
+                            return (
+                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                    <span className="text-xs text-slate-500 mr-auto">{ds.length - rej - red} as asked · {red} reduced · {rej} rejected</span>
+                                    <SecondaryButton onClick={() => setDeciding(null)}>Cancel</SecondaryButton>
+                                    <PrimaryButton busy={busy} disabled={busy || incomplete || rej === ds.length}
+                                        onClick={() => runForm(() => planningApi.approvePr(id, Object.entries(deciding).filter(([, d]) => d.decision !== 'APPROVE').map(([lid, d]) => ({ line_id: lid, decision: d.decision, qty: d.decision === 'REDUCE' ? Number(d.qty) : undefined, reason: d.reason.trim() }))), () => setDeciding(null))}>
+                                        {rej === ds.length ? 'Every line rejected — use Reject' : `Approve ${ds.length - rej} line(s)`}
+                                    </PrimaryButton>
+                                </div>
+                            );
+                        })()}
+                    </div>
+                </Modal>
+            )}
 
             {editing && (
                 <Modal title={`Line ${editing.line.line_no} — ${editing.line.label}`} onClose={() => setEditing(null)}>

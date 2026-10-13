@@ -14,7 +14,7 @@ import SalesOrderStatusBadge from '../salesOrders/SalesOrderStatusBadge';
 const TABS = [
     { key: 'overview', label: 'Overview', page: 'tracker.orders', approved: true, to: (id) => `/v3/tracker/orders/${id}` },
     { key: 'order', label: 'Order & documents', page: 'sales.orders', to: (id) => `/v3/sales-orders/${id}` },
-    { key: 'materials', label: 'Materials', page: 'planning.requirements', to: (id) => `/v3/planning/orders/${id}` },
+    { key: 'materials', label: 'Order BOM', page: 'planning.requirements', to: (id) => `/v3/planning/orders/${id}` },
     { key: 'milestones', label: 'Milestones', page: 'planning.milestones', approved: true, to: (id) => `/v3/planning/orders/${id}?tab=MILESTONES` },
     { key: 'issue', label: 'Material issue', page: 'issue.materialIssue', approved: true, to: (id) => `/v3/material-issue/orders/${id}` },
 ];

@@ -14,6 +14,7 @@ import { workApi } from './api/workApi';
 import { apiError } from './api/mastersApi';
 import { NAV, keyForPath, visibleNav, trailFor } from './v3Nav';
 import { V3AccessContext } from './V3Access';
+import { useV3Live } from './live';
 
 const store = {
     get: (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
@@ -192,10 +193,9 @@ export default function V3Layout() {
     useEffect(() => { load(); }, [load]);
     // Approvals waiting: refreshed as the user moves between pages.
     const approver = !!me?.menu?.approvals && !me?.floor;
-    useEffect(() => {
-        if (!approver) return;
-        workApi.approvals().then(res => setApprovals(res.data.items.length)).catch(() => {});
-    }, [approver, location.pathname]);
+    const loadApprovals = useCallback(() => { workApi.approvals().then(res => setApprovals(res.data.items.length)).catch(() => {}); }, []);
+    useEffect(() => { if (approver) loadApprovals(); }, [approver, location.pathname, loadApprovals]);
+    useV3Live(loadApprovals, approver);   // live: re-count when 3.0 work changes
     useEffect(() => { setDrawer(false); }, [location.pathname]);
     const ctx = useMemo(() => ({ me, reload: load }), [me, load]);
 

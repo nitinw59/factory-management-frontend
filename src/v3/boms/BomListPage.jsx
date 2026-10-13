@@ -2,16 +2,20 @@
 // (and rejected BOMs to fix). Drafts first; open one to edit, submit or approve
 // (what you can do there depends on your role).
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { stylesApi } from '../api/stylesApi';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, ErrorBox, Loading, SearchInput } from '../components/ui';
 import BomStatusBadge, { BOM_STATUS } from './BomStatusBadge';
 
-const TABS = ['DRAFT', 'REJECTED', 'PENDING_APPROVAL', 'APPROVED', 'ARCHIVED'];
+// "To finish" = draft + rejected (My work opens it); ?status= picks the tab.
+const TABS = ['DRAFT,REJECTED', 'DRAFT', 'REJECTED', 'PENDING_APPROVAL', 'APPROVED', 'ARCHIVED'];
+const tabLabel = (s) => (s === 'DRAFT,REJECTED' ? 'To finish' : BOM_STATUS[s]?.label || s);
 
 export default function BomListPage() {
-    const [status, setStatus] = useState('DRAFT');
+    const [params, setParams] = useSearchParams();
+    const status = TABS.includes(params.get('status')) ? params.get('status') : 'DRAFT';
+    const setStatus = (s) => setParams({ status: s }, { replace: true });
     const [rows, setRows] = useState(null);
     const [q, setQ] = useState('');
     const [error, setError] = useState('');
@@ -23,17 +27,17 @@ export default function BomListPage() {
 
     return (
         <div>
-            <PageHeader title="BOMs" subtitle="Every BOM of every style. Drafts and rejected BOMs are waiting for the merchandiser; pending ones for approval." />
+            <PageHeader title="Style BOMs" subtitle="Fabric and trims per garment for every style (the order BOM multiplies this by an order's quantities). Drafts and rejected BOMs are waiting for the merchandiser; pending ones for approval." />
             <div className="flex flex-wrap gap-2 items-center mb-3">
                 {TABS.map(s => (
                     <button key={s} type="button" onClick={() => setStatus(s)}
-                        className={`px-3 py-1 rounded-lg text-xs font-bold border ${status === s ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-200 text-slate-600'}`}>{BOM_STATUS[s].label}</button>
+                        className={`px-3 py-1 rounded-lg text-xs font-bold border ${status === s ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-200 text-slate-600'}`}>{tabLabel(s)}</button>
                 ))}
                 <div className="ml-auto"><SearchInput value={q} onChange={setQ} placeholder="Search style…" /></div>
             </div>
             <ErrorBox text={error} />
             {!rows ? (!error && <Loading />) : list.length === 0 ? (
-                <p className="text-sm text-slate-400 py-6">No {BOM_STATUS[status].label.toLowerCase()} BOMs.</p>
+                <p className="text-sm text-slate-400 py-6">No {status === 'DRAFT,REJECTED' ? 'BOMs to finish' : `${tabLabel(status).toLowerCase()} BOMs`}.</p>
             ) : (
                 <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
                     {list.map(b => (

@@ -9,7 +9,7 @@ import { cuttingApi } from '../api/cuttingApi';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, Field, inputCls, PrimaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
-import { OrderGrid, IN_TO_M, fmt } from './cutShared';
+import { OrderGrid, perLay, layerText, fmt } from './cutShared';
 
 export default function NewCutBatchPage() {
     const { lineId } = useParams();
@@ -25,20 +25,22 @@ export default function NewCutBatchPage() {
     useEffect(() => { cuttingApi.orderLine(lineId).then(res => setD(res.data)).catch(err => setError(apiError(err, 'Failed to load the order line.'))); }, [lineId]);
 
     const ratioSum = Object.values(ratio).reduce((s, v) => s + (Number(v) || 0), 0);
-    const layM = Number(length) > 0 ? Number(length) * IN_TO_M : 0;
-    // Preview: for each roll that cuts a MAIN part, max lays = metres ÷ layer → garments per colour × size.
+    const hasLength = Number(length) > 0;
+    // Preview: for each roll that cuts a MAIN part, max lays = roll quantity ÷ one lay (in the roll's unit) → garments per colour × size.
     const preview = useMemo(() => {
         const extra = {};
-        if (!d || !layM || !ratioSum) return extra;
+        if (!d || !hasLength || !ratioSum) return extra;
         for (const [rid, p] of Object.entries(picks)) {
             const roll = d.rolls.find(r => r.id === rid);
             const colour = p.colour || (roll.colours.length === 1 ? roll.colours[0].id : null);
             if (!colour || !(roll.parts[colour] || []).some(x => x.part_type === 'MAIN')) continue;
-            const lays = Math.floor((Number(p.metres) || roll.available) / layM + 1e-9);
+            const lay = perLay(length, roll.uom);
+            if (!lay) continue;   // kg fabric: no lay length
+            const lays = Math.floor((Number(p.metres) || roll.available) / lay + 1e-9);
             for (const [sid, v] of Object.entries(ratio)) if (Number(v) > 0) extra[`${colour}|${sid}`] = (extra[`${colour}|${sid}`] || 0) + lays * Number(v);
         }
         return extra;
-    }, [d, picks, ratio, layM, ratioSum]);
+    }, [d, picks, ratio, length, hasLength, ratioSum]);
     if (!d) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
     const over = d.grid.cells.filter(c => (c.cut + (preview[`${c.colour_id}|${c.size_id}`] || 0)) > c.planned);
     const free = d.rolls.filter(r => r.available > 0);
@@ -62,7 +64,7 @@ export default function NewCutBatchPage() {
                     <Field label="Piece numbering">
                         <select className={inputCls} value={mode} onChange={e => setMode(e.target.value)}><option value="MODE_1">Mode 1 — numbered per roll</option><option value="MODE_2">Mode 2 — continuous across rolls</option></select>
                     </Field>
-                    <Field label="Layer length (inches) *" hint={layM ? `= ${fmt(layM, 2)} m per lay` : ' '}><input className={inputCls} type="number" min="1" step="0.01" value={length} onChange={e => setLength(e.target.value)} /></Field>
+                    <Field label="Layer length (inches) *" hint={hasLength ? `= ${layerText(Number(length))} per lay` : ' '}><input className={inputCls} type="number" min="1" step="0.01" value={length} onChange={e => setLength(e.target.value)} /></Field>
                     <Field label="Notes"><input className={inputCls} value={notes} onChange={e => setNotes(e.target.value)} /></Field>
                 </div>
                 <div>
@@ -75,9 +77,9 @@ export default function NewCutBatchPage() {
             </div>
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
                 <table className="w-full text-sm min-w-[860px]">
-                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2 w-8" /><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Fabric</th><th className="px-3 py-2">Cuts for colour → parts</th><th className="px-3 py-2 text-right">Free at cutting</th><th className="px-3 py-2 w-32">Take (m)</th><th className="px-3 py-2 text-right">Max lays</th></tr></thead>
+                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2 w-8" /><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Fabric</th><th className="px-3 py-2">Cuts for colour → parts</th><th className="px-3 py-2 text-right">Free at cutting</th><th className="px-3 py-2 w-32">Take</th><th className="px-3 py-2 text-right">Max lays</th></tr></thead>
                     <tbody>
-                        {free.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No fabric issued to cutting for this order with metres free. Issue it first (Material issue).</td></tr>}
+                        {free.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No fabric issued to cutting for this order with anything free. Issue it first (Material issue).</td></tr>}
                         {free.map(r => {
                             const p = picks[r.id];
                             const colour = p?.colour || (r.colours.length === 1 ? r.colours[0].id : '');
@@ -92,9 +94,9 @@ export default function NewCutBatchPage() {
                                             : r.colours.map(c => c.name).join(' / ')}
                                         {colour && <span className="block text-slate-500">{(r.parts[colour] || []).map(x => x.part_name).join(', ')}</span>}
                                     </td>
-                                    <td className="px-3 py-2 text-right tabular-nums">{fmt(r.available)} m</td>
-                                    <td className="px-3 py-2">{p && <input className={`${inputCls} !py-1`} type="number" min="0" max={r.available} step="any" placeholder={String(r.available)} value={p.metres} onChange={e => setPicks({ ...picks, [r.id]: { ...p, metres: e.target.value } })} aria-label="Metres" />}</td>
-                                    <td className="px-3 py-2 text-right tabular-nums">{layM ? Math.floor(m / layM + 1e-9) : '—'}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums">{fmt(r.available)} {r.uom}</td>
+                                    <td className="px-3 py-2">{p && <input className={`${inputCls} !py-1`} type="number" min="0" max={r.available} step="any" placeholder={String(r.available)} value={p.metres} onChange={e => setPicks({ ...picks, [r.id]: { ...p, metres: e.target.value } })} aria-label={`Take (${r.uom})`} />}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums">{perLay(length, r.uom) ? Math.floor(m / perLay(length, r.uom) + 1e-9) : '—'}</td>
                                 </tr>
                             );
                         })}

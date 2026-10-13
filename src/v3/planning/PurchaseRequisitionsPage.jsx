@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import { planningApi } from '../api/planningApi';
+import { useV3Live } from '../live';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
@@ -15,24 +16,28 @@ const prLink = (r) => (r.purpose === 'STORE' ? `/v3/store/requisitions/${r.id}` 
 export default function PurchaseRequisitionsPage({ purpose }) {
     const [params, setParams] = useSearchParams();
     const status = params.get('status') || '';
+    const attention = params.get('attention') === 'me';   // My work → requisitions sent back to me
     const [rows, setRows] = useState(null);
     const [search, setSearch] = useState('');
     const [error, setError] = useState('');
 
+    const [rev, setRev] = useState(0);   // bumped by the live refresh
     useEffect(() => {
-        const t = setTimeout(() => planningApi.prs({ status: status || undefined, q: search.trim() || undefined, purpose })
+        const t = setTimeout(() => planningApi.prs({ status: status || undefined, q: search.trim() || undefined, purpose, attention: attention ? 'me' : undefined })
             .then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load requisitions.'))), 250);
         return () => clearTimeout(t);
-    }, [status, search, purpose]);
+    }, [status, search, purpose, attention, rev]);
+    useV3Live(() => setRev(r => r + 1));   // live: requisitions decided elsewhere show at once
 
     return (
         <div>
-            <PageHeader title={purpose === 'STORE' ? 'Store requisitions' : status === 'SUBMITTED' ? 'Requisition approvals' : 'Purchase requisitions'}
-                subtitle={purpose === 'STORE' ? 'Spares and general items requested by the store (raise them from the reorder list). The purchase manager approves; approved ones are ordered on a PO.'
+            <PageHeader title={attention ? 'Requisitions sent back to you' : purpose === 'STORE' ? 'Store requisitions' : status === 'SUBMITTED' ? 'Requisition approvals' : 'Purchase requisitions'}
+                subtitle={attention ? 'Requisitions you raised that purchasing rejected, or where lines were rejected or closed. Open one, raise the need again (buy list / reorder list) or change and resubmit, then mark it handled.' : purpose === 'STORE' ? 'Spares and general items requested by the store (raise them from the reorder list). The purchase manager approves; approved ones are ordered on a PO.'
                     : status === 'SUBMITTED' ? 'Requisitions waiting for the purchase manager (production and store). Open one to approve or reject it.' : 'Raised from the buy list (production) and the reorder list (store). Approved requisitions are what purchasing orders.'}
                 actions={<>
                     <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={status} onChange={e => setParams(e.target.value ? { status: e.target.value } : {})} aria-label="Filter by status">
                         <option value="">All statuses</option>
+                        <option value="DRAFT,REJECTED">To finish (draft + rejected)</option>
                         {Object.entries(PR_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                     </select>
                     <SearchInput value={search} onChange={setSearch} placeholder="PR number" />
@@ -45,7 +50,7 @@ export default function PurchaseRequisitionsPage({ purpose }) {
                             <tr><th className="px-4 py-2.5">Requisition</th><th className="px-4 py-2.5">Raised by</th><th className="px-4 py-2.5 text-right">Lines</th><th className="px-4 py-2.5">Needed by</th><th className="px-4 py-2.5">Status</th><th className="px-4 py-2.5 w-10" /></tr>
                         </thead>
                         <tbody>
-                            {rows.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">{status === 'SUBMITTED' ? 'Nothing waiting for approval.' : purpose === 'STORE' ? 'No store requisitions yet. Raise them from the reorder list.' : 'No requisitions yet. Raise them from the buy list.'}</td></tr>}
+                            {rows.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">{attention ? 'Nothing sent back to you.' : status === 'SUBMITTED' ? 'Nothing waiting for approval.' : purpose === 'STORE' ? 'No store requisitions yet. Raise them from the reorder list.' : 'No requisitions yet. Raise them from the buy list.'}</td></tr>}
                             {rows.map(r => (
                                 <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
                                     <td className="px-4 py-2.5"><Link to={prLink(r)} className="font-semibold text-indigo-700 hover:underline whitespace-nowrap">{r.pr_no}</Link>
@@ -54,7 +59,8 @@ export default function PurchaseRequisitionsPage({ purpose }) {
                                     <td className="px-4 py-2.5 text-slate-700">{r.created_by_name || '—'}</td>
                                     <td className="px-4 py-2.5 text-right tabular-nums">{r.line_count}{r.fabric_lines ? <span className="block text-[11px] text-slate-500">{r.fabric_lines} fabric</span> : null}</td>
                                     <td className="px-4 py-2.5 whitespace-nowrap">{fmtDate(r.needed_by)}</td>
-                                    <td className="px-4 py-2.5"><span className={`text-[11px] font-black px-2 py-0.5 rounded border ${PR_STATUS[r.status].cls}`}>{PR_STATUS[r.status].label}</span></td>
+                                    <td className="px-4 py-2.5"><span className={`text-[11px] font-black px-2 py-0.5 rounded border ${PR_STATUS[r.status].cls}`}>{PR_STATUS[r.status].label}</span>
+                                        {r.sent_back_lines > 0 && <span className="block mt-1 text-[11px] font-bold text-rose-700">{r.sent_back_lines} line(s) sent back</span>}</td>
                                     <td className="px-4 py-2.5"><Link to={prLink(r)} className="text-slate-400 hover:text-indigo-600" aria-label={`Open ${r.pr_no}`}><ChevronRight size={16} /></Link></td>
                                 </tr>
                             ))}

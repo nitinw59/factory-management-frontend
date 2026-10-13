@@ -7,7 +7,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowUp, ArrowDown, FileDown, FileSpreadsheet, Save, RotateCcw, Plus, Trash2 } from 'lucide-react';
 import { stylesApi } from '../api/stylesApi';
 import { apiError } from '../api/mastersApi';
-import { adminApi } from '../../api/adminApi';
+import { loadLetterhead, logoUrlOf } from '../components/letterhead';
 import { inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import BomStatusBadge from './BomStatusBadge';
 import { SHOW_AS, SIZES_AS, BOTTOM_BOXES, lineKeys, variesBySize, defaultSettings, normalizeSettings, buildCard } from './trimCardLayout';
@@ -31,20 +31,17 @@ const Tick = ({ checked, onChange, children }) => (
 );
 
 // The card as it prints: black ruled grid on white.
-function CardPreview({ m }) {
+function CardPreview({ m, logo }) {
     const td = 'border border-black px-1.5 py-1 align-top text-[12px] leading-snug';
     return (
         <div className="bg-white text-black shadow-md mx-auto p-5 min-w-[760px] max-w-[1120px]" style={{ fontFamily: 'Helvetica, Arial, sans-serif' }}>
-            <div className="flex items-start justify-between gap-4 mb-2">
-                <p className="text-xl font-bold">{m.title}</p>
-                {m.company && (
-                    <div className="text-center flex-1">
-                        <p className="text-lg font-bold">{m.company.name}</p>
-                        {m.company.sub && <p className="text-xs">{m.company.sub}</p>}
-                    </div>
-                )}
-                <div className="w-24" />
-            </div>
+            {m.company ? (
+                <div className="flex items-center gap-3 mb-2">
+                    {logo && <img src={logo} alt="" className="h-12 w-auto max-w-[160px] object-contain" />}
+                    <div className="min-w-0 flex-1"><p className="text-lg font-bold">{m.company.name}</p>{m.company.sub && <p className="text-xs text-slate-600">{m.company.sub}</p>}</div>
+                    <p className="text-xl font-bold shrink-0">{m.title}</p>
+                </div>
+            ) : <p className="text-xl font-bold mb-2">{m.title}</p>}
             {m.header.length > 0 && (
                 <table className="w-full border-collapse mb-2">
                     <tbody>
@@ -112,7 +109,8 @@ export default function TrimCardDesignerPage() {
     const [saved, setSaved] = useState(null);       // normalized saved settings (for "unsaved changes")
     const [s, setS] = useState(null);
     const [canSave, setCanSave] = useState(false);
-    const [company, setCompany] = useState(null);
+    const [lh, setLh] = useState(null);   // company letterhead (logo, name, address)
+    const company = lh?.company || null;
     const [orderId, setOrderId] = useState('');
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
@@ -128,7 +126,7 @@ export default function TrimCardDesignerPage() {
             })
             .catch(err => setError(apiError(err, 'Failed to load the trim card.')));
         stylesApi.permissions().then(res => setCanSave(!!res.data.bomEdit)).catch(() => {});
-        adminApi.getCompanyProfile().then(res => setCompany(res.data)).catch(() => {});
+        loadLetterhead().then(setLh).catch(() => {});
     }, [id, fromOrder]);
 
     const lines = useMemo(() => (card ? new Map([...lineKeys(card.fabric), ...lineKeys(card.trims)]) : new Map()), [card]);
@@ -175,8 +173,8 @@ export default function TrimCardDesignerPage() {
                 <div className="ml-auto flex flex-wrap gap-2">
                     <SecondaryButton onClick={() => set(defaultSettings(card))}><RotateCcw size={14} /> Defaults</SecondaryButton>
                     {canSave && <SecondaryButton onClick={save} disabled={busy || !dirty}><Save size={14} /> Save choices</SecondaryButton>}
-                    <SecondaryButton onClick={() => exportTrimCardXlsx(model).catch(err => setError(err.message || 'Failed to make the Excel file.'))} disabled={!model.colours.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
-                    <PrimaryButton onClick={() => exportTrimCardFactoryPdf(model)} disabled={!model.colours.length}><FileDown size={15} /> Download PDF</PrimaryButton>
+                    <SecondaryButton onClick={() => exportTrimCardXlsx(model, lh).catch(err => setError(err.message || 'Failed to make the Excel file.'))} disabled={!model.colours.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
+                    <PrimaryButton onClick={() => exportTrimCardFactoryPdf(model, lh)} disabled={!model.colours.length}><FileDown size={15} /> Download PDF</PrimaryButton>
                 </div>
             </div>
             <ErrorBox text={error} />
@@ -278,7 +276,7 @@ export default function TrimCardDesignerPage() {
                 </aside>
 
                 <div className="flex-1 min-w-0 overflow-x-auto bg-slate-100 rounded-xl p-4">
-                    {model.colours.length === 0 ? <p className="text-sm text-slate-500">Tick at least one colour.</p> : <CardPreview m={model} />}
+                    {model.colours.length === 0 ? <p className="text-sm text-slate-500">Tick at least one colour.</p> : <CardPreview m={model} logo={logoUrlOf(company)} />}
                 </div>
             </div>
         </div>

@@ -4,7 +4,7 @@ import api from '../../utils/api';
 export const salesOrdersApi = {
     permissions: () => api.get('/v3/sales-orders-permissions'),
     customers: () => api.get('/v3/customers'),
-    styleOptions: () => api.get('/v3/sales-orders/style-options'),
+    styleOptions: (params) => api.get('/v3/sales-orders/style-options', { params }),   // { q, customer_id, limit }
 
     orders: (params) => api.get('/v3/sales-orders', { params }),
     order: (id) => api.get(`/v3/sales-orders/${id}`),

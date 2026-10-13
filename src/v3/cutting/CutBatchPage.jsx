@@ -9,7 +9,7 @@ import Modal from '../../shared/Modal';
 import { cuttingApi } from '../api/cuttingApi';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
-import { CUT_STATUS, OrderGrid, IN_TO_M, fmt, exportCutSheet, useCuttingPermissions } from './cutShared';
+import { CUT_STATUS, OrderGrid, perLay, layerText, fmt, exportCutSheet, useCuttingPermissions } from './cutShared';
 
 const ACTION = { CREATED: 'Created', EDITED: 'Edited', ROLL_ADDED: 'Roll added', ROLL_REMOVED: 'Roll removed', ROLL_CUT: 'Roll cut', ROLL_RECUT: 'Roll re-cut', END_BIT: 'End bit returned', FINALIZED: 'Finalised', CANCELLED: 'Cancelled' };
 
@@ -28,7 +28,6 @@ export default function CutBatchPage() {
     useEffect(() => { load(); }, [load]);
     if (!b) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
     const open = ['DRAFT', 'CUTTING'].includes(b.status);
-    const layM = b.layer_length_in * IN_TO_M;
     const run = async (fn, close) => {
         setBusy(true); setFormError(''); setError('');
         try { setB((await fn()).data); if (close) close(); } catch (err) { (close ? setFormError : setError)(apiError(err, 'Failed.')); } finally { setBusy(false); }
@@ -44,7 +43,7 @@ export default function CutBatchPage() {
                 <h1 className="text-2xl font-black text-slate-900">{b.batch_code}</h1>
                 <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${CUT_STATUS[b.status].cls}`}>{CUT_STATUS[b.status].label}</span>
             </div>
-            <p className="text-sm text-slate-500 mb-1">{b.line.customer_name} · {b.line.style_code} {b.line.style_name} · {b.numbering_mode === 'MODE_2' ? 'numbering continuous across rolls (mode 2)' : 'numbering per roll (mode 1)'} · layer {b.layer_length_in} in ({fmt(layM, 2)} m) · ratio {b.ratios.map(r => `${r.size}:${r.ratio}`).join('  ')} ({b.ratio_sum}/lay)</p>
+            <p className="text-sm text-slate-500 mb-1">{b.line.customer_name} · {b.line.style_code} {b.line.style_name} · {b.numbering_mode === 'MODE_2' ? 'numbering continuous across rolls (mode 2)' : 'numbering per roll (mode 1)'} · layer {b.layer_length_in} in ({layerText(b.layer_length_in)}) · ratio {b.ratios.map(r => `${r.size}:${r.ratio}`).join('  ')} ({b.ratio_sum}/lay)</p>
             {b.gate_override && <p className="text-sm text-rose-700 mb-1">Created under the factory admin's cutting-gate override.</p>}
             {b.status === 'CANCELLED' && <p className="text-sm text-slate-600 mb-1"><b>Cancelled:</b> {b.cancelled_reason}</p>}
             <div className="flex flex-wrap gap-2 my-3">
@@ -68,17 +67,17 @@ export default function CutBatchPage() {
             </div>
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
                 <table className="w-full text-sm min-w-[980px]">
-                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2">#</th><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Colour → parts</th><th className="px-3 py-2 text-right">Metres</th><th className="px-3 py-2 text-right">Lays</th><th className="px-3 py-2 text-right">Expected</th><th className="px-3 py-2 text-right">Used</th><th className="px-3 py-2 text-right">End bit</th><th className="px-3 py-2 text-right">Pieces</th><th className="px-3 py-2" /></tr></thead>
+                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2">#</th><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Colour → parts</th><th className="px-3 py-2 text-right">Taken</th><th className="px-3 py-2 text-right">Lays</th><th className="px-3 py-2 text-right">Expected</th><th className="px-3 py-2 text-right">Used</th><th className="px-3 py-2 text-right">End bit</th><th className="px-3 py-2 text-right">Pieces</th><th className="px-3 py-2" /></tr></thead>
                     <tbody>
                         {b.rolls.map(r => (
                             <tr key={r.id} className="border-t border-slate-100">
                                 <td className="px-3 py-2">{r.roll_sequence}</td>
                                 <td className="px-3 py-2 font-semibold">{r.roll_no}<span className="block text-xs font-normal text-slate-500">{r.dye_lot ? `lot ${r.dye_lot} · ` : ''}{r.fabric_label}</span></td>
                                 <td className="px-3 py-2 text-xs">{r.colour}<span className="block text-slate-500">{r.parts.map(p => p.part_name).join(', ')}</span></td>
-                                <td className="px-3 py-2 text-right tabular-nums">{fmt(r.metres)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{fmt(r.metres)} {r.uom}</td>
                                 <td className="px-3 py-2 text-right tabular-nums font-bold">{r.lays ?? '—'}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{r.expected_m != null ? fmt(r.expected_m) : '—'}</td>
-                                <td className={`px-3 py-2 text-right tabular-nums ${r.variance_m != null && Math.abs(r.variance_m) > r.metres * 0.03 ? 'text-amber-700 font-bold' : ''}`}>{r.consumed_m != null ? fmt(r.consumed_m) : '—'}{r.variance_m ? <span className="block text-[11px]">{r.variance_m > 0 ? '+' : ''}{fmt(r.variance_m)} m</span> : null}</td>
+                                <td className={`px-3 py-2 text-right tabular-nums ${r.variance_m != null && Math.abs(r.variance_m) > r.metres * 0.03 ? 'text-amber-700 font-bold' : ''}`}>{r.consumed_m != null ? fmt(r.consumed_m) : '—'}{r.variance_m ? <span className="block text-[11px]">{r.variance_m > 0 ? '+' : ''}{fmt(r.variance_m)} {r.uom}</span> : null}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{r.end_bit_m ? fmt(r.end_bit_m) : '—'}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{r.pieces || '—'}</td>
                                 <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -109,13 +108,13 @@ export default function CutBatchPage() {
                     {h.detail?.summary?.length > 0 && <ul className="ml-6 list-disc text-xs text-slate-600">{h.detail.summary.map((x, i) => <li key={i}>{x}</li>)}</ul>}</div>)}
             </div>
 
-            {cut && (
+            {cut && (() => { const cutLay = perLay(b.layer_length_in, cut.roll.uom); return (
                 <Modal title={`${cut.roll.lays ? 'Re-cut' : 'Cut'} roll ${cut.roll.roll_no}`} onClose={() => setCut(null)}>
                     <div className="space-y-3 w-[min(460px,88vw)]">
-                        <p className="text-sm text-slate-600">{fmt(cut.roll.metres)} m · layer {fmt(layM, 2)} m → up to {Math.floor((cut.roll.metres - (Number(cut.end) || 0)) / layM + 1e-9)} lays. Parts: {cut.roll.parts.map(p => p.part_name).join(', ')}.</p>
+                        <p className="text-sm text-slate-600">{fmt(cut.roll.metres)} {cut.roll.uom}{cutLay ? <> · layer {fmt(cutLay, 2)} {cut.roll.uom} → up to {Math.floor((cut.roll.metres - (Number(cut.end) || 0)) / cutLay + 1e-9)} lays</> : ' · weighed fabric: no lay-length check'}. Parts: {cut.roll.parts.map(p => p.part_name).join(', ')}.</p>
                         <div className="grid grid-cols-2 gap-3">
-                            <Field label="Lays made *" hint={Number(cut.lays) > 0 ? `${Number(cut.lays) * b.ratio_sum} garments · ${fmt(Number(cut.lays) * layM, 2)} m` : ' '}><input className={inputCls} type="number" min="1" step="1" value={cut.lays} onChange={e => setCut({ ...cut, lays: e.target.value })} autoFocus /></Field>
-                            <Field label="End bit (m)" hint={cut.roll.end_bit_m ? `${cut.roll.end_bit_m} m already returned` : 'Goes back to the roll'}><input className={inputCls} type="number" min={cut.roll.end_bit_m || 0} step="any" value={cut.end} onChange={e => setCut({ ...cut, end: e.target.value })} /></Field>
+                            <Field label="Lays made *" hint={Number(cut.lays) > 0 ? `${Number(cut.lays) * b.ratio_sum} garments${cutLay ? ` · ${fmt(Number(cut.lays) * cutLay, 2)} ${cut.roll.uom}` : ''}` : ' '}><input className={inputCls} type="number" min="1" step="1" value={cut.lays} onChange={e => setCut({ ...cut, lays: e.target.value })} autoFocus /></Field>
+                            <Field label={`End bit (${cut.roll.uom})`} hint={cut.roll.end_bit_m ? `${cut.roll.end_bit_m} ${cut.roll.uom} already returned` : 'Goes back to the roll'}><input className={inputCls} type="number" min={cut.roll.end_bit_m || 0} step="any" value={cut.end} onChange={e => setCut({ ...cut, end: e.target.value })} /></Field>
                         </div>
                         {cut.roll.lays && <Field label="Reason for correcting *"><input className={inputCls} value={cut.reason} onChange={e => setCut({ ...cut, reason: e.target.value })} /></Field>}
                         <ErrorBox text={formError} />
@@ -126,7 +125,7 @@ export default function CutBatchPage() {
                         </div>
                     </div>
                 </Modal>
-            )}
+            ); })()}
             {edit && (
                 <Modal title="Ratio, layer length, numbering" onClose={() => setEdit(null)}>
                     <div className="space-y-3 w-[min(480px,88vw)]">
@@ -144,12 +143,12 @@ export default function CutBatchPage() {
             {add && (
                 <Modal title="Add rolls issued to cutting" onClose={() => setAdd(null)}>
                     <div className="space-y-3 w-[min(620px,92vw)] max-h-[70vh] overflow-y-auto">
-                        {add.rolls.length === 0 ? <p className="text-sm text-slate-500">No issued fabric with metres free. Issue more fabric to cutting first.</p> : add.rolls.map(r => {
+                        {add.rolls.length === 0 ? <p className="text-sm text-slate-500">No issued fabric with anything free. Issue more fabric to cutting first.</p> : add.rolls.map(r => {
                             const p = add.picks[r.id];
                             return (
                                 <div key={r.id} className="flex flex-wrap items-center gap-2 text-sm border-b border-slate-100 py-1">
                                     <input type="checkbox" checked={Boolean(p)} onChange={e => setAdd({ ...add, picks: e.target.checked ? { ...add.picks, [r.id]: { colour: r.colours.length === 1 ? r.colours[0].id : '' } } : Object.fromEntries(Object.entries(add.picks).filter(([k]) => k !== r.id)) })} aria-label={`Add ${r.roll_no}`} />
-                                    <span className="w-56"><b>{r.roll_no}</b> {r.dye_lot ? `lot ${r.dye_lot} · ` : ''}{fmt(r.available)} m<span className="block text-xs text-slate-500">{r.fabric_label}</span></span>
+                                    <span className="w-56"><b>{r.roll_no}</b> {r.dye_lot ? `lot ${r.dye_lot} · ` : ''}{fmt(r.available)} {r.uom}<span className="block text-xs text-slate-500">{r.fabric_label}</span></span>
                                     {p && r.colours.length > 1 && <select className={`${inputCls} !w-40 !py-1`} value={p.colour} onChange={e => setAdd({ ...add, picks: { ...add.picks, [r.id]: { colour: e.target.value } } })} aria-label="Colour"><option value="">Colour…</option>{r.colours.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
                                 </div>
                             );

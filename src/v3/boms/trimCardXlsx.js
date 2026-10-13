@@ -2,10 +2,11 @@
 // (trimCardLayout.buildCard), so the merchandiser's ticks apply. Ruled cells, A4 landscape,
 // one page wide; the swatch row and empty bottom boxes are left blank to fill or staple.
 import { newWorkbook, saveWorkbook, put, FONT, BOLD } from '../components/xlsxSave';
+import { addXlsxLetterhead } from '../components/letterhead';
 
 const RED = 'FFBE123C';
 
-export async function buildTrimCardWorkbook(m) {
+export async function buildTrimCardWorkbook(m, lh = null) {
     const wb = await newWorkbook();
     const ws = wb.addWorksheet('Trim card', {
         pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } },
@@ -15,11 +16,12 @@ export async function buildTrimCardWorkbook(m) {
     const all = [1, last];
     const rest = [2, last];
     ws.columns = [{ width: 26 }, ...m.colours.map(() => ({ width: Math.max(16, Math.min(28, 120 / n)) }))];
-    let r = 1;
+    // Company letterhead (logo + name + address) when "Company name" is ticked.
+    let r = m.company && lh ? addXlsxLetterhead(wb, ws, lh, { lastCol: last, logoCols: 1, title: m.title }) : 1;
 
-    // Title + company
-    put(ws, r, [1, 1], m.title, { font: { ...BOLD, size: 14 } });
-    if (m.company) {
+    // Without the letterhead: title row (+ company name centred)
+    if (r === 1) put(ws, r, [1, 1], m.title, { font: { ...BOLD, size: 14 } });
+    if (r === 1 && m.company) {
         put(ws, r, rest, `${m.company.name}${m.company.sub ? `\n${m.company.sub}` : ''}`, { font: { ...BOLD, size: 12 }, align: 'center' });
         ws.getRow(r).height = m.company.sub ? 32 : 22;
     } else ws.getRow(r).height = 22;
@@ -83,6 +85,6 @@ export async function buildTrimCardWorkbook(m) {
     return wb;
 }
 
-export async function exportTrimCardXlsx(m) {
-    await saveWorkbook(await buildTrimCardWorkbook(m), `${m.file}.xlsx`);
+export async function exportTrimCardXlsx(m, lh = null) {
+    await saveWorkbook(await buildTrimCardWorkbook(m, lh), `${m.file}.xlsx`);
 }

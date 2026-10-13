@@ -1,12 +1,14 @@
 // BOM Lines tab: fabric lines and trim lines, each with its consumption, rule
 // and item picks; colours / sizes still missing an item are flagged as gaps.
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, Trash2, AlertTriangle, Droplet } from 'lucide-react';
 import { stylesApi } from '../api/stylesApi';
 import { mastersApi, apiError } from '../api/mastersApi';
 import { SecondaryButton, ErrorBox, Loading, fmtQty } from '../components/ui';
 import { roleLabel, ruleLabel, lineGaps } from './bomRules';
 import BomLineEditor from './BomLineEditor';
+import DtmModal from './DtmModal';
+import { DtmChip } from './dtmShared';
 
 const matchLabel = (it, tones, colours) => {
     if (it.match === 'ALL') return 'All';
@@ -18,6 +20,7 @@ export default function BomLinesTab({ bom, editable, tones }) {
     const [lines, setLines] = useState(null);
     const [ref, setRef] = useState(null); // style + masters
     const [editing, setEditing] = useState(null); // { kind, line }
+    const [dtm, setDtm] = useState(null);         // trim line to make DTM items for
     const [error, setError] = useState('');
 
     const load = useCallback(() => stylesApi.bomLines(bom.id)
@@ -73,6 +76,7 @@ export default function BomLinesTab({ bom, editable, tones }) {
                             {' · '}{ruleLabel(l.colour_rule)}
                             {kind === 'trim' && l.size_rule === 'BY_SIZE' && ' · by size'}
                             {kind === 'trim' && <> · issued at <b>{l.issue_stage_name}</b></>}
+                            {kind === 'trim' && l.dtm_base_item_id && <> · <b className="text-indigo-700">DTM</b> to {(lines.fabric.find(f => String(f.id) === String(l.dtm_fabric_line_id))?.role || 'fabric').toLowerCase()} fabric</>}
                         </p>
                         {kind === 'fabric' && l.part_ids.length > 0 && (
                             <p className="text-xs text-slate-500 mt-0.5">Parts: {l.part_ids.map(p => partName.get(String(p)) || '?').join(', ')}</p>
@@ -80,6 +84,7 @@ export default function BomLinesTab({ bom, editable, tones }) {
                     </div>
                     {editable && (
                         <div className="flex gap-1">
+                            {kind === 'trim' && <button type="button" onClick={() => setDtm(l)} className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-bold text-indigo-700 hover:bg-indigo-50" title="Make one dyed-to-match shade item per colour and map the line"><Droplet size={14} /> {l.dtm_base_item_id ? 'Re-make DTM' : 'Make DTM items'}</button>}
                             <button type="button" onClick={() => setEditing({ kind, line: l })} className="p-1.5 rounded text-slate-500 hover:bg-slate-100" aria-label="Edit line"><Pencil size={15} /></button>
                             <button type="button" onClick={() => remove(kind, l)} className="p-1.5 rounded text-rose-500 hover:bg-rose-50" aria-label="Delete line"><Trash2 size={15} /></button>
                         </div>
@@ -91,6 +96,7 @@ export default function BomLinesTab({ bom, editable, tones }) {
                             <b className="text-slate-700">{matchLabel(it, tones, bom.colours)}</b>
                             {it.size_ids && <span className="text-slate-500"> [{it.size_ids.map(s => sizeName.get(String(s)) || '?').join(', ')}]</span>}
                             <span className="text-slate-600"> → {it.label}</span>
+                            {it.info?.dtm_base_item_id && <> <DtmChip title={it.info.dtm_reference ? `Dyed to match ${it.info.dtm_reference}` : undefined} /></>}
                         </span>
                     ))}
                     {l.items.length === 0 && <span className="text-xs text-slate-400">No items picked yet.</span>}
@@ -123,6 +129,10 @@ export default function BomLinesTab({ bom, editable, tones }) {
             {bom.colours.length === 0 && <p className="text-xs font-semibold text-amber-700">Pick garment colours in the Colours tab first; by-tone and by-colour lines need them.</p>}
             {section('fabric', 'Fabric', lines.fabric)}
             {section('trim', 'Trims', lines.trims)}
+            {dtm && (
+                <DtmModal bom={bom} line={dtm} fabricLines={lines.fabric} trimItems={ref.trimItems}
+                    onClose={() => setDtm(null)} onDone={() => { setDtm(null); load(); mastersApi.trimItems().then(r => setRef(x => ({ ...x, trimItems: r.data }))).catch(() => {}); }} />
+            )}
             {editing && (
                 <BomLineEditor kind={editing.kind} line={editing.line} bom={bom} style={ref.style} tones={tones}
                     fabricItems={ref.fabricItems} trimTypes={ref.trimTypes} trimItems={ref.trimItems}

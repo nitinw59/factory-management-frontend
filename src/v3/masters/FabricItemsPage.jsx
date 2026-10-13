@@ -1,6 +1,6 @@
 // Fabric items (v3.fabric_items): mill + article + shade = one item.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Pencil } from 'lucide-react';
+import { Plus, Pencil, Copy } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { mastersApi, apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, ActiveBadge, Loading, useMastersPermissions } from '../components/ui';
@@ -40,6 +40,17 @@ export default function FabricItemsPage() {
     };
 
     const set = (k) => (e) => setEditing({ ...editing, [k]: e.target.value });
+    // Copy: a new item pre-filled from an existing one — usually the same quality in another shade.
+    // Shade code and name are left blank (mill + article + shade must be unique); stock is never copied.
+    const startCopy = (r) => {
+        setFormError('');
+        setEditing({
+            ...empty, mill: r.mill, article_code: r.article_code, shade_code: '', shade_name: '', composition: r.composition || '',
+            gsm: r.gsm ? Number(r.gsm) : '', width: r.width ? Number(r.width) : '', width_unit: r.width_unit || 'in', usage_uom: r.usage_uom,
+            hsn_code: r.hsn_code || '', gst_pct: r.gst_pct != null ? Number(r.gst_pct) : '', is_active: true,
+            copiedFrom: `${r.mill} ${r.article_code} ${r.shade_code}`,
+        });
+    };
     const canSave = editing && editing.mill.trim() && editing.article_code.trim() && editing.shade_code.trim();
 
     return (
@@ -72,6 +83,7 @@ export default function FabricItemsPage() {
                                     <td className="px-4 py-2.5"><ActiveBadge active={r.is_active} /></td>
                                     <td className="px-4 py-2.5 text-right">
                                         {perms.fabric && <button type="button" onClick={() => { setFormError(''); setEditing({ ...empty, ...Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v ?? ''])), gsm: r.gsm ? Number(r.gsm) : '', width: r.width ? Number(r.width) : '', gst_pct: r.gst_pct != null ? Number(r.gst_pct) : '' }); }} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Edit ${r.mill} ${r.article_code} ${r.shade_code}`}><Pencil size={15} /></button>}
+                                        {perms.fabric && <button type="button" onClick={() => startCopy(r)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Copy ${r.mill} ${r.article_code} ${r.shade_code} into a new item`} title="Copy into a new item (another shade)"><Copy size={15} /></button>}
                                     </td>
                                 </tr>
                             ))}
@@ -81,12 +93,12 @@ export default function FabricItemsPage() {
             )}
 
             {editing && (
-                <Modal title={editing.id ? 'Edit fabric item' : 'Add fabric item'} onClose={() => setEditing(null)}>
+                <Modal title={editing.id ? 'Edit fabric item' : editing.copiedFrom ? `Add fabric item — copy of ${editing.copiedFrom}` : 'Add fabric item'} onClose={() => setEditing(null)}>
                     <div className="space-y-4 w-[min(600px,85vw)]">
                         <div className="grid grid-cols-2 gap-3">
-                            <Field label="Mill *" hint='e.g. "Arvind"'><input className={inputCls} value={editing.mill} onChange={set('mill')} autoFocus /></Field>
+                            <Field label="Mill *" hint='e.g. "Arvind"'><input className={inputCls} value={editing.mill} onChange={set('mill')} autoFocus={!editing.copiedFrom} /></Field>
                             <Field label="Article code *" hint='e.g. "DN-401"'><input className={inputCls} value={editing.article_code} onChange={set('article_code')} /></Field>
-                            <Field label="Shade code *" hint='e.g. "826"'><input className={inputCls} value={editing.shade_code} onChange={set('shade_code')} /></Field>
+                            <Field label="Shade code *" hint={editing.copiedFrom ? 'Enter the new shade' : 'e.g. "826"'}><input className={inputCls} value={editing.shade_code} onChange={set('shade_code')} autoFocus={Boolean(editing.copiedFrom)} /></Field>
                             <Field label="Shade name" hint='e.g. "Black"'><input className={inputCls} value={editing.shade_name} onChange={set('shade_name')} /></Field>
                         </div>
                         <Field label="Composition" hint='e.g. "98% cotton 2% elastane"'><input className={inputCls} value={editing.composition} onChange={set('composition')} /></Field>
@@ -101,7 +113,7 @@ export default function FabricItemsPage() {
                                 <select className={inputCls} value={editing.width_unit} onChange={set('width_unit')}><option value="in">inches</option><option value="cm">cm</option></select>
                             </Field>
                             <Field label="Unit">
-                                <select className={inputCls} value={editing.usage_uom} onChange={set('usage_uom')}><option value="m">metres</option><option value="kg">kg (knits)</option></select>
+                                <select className={inputCls} value={editing.usage_uom} onChange={set('usage_uom')}><option value="m">metres</option><option value="yd">yards</option><option value="kg">kg (knits)</option></select>
                             </Field>
                         </div>
                         {editing.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={editing.is_active} onChange={e => setEditing({ ...editing, is_active: e.target.checked })} /> Active</label>}

@@ -41,7 +41,7 @@ export default function StyleBomsTab({ styleId, canEdit }) {
                 <p className="text-sm text-slate-500 flex-1 min-w-[240px]">
                     One approved version at a time. An approved BOM can't be edited; make a new version (a copy) and approve that.
                 </p>
-                {canEdit && boms.length === 0 && <PrimaryButton onClick={() => create(null)} busy={busy} disabled={busy}><Plus size={15} /> New BOM</PrimaryButton>}
+                {canEdit && boms.length === 0 && <PrimaryButton onClick={() => create(null)} busy={busy} disabled={busy}><Plus size={15} /> New style BOM</PrimaryButton>}
                 {canEdit && boms.length > 0 && (
                     <PrimaryButton onClick={() => create((approved || latest).id)} busy={busy} disabled={busy}>
                         <Copy size={15} /> New version (copy of v{(approved || latest).version_no})
@@ -51,7 +51,7 @@ export default function StyleBomsTab({ styleId, canEdit }) {
             {openDraft && canEdit && <p className="text-xs font-bold text-amber-700 mb-2">Version {openDraft.version_no} is still {openDraft.status.replace('_', ' ').toLowerCase()}; you may want to continue that one.</p>}
             <ErrorBox text={error} />
             {boms.length === 0 ? (
-                <p className="text-sm text-slate-400 py-6">No BOM yet for this style.</p>
+                <p className="text-sm text-slate-400 py-6">No style BOM yet for this style.</p>
             ) : (
                 <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg">
                     {boms.map(b => (

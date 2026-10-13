@@ -40,6 +40,20 @@ export default function BomLineEditor({ kind, line, bom, style, tones, fabricIte
     const itemOptions = isTrim
         ? trimItems.filter(t => t.is_active && String(t.trim_type_id) === f.trim_type_id && t.usage_uom === f.uom)
         : fabricItems.filter(x => x.is_active && x.usage_uom === f.uom);
+    // Items the unit hides: the line lists only items counted in its own unit (consumption must match).
+    const UNIT_NAME = { m: 'metres', yd: 'yards', kg: 'kg', pcs: 'pieces' };
+    const hiddenByUnit = (isTrim
+        ? trimItems.filter(t => t.is_active && String(t.trim_type_id) === f.trim_type_id && t.usage_uom !== f.uom)
+        : fabricItems.filter(x => x.is_active && x.usage_uom !== f.uom))
+        .reduce((m, it) => ({ ...m, [it.usage_uom]: (m[it.usage_uom] || 0) + 1 }), {});
+    const unitHint = Object.keys(hiddenByUnit).length ? (
+        <span className="block mt-1 text-[11px] text-amber-700">
+            {Object.entries(hiddenByUnit).map(([u, n]) => (
+                <span key={u} className="mr-2">{n} {isTrim ? 'trim' : 'fabric'} item{n === 1 ? '' : 's'} in {UNIT_NAME[u] || u} — <button type="button" className="font-bold underline" onClick={() => set({ uom: u, items: [] })}>switch to {UNIT_NAME[u] || u}</button></span>
+            ))}
+            <span className="block text-slate-500">Only items counted in the line's unit can be picked (the consumption is in that unit). Switching clears the picks.</span>
+        </span>
+    ) : null;
     const itemLabel = (it) => (isTrim ? `${it.brand} · ${it.code}${it.description ? ` — ${it.description}` : ''}` : `${it.mill} · ${it.article_code} · ${it.shade_code}${it.shade_name ? ` ${it.shade_name}` : ''}`);
 
     const keys = colourKeys(f.colour_rule, bom.colours, tones);
@@ -165,8 +179,9 @@ export default function BomLineEditor({ kind, line, bom, style, tones, fabricIte
                         </Field>
                         <Field label="Unit *">
                             <select className={inputCls} value={f.uom} onChange={e => set({ uom: e.target.value, items: [] })}>
-                                <option value="m">metres</option><option value="kg">kg</option>
+                                <option value="m">metres</option><option value="yd">yards</option><option value="kg">kg</option>
                             </select>
+                            {unitHint}
                         </Field>
                         <div className="sm:col-span-2">
                             <span className="block text-xs font-bold text-slate-600 mb-1">Parts cut from this fabric</span>

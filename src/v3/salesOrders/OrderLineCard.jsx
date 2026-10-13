@@ -18,12 +18,13 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
     const [cells, setCells] = useState(() => toCells(line));
     const [shipDate, setShipDate] = useState(line.ship_date || '');
     const [notes, setNotes] = useState(line.notes || '');
+    const [brand, setBrand] = useState(line.brand || '');   // starts from the style's brand
     const [reason, setReason] = useState('');
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
 
-    const original = useMemo(() => JSON.stringify([toCells(line), line.ship_date || '', line.notes || '']), [line]);
-    const dirty = JSON.stringify([Object.fromEntries(Object.entries(cells).filter(([, v]) => v !== '' && Number(v) !== 0)), shipDate, notes]) !== original;
+    const original = useMemo(() => JSON.stringify([toCells(line), line.ship_date || '', line.notes || '', line.brand || '']), [line]);
+    const dirty = JSON.stringify([Object.fromEntries(Object.entries(cells).filter(([, v]) => v !== '' && Number(v) !== 0)), shipDate, notes, brand]) !== original;
 
     const val = (cid, sid) => Number(cells[keyOf(cid, sid)] || 0);
     const rowTotal = (cid) => line.sizes.reduce((n, s) => n + val(cid, s.size_id), 0);
@@ -54,7 +55,7 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
         setSaving(true); setError('');
         try {
             await onSave({
-                ship_date: shipDate || null, notes, ...(needsReason && { reason }),
+                ship_date: shipDate || null, notes, brand, ...(needsReason && { reason }),
                 qty: Object.entries(cells).filter(([, v]) => v !== '' && Number(v) > 0).map(([k, v]) => {
                     const [garment_colour_id, size_id] = k.split(':');
                     return { garment_colour_id, size_id, qty: Number(v) };
@@ -66,7 +67,7 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
             setSaving(false);
         }
     };
-    const reset = () => { setCells(toCells(line)); setShipDate(line.ship_date || ''); setNotes(line.notes || ''); setReason(''); setError(''); };
+    const reset = () => { setCells(toCells(line)); setShipDate(line.ship_date || ''); setNotes(line.notes || ''); setBrand(line.brand || ''); setReason(''); setError(''); };
 
     return (
         <div className={`bg-white border rounded-xl p-4 ${cancelled ? 'border-slate-200 opacity-60' : dirty ? 'border-indigo-300' : 'border-slate-200'}`}>
@@ -77,7 +78,7 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
                         <span className="font-normal text-slate-500"> {line.style_name}</span>
                     </p>
                     <p className="text-xs text-slate-500">
-                        BOM <Link to={`/v3/boms/${line.bom_id}`} className="font-semibold text-indigo-700 hover:underline">v{line.bom_version}</Link>
+                        Style BOM <Link to={`/v3/boms/${line.bom_id}`} className="font-semibold text-indigo-700 hover:underline">v{line.bom_version}</Link>
                         <Link to={`/v3/boms/${line.bom_id}/trim-card${orderId ? `?order=${orderId}` : ''}`} className="ml-3 inline-flex items-center gap-1 font-semibold text-indigo-700 hover:underline">
                             <ClipboardList size={12} /> Trim card
                         </Link>
@@ -91,6 +92,11 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
                         {cancelled && <span className="ml-2 font-bold text-rose-700">Cancelled: {line.cancelled_reason}</span>}
                     </p>
                 </div>
+                <label className="text-xs font-bold text-slate-600">
+                    Brand
+                    {editable ? <input className={`${inputCls} mt-0.5 w-36`} value={brand} maxLength={60} placeholder={line.style_brand || '—'} onChange={e => setBrand(e.target.value)} />
+                        : <span className="block text-sm font-semibold text-slate-800 mt-0.5">{line.brand || '—'}</span>}
+                </label>
                 <label className="text-xs font-bold text-slate-600">
                     Ship date
                     {editable ? <input type="date" className={`${inputCls} mt-0.5 w-40`} value={shipDate} onChange={e => setShipDate(e.target.value)} />

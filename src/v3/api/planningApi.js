@@ -33,4 +33,7 @@ export const planningApi = {
     updatePrLine: (id, lineId, data) => api.put(`/v3/planning/purchase-requisitions/${id}/lines/${lineId}`, data),
     removePrLine: (id, lineId) => api.delete(`/v3/planning/purchase-requisitions/${id}/lines/${lineId}`),
     prAction: (id, action, reason) => api.post(`/v3/planning/purchase-requisitions/${id}/${action}`, reason ? { reason } : undefined),
+    approvePr: (id, lines) => api.post(`/v3/planning/purchase-requisitions/${id}/approve`, { lines }),   // per-line APPROVE / REDUCE / REJECT
+    closePrLine: (id, lineId, reason) => api.post(`/v3/planning/purchase-requisitions/${id}/lines/${lineId}/close`, { reason }),
+    notedPr: (id) => api.post(`/v3/planning/purchase-requisitions/${id}/noted`),
 };

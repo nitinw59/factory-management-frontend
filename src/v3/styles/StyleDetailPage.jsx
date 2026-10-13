@@ -13,7 +13,7 @@ const TABS = [
     { key: 'sizes', label: 'Sizes' },
     { key: 'parts', label: 'Parts' },
     { key: 'route', label: 'Route' },
-    { key: 'boms', label: 'BOMs' },
+    { key: 'boms', label: 'Style BOMs' },
 ];
 
 const move = (arr, i, d) => {
@@ -47,7 +47,7 @@ export default function StyleDetailPage() {
 
     const apply = useCallback((s) => {
         setStyle(s);
-        setDetails({ style_code: s.style_code, name: s.name, buyer: s.buyer || '', product_type: s.product_type || '', is_active: s.is_active });
+        setDetails({ style_code: s.style_code, name: s.name, buyer: s.buyer || '', product_type: s.product_type || '', brand: s.brand || '', fit: s.fit || '', sam: s.sam != null ? String(Number(s.sam)) : '', is_active: s.is_active });
         setSizeIds(s.sizes.map(x => String(x.size_id)));
         setParts(s.parts.map(p => ({ ...p, id: String(p.id) })));
         setRoute(s.route.map(r => ({ stage_type_id: String(r.stage_type_id), skipped_part_ids: r.skipped_part_ids.map(String) })));
@@ -64,7 +64,7 @@ export default function StyleDetailPage() {
     const savedParts = style?.parts || [];
 
     const dirty = style && {
-        details: JSON.stringify(details) !== JSON.stringify({ style_code: style.style_code, name: style.name, buyer: style.buyer || '', product_type: style.product_type || '', is_active: style.is_active }),
+        details: JSON.stringify(details) !== JSON.stringify({ style_code: style.style_code, name: style.name, buyer: style.buyer || '', product_type: style.product_type || '', brand: style.brand || '', fit: style.fit || '', sam: style.sam != null ? String(Number(style.sam)) : '', is_active: style.is_active }),
         sizes: JSON.stringify(sizeIds) !== JSON.stringify(style.sizes.map(x => String(x.size_id))),
         parts: JSON.stringify(parts.map(p => [p.id || null, p.part_name, p.part_type, p.is_active])) !== JSON.stringify(style.parts.map(p => [String(p.id), p.part_name, p.part_type, p.is_active])),
         route: JSON.stringify(route) !== JSON.stringify(style.route.map(r => ({ stage_type_id: String(r.stage_type_id), skipped_part_ids: r.skipped_part_ids.map(String) }))),
@@ -125,7 +125,12 @@ export default function StyleDetailPage() {
                         <Field label="Style code *"><input className={inputCls} disabled={!canEdit} value={details.style_code} onChange={e => setDetails({ ...details, style_code: e.target.value })} /></Field>
                         <Field label="Style name *"><input className={inputCls} disabled={!canEdit} value={details.name} onChange={e => setDetails({ ...details, name: e.target.value })} /></Field>
                         <Field label="Buyer"><input className={inputCls} disabled={!canEdit} value={details.buyer} onChange={e => setDetails({ ...details, buyer: e.target.value })} /></Field>
-                        <Field label="Product type"><input className={inputCls} disabled={!canEdit} value={details.product_type} onChange={e => setDetails({ ...details, product_type: e.target.value })} /></Field>
+                        <Field label="Style category" hint="e.g. Formal trouser, Jeans."><input className={inputCls} disabled={!canEdit} value={details.product_type} onChange={e => setDetails({ ...details, product_type: e.target.value })} /></Field>
+                        <Field label="Brand" hint="Order lines start with this brand."><input className={inputCls} disabled={!canEdit} maxLength={60} value={details.brand} onChange={e => setDetails({ ...details, brand: e.target.value })} /></Field>
+                        <Field label="Fit" hint="e.g. Slim, Regular."><input className={inputCls} disabled={!canEdit} list="v3-fits" maxLength={40} value={details.fit} onChange={e => setDetails({ ...details, fit: e.target.value })} /><datalist id="v3-fits">{["Slim", "Regular", "Relaxed", "Skinny", "Straight", "Tapered", "Comfort", "Loose"].map(f => <option key={f} value={f} />)}</datalist></Field>
+                        <Field label="SAM *" hint={details.sam ? 'Standard minutes for one garment (from the operation breakdown).' : 'Required — the style BOM can\'t be submitted without it.'}>
+                            <input className={`${inputCls} ${!details.sam ? 'border-amber-400' : ''}`} disabled={!canEdit} type="number" min="0" step="0.01" value={details.sam} onChange={e => setDetails({ ...details, sam: e.target.value })} />
+                        </Field>
                         <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={!canEdit} checked={details.is_active} onChange={e => setDetails({ ...details, is_active: e.target.checked })} /> Active</label>
                     </div>
                 )}

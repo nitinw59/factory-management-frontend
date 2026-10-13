@@ -8,6 +8,8 @@ import { stylesApi } from '../api/stylesApi';
 import { apiError } from '../api/mastersApi';
 import { SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { SOURCE_LABEL, consumptionText, lineDetail, exportTrimCardPdf, exportTrimCardExcel } from './trimCardExport';
+import { buildStyleBomV2, exportBomV2Pdf, exportBomV2Xlsx } from './bomV2';
+import { loadLetterhead } from '../components/letterhead';
 
 const SOURCE_CLS = { EXACT: 'bg-violet-100 text-violet-700', TONE: 'bg-sky-100 text-sky-700', ALL: 'bg-slate-100 text-slate-600' };
 
@@ -83,8 +85,10 @@ export default function TrimCardTab({ bomId, refreshKey }) {
                 )}
                 <div className="ml-auto flex gap-2">
                     <Link to={`/v3/boms/${bomId}/trim-card`} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"><ClipboardList size={14} /> Trim card</Link>
-                    <SecondaryButton onClick={() => exportTrimCardPdf(card)}><FileDown size={14} /> BOM PDF</SecondaryButton>
-                    <SecondaryButton onClick={() => exportTrimCardExcel(card)}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
+                    <SecondaryButton onClick={async () => exportBomV2Pdf(buildStyleBomV2(card), await loadLetterhead())} title="Layout v2: the factory's BOM layout"><FileDown size={14} /> Style BOM v2 PDF</SecondaryButton>
+                    <SecondaryButton onClick={async () => exportBomV2Xlsx(buildStyleBomV2(card), await loadLetterhead()).catch(err => setError(err.message || 'Failed to make the Excel file.'))} title="Layout v2 as Excel"><FileSpreadsheet size={14} /> v2 Excel</SecondaryButton>
+                    <SecondaryButton onClick={async () => exportTrimCardPdf(card, await loadLetterhead())} title="Layout v1 (to be retired)"><FileDown size={14} /> Style BOM PDF (v1)</SecondaryButton>
+                    <SecondaryButton onClick={async () => exportTrimCardExcel(card, await loadLetterhead())}><FileSpreadsheet size={14} /> Excel (v1)</SecondaryButton>
                 </div>
             </div>
             {card.warnings.map((w, i) => <p key={i} className="text-xs font-semibold text-amber-700">{w}</p>)}

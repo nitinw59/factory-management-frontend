@@ -13,12 +13,16 @@ import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from './SalesOrderStatusBadge';
 import OrderLineCard from './OrderLineCard';
+import StylePicker from './StylePicker';
 import OrderTabs from '../orders/OrderTabs';
 import OrderDocumentsTab from './OrderDocumentsTab';
 import { exportPpmTemplate } from './ppmTemplatePdf';
 import { exportPpmTemplateXlsx } from './ppmTemplateXlsx';
 import { planningApi } from '../api/planningApi';
 import { downloadMaterialSheet } from '../planning/materialSheetPdf';
+import { downloadOrderBomV2 } from '../boms/bomV2';
+
+const ORDER_TYPES = ['FOB', 'CMT', 'CM', 'DOMESTIC'];   // sales order type (13 Oct 2026)
 
 const EDITABLE = ['DRAFT', 'REJECTED'];
 const ACTION_LABEL = {
@@ -33,7 +37,6 @@ export default function SalesOrderPage() {
     const [order, setOrder] = useState(null);
     const [perms, setPerms] = useState({ edit: false, approve: false, cancelApproved: false, documents: false });
     const [customers, setCustomers] = useState([]);
-    const [styleOptions, setStyleOptions] = useState(null);
     const [tab, setTab] = useState('lines');
     const [error, setError] = useState('');
     const [problems, setProblems] = useState([]);   // from a refused submit / approve
@@ -92,12 +95,11 @@ export default function SalesOrderPage() {
     const openHeader = () => {
         setFormError('');
         if (!customers.length) salesOrdersApi.customers().then(res => setCustomers(res.data)).catch(() => {});
-        setHeader({ customer_id: String(order.customer_id), buyer_po_no: order.buyer_po_no || '', order_date: order.order_date, notes: order.notes || '', reason: '' });
+        setHeader({ customer_id: String(order.customer_id), buyer_po_no: order.buyer_po_no || '', order_type: order.order_type || 'FOB', order_date: order.order_date, notes: order.notes || '', reason: '' });
     };
     const openAdd = () => {
         setFormError('');
-        salesOrdersApi.styleOptions().then(res => setStyleOptions(res.data)).catch(err => setFormError(apiError(err, 'Failed to load styles.')));
-        setAdding({ style_id: '', ship_date: '', reason: '' });
+        setAdding({ style_id: '', style: null, ship_date: '', reason: '' });
     };
     const submitForm = async (fn, close) => {
         setBusy(true); setFormError('');
@@ -139,7 +141,7 @@ export default function SalesOrderPage() {
                 <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Cancelled</b>{order.cancelled_by_name ? ` by ${order.cancelled_by_name}` : ''}: {order.cancelled_reason}</div>
             )}
             {order.status === 'SUBMITTED' && <p className="text-sm text-amber-700 mb-3">Waiting for a merchandiser to approve. {perms.edit ? 'Withdraw it to make changes.' : ''}</p>}
-            {revising && <p className="text-sm text-emerald-700 mb-3"><Link to={`/v3/planning/orders/${order.id}`} className="font-bold text-indigo-700 hover:underline mr-2">Material requirements →</Link>Approved {order.approved_at ? new Date(order.approved_at).toLocaleString() : ''}{order.approved_by_name ? ` by ${order.approved_by_name}` : ''}. BOM versions are locked.{perms.edit ? ' Changes need a reason and are saved as revisions.' : ''}</p>}
+            {revising && <p className="text-sm text-emerald-700 mb-3"><Link to={`/v3/planning/orders/${order.id}`} className="font-bold text-indigo-700 hover:underline mr-2">Order BOM →</Link>Approved {order.approved_at ? new Date(order.approved_at).toLocaleString() : ''}{order.approved_by_name ? ` by ${order.approved_by_name}` : ''}. BOM versions are locked.{perms.edit ? ' Changes need a reason and are saved as revisions.' : ''}</p>}
 
             {/* Actions for this status and the signed-in user's rights */}
             <div className="flex flex-wrap gap-2 mb-3">
@@ -153,9 +155,19 @@ export default function SalesOrderPage() {
                     {order.status !== 'CANCELLED' && activeLines.length > 0 && (
                         <SecondaryButton disabled={busy} title={revising ? 'Fabric and trims per line and colour (the planned requirement)' : 'Estimate of fabric and trims from the BOMs — final once the order is approved'}
                             onClick={() => { setError(''); downloadMaterialSheet(planningApi, adminApi, order.id).catch(err => setError(apiError(err, 'Failed to make the material PDF.'))); }}>
-                            <FileDown size={14} /> Material PDF{revising ? '' : ' (estimate)'}
+                            <FileDown size={14} /> Order BOM PDF (v1){revising ? '' : ' (estimate)'}
                         </SecondaryButton>
                     )}
+                    {order.status !== 'CANCELLED' && activeLines.length > 0 && <>
+                        <SecondaryButton disabled={busy} title="Layout v2: the factory's order BOM layout (one page per style line)"
+                            onClick={() => { setError(''); downloadOrderBomV2(planningApi, order.id, 'pdf').catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.'))); }}>
+                            <FileDown size={14} /> Order BOM v2 PDF{revising ? '' : ' (estimate)'}
+                        </SecondaryButton>
+                        <SecondaryButton disabled={busy} title="Layout v2 as Excel (one sheet per style line)"
+                            onClick={() => { setError(''); downloadOrderBomV2(planningApi, order.id, 'xlsx').catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.'))); }}>
+                            <FileSpreadsheet size={14} /> v2 Excel
+                        </SecondaryButton>
+                    </>}
                     <SecondaryButton onClick={exportPdf} disabled={busy}><FileDown size={14} /> PDF</SecondaryButton>
                     <SecondaryButton onClick={() => exportOrderExcel(order)}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                 </span>
@@ -172,6 +184,7 @@ export default function SalesOrderPage() {
             <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 flex flex-wrap gap-x-8 gap-y-3 items-start">
                 <div><p className="text-xs font-bold text-slate-500">Customer</p><p className="font-bold text-slate-800">{order.customer_name}</p></div>
                 <div><p className="text-xs font-bold text-slate-500">Buyer PO no.</p><p className="font-semibold text-slate-800">{order.buyer_po_no || '—'}</p></div>
+                <div><p className="text-xs font-bold text-slate-500">Order type</p><p className="font-semibold text-slate-800">{order.order_type === 'DOMESTIC' ? 'Domestic' : order.order_type || 'FOB'}</p></div>
                 <div><p className="text-xs font-bold text-slate-500">Order date</p><p className="font-semibold text-slate-800">{fmtDate(order.order_date)}</p></div>
                 <div><p className="text-xs font-bold text-slate-500">Lines</p><p className="font-semibold text-slate-800">{activeLines.length}</p></div>
                 <div><p className="text-xs font-bold text-slate-500">Pieces</p><p className="font-black text-slate-900">{order.total_qty.toLocaleString('en-IN')}</p></div>
@@ -243,6 +256,11 @@ export default function SalesOrderPage() {
                         </Field>
                         <div className="grid grid-cols-2 gap-3">
                             <Field label="Buyer PO no."><input className={inputCls} value={header.buyer_po_no} onChange={e => setHeader({ ...header, buyer_po_no: e.target.value })} /></Field>
+                            <Field label="Order type *" hint="FOB: we buy all material · CMT: buyer gives fabric · CM: buyer gives fabric and trims.">
+                                <select className={inputCls} value={header.order_type} onChange={e => setHeader({ ...header, order_type: e.target.value })}>
+                                    {ORDER_TYPES.map(t => <option key={t} value={t}>{t === 'DOMESTIC' ? 'Domestic' : t}</option>)}
+                                </select>
+                            </Field>
                             <Field label="Order date *"><input className={inputCls} type="date" value={header.order_date} onChange={e => setHeader({ ...header, order_date: e.target.value })} /></Field>
                         </div>
                         <Field label="Notes"><textarea className={`${inputCls} min-h-[60px]`} value={header.notes} onChange={e => setHeader({ ...header, notes: e.target.value })} /></Field>
@@ -259,20 +277,17 @@ export default function SalesOrderPage() {
 
             {adding && (
                 <Modal title="Add style line" onClose={() => setAdding(null)}>
-                    <div className="space-y-3 w-[min(480px,85vw)]">
-                        <Field label="Style *" hint="Only styles with an approved BOM can be ordered.">
-                            <select className={inputCls} value={adding.style_id} onChange={e => setAdding({ ...adding, style_id: e.target.value })} autoFocus>
-                                <option value="">{styleOptions ? '— pick —' : 'Loading…'}</option>
-                                {(styleOptions || []).map(s => <option key={s.id} value={s.id}>{s.style_code} — {s.name} (BOM v{s.bom_version}, {s.colour_count} colours, {s.size_count} sizes)</option>)}
-                            </select>
+                    <div className="space-y-3 w-[min(640px,90vw)]">
+                        <Field label="Style *" hint="Only styles with an approved style BOM can be ordered.">
+                            <StylePicker customerId={order.customer_id} value={adding.style} autoFocus
+                                onChange={(st) => setAdding({ ...adding, style: st, style_id: st ? String(st.id) : '' })} />
                         </Field>
-                        {styleOptions && styleOptions.length === 0 && <p className="text-xs text-amber-700">No style has an approved BOM yet.</p>}
                         <Field label={revising ? 'Ship date *' : 'Ship date'}><input className={inputCls} type="date" value={adding.ship_date} onChange={e => setAdding({ ...adding, ship_date: e.target.value })} /></Field>
                         {revising && <Field label="Reason *" hint="The order is approved; adding a line is saved as a revision, and the line's BOM is locked now."><input className={inputCls} value={adding.reason} onChange={e => setAdding({ ...adding, reason: e.target.value })} /></Field>}
                         <ErrorBox text={formError} />
                         <div className="flex justify-end gap-2">
                             <SecondaryButton onClick={() => setAdding(null)}>Cancel</SecondaryButton>
-                            <PrimaryButton onClick={() => submitForm(() => salesOrdersApi.addLine(id, adding), () => setAdding(null))} busy={busy}
+                            <PrimaryButton onClick={() => submitForm(() => salesOrdersApi.addLine(id, { style_id: adding.style_id, ship_date: adding.ship_date, reason: adding.reason }), () => setAdding(null))} busy={busy}
                                 disabled={busy || !adding.style_id || (revising && (!adding.ship_date || !adding.reason.trim()))}>Add line</PrimaryButton>
                         </div>
                     </div>

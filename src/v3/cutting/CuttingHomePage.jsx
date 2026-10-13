@@ -5,7 +5,7 @@ import { cuttingApi } from '../api/cuttingApi';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
-import { CUT_STATUS, fmt, useCuttingPermissions } from './cutShared';
+import { CUT_STATUS, useCuttingPermissions } from './cutShared';
 
 export default function CuttingHomePage() {
     const perms = useCuttingPermissions();
@@ -42,7 +42,7 @@ export default function CuttingHomePage() {
                                     <td className="px-3 py-2.5 whitespace-nowrap">{fmtDate(l.ship_date)}</td>
                                     <td className="px-3 py-2.5 text-right tabular-nums">{l.ordered}</td>
                                     <td className={`px-3 py-2.5 text-right tabular-nums font-bold ${l.cut >= l.ordered && l.ordered ? 'text-emerald-700' : ''}`}>{l.cut}</td>
-                                    <td className="px-3 py-2.5 text-right tabular-nums">{l.fabric_issued_m ? `${fmt(l.fabric_issued_m)} m` : '—'}</td>
+                                    <td className="px-3 py-2.5 text-right tabular-nums">{l.fabric_issued || '—'}</td>
                                     <td className="px-3 py-2.5 text-right tabular-nums">{l.batches}</td>
                                     <td className="px-3 py-2.5 text-right whitespace-nowrap">{perms.manage && <Link to={`/v3/cutting/lines/${l.line_id}/new`} className="text-sm font-semibold text-indigo-700 hover:underline">New batch →</Link>}</td>
                                 </tr>

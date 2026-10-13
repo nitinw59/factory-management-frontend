@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { Inbox } from 'lucide-react';
 import { PageHeader, ErrorBox, Loading } from '../components/ui';
 import { workApi } from '../api/workApi';
+import { useV3Live } from '../live';
 import { apiError } from '../api/mastersApi';
 
 const KIND_CLS = { BOM: 'bg-violet-100 text-violet-800', ORDER: 'bg-sky-100 text-sky-800', REQUISITION: 'bg-amber-100 text-amber-800', GRN: 'bg-emerald-100 text-emerald-800' };
@@ -24,7 +25,9 @@ export default function ApprovalsPage() {
     const [data, setData] = useState(null);
     const [type, setType] = useState('');
     const [error, setError] = useState('');
-    useEffect(() => { workApi.approvals().then(res => setData(res.data)).catch(err => setError(apiError(err, 'Failed to load approvals.'))); }, []);
+    const load = () => workApi.approvals().then(res => setData(res.data)).catch(err => setError(apiError(err, 'Failed to load approvals.')));
+    useEffect(() => { load(); }, []);
+    useV3Live(load);   // live: the list follows approvals as they happen
     if (!data) return error ? <ErrorBox text={error} /> : <Loading />;
     const items = data.items.filter(i => !type || i.type === type);
     const count = (t) => data.items.filter(i => i.type === t).length;

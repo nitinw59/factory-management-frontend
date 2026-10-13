@@ -165,7 +165,7 @@ export function buildCard(card, s, { order = null, company = null } = {}) {
     if (s.header.so) header.push(['S.O. no.', order ? `${order.order_no}${order.buyer_po_no ? ` · PO ${order.buyer_po_no}` : ''}` : '']);
     if (s.header.date) header.push(['Date', dmy(new Date())]);
     if (s.header.sizes) header.push(['Sizes', card.sizes.map(z => z.name).join(', ')]);
-    header.push(['BOM', `v${card.bom.version_no} · ${String(card.bom.status).replace('_', ' ').toLowerCase()}`]);
+    header.push(['Style BOM', `v${card.bom.version_no} · ${String(card.bom.status).replace('_', ' ').toLowerCase()}`]);
 
     const grid = [];
     const head = s.fabric_header && s.header_fabric_key ? lines.get(s.header_fabric_key) : null;
@@ -201,7 +201,12 @@ export function buildCard(card, s, { order = null, company = null } = {}) {
 
     const bottom = s.bottom.filter(b => b.show).map(b => ({ label: b.label, text: b.text || '' }));
     const name = company?.trade_name || company?.legal_name || '';
-    const sub = [company?.city ? `${company.city}${company.legal_name && company.trade_name && company.legal_name !== company.trade_name ? ',' : ''}` : null, company?.legal_name && company?.trade_name && company.legal_name !== company.trade_name ? `(A unit of ${company.legal_name})` : null].filter(Boolean).join(' ');
+    // Same line as the letterhead on the PDF / Excel: legal name (when different), address, GSTIN.
+    const sub = [
+        company?.trade_name && company?.legal_name && company.legal_name !== company.trade_name ? company.legal_name : null,
+        [company?.address_line1, company?.address_line2, company?.city, company?.state, company?.pin_code].filter(Boolean).join(', '),
+        company?.gstin ? `GSTIN ${company.gstin}` : null,
+    ].filter(Boolean).join(' · ');
     return {
         title: s.title || 'TRIM CARD',
         company: s.header.company && name ? { name, sub } : null,

@@ -1,6 +1,6 @@
 // Shared bits of the order tracker pages: phase names and the red / amber / green / grey dot.
 export const PHASES = [
-    { key: 'bom', label: 'BOM' },
+    { key: 'bom', label: 'Style BOM' },
     { key: 'materials', label: 'Materials' },
     { key: 'issue', label: 'Issue' },
     { key: 'cutting', label: 'Cutting' },

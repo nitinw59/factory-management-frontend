@@ -2,7 +2,7 @@
 // "New order" for the accounts team. Lines and quantities are edited on the
 // order's own page.
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, ChevronRight, FileSpreadsheet } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { salesOrdersApi } from '../api/salesOrdersApi';
@@ -10,6 +10,8 @@ import { apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import SalesOrderStatusBadge, { SO_STATUS, fmtDate } from './SalesOrderStatusBadge';
 import { exportOrderListExcel } from './orderSheetExport';
+
+const ORDER_TYPES = ['FOB', 'CMT', 'CM', 'DOMESTIC'];   // sales order type (13 Oct 2026)
 
 const today = () => {
     const d = new Date();
@@ -20,7 +22,9 @@ export default function SalesOrdersPage() {
     const navigate = useNavigate();
     const [rows, setRows] = useState(null);
     const [perms, setPerms] = useState({ edit: false });
-    const [status, setStatus] = useState('');
+    const [params, setParams] = useSearchParams();
+    const status = params.get('status') || '';   // My work → ?status=DRAFT,REJECTED
+    const setStatus = (s) => setParams(s ? { status: s } : {}, { replace: true });
     const [search, setSearch] = useState('');
     const [error, setError] = useState('');
     const [customers, setCustomers] = useState([]);
@@ -60,11 +64,12 @@ export default function SalesOrdersPage() {
                 actions={<>
                     <select className={`${inputCls} w-40`} value={status} onChange={e => setStatus(e.target.value)} aria-label="Filter by status">
                         <option value="">All statuses</option>
+                        <option value="DRAFT,REJECTED">To finish (draft + rejected)</option>
                         {Object.entries(SO_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                     </select>
                     <SearchInput value={search} onChange={setSearch} placeholder="Order no., buyer PO, customer, style" />
                     <SecondaryButton onClick={() => exportOrderListExcel(rows || [])} disabled={!rows?.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
-                    {perms.edit && <PrimaryButton onClick={() => { setFormError(''); setCreating({ customer_id: '', buyer_po_no: '', order_date: today(), notes: '' }); }}><Plus size={15} /> New order</PrimaryButton>}
+                    {perms.edit && <PrimaryButton onClick={() => { setFormError(''); setCreating({ customer_id: '', buyer_po_no: '', order_type: 'FOB', order_date: today(), notes: '' }); }}><Plus size={15} /> New order</PrimaryButton>}
                 </>}
             />
             <ErrorBox text={error} />
@@ -83,7 +88,7 @@ export default function SalesOrdersPage() {
                                 <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
                                     <td className="px-4 py-2.5">
                                         <Link to={`/v3/sales-orders/${r.id}`} className="font-semibold text-indigo-700 hover:underline whitespace-nowrap">{r.order_no}</Link>
-                                        <span className="block text-xs text-slate-500">{fmtDate(r.order_date)}{r.buyer_po_no ? ` · PO ${r.buyer_po_no}` : ''}</span>
+                                        <span className="block text-xs text-slate-500">{fmtDate(r.order_date)}{r.buyer_po_no ? ` · PO ${r.buyer_po_no}` : ''}{r.order_type && r.order_type !== 'FOB' ? ` · ${r.order_type}` : ''}</span>
                                     </td>
                                     <td className="px-4 py-2.5 text-slate-700">{r.customer_name}</td>
                                     <td className="px-4 py-2.5 text-slate-600 text-xs">{r.styles || '—'}<span className="block text-slate-400">{r.line_count} line{r.line_count === 1 ? '' : 's'}</span></td>
@@ -110,6 +115,11 @@ export default function SalesOrdersPage() {
                         </Field>
                         <div className="grid grid-cols-2 gap-3">
                             <Field label="Buyer PO no."><input className={inputCls} value={creating.buyer_po_no} onChange={e => setCreating({ ...creating, buyer_po_no: e.target.value })} /></Field>
+                            <Field label="Order type *" hint="FOB: we buy all material · CMT: buyer gives fabric · CM: buyer gives fabric and trims.">
+                                <select className={inputCls} value={creating.order_type} onChange={e => setCreating({ ...creating, order_type: e.target.value })}>
+                                    {ORDER_TYPES.map(t => <option key={t} value={t}>{t === 'DOMESTIC' ? 'Domestic' : t}</option>)}
+                                </select>
+                            </Field>
                             <Field label="Order date *"><input className={inputCls} type="date" value={creating.order_date} onChange={e => setCreating({ ...creating, order_date: e.target.value })} /></Field>
                         </div>
                         <Field label="Notes"><textarea className={`${inputCls} min-h-[60px]`} value={creating.notes} onChange={e => setCreating({ ...creating, notes: e.target.value })} /></Field>

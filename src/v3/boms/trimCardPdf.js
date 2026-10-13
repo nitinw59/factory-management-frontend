@@ -2,13 +2,14 @@
 // A4 landscape, plain ruled grid (black 1px lines, no fills), like the factory's paper card.
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { drawPdfLetterhead } from '../components/letterhead';
 
 const PX = 0.2646;                                   // 1 px in mm
 const PAD = { top: 1.2, bottom: 1.2, left: 1.6, right: 1.6 };
 const GRID = { lineWidth: PX * 1.5, lineColor: [0, 0, 0], fillColor: false, textColor: [0, 0, 0], valign: 'top', cellPadding: PAD, fontSize: 9 };
 const RED = [190, 18, 60];
 
-export function exportTrimCardFactoryPdf(m) {
+export function exportTrimCardFactoryPdf(m, lh = null) {
     const doc = new jsPDF({ orientation: 'landscape' });
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
@@ -16,15 +17,16 @@ export function exportTrimCardFactoryPdf(m) {
     const W = pageW - margin.left - margin.right;
     const base = { theme: 'plain', margin, tableWidth: W, styles: { ...GRID }, headStyles: { ...GRID, fontStyle: 'bold' }, bodyStyles: { ...GRID }, rowPageBreak: 'avoid' };
 
-    // Title strip: TRIM CARD left, company centre.
-    let y = margin.top + 5;
-    doc.setFont(undefined, 'bold'); doc.setFontSize(15); doc.text(m.title, margin.left, y);
-    if (m.company) {
+    // Company letterhead (logo + name + address) when "Company name" is ticked, then TRIM CARD.
+    const withLh = m.company && lh;   // company left, TRIM CARD right
+    let y = withLh ? drawPdfLetterhead(doc, lh, { x: margin.left, y: 5, title: m.title }) - 3 : margin.top + 5;
+    if (!withLh) { doc.setFont(undefined, 'bold'); doc.setFontSize(15); doc.text(m.title, margin.left, y); }
+    if (m.company && !lh) {
         doc.setFontSize(13); doc.text(m.company.name, pageW / 2, y, { align: 'center' });
         if (m.company.sub) { doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.text(m.company.sub, pageW / 2, y + 4.5, { align: 'center' }); }
     }
     doc.setFont(undefined, 'normal');
-    y += m.company?.sub ? 8 : 4;
+    y += m.company?.sub && !lh ? 8 : 4;
 
     // Header fields: label / value pairs, up to three pairs a row.
     if (m.header.length) {
