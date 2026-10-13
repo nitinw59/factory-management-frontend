@@ -32,7 +32,7 @@ export default function ReadinessDashboardPage() {
 
     return (
         <div>
-            <PageHeader title="Material readiness" subtitle="Approved orders, red first. Ready = every fabric and trim item allocated from stock in hand. Only ready orders, or ones a factory admin releases, can be cut." />
+            <PageHeader title="Material readiness" subtitle="Approved orders, red first. Ready = every fabric and trim item allocated from stock in hand. Only ready orders, or ones the merchandiser or factory admin releases (with a reason), can be cut." />
             <ErrorBox text={error} />
             {!rows ? <Loading /> : <>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
@@ -48,7 +48,7 @@ export default function ReadinessDashboardPage() {
                     </div>
                 </div>
                 <p className="mb-3 text-xs text-slate-600 flex items-start gap-1.5"><Info size={13} className="mt-0.5 shrink-0" />
-                    Allocate stock from Material position (fabric comes from the rolls in Masters → Fabric stock). A factory admin can release an urgent, not-ready order for cutting from its requirements page.</p>
+                    Allocate stock from Material position (fabric comes from the rolls in Masters → Fabric stock). The merchandiser or factory admin can release an urgent, not-ready order for cutting from its requirements page.</p>
                 <div className="flex flex-wrap items-center gap-2 mb-3">
                     <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={status} onChange={e => setStatus(e.target.value)} aria-label="Filter by status">
                         <option value="">All statuses</option>

@@ -5,7 +5,9 @@
 // themselves when all their pieces are final at the stage.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Truck, ArrowRightLeft } from 'lucide-react';
+import { Truck, ArrowRightLeft, Package, ArrowRight } from 'lucide-react';
+import { trimKitsApi } from '../api/trimKitsApi';
+import { useV3Live } from '../live';
 import Modal from '../../shared/Modal';
 import { productionApi } from '../api/productionApi';
 import { apiError } from '../api/mastersApi';
@@ -25,6 +27,10 @@ export default function LineLoadingPage() {
     const [error, setError] = useState('');
     const [msg, setMsg] = useState('');
     const [busy, setBusy] = useState(false);
+    const [kits, setKits] = useState(null);    // trim kits ready for pickup (13 Oct 2026)
+    const loadKits = useCallback(() => trimKitsApi.list({ status: 'READY' }).then(res => setKits(res.data)).catch(() => setKits(null)), []);
+    useEffect(() => { loadKits(); }, [loadKits]);
+    useV3Live(loadKits);
     useEffect(() => {
         productionApi.permissions().then(res => setPerms(res.data)).catch(() => {});
         productionApi.station().then(res => {
@@ -51,6 +57,14 @@ export default function LineLoadingPage() {
         <div>
             <PageHeader title="Line loading" subtitle="Load cut batches onto lines, size by size. A size loads only when its pieces are cleared at the earlier stages; the line's WIP limit (2.0) applies."
                 actions={<select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={stageId} onChange={e => setStageId(e.target.value)} aria-label="Stage">{stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>} />
+            {kits?.length > 0 && (
+                <Link to="/v3/trim-kits?status=READY" className="flex items-center gap-3 mb-3 rounded-xl border border-emerald-200 bg-emerald-50 hover:border-emerald-400 px-4 py-3">
+                    <Package size={20} className="text-emerald-700" />
+                    <span className="font-black text-slate-800">{kits.length} trim kit{kits.length === 1 ? '' : 's'} ready for pickup</span>
+                    <span className="text-xs text-slate-600 hidden sm:inline">{kits.slice(0, 3).map(k => `${k.kit_no} (${k.order_no}${k.batch_code ? ` · ${k.batch_code}` : ''})`).join(', ')}{kits.length > 3 ? ' …' : ''} — count and sign</span>
+                    <ArrowRight size={16} className="ml-auto text-slate-400" />
+                </Link>
+            )}
             <div className="flex flex-wrap gap-2 mb-3">{lines.map(l => (
                 <span key={l.id} className={`text-xs px-2 py-1 rounded border ${l.wip_limit != null && l.open_batches >= l.wip_limit ? 'bg-rose-50 border-rose-300 text-rose-800' : 'bg-white border-slate-200 text-slate-700'}`}>{l.name}: {l.open_batches}{l.wip_limit != null ? ` / ${l.wip_limit}` : ''} batches</span>
             ))}</div>

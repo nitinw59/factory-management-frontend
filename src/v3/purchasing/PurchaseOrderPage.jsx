@@ -1,10 +1,12 @@
 // One purchase order: supplier and terms, lines (qty, rate, GST, delivery,
 // what each covers), totals with CGST + SGST or IGST, issue / revise / cancel,
 // documents, history, PDF / Excel. Draft: free editing. Issued: every change
-// needs a reason and becomes a revision.
+// needs a reason and becomes a revision. Quantity with no requisition (direct items, or a line raised above
+// its requisitions) needs a reason per line and factory admin approval: Send for approval → Approve & issue,
+// or sent back to draft with the approver's reason.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Send, Ban, Pencil, Trash2, Plus, FileDown, FileSpreadsheet, Upload, Info, PackageOpen, PackageX } from 'lucide-react';
+import { ArrowLeft, Send, Ban, Pencil, Trash2, Plus, FileDown, FileSpreadsheet, Upload, Info, PackageOpen, PackageX, ShieldCheck, Undo2, PackagePlus } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { purchasingApi } from '../api/purchasingApi';
 import { adminApi } from '../../api/adminApi';
@@ -12,23 +14,28 @@ import { API_BASE_URL } from '../../utils/api';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
-import { PO_STATUS, inr, amountInWords, exportPoPdf, exportPoExcel } from './poShared';
+import { PO_STATUS, EXTRA_REASONS, inr, amountInWords, exportPoPdf, exportPoExcel } from './poShared';
 import RequisitionLinePicker from './RequisitionLinePicker';
+import DirectItemsEditor, { directProblem, directPayload } from './DirectItemsEditor';
 import { GRN_STATUS } from './grnShared';
 
 const fmt = (v, uom) => Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 3 });
-const ACTION = { CREATED: 'Created', EDITED: 'Edited', ISSUED: 'Issued', REVISED: 'Revised', CANCELLED: 'Cancelled', SHORT_CLOSED: 'Short-closed', DOCUMENT: 'Document', RECEIPT: 'Goods received', RETURNED: 'Returned to supplier' };
+const ACTION = { CREATED: 'Created', EDITED: 'Edited', ISSUED: 'Issued', REVISED: 'Revised', CANCELLED: 'Cancelled', SHORT_CLOSED: 'Short-closed', DOCUMENT: 'Document', RECEIPT: 'Goods received', RETURNED: 'Returned to supplier',
+    SENT: 'Sent for approval', APPROVED: 'Approved', REJECTED: 'Sent back' };
+// Whole purchase units the requisitions on a line need (the server's rule).
+const needUnits = (l) => (l.covered > 0 ? Math.ceil(Math.round((l.covered / l.factor) * 1000) / 1000 - 1e-9) : 0);
 
 export default function PurchaseOrderPage() {
     const { id } = useParams();
     const [po, setPo] = useState(null);
     const [canManage, setCanManage] = useState(false);
     const [canReceive, setCanReceive] = useState(false);
+    const [canApprove, setCanApprove] = useState(false);
     const navigate = useNavigate();
     const [error, setError] = useState('');
     const [lineEdit, setLineEdit] = useState(null);
     const [headerEdit, setHeaderEdit] = useState(null);
-    const [adding, setAdding] = useState(null);     // { lines, picks, reason }
+    const [adding, setAdding] = useState(null);     // { mode: 'pr' | 'direct', lines, picks, direct, reason }
     const [ask, setAsk] = useState(null);           // { title, confirm, run(reason) }
     const [askText, setAskText] = useState('');
     const [docForm, setDocForm] = useState({ file: null, name: '' });
@@ -36,7 +43,7 @@ export default function PurchaseOrderPage() {
     const [formError, setFormError] = useState('');
 
     const load = useCallback(() => purchasingApi.order(id).then(res => setPo(res.data)).catch(err => setError(apiError(err, 'Failed to load the purchase order.'))), [id]);
-    useEffect(() => { load(); purchasingApi.permissions().then(res => { setCanManage(res.data.manage); setCanReceive(res.data.receive); }).catch(() => {}); }, [load]);
+    useEffect(() => { load(); purchasingApi.permissions().then(res => { setCanManage(res.data.manage); setCanReceive(res.data.receive); setCanApprove(!!res.data.approve); }).catch(() => {}); }, [load]);
 
     if (!po) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
     const editable = canManage && ['DRAFT', 'ISSUED'].includes(po.status);
@@ -44,6 +51,10 @@ export default function PurchaseOrderPage() {
     const intra = po.tax_mode === 'INTRA';
     const receivable = ['ISSUED', 'PARTLY_RECEIVED'].includes(po.status);
     const anyReceived = po.lines.some(l => l.received_qty > 0 || l.pending_qty > 0);
+    const editLine = (l) => { setFormError(''); setLineEdit({ line: l, qty: String(l.qty), rate: String(l.rate), gst_pct: String(l.gst_pct), delivery_date: l.delivery_date || '', notes: l.notes || '', reason: '', extra_reason: l.extra_reason || '', extra_note: l.extra_note || '' }); };
+    const pending = po.status === 'PENDING_APPROVAL';
+    const extraLines = po.lines.filter(l => l.extra_qty > 0);
+    const STICKY = 'sticky right-0 bg-white shadow-[-6px_0_6px_-6px_rgba(15,23,42,0.15)]';   // line actions stay in view when the table scrolls
 
     const run = async (fn, close) => {
         setBusy(true); setFormError(''); setError('');
@@ -57,7 +68,7 @@ export default function PurchaseOrderPage() {
     };
     const openAdd = () => {
         setFormError('');
-        setAdding({ lines: null, picks: new Map(), reason: '' });
+        setAdding({ mode: 'pr', lines: null, picks: new Map(), direct: [], reason: '' });
         purchasingApi.openRequisitionLines().then(res => setAdding(a => (a ? { ...a, lines: res.data } : a))).catch(err => setFormError(apiError(err, 'Failed to load.')));
     };
     const upload = () => run(() => purchasingApi.uploadDocument(id, docForm.file, docForm.name), () => setDocForm({ file: null, name: '' }));
@@ -73,15 +84,34 @@ export default function PurchaseOrderPage() {
             </div>
             {po.status === 'CANCELLED' && <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Cancelled</b>{po.cancelled_by_name ? ` by ${po.cancelled_by_name}` : ''}: {po.cancelled_reason}</div>}
             {po.status === 'SHORT_CLOSED' && <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Short-closed</b> — the rest of this PO is no longer expected.</div>}
+            {pending && (
+                <div className="mb-3 text-sm bg-rose-50 border border-rose-200 text-rose-900 rounded-lg px-3 py-2">
+                    <b>Waiting for factory admin approval</b>{po.approval_requested_by_name ? ` — sent by ${po.approval_requested_by_name}` : ''}{po.approval_requested_at ? ` on ${new Date(po.approval_requested_at).toLocaleString()}` : ''}. {extraLines.length} line(s) have quantity with no requisition. No changes until it is approved or taken back.
+                </div>
+            )}
+            {po.status === 'DRAFT' && po.approval_rejected_reason && (
+                <div className="mb-3 text-sm bg-amber-50 border border-amber-300 text-amber-900 rounded-lg px-3 py-2">
+                    <b>Sent back</b>{po.approval_rejected_by_name ? ` by ${po.approval_rejected_by_name}` : ''}: {po.approval_rejected_reason} — change it and send it again.
+                </div>
+            )}
+            {po.status === 'DRAFT' && po.needs_approval && !po.approval_rejected_reason && (
+                <p className="text-sm text-amber-800 mb-3">{extraLines.length} line(s) have quantity with no requisition — {canApprove ? 'issuing it records your approval.' : 'it needs factory admin approval before it is issued.'}</p>
+            )}
+            {issued && po.approved_by_name && <p className="text-sm text-emerald-700 mb-1">Approved by {po.approved_by_name}{po.approved_at ? ` on ${new Date(po.approved_at).toLocaleString()}` : ''} (quantity with no requisition).</p>}
             {issued && <p className="text-sm text-indigo-700 mb-3">Issued {new Date(po.issued_at).toLocaleString()}{po.issued_by_name ? ` by ${po.issued_by_name}` : ''}. Changes need a reason and become revisions.</p>}
 
             <div className="flex flex-wrap gap-2 mb-3">
-                {canManage && po.status === 'DRAFT' && <PrimaryButton onClick={() => { if (window.confirm(`Issue ${po.po_no} to ${po.supplier_name}?`)) run(() => purchasingApi.issue(id)); }} busy={busy} disabled={busy}><Send size={14} /> Issue to supplier</PrimaryButton>}
+                {canManage && po.status === 'DRAFT' && (!po.needs_approval || canApprove) && <PrimaryButton onClick={() => { if (window.confirm(`${po.needs_approval ? 'Approve and issue' : 'Issue'} ${po.po_no} to ${po.supplier_name}?`)) run(() => purchasingApi.issue(id)); }} busy={busy} disabled={busy}>{po.needs_approval ? <ShieldCheck size={14} /> : <Send size={14} />} {po.needs_approval ? 'Approve & issue' : 'Issue to supplier'}</PrimaryButton>}
+                {canManage && po.status === 'DRAFT' && po.needs_approval && !canApprove && <PrimaryButton onClick={() => { if (window.confirm(`Send ${po.po_no} to the factory admin for approval?`)) run(() => purchasingApi.sendForApproval(id)); }} busy={busy} disabled={busy}><Send size={14} /> Send for approval</PrimaryButton>}
+                {canApprove && pending && <PrimaryButton onClick={() => { if (window.confirm(`Approve ${po.po_no} and issue it to ${po.supplier_name}?`)) run(() => purchasingApi.approve(id)); }} busy={busy} disabled={busy}><ShieldCheck size={14} /> Approve & issue</PrimaryButton>}
+                {canApprove && pending && <SecondaryButton onClick={() => askReason({ title: `Send ${po.po_no} back`, confirm: 'Send back', hint: 'It goes back to draft; the purchase manager sees your reason.', run: (r) => purchasingApi.reject(id, r) })}><Ban size={14} /> Send back</SecondaryButton>}
+                {canManage && pending && <SecondaryButton onClick={() => run(() => purchasingApi.recall(id))}><Undo2 size={14} /> Take back to change</SecondaryButton>}
                 {editable && <SecondaryButton onClick={openAdd}><Plus size={14} /> Add requisition lines</SecondaryButton>}
+                {editable && (!issued || canApprove) && <SecondaryButton onClick={() => { setFormError(''); setAdding({ mode: 'direct', direct: [], reason: '' }); }}><PackagePlus size={14} /> Add item (no requisition)</SecondaryButton>}
                 {editable && <SecondaryButton onClick={() => { setFormError(''); setHeaderEdit({ delivery_date: po.delivery_date || '', terms: po.terms || '', notes: po.notes || '', reason: '' }); }}><Pencil size={14} /> Delivery / terms</SecondaryButton>}
                 {canReceive && receivable && <PrimaryButton onClick={() => navigate(`/v3/purchasing/receive/${id}`)}><PackageOpen size={14} /> Receive goods</PrimaryButton>}
                 {canManage && po.status === 'PARTLY_RECEIVED' && <SecondaryButton onClick={() => askReason({ title: `Short-close ${po.po_no}`, confirm: 'Short-close', hint: 'The rest is no longer expected from the supplier. Planning stops counting it as incoming; the open requisition quantity can go on a new PO.', run: (r) => purchasingApi.shortClose(id, r) })}><PackageX size={14} /> Short-close</SecondaryButton>}
-                {editable && !anyReceived && <SecondaryButton onClick={() => askReason({ title: `Cancel ${po.po_no}`, confirm: 'Cancel purchase order', run: (r) => purchasingApi.cancel(id, r) })}><Ban size={14} /> Cancel</SecondaryButton>}
+                {(editable || (canManage && pending)) && !anyReceived && <SecondaryButton onClick={() => askReason({ title: `Cancel ${po.po_no}`, confirm: 'Cancel purchase order', run: (r) => purchasingApi.cancel(id, r) })}><Ban size={14} /> Cancel</SecondaryButton>}
                 <span className="ml-auto flex gap-2">
                     <SecondaryButton onClick={exportPdf}><FileDown size={14} /> PDF</SecondaryButton>
                     <SecondaryButton onClick={() => exportPoExcel(po)}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
@@ -110,7 +140,7 @@ export default function PurchaseOrderPage() {
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-3">
                 <table className="w-full text-sm min-w-[1050px]">
                     <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                        <tr className="text-right"><th className="px-3 py-2.5 text-left">#</th><th className="px-3 py-2.5 text-left">Item</th><th className="px-3 py-2.5">Qty</th><th className="px-3 py-2.5">Rate (₹)</th><th className="px-3 py-2.5">Taxable</th><th className="px-3 py-2.5">GST</th><th className="px-3 py-2.5">Amount</th><th className="px-3 py-2.5 text-left">Delivery</th><th className="px-3 py-2.5 text-left">Covers</th>{editable && <th className="px-3 py-2.5 w-16" />}</tr>
+                        <tr className="text-right"><th className="px-3 py-2.5 text-left">#</th><th className="px-3 py-2.5 text-left">Item</th><th className="px-3 py-2.5">Qty</th><th className="px-3 py-2.5">Rate (₹)</th><th className="px-3 py-2.5">Taxable</th><th className="px-3 py-2.5">GST</th><th className="px-3 py-2.5">Amount</th><th className="px-3 py-2.5 text-left">Delivery</th><th className="px-3 py-2.5 text-left">Covers</th>{editable && <th className={`px-3 py-2.5 text-left bg-slate-50 ${STICKY}`}>Line</th>}</tr>
                     </thead>
                     <tbody>
                         {po.lines.length === 0 && <tr><td colSpan={10} className="px-4 py-6 text-center text-slate-400">No lines. Add approved requisition lines.</td></tr>}
@@ -119,10 +149,15 @@ export default function PurchaseOrderPage() {
                                 <td className="px-3 py-2.5 text-left">{l.line_no}</td>
                                 <td className="px-3 py-2.5 text-left"><span className="font-semibold text-slate-800">{l.label}</span>
                                     <span className="block text-xs text-slate-500">{l.type_name}{l.hsn_code ? ` · HSN ${l.hsn_code}` : ' · no HSN'}{l.notes ? ` · ${l.notes}` : ''}</span>
-                                    <span className="block text-[11px] text-slate-400">{l.requisitions.map(r => `${r.pr_no}/${r.pr_line_no}`).join(', ')}</span></td>
-                                <td className="px-3 py-2.5 whitespace-nowrap"><b>{fmt(l.qty, 'm')}</b> {l.purchase_uom}<span className="block text-[11px] text-slate-500">= {fmt(l.usage_qty, l.uom)} {l.uom}</span>
+                                    <span className="block text-[11px] text-slate-400">{l.requisitions.map(r => `${r.pr_no}/${r.pr_line_no}`).join(', ')}</span>
+                                    {l.extra_qty > 0 && (
+                                        <span className="mt-1 inline-block text-[11px] font-semibold bg-amber-50 border border-amber-200 text-amber-800 rounded px-1.5 py-0.5">
+                                            {l.direct ? 'No requisition' : `+${fmt(l.extra_qty, 'm')} ${l.purchase_uom} beyond requisitions`} · {l.extra_reason_label || 'reason needed'}{l.extra_note ? ` — ${l.extra_note}` : ''}
+                                        </span>
+                                    )}</td>
+                                <td className={`px-3 py-2.5 whitespace-nowrap ${editable ? 'cursor-pointer hover:bg-indigo-50' : ''}`} onClick={editable ? () => editLine(l) : undefined} title={editable ? 'Edit quantity, rate, GST, delivery' : undefined}><b>{fmt(l.qty, 'm')}</b> {l.purchase_uom}<span className="block text-[11px] text-slate-500">= {fmt(l.usage_qty, l.uom)} {l.uom}</span>
                                     {(l.received_qty > 0 || l.pending_qty > 0) && <span className={`block text-[11px] font-semibold ${l.received_qty + 0.0005 >= l.qty ? 'text-emerald-700' : 'text-amber-700'}`}>received {fmt(l.received_qty, 'm')}{l.pending_qty > 0 ? ` · ${fmt(l.pending_qty, 'm')} awaiting approval` : ''}</span>}</td>
-                                <td className={`px-3 py-2.5 ${l.rate > 0 ? '' : 'text-rose-700 font-bold'}`}>{l.rate > 0 ? inr(l.rate) : 'set rate'}</td>
+                                <td className={`px-3 py-2.5 ${l.rate > 0 ? '' : 'text-rose-700 font-bold'} ${editable ? 'cursor-pointer hover:bg-indigo-50' : ''}`} onClick={editable ? () => editLine(l) : undefined}>{l.rate > 0 ? inr(l.rate) : 'set rate'}</td>
                                 <td className="px-3 py-2.5">{inr(l.value)}</td>
                                 <td className="px-3 py-2.5 whitespace-nowrap">{l.gst_pct}%<span className="block text-[11px] text-slate-500">{intra ? `${inr(l.cgst)} + ${inr(l.sgst)}` : inr(l.igst)}</span></td>
                                 <td className="px-3 py-2.5 font-bold">{inr(l.total)}</td>
@@ -132,13 +167,13 @@ export default function PurchaseOrderPage() {
                                     {l.uncommitted > 0 && <p className="text-sky-700">+{fmt(l.uncommitted, l.uom)} uncommitted</p>}
                                 </td>
                                 {editable && (
-                                    <td className="px-3 py-2.5 whitespace-nowrap">
-                                        <button type="button" className="p-1 rounded text-slate-500 hover:bg-slate-100" aria-label={`Edit line ${l.line_no}`}
-                                            onClick={() => { setFormError(''); setLineEdit({ line: l, qty: String(l.qty), rate: String(l.rate), gst_pct: String(l.gst_pct), delivery_date: l.delivery_date || '', notes: l.notes || '', reason: '' }); }}><Pencil size={14} /></button>
-                                        <button type="button" className="p-1 rounded text-rose-500 hover:bg-rose-50" aria-label={`Remove line ${l.line_no}`}
+                                    <td className={`px-3 py-2.5 whitespace-nowrap text-left ${STICKY}`}>
+                                        <button type="button" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-indigo-200 text-xs font-bold text-indigo-700 hover:bg-indigo-50" aria-label={`Edit line ${l.line_no}`}
+                                            onClick={() => editLine(l)}><Pencil size={12} /> Edit</button>
+                                        <button type="button" className="ml-1 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold text-rose-600 hover:bg-rose-50" aria-label={`Remove line ${l.line_no}`}
                                             onClick={() => (issued
                                                 ? askReason({ title: `Remove line ${l.line_no}`, confirm: 'Remove line', run: (r) => purchasingApi.removeLine(id, l.id, r) })
-                                                : window.confirm(`Remove line ${l.line_no}? Its requisition quantity becomes open again.`) && run(() => purchasingApi.removeLine(id, l.id)))}><Trash2 size={14} /></button>
+                                                : window.confirm(`Remove line ${l.line_no}? Its requisition quantity becomes open again.`) && run(() => purchasingApi.removeLine(id, l.id)))}><Trash2 size={12} /> Remove</button>
                                     </td>
                                 )}
                             </tr>
@@ -215,7 +250,19 @@ export default function PurchaseOrderPage() {
                             <Field label={`Rate ₹ / ${lineEdit.line.purchase_uom}`} hint="Before GST"><input className={inputCls} type="number" min="0" step="any" value={lineEdit.rate} onChange={e => setLineEdit({ ...lineEdit, rate: e.target.value })} /></Field>
                             <Field label="GST %"><input className={inputCls} type="number" min="0" max="40" step="0.01" value={lineEdit.gst_pct} onChange={e => setLineEdit({ ...lineEdit, gst_pct: e.target.value })} /></Field>
                         </div>
-                        <p className="text-xs text-slate-500">= {fmt(Number(lineEdit.qty || 0) * lineEdit.line.factor, lineEdit.line.uom)} {lineEdit.line.uom} · taxable ₹{inr(Number(lineEdit.qty || 0) * Number(lineEdit.rate || 0))} · requisitions need {fmt(lineEdit.line.covered, lineEdit.line.uom)} {lineEdit.line.uom}</p>
+                        <p className="text-xs text-slate-500">= {fmt(Number(lineEdit.qty || 0) * lineEdit.line.factor, lineEdit.line.uom)} {lineEdit.line.uom} · taxable ₹{inr(Number(lineEdit.qty || 0) * Number(lineEdit.rate || 0))} · requisitions need {fmt(lineEdit.line.covered, lineEdit.line.uom)} {lineEdit.line.uom}{lineEdit.line.covered > 0 ? ` (${needUnits(lineEdit.line)} ${lineEdit.line.purchase_uom})` : ''}</p>
+                        {Number(lineEdit.qty || 0) > needUnits(lineEdit.line) && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+                                <p className="text-xs text-amber-900"><b>{fmt(Number(lineEdit.qty) - needUnits(lineEdit.line), 'm')} {lineEdit.line.purchase_uom} with no requisition</b> — give the reason{canApprove ? '.' : '; the PO then needs factory admin approval before it is issued.'}</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <select className={inputCls} value={lineEdit.extra_reason} onChange={e => setLineEdit({ ...lineEdit, extra_reason: e.target.value })} aria-label="Why more than the requisitions">
+                                        <option value="">— why? —</option>
+                                        {EXTRA_REASONS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                                    </select>
+                                    <input className={inputCls} value={lineEdit.extra_note} onChange={e => setLineEdit({ ...lineEdit, extra_note: e.target.value })} placeholder={lineEdit.extra_reason === 'OTHER' ? 'Describe the reason *' : 'Note (optional)'} aria-label="Reason note" />
+                                </div>
+                            </div>
+                        )}
                         <div className="grid grid-cols-2 gap-3">
                             <Field label="Delivery date"><input className={inputCls} type="date" value={lineEdit.delivery_date} onChange={e => setLineEdit({ ...lineEdit, delivery_date: e.target.value })} /></Field>
                             <Field label="Notes"><input className={inputCls} value={lineEdit.notes} onChange={e => setLineEdit({ ...lineEdit, notes: e.target.value })} /></Field>
@@ -224,8 +271,9 @@ export default function PurchaseOrderPage() {
                         <ErrorBox text={formError} />
                         <div className="flex justify-end gap-2">
                             <SecondaryButton onClick={() => setLineEdit(null)}>Cancel</SecondaryButton>
-                            <PrimaryButton busy={busy} disabled={busy || (issued && !lineEdit.reason.trim())}
-                                onClick={() => run(() => purchasingApi.updateLine(id, lineEdit.line.id, { qty: Number(lineEdit.qty), rate: Number(lineEdit.rate), gst_pct: Number(lineEdit.gst_pct), delivery_date: lineEdit.delivery_date || null, notes: lineEdit.notes, reason: lineEdit.reason }), () => setLineEdit(null))}>Save</PrimaryButton>
+                            <PrimaryButton busy={busy} disabled={busy || (issued && !lineEdit.reason.trim()) || (Number(lineEdit.qty || 0) > needUnits(lineEdit.line) && (!lineEdit.extra_reason || (lineEdit.extra_reason === 'OTHER' && !lineEdit.extra_note.trim())))}
+                                onClick={() => run(() => purchasingApi.updateLine(id, lineEdit.line.id, { qty: Number(lineEdit.qty), rate: Number(lineEdit.rate), gst_pct: Number(lineEdit.gst_pct), delivery_date: lineEdit.delivery_date || null, notes: lineEdit.notes, reason: lineEdit.reason,
+                                    ...(Number(lineEdit.qty || 0) > needUnits(lineEdit.line) ? { extra_reason: lineEdit.extra_reason, extra_note: lineEdit.extra_note.trim() || null } : {}) }), () => setLineEdit(null))}>Save</PrimaryButton>
                         </div>
                     </div>
                 </Modal>
@@ -247,7 +295,23 @@ export default function PurchaseOrderPage() {
                 </Modal>
             )}
 
-            {adding && (
+            {adding?.mode === 'direct' && (
+                <Modal title={`Add items with no requisition to ${po.po_no}`} onClose={() => setAdding(null)}>
+                    <div className="space-y-3 w-[min(860px,94vw)] max-h-[75vh] overflow-y-auto">
+                        <p className="text-xs text-slate-500">Fabric, trims, spares or general items bought ahead of a requisition. An item already on this PO is added to its line. {canApprove ? '' : 'The PO then needs factory admin approval before it is issued.'}</p>
+                        <DirectItemsEditor items={adding.direct} setItems={(d) => setAdding({ ...adding, direct: d })} supplierId={po.supplier_id} />
+                        {issued && <Field label="Reason for the revision *"><input className={inputCls} value={adding.reason} onChange={e => setAdding({ ...adding, reason: e.target.value })} /></Field>}
+                        <ErrorBox text={formError || (adding.direct.length ? directProblem(adding.direct) : '')} />
+                        <div className="flex justify-end gap-2">
+                            <SecondaryButton onClick={() => setAdding(null)}>Cancel</SecondaryButton>
+                            <PrimaryButton busy={busy} disabled={busy || !adding.direct.length || !!directProblem(adding.direct) || (issued && !adding.reason.trim())}
+                                onClick={() => run(() => purchasingApi.addLines(id, [], adding.reason, directPayload(adding.direct)), () => setAdding(null))}>Add to PO</PrimaryButton>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+
+            {adding?.mode === 'pr' && (
                 <Modal title={`Add requisition lines to ${po.po_no}`} onClose={() => setAdding(null)}>
                     <div className="space-y-3 w-[min(980px,94vw)] max-h-[75vh] overflow-y-auto">
                         {!adding.lines ? <Loading /> : <RequisitionLinePicker lines={adding.lines} picks={adding.picks} setPicks={(p) => setAdding({ ...adding, picks: p })} />}

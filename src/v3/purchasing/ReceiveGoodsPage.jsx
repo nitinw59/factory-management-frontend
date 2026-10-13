@@ -14,6 +14,24 @@ import { fmtDate, todayLocal } from '../salesOrders/SalesOrderStatusBadge';
 const fmt = (v) => Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
 const blankRoll = () => ({ roll_no: '', dye_lot: '', qty: '', width: '', location: '' });
 
+// Ordered / received / waiting / open / due as chips — open is what can be received now; the due date turns
+// amber within 3 days and red when overdue.
+function QtyChips({ l }) {
+    const today = todayLocal();
+    const days = l.delivery_date ? Math.round((Date.parse(l.delivery_date) - Date.parse(today)) / 86400000) : null;
+    const due = days == null ? 'bg-slate-50 border-slate-200 text-slate-600' : days < 0 ? 'bg-rose-50 border-rose-300 text-rose-700' : days <= 3 ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-slate-50 border-slate-200 text-slate-700';
+    const chip = 'inline-flex items-baseline gap-1 px-2 py-0.5 rounded-md border text-xs';
+    return (
+        <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span className={`${chip} bg-slate-50 border-slate-200 text-slate-700`}>Ordered <b className="tabular-nums">{fmt(l.ordered_qty)}</b> {l.purchase_uom}</span>
+            <span className={`${chip} ${l.received_qty > 0 ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>Received <b className="tabular-nums">{fmt(l.received_qty)}</b></span>
+            {l.pending_qty > 0 && <span className={`${chip} bg-amber-50 border-amber-300 text-amber-800`}>Waiting for approval <b className="tabular-nums">{fmt(l.pending_qty)}</b></span>}
+            <span className={`${chip} text-sm bg-indigo-600 border-indigo-600 text-white`}>Open <b className="tabular-nums text-base leading-none">{fmt(l.open_qty)}</b> {l.purchase_uom}</span>
+            <span className={`${chip} ${due}`}>Due <b>{fmtDate(l.delivery_date)}</b>{days != null && days < 0 ? ` · ${-days} day${days === -1 ? '' : 's'} late` : days === 0 ? ' · today' : ''}</span>
+        </span>
+    );
+}
+
 function LineForm({ l, value, onChange }) {
     const v = value;
     const set = (patch) => onChange({ ...v, ...patch });
@@ -36,7 +54,7 @@ function LineForm({ l, value, onChange }) {
                 <input type="checkbox" className="mt-1" checked={v.on} onChange={e => set({ on: e.target.checked })} />
                 <span className="flex-1">
                     <span className="font-bold text-slate-800">PO line {l.line_no}: {l.label}</span>
-                    <span className="block text-xs text-slate-500">Ordered {fmt(l.ordered_qty)} {l.purchase_uom} · received {fmt(l.received_qty)}{l.pending_qty ? ` · ${fmt(l.pending_qty)} waiting for approval` : ''} · <b>open {fmt(l.open_qty)}</b> · due {fmtDate(l.delivery_date)}</span>
+                    <QtyChips l={l} />
                 </span>
             </label>
             {v.on && (

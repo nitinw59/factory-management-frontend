@@ -12,24 +12,27 @@ import { PO_STATUS, inr } from './poShared';
 export default function PurchaseOrdersPage() {
     const [params, setParams] = useSearchParams();
     const status = params.get('status') || '';
+    const sentBack = params.get('sent_back') === '1';   // My work: "Purchase orders sent back"
     const [rows, setRows] = useState(null);
     const [search, setSearch] = useState('');
     const [canManage, setCanManage] = useState(false);
     const [error, setError] = useState('');
 
     useEffect(() => {
-        const t = setTimeout(() => purchasingApi.orders({ status: status || undefined, q: search.trim() || undefined })
+        const t = setTimeout(() => purchasingApi.orders({ status: status || undefined, sent_back: sentBack ? 1 : undefined, q: search.trim() || undefined })
             .then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load purchase orders.'))), 250);
         return () => clearTimeout(t);
-    }, [status, search]);
+    }, [status, sentBack, search]);
     useEffect(() => { purchasingApi.permissions().then(res => setCanManage(res.data.manage)).catch(() => {}); }, []);
 
     return (
         <div>
-            <PageHeader title="Purchase orders" subtitle="Built from approved requisitions. Issued by the purchase manager; changes after issue need a reason."
+            <PageHeader title="Purchase orders" subtitle="Built from approved requisitions, or items with no requisition (factory admin approves those before issue). Issued by the purchase manager; changes after issue need a reason."
                 actions={<>
-                    <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={status} onChange={e => setParams(e.target.value ? { status: e.target.value } : {})} aria-label="Filter by status">
+                    <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={sentBack ? 'SENT_BACK' : status}
+                        onChange={e => setParams(e.target.value === 'SENT_BACK' ? { status: 'DRAFT', sent_back: '1' } : e.target.value ? { status: e.target.value } : {})} aria-label="Filter by status">
                         <option value="">All statuses</option>
+                        <option value="SENT_BACK">Sent back (approval refused)</option>
                         {Object.entries(PO_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                     </select>
                     <SearchInput value={search} onChange={setSearch} placeholder="PO number, supplier" />
@@ -52,7 +55,9 @@ export default function PurchaseOrdersPage() {
                                     <td className="px-4 py-2.5 text-right tabular-nums">{r.line_count}</td>
                                     <td className="px-4 py-2.5 text-right tabular-nums font-semibold">{inr(r.total)}</td>
                                     <td className="px-4 py-2.5 whitespace-nowrap">{fmtDate(r.delivery_date || r.first_delivery)}</td>
-                                    <td className="px-4 py-2.5"><span className={`text-[11px] font-black px-2 py-0.5 rounded border ${PO_STATUS[r.status].cls}`}>{PO_STATUS[r.status].label}</span></td>
+                                    <td className="px-4 py-2.5"><span className={`text-[11px] font-black px-2 py-0.5 rounded border ${PO_STATUS[r.status].cls}`}>{PO_STATUS[r.status].label}</span>
+                                        {r.sent_back && <span className="ml-1 text-[11px] font-bold text-rose-700">sent back</span>}
+                                        {r.unrequisitioned && <span className="block mt-0.5 text-[11px] font-semibold text-amber-700">has quantity with no requisition</span>}</td>
                                     <td className="px-4 py-2.5"><Link to={`/v3/purchasing/orders/${r.id}`} className="text-slate-400 hover:text-indigo-600" aria-label={`Open ${r.po_no}`}><ChevronRight size={16} /></Link></td>
                                 </tr>
                             ))}

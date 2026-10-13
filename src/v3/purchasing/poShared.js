@@ -6,12 +6,19 @@ import * as XLSX from 'xlsx';
 
 export const PO_STATUS = {
     DRAFT:           { label: 'Draft',           cls: 'bg-slate-100 text-slate-700 border-slate-300' },
+    PENDING_APPROVAL: { label: 'Waiting for approval', cls: 'bg-rose-50 text-rose-700 border-rose-300' },
     ISSUED:          { label: 'Issued',          cls: 'bg-indigo-50 text-indigo-700 border-indigo-300' },
     PARTLY_RECEIVED: { label: 'Partly received', cls: 'bg-amber-50 text-amber-800 border-amber-300' },
     RECEIVED:        { label: 'Received',        cls: 'bg-emerald-50 text-emerald-700 border-emerald-300' },
     SHORT_CLOSED:    { label: 'Short-closed',    cls: 'bg-slate-50 text-slate-500 border-slate-300' },
     CANCELLED:       { label: 'Cancelled',       cls: 'bg-slate-50 text-slate-400 border-slate-200 line-through' },
 };
+
+// Why a line holds quantity with no requisition (server: EXTRA_REASONS in purchaseOrdersController.js).
+export const EXTRA_REASONS = [
+    ['ADVANCE', 'Advance buy for an expected order'], ['MOQ', 'Supplier minimum / pack size'], ['PRICE', 'Price advantage / bulk rate'],
+    ['SAMPLE', 'Sample / trial'], ['STOCK', 'Store stock (spares / general use)'], ['OTHER', 'Other'],
+];
 
 export const inr = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const qtyFmt = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
@@ -54,9 +61,9 @@ export function exportPoPdf(po, company) {
     if (company?.gstin) { y += 4; doc.text(`GSTIN: ${company.gstin}   State: ${po.company_state_name || ''} (${po.company_state_code})`, 14, y); }
     y += 7;
     doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.text('PURCHASE ORDER', pageW / 2, y, { align: 'center' }); doc.setFont(undefined, 'normal');
-    if (po.status === 'DRAFT' || po.status === 'CANCELLED') {
+    if (po.status === 'DRAFT' || po.status === 'PENDING_APPROVAL' || po.status === 'CANCELLED') {
         y += 5; doc.setFontSize(9); doc.setTextColor(190, 18, 60);
-        doc.text(po.status === 'DRAFT' ? 'DRAFT — not issued, not valid for supply' : `CANCELLED: ${po.cancelled_reason || ''}`, pageW / 2, y, { align: 'center' });
+        doc.text(po.status !== 'CANCELLED' ? 'DRAFT — not issued, not valid for supply' : `CANCELLED: ${po.cancelled_reason || ''}`, pageW / 2, y, { align: 'center' });
         doc.setTextColor(0, 0, 0);
     }
     autoTable(doc, {
@@ -106,6 +113,7 @@ export function exportPoExcel(po) {
         ...(intra ? { CGST: l.cgst, SGST: l.sgst } : { IGST: l.igst }), Amount: l.total, Delivery: l.delivery_date || '',
         Requisitions: l.requisitions.map(r => `${r.pr_no} line ${r.pr_line_no} (${r.qty})`).join(', '),
         'Covers orders': l.covers.map(c => `${c.order_no} ${c.qty}`).join(', '), Uncommitted: l.uncommitted || '',
+        'No requisition': l.extra_qty || '', 'Why': l.extra_qty ? [l.extra_reason_label, l.extra_note].filter(Boolean).join(' — ') : '',
     }))), 'Lines');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(po.history.map(h => ({
         When: new Date(h.created_at).toLocaleString('en-IN'), Action: h.action, Revision: h.revision_no || '', By: h.user_name || '', Reason: h.reason || '', Detail: (h.detail?.summary || []).join('\n'),

@@ -35,6 +35,7 @@ export const NAV = [
     { to: '/v3/purchasing/grns', label: 'Goods receipts', icon: PackageCheck, key: 'purchasing.grns', text: 'GRNs and their status' },
     { to: '/v3/purchasing/grns?status=PENDING_APPROVAL', label: 'GRN approvals', icon: BadgeCheck, key: 'purchasing.grnApprovals', hidden: true },
     { to: '/v3/material-issue', label: 'Issue to production', icon: Forklift, key: 'issue.materialIssue', text: 'Fabric and trims to cutting and lines' },
+    { to: '/v3/trim-kits', label: 'Trim kits', icon: Package, key: 'store.trimKits', text: 'Kits prepared for the lines; the line loader counts and signs' },
     { to: '/v3/masters/fabric-stock', label: 'Fabric rolls', icon: Warehouse, key: 'masters.fabricStock', text: 'Rolls in stock with dye lot and width' },
     { to: '/v3/masters/opening-stock', label: 'Trim opening stock', icon: ClipboardList, key: 'masters.openingStock', text: 'Physical count of trims, once per item' },
     { to: '/v3/store/items', label: 'Spares & general items', icon: Wrench, key: 'store.items', text: 'Store items and stock' },

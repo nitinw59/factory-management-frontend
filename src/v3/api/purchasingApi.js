@@ -14,10 +14,15 @@ export const purchasingApi = {
     order: (id) => api.get(`/v3/purchasing/purchase-orders/${id}`),
     createOrder: (data) => api.post('/v3/purchasing/purchase-orders', data),
     updateOrder: (id, data) => api.put(`/v3/purchasing/purchase-orders/${id}`, data),
-    addLines: (id, lines, reason) => api.post(`/v3/purchasing/purchase-orders/${id}/lines`, { lines, reason }),
+    addLines: (id, lines, reason, direct) => api.post(`/v3/purchasing/purchase-orders/${id}/lines`, { lines, reason, direct }),
+    items: (params) => api.get('/v3/purchasing/items', { params }),   // fabric / trim / store items for a line with no requisition
     updateLine: (id, lineId, data) => api.put(`/v3/purchasing/purchase-orders/${id}/lines/${lineId}`, data),
     removeLine: (id, lineId, reason) => api.delete(`/v3/purchasing/purchase-orders/${id}/lines/${lineId}`, { data: reason ? { reason } : undefined }),
     issue: (id) => api.post(`/v3/purchasing/purchase-orders/${id}/issue`),
+    sendForApproval: (id) => api.post(`/v3/purchasing/purchase-orders/${id}/send`),
+    recall: (id) => api.post(`/v3/purchasing/purchase-orders/${id}/recall`),
+    approve: (id) => api.post(`/v3/purchasing/purchase-orders/${id}/approve`),
+    reject: (id, reason) => api.post(`/v3/purchasing/purchase-orders/${id}/reject`, { reason }),
     cancel: (id, reason) => api.post(`/v3/purchasing/purchase-orders/${id}/cancel`, { reason }),
     shortClose: (id, reason) => api.post(`/v3/purchasing/purchase-orders/${id}/short-close`, { reason }),
 

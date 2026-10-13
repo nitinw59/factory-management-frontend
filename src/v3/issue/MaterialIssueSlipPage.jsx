@@ -59,7 +59,7 @@ export default function MaterialIssueSlipPage() {
                 <h1 className="text-2xl font-black text-slate-900">{s.issue_no}</h1>
                 <span className="text-sm text-slate-500">{fmtDate(s.issue_date)} · <Link to={`/v3/planning/orders/${s.order_id}`} className="text-indigo-700 font-semibold hover:underline">{s.order_no}</Link> · {s.stage} · to {s.received_by}{s.department_name ? ` (${s.department_name})` : ''}{s.cut_batch_code ? ` · batch ${s.cut_batch_code}` : ''} · by {s.issued_by_name || '—'}</span>
             </div>
-            {s.gate_override && <p className="mb-2 text-sm text-rose-700">Issued to cutting under the factory admin's readiness override.</p>}
+            {s.gate_override && <p className="mb-2 text-sm text-rose-700">Issued to cutting under a release for cutting (order not fully allocated).</p>}
             <div className="flex gap-2 mb-3">
                 {returnable.length > 0 && <SecondaryButton onClick={() => { setFormError(''); setRet({ reason: '', qty: {}, rolls: {} }); }}><Undo2 size={14} /> Return from production</SecondaryButton>}
                 <SecondaryButton onClick={() => pdf(s)}><FileDown size={14} /> PDF</SecondaryButton>

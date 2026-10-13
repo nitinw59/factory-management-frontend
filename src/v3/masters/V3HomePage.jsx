@@ -3,7 +3,7 @@
 // approved orders where they have the next step, and their pages as quick links.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Inbox, ArrowRight, RefreshCw } from 'lucide-react';
+import { Inbox, ArrowRight, RefreshCw, PackageCheck } from 'lucide-react';
 import { useV3Live } from '../live';
 import { PageHeader, Loading } from '../components/ui';
 import { useV3Access } from '../V3Access';
@@ -27,6 +27,35 @@ function Card({ to, count, title, hint, tone, changed }) {
     );
 }
 
+const qtyFmt = (n, uom) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 2 });
+
+// Goods received into free stock that an approved order needs but nobody has reserved yet (13 Oct 2026):
+// for the kinds this user plans — trim store, fabric store, merchandiser / admin.
+function AllocateBanner({ a, changed }) {
+    const kind = a.kinds.length === 1 ? `&kind=${a.kinds[0]}` : '';
+    return (
+        <div className={`rounded-xl p-4 border bg-emerald-50 border-emerald-200 ${changed ? 'ring-2 ring-amber-400' : ''}`}>
+            <Link to={`/v3/planning/position?to_allocate=1${kind}`} className="flex items-center gap-3 group">
+                <PackageCheck size={22} className="text-emerald-700" />
+                <p className="font-black text-slate-800 text-lg group-hover:text-emerald-800">{a.total} item{a.total === 1 ? '' : 's'} in stock waiting for allocation</p>
+                <ArrowRight size={16} className="ml-auto text-slate-400" />
+            </Link>
+            <p className="text-sm text-slate-600 mt-1 ml-9">Goods received and free in the store, needed by {a.orders} approved order{a.orders === 1 ? '' : 's'} — reserve them so the orders count as ready.</p>
+            <div className="mt-2 ml-9 divide-y divide-emerald-100">
+                {a.items.map(it => (
+                    <Link key={`${it.kind}:${it.item_id}`} to={`/v3/planning/position/${it.kind}/${it.item_id}`} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1.5 text-sm hover:text-emerald-800">
+                        <b className="text-slate-800">{it.label}</b>
+                        <span className="text-emerald-800 font-semibold">{qtyFmt(it.qty, it.uom)} {it.uom} free</span>
+                        <span className="text-xs text-slate-500">for {it.orders.slice(0, 2).map(o => o.order_no).join(', ')}{it.orders.length > 2 ? ` +${it.orders.length - 2}` : ''}</span>
+                        {it.last_grn && <span className="ml-auto text-xs text-slate-500">arrived {fmtDate(it.last_grn.received_date)} · {it.last_grn.grn_no}</span>}
+                    </Link>
+                ))}
+                {a.total > a.items.length && <Link to={`/v3/planning/position?to_allocate=1${kind}`} className="block py-1.5 text-xs font-bold text-emerald-800">… and {a.total - a.items.length} more</Link>}
+            </div>
+        </div>
+    );
+}
+
 export default function V3HomePage() {
     const { me } = useV3Access();
     const [work, setWork] = useState(null);
@@ -37,7 +66,7 @@ export default function V3HomePage() {
     const prev = useRef(null);
     const load = useCallback(() => {
         workApi.myWork().then(res => {
-            const next = Object.fromEntries([...res.data.cards.map(c => [c.key, c.count]), ['approvals', res.data.approvals.total]]);
+            const next = Object.fromEntries([...res.data.cards.map(c => [c.key, c.count]), ['approvals', res.data.approvals.total], ['allocate', res.data.allocate?.total ?? 0]]);
             if (prev.current) {
                 const diff = new Set(Object.keys(next).filter(k => prev.current[k] !== undefined && prev.current[k] !== next[k]));
                 if (diff.size) { setChanged(diff); setTimeout(() => setChanged(new Set()), 5000); }
@@ -98,6 +127,8 @@ export default function V3HomePage() {
                             <p className="text-sm text-slate-600 mt-1 ml-9">{work.approvals.kinds.map(k => `${k.label}s: ${k.count}`).join(' · ')}</p>
                         </Link>
                     )}
+
+                    {work.allocate?.total > 0 && <AllocateBanner a={work.allocate} changed={changed.has('allocate')} />}
 
                     {areas.filter(a => a !== mainArea).map(section)}
 

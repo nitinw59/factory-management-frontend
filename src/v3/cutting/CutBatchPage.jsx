@@ -44,7 +44,7 @@ export default function CutBatchPage() {
                 <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${CUT_STATUS[b.status].cls}`}>{CUT_STATUS[b.status].label}</span>
             </div>
             <p className="text-sm text-slate-500 mb-1">{b.line.customer_name} · {b.line.style_code} {b.line.style_name} · {b.numbering_mode === 'MODE_2' ? 'numbering continuous across rolls (mode 2)' : 'numbering per roll (mode 1)'} · layer {b.layer_length_in} in ({layerText(b.layer_length_in)}) · ratio {b.ratios.map(r => `${r.size}:${r.ratio}`).join('  ')} ({b.ratio_sum}/lay)</p>
-            {b.gate_override && <p className="text-sm text-rose-700 mb-1">Created under the factory admin's cutting-gate override.</p>}
+            {b.gate_override && <p className="text-sm text-rose-700 mb-1">Created under a release for cutting (order not fully allocated).</p>}
             {b.status === 'CANCELLED' && <p className="text-sm text-slate-600 mb-1"><b>Cancelled:</b> {b.cancelled_reason}</p>}
             <div className="flex flex-wrap gap-2 my-3">
                 {perms.manage && b.status === 'DRAFT' && <SecondaryButton onClick={() => { setFormError(''); setEdit({ layer_length_in: String(b.layer_length_in), numbering_mode: b.numbering_mode, ratio: Object.fromEntries(b.ratios.map(r => [r.size_id, String(r.ratio)])) }); }}><Pencil size={14} /> Ratio / length</SecondaryButton>}

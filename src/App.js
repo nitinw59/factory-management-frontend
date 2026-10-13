@@ -270,6 +270,8 @@ const V3CutBatchPage = lazyPage(() => import('./v3/cutting/CutBatchPage'));
 const V3StageCheckPage = lazyPage(() => import('./v3/production/StageCheckPage'));
 const V3RecutsPage = lazyPage(() => import('./v3/production/RecutsPage'));
 const V3LineLoadingPage = lazyPage(() => import('./v3/production/LineLoadingPage'));
+const V3TrimKitsPage = lazyPage(() => import('./v3/production/TrimKitsPage'));
+const V3TrimKitPage = lazyPage(() => import('./v3/production/TrimKitPage'));
 const V3UserAccessPage = lazyPage(() => import('./v3/access/UserAccessPage'));
 const V3BomListPage = lazyPage(() => import('./v3/boms/BomListPage'));
 const V3CustomersAdminPage = lazyPage(() => import('./v3/admin/CustomersPage'));
@@ -364,6 +366,8 @@ const appRoutes = (
           <Route path="production/check" element={<V3StageCheckPage />} />
           <Route path="production/recuts" element={<V3RecutsPage />} />
           <Route path="production/loading" element={<V3LineLoadingPage />} />
+          <Route path="trim-kits" element={<V3TrimKitsPage />} />
+          <Route path="trim-kits/:id" element={<V3TrimKitPage />} />
           <Route path="admin/access" element={<V3UserAccessPage />} />
           <Route path="admin/customers" element={<V3CustomersAdminPage />} />
           <Route path="admin/sizes" element={<V3SizesAdminPage />} />

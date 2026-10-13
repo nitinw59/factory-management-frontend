@@ -53,7 +53,7 @@ export default function OrderRequirementsPage() {
     const { me } = useV3Access();
     const { orderId } = useParams();
     const [data, setData] = useState(null);
-    const [perms, setPerms] = useState({ plan: false, settings: false });
+    const [perms, setPerms] = useState({ plan: false, settings: false, release: false });
     // Allocate / release / raise: the merchandiser for all material, each store for its own kind.
     const myKinds = perms.plan_kinds || (perms.plan ? ['FABRIC', 'TRIM'] : []);
     const anyKind = myKinds.length > 0;
@@ -143,12 +143,12 @@ export default function OrderRequirementsPage() {
                         </div>
                         {r.override && (
                             <div className="basis-full text-sm bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-lg px-3 py-2 flex flex-wrap items-center gap-2">
-                                <ShieldCheck size={15} /> Released for cutting by {r.override.by_name || 'factory admin'} on {new Date(r.override.at).toLocaleString()}: {r.override.reason}
+                                <ShieldCheck size={15} /> Released for cutting by {r.override.by_name || '—'} on {new Date(r.override.at).toLocaleString()}: {r.override.reason}
                                 {r.override.stale && <span className="font-bold text-amber-700">· given before the order's latest revision</span>}
-                                {perms.settings && <button type="button" className="ml-auto text-xs font-bold text-indigo-700 underline" onClick={() => { setFormError(''); setOv({ mode: 'revoke', reason: '' }); }}>Revoke</button>}
+                                {perms.release && <button type="button" className="ml-auto text-xs font-bold text-indigo-700 underline" onClick={() => { setFormError(''); setOv({ mode: 'revoke', reason: '' }); }}>Revoke</button>}
                             </div>
                         )}
-                        {perms.settings && !r.override && r.status !== 'READY' && (
+                        {perms.release && !r.override && r.status !== 'READY' && (
                             <div className="ml-auto"><SecondaryButton onClick={() => { setFormError(''); setOv({ mode: 'override', reason: '' }); }}><ShieldCheck size={14} /> Release for cutting…</SecondaryButton></div>
                         )}
                     </div>

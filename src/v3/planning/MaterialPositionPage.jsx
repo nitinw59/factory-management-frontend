@@ -2,7 +2,7 @@
 // allocated): on hand, allocated, free, required, shortfall. Open an item to
 // allocate it to orders, earliest ship date first.
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ChevronRight, AlertTriangle, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { planningApi } from '../api/planningApi';
@@ -23,17 +23,19 @@ function exportExcel(rows) {
 const fmt = (n, uom) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 2 });
 
 export default function MaterialPositionPage() {
+    const [params] = useSearchParams();   // ?kind=TRIM&to_allocate=1 from the My work banner
     const [rows, setRows] = useState(null);
-    const [kind, setKind] = useState('');
+    const [kind, setKind] = useState(['FABRIC', 'TRIM'].includes(params.get('kind')) ? params.get('kind') : '');
+    const [toAllocate, setToAllocate] = useState(params.get('to_allocate') === '1');
     const [shortOnly, setShortOnly] = useState(false);
     const [search, setSearch] = useState('');
     const [error, setError] = useState('');
 
     useEffect(() => {
-        const t = setTimeout(() => planningApi.position({ kind: kind || undefined, q: search.trim() || undefined, shortfall: shortOnly ? 1 : undefined })
+        const t = setTimeout(() => planningApi.position({ kind: kind || undefined, q: search.trim() || undefined, shortfall: shortOnly ? 1 : undefined, to_allocate: toAllocate ? 1 : undefined })
             .then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load.'))), 250);
         return () => clearTimeout(t);
-    }, [kind, search, shortOnly]);
+    }, [kind, search, shortOnly, toAllocate]);
 
     return (
         <div>
@@ -43,6 +45,7 @@ export default function MaterialPositionPage() {
                         <option value="">Fabric and trims</option><option value="FABRIC">Fabric</option><option value="TRIM">Trims</option>
                     </select>
                     <label className="flex items-center gap-1.5 text-sm font-semibold text-slate-600"><input type="checkbox" checked={shortOnly} onChange={e => setShortOnly(e.target.checked)} /> Shortfall only</label>
+                    <label className="flex items-center gap-1.5 text-sm font-semibold text-emerald-700" title="In free stock, needed by an approved order, not reserved yet"><input type="checkbox" checked={toAllocate} onChange={e => setToAllocate(e.target.checked)} /> Waiting for allocation</label>
                     <SearchInput value={search} onChange={setSearch} placeholder="Item, brand, code, type" />
                     <SecondaryButton onClick={() => exportExcel(rows || [])} disabled={!rows?.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                 </>} />
