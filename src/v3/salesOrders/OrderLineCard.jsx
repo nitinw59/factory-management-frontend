@@ -13,6 +13,7 @@ import { fmtDate } from './SalesOrderStatusBadge';
 const keyOf = (cid, sid) => `${cid}:${sid}`;
 const toCells = (line) => Object.fromEntries(line.qty.map(x => [keyOf(x.garment_colour_id, x.size_id), String(x.qty)]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
+const rowTotalOf = (cells, cid) => Object.entries(cells).filter(([k]) => k.startsWith(`${cid}:`)).reduce((n, [, v]) => n + Number(v || 0), 0);
 
 export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDocuments, editable, canDelete, needsReason, onSave, onDelete, onCancelLine, onMoveBom }) {
     const [cells, setCells] = useState(() => toCells(line));
@@ -22,16 +23,19 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
     const [reason, setReason] = useState('');
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
-    // "BOM pending" line: no approved Style BOM yet, so rows are any colours — the ones in use plus those added here.
+    // Draft line: any colour can be added (search). One not on the approved Style BOM makes the line "BOM pending"
+    // until a BOM version with it is approved (it then links by itself). Approved order: the BOM's colours only.
+    const canAddColour = editable && !needsReason;
     const [extraColours, setExtraColours] = useState([]);
     const [colourQ, setColourQ] = useState('');
     const [colourHits, setColourHits] = useState([]);
     const colours = useMemo(() => [...line.colours, ...extraColours.filter(c => !line.colours.some(x => x.garment_colour_id === c.garment_colour_id))], [line.colours, extraColours]);
+    const offBom = colours.filter(c => c.on_bom === false && rowTotalOf(cells, c.garment_colour_id) > 0).map(c => c.name);
     useEffect(() => {
-        if (!line.bom_pending || colourQ.trim().length < 2) { setColourHits([]); return undefined; }
+        if (!canAddColour || colourQ.trim().length < 2) { setColourHits([]); return undefined; }
         const t = setTimeout(() => mastersApi.garmentColours({ search: colourQ.trim() }).then(res => setColourHits(res.data.filter(c => c.is_active).slice(0, 12))).catch(() => setColourHits([])), 250);
         return () => clearTimeout(t);
-    }, [colourQ, line.bom_pending]);
+    }, [colourQ, canAddColour]);
 
     const original = useMemo(() => JSON.stringify([toCells(line), line.ship_date || '', line.notes || '', line.brand || '']), [line]);
     const dirty = JSON.stringify([Object.fromEntries(Object.entries(cells).filter(([, v]) => v !== '' && Number(v) !== 0)), shipDate, notes, brand]) !== original;
@@ -140,7 +144,7 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
             {line.bom_pending && !cancelled && (
                 <p className="mb-2 text-xs text-amber-800">
                     {line.current_bom_id
-                        ? <>Style BOM v{line.current_bom_version} is approved but doesn't have every colour on this line — take those colours off, or add them to the BOM. </>
+                        ? <>Style BOM v{line.current_bom_version} is approved but doesn't have every colour on this line{offBom.length ? ` (${offBom.join(', ')})` : ''}. The order can be submitted once a Style BOM version with {offBom.length === 1 ? 'it' : 'them'} is approved — the line links to it by itself — or take {offBom.length === 1 ? 'that colour' : 'those colours'} off. </>
                         : <>Quantities can be entered in any colour. The order can be submitted once this style's Style BOM is approved — the line links to it by itself; colours it doesn't have must come off. </>}
                     <Link to={`/v3/styles/${line.style_id}`} className="font-semibold text-indigo-700 hover:underline">Open the style →</Link>
                 </p>
@@ -151,13 +155,14 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
                 </p>
             )}
 
-            {line.bom_pending && editable && (
+            {canAddColour && (
                 <div className="mb-2 flex flex-wrap items-center gap-1.5">
                     <input className={`${inputCls} !py-1 w-56`} value={colourQ} onChange={e => setColourQ(e.target.value)} placeholder="Add a colour — type its name…" aria-label="Add a colour" />
                     {colourHits.filter(c => !colours.some(x => x.garment_colour_id === String(c.id))).map(c => (
-                        <button key={c.id} type="button" onClick={() => { setExtraColours([...extraColours, { garment_colour_id: String(c.id), name: c.name, is_active: true }]); setColourQ(''); }}
+                        <button key={c.id} type="button" onClick={() => { setExtraColours([...extraColours, { garment_colour_id: String(c.id), name: c.name, is_active: true, on_bom: false }]); setColourQ(''); }}
                             className="px-2 py-1 rounded border border-slate-200 text-xs font-semibold text-slate-700 hover:border-indigo-400">+ {c.name}</button>
                     ))}
+                    {!line.bom_pending && <span className="text-[11px] text-slate-500">A colour not on the Style BOM makes the line "BOM pending" until a BOM version with it is approved.</span>}
                 </div>
             )}
             {colours.length === 0 || line.sizes.length === 0 ? (
@@ -175,7 +180,7 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
                         <tbody>
                             {colours.map((c, ri) => (
                                 <tr key={c.garment_colour_id} className="border-t border-slate-100">
-                                    <td className="px-2 py-1 font-semibold text-slate-700">{c.name}{!c.is_active && <span className="ml-1 text-[10px] font-bold text-rose-600">inactive</span>}</td>
+                                    <td className="px-2 py-1 font-semibold text-slate-700">{c.name}{!c.is_active && <span className="ml-1 text-[10px] font-bold text-rose-600">inactive</span>}{c.on_bom === false && <span className="ml-1 text-[10px] font-bold text-amber-700">not on Style BOM</span>}</td>
                                     {line.sizes.map((s, ci) => (
                                         <td key={s.size_id} className="px-1 py-1">
                                             {editable ? (
