@@ -24,6 +24,7 @@ export default function SalesOrdersPage() {
     const [perms, setPerms] = useState({ edit: false });
     const [params, setParams] = useSearchParams();
     const status = params.get('status') || '';   // My work → ?status=DRAFT,REJECTED
+    const bomPending = params.get('bom_pending') === '1';   // My work → "Style BOMs needed for orders"
     const setStatus = (s) => setParams(s ? { status: s } : {}, { replace: true });
     const [search, setSearch] = useState('');
     const [error, setError] = useState('');
@@ -33,9 +34,9 @@ export default function SalesOrdersPage() {
     const [formError, setFormError] = useState('');
 
     const load = useCallback(() => {
-        salesOrdersApi.orders({ status: status || undefined, q: search.trim() || undefined })
+        salesOrdersApi.orders({ status: status || undefined, bom_pending: bomPending ? 1 : undefined, q: search.trim() || undefined })
             .then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load sales orders.')));
-    }, [status, search]);
+    }, [status, bomPending, search]);
     useEffect(() => {
         const t = setTimeout(load, 250); // debounce typing
         return () => clearTimeout(t);
@@ -73,6 +74,7 @@ export default function SalesOrdersPage() {
                 </>}
             />
             <ErrorBox text={error} />
+            {bomPending && <p className="mb-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Orders with lines waiting for a Style BOM ("BOM pending") — they can't be submitted until the style's BOM is approved. <button type="button" onClick={() => setParams({})} className="font-bold text-indigo-700 underline">Show all orders</button></p>}
             {!rows ? <Loading /> : (
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
                     <table className="w-full text-sm min-w-[880px]">
@@ -91,7 +93,7 @@ export default function SalesOrdersPage() {
                                         <span className="block text-xs text-slate-500">{fmtDate(r.order_date)}{r.buyer_po_no ? ` · PO ${r.buyer_po_no}` : ''}{r.order_type && r.order_type !== 'FOB' ? ` · ${r.order_type}` : ''}</span>
                                     </td>
                                     <td className="px-4 py-2.5 text-slate-700">{r.customer_name}</td>
-                                    <td className="px-4 py-2.5 text-slate-600 text-xs">{r.styles || '—'}<span className="block text-slate-400">{r.line_count} line{r.line_count === 1 ? '' : 's'}</span></td>
+                                    <td className="px-4 py-2.5 text-slate-600 text-xs">{r.styles || '—'}<span className="block text-slate-400">{r.line_count} line{r.line_count === 1 ? '' : 's'}</span>{r.bom_pending_styles && <span className="block font-semibold text-amber-700">BOM pending: {r.bom_pending_styles}</span>}</td>
                                     <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{r.total_qty.toLocaleString('en-IN')}</td>
                                     <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{fmtDate(r.first_ship_date)}</td>
                                     <td className="px-4 py-2.5"><SalesOrderStatusBadge status={r.status} />{r.revision_no > 0 && <span className="ml-1 text-[11px] text-slate-500">rev {r.revision_no}</span>}</td>

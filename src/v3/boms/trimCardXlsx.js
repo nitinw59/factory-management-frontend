@@ -12,10 +12,11 @@ export async function buildTrimCardWorkbook(m, lh = null) {
         pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } },
     });
     const n = Math.max(1, m.colours.length);
-    const last = 1 + n;                         // A = row names, B.. = one column per colour
+    const sampleCol = m.sample ? 2 + n : null;  // blank "Sample" column after the colours, to stick the real trim
+    const last = 1 + n + (m.sample ? 1 : 0);    // A = row names, B.. = one column per colour
     const all = [1, last];
     const rest = [2, last];
-    ws.columns = [{ width: 26 }, ...m.colours.map(() => ({ width: Math.max(16, Math.min(28, 120 / n)) }))];
+    ws.columns = [{ width: 26 }, ...m.colours.map(() => ({ width: Math.max(16, Math.min(28, 120 / n)) })), ...(m.sample ? [{ width: 18 }] : [])];
     // Company letterhead (logo + name + address) when "Company name" is ticked.
     let r = m.company && lh ? addXlsxLetterhead(wb, ws, lh, { lastCol: last, logoCols: 1, title: m.title }) : 1;
 
@@ -39,6 +40,7 @@ export async function buildTrimCardWorkbook(m, lh = null) {
     // Grid: colours across
     put(ws, r, [1, 1], 'Colour', { font: BOLD, fill: 'FFF1F5F9' });
     m.colours.forEach((c, k) => put(ws, r, [2 + k, 2 + k], c.name, { font: BOLD, align: 'center', fill: 'FFF1F5F9' }));
+    if (sampleCol) put(ws, r, [sampleCol, sampleCol], 'Sample', { font: BOLD, align: 'center', fill: 'FFF1F5F9' });
     r++;
     for (const row of m.grid) {
         put(ws, r, [1, 1], row.sub ? `${row.label}\n${row.sub}` : row.label, { font: BOLD });
@@ -47,8 +49,9 @@ export async function buildTrimCardWorkbook(m, lh = null) {
             const bad = lines.some(t => t.startsWith('! '));
             put(ws, r, [2 + k, 2 + k], lines.join('\n'), { font: { ...(row.bold ? BOLD : FONT), ...(bad ? { color: { argb: RED } } : {}) } });
         }
+        if (sampleCol) put(ws, r, [sampleCol, sampleCol], '');
         const tall = Math.max(1, ...row.cells.map(l => l.length), row.sub ? 2 : 1);
-        ws.getRow(r).height = row.swatch ? 70 : Math.max(16, tall * 13);
+        ws.getRow(r).height = row.swatch ? 70 : Math.max(m.sample ? 42 : 16, tall * 13);
         r++;
     }
 

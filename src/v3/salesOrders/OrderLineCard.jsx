@@ -3,11 +3,11 @@
 // sizes) with row / column / line totals. Pasting a block copied from Excel
 // fills the grid from the cell pasted into. On an approved order every save
 // needs a reason (it becomes a revision); lines are cancelled, not deleted.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Trash2, AlertTriangle, XCircle, RefreshCw, ClipboardList, FileDown } from 'lucide-react';
 import { inputCls, PrimaryButton, SecondaryButton, ErrorBox } from '../components/ui';
-import { apiError } from '../api/mastersApi';
+import { apiError, mastersApi } from '../api/mastersApi';
 import { fmtDate } from './SalesOrderStatusBadge';
 
 const keyOf = (cid, sid) => `${cid}:${sid}`;
@@ -22,14 +22,24 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
     const [reason, setReason] = useState('');
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    // "BOM pending" line: no approved Style BOM yet, so rows are any colours — the ones in use plus those added here.
+    const [extraColours, setExtraColours] = useState([]);
+    const [colourQ, setColourQ] = useState('');
+    const [colourHits, setColourHits] = useState([]);
+    const colours = useMemo(() => [...line.colours, ...extraColours.filter(c => !line.colours.some(x => x.garment_colour_id === c.garment_colour_id))], [line.colours, extraColours]);
+    useEffect(() => {
+        if (!line.bom_pending || colourQ.trim().length < 2) { setColourHits([]); return undefined; }
+        const t = setTimeout(() => mastersApi.garmentColours({ search: colourQ.trim() }).then(res => setColourHits(res.data.filter(c => c.is_active).slice(0, 12))).catch(() => setColourHits([])), 250);
+        return () => clearTimeout(t);
+    }, [colourQ, line.bom_pending]);
 
     const original = useMemo(() => JSON.stringify([toCells(line), line.ship_date || '', line.notes || '', line.brand || '']), [line]);
     const dirty = JSON.stringify([Object.fromEntries(Object.entries(cells).filter(([, v]) => v !== '' && Number(v) !== 0)), shipDate, notes, brand]) !== original;
 
     const val = (cid, sid) => Number(cells[keyOf(cid, sid)] || 0);
     const rowTotal = (cid) => line.sizes.reduce((n, s) => n + val(cid, s.size_id), 0);
-    const colTotal = (sid) => line.colours.reduce((n, c) => n + val(c.garment_colour_id, sid), 0);
-    const total = line.colours.reduce((n, c) => n + rowTotal(c.garment_colour_id), 0);
+    const colTotal = (sid) => colours.reduce((n, c) => n + val(c.garment_colour_id, sid), 0);
+    const total = colours.reduce((n, c) => n + rowTotal(c.garment_colour_id), 0);
     const cancelled = line.status === 'CANCELLED';
 
     const setCell = (cid, sid, v) => setCells(prev => ({ ...prev, [keyOf(cid, sid)]: v.replace(/[^\d]/g, '') }));
@@ -43,7 +53,7 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
         setCells(prev => {
             const next = { ...prev };
             rows.forEach((r, i) => r.split('\t').forEach((v, j) => {
-                const c = line.colours[rowIdx + i];
+                const c = colours[rowIdx + i];
                 const s = line.sizes[colIdx + j];
                 if (c && s && c.is_active) next[keyOf(c.garment_colour_id, s.size_id)] = String(v).replace(/[^\d]/g, '');
             }));
@@ -67,7 +77,7 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
             setSaving(false);
         }
     };
-    const reset = () => { setCells(toCells(line)); setShipDate(line.ship_date || ''); setNotes(line.notes || ''); setBrand(line.brand || ''); setReason(''); setError(''); };
+    const reset = () => { setCells(toCells(line)); setShipDate(line.ship_date || ''); setNotes(line.notes || ''); setBrand(line.brand || ''); setReason(''); setError(''); setExtraColours([]); };
 
     return (
         <div className={`bg-white border rounded-xl p-4 ${cancelled ? 'border-slate-200 opacity-60' : dirty ? 'border-indigo-300' : 'border-slate-200'}`}>
@@ -78,10 +88,16 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
                         <span className="font-normal text-slate-500"> {line.style_name}</span>
                     </p>
                     <p className="text-xs text-slate-500">
-                        Style BOM <Link to={`/v3/boms/${line.bom_id}`} className="font-semibold text-indigo-700 hover:underline">v{line.bom_version}</Link>
-                        <Link to={`/v3/boms/${line.bom_id}/trim-card${orderId ? `?order=${orderId}` : ''}`} className="ml-3 inline-flex items-center gap-1 font-semibold text-indigo-700 hover:underline">
-                            <ClipboardList size={12} /> Trim card
-                        </Link>
+                        {line.bom_pending ? (
+                            <span className="inline-flex items-center gap-1 font-bold text-amber-800 bg-amber-50 border border-amber-300 rounded px-1.5 py-0.5">
+                                <AlertTriangle size={12} /> BOM pending{line.open_boms ? ` — Style BOM ${line.open_boms.replace('pending_approval', 'waiting for approval')}` : ' — no Style BOM yet'}
+                            </span>
+                        ) : <>
+                            Style BOM <Link to={`/v3/boms/${line.bom_id}`} className="font-semibold text-indigo-700 hover:underline">v{line.bom_version}</Link>
+                            <Link to={`/v3/boms/${line.bom_id}/trim-card${orderId ? `?order=${orderId}` : ''}`} className="ml-3 inline-flex items-center gap-1 font-semibold text-indigo-700 hover:underline">
+                                <ClipboardList size={12} /> Trim card
+                            </Link>
+                        </>}
                         {onPpm && line.status === 'ACTIVE' && <>
                             <span className="ml-3 inline-flex items-center gap-1 font-semibold text-slate-600"><FileDown size={12} /> PPM template:</span>
                             <button type="button" onClick={() => onPpm('pdf')} className="ml-1 font-semibold text-indigo-700 hover:underline">PDF</button>
@@ -121,14 +137,31 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
                     {onMoveBom && <button type="button" onClick={onMoveBom} className="ml-2 inline-flex items-center gap-1 text-indigo-700 underline"><RefreshCw size={12} /> Move to v{line.current_bom_version}</button>}
                 </p>
             )}
+            {line.bom_pending && !cancelled && (
+                <p className="mb-2 text-xs text-amber-800">
+                    {line.current_bom_id
+                        ? <>Style BOM v{line.current_bom_version} is approved but doesn't have every colour on this line — take those colours off, or add them to the BOM. </>
+                        : <>Quantities can be entered in any colour. The order can be submitted once this style's Style BOM is approved — the line links to it by itself; colours it doesn't have must come off. </>}
+                    <Link to={`/v3/styles/${line.style_id}`} className="font-semibold text-indigo-700 hover:underline">Open the style →</Link>
+                </p>
+            )}
             {line.stray_qty > 0 && (
                 <p className="mb-2 text-xs font-semibold text-rose-700 flex items-center gap-1">
                     <AlertTriangle size={13} /> {line.stray_qty} quantity cell(s) are for a colour or size this style / BOM no longer has.{editable ? ' Saving the line drops them.' : ''}
                 </p>
             )}
 
-            {line.colours.length === 0 || line.sizes.length === 0 ? (
-                <p className="text-sm text-amber-700">This style's BOM has no colours or the style has no sizes.</p>
+            {line.bom_pending && editable && (
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                    <input className={`${inputCls} !py-1 w-56`} value={colourQ} onChange={e => setColourQ(e.target.value)} placeholder="Add a colour — type its name…" aria-label="Add a colour" />
+                    {colourHits.filter(c => !colours.some(x => x.garment_colour_id === String(c.id))).map(c => (
+                        <button key={c.id} type="button" onClick={() => { setExtraColours([...extraColours, { garment_colour_id: String(c.id), name: c.name, is_active: true }]); setColourQ(''); }}
+                            className="px-2 py-1 rounded border border-slate-200 text-xs font-semibold text-slate-700 hover:border-indigo-400">+ {c.name}</button>
+                    ))}
+                </div>
+            )}
+            {colours.length === 0 || line.sizes.length === 0 ? (
+                <p className="text-sm text-amber-700">{line.sizes.length === 0 ? 'The style has no sizes.' : line.bom_pending ? 'Add the colours being ordered (above).' : 'This style\'s BOM has no colours.'}</p>
             ) : (
                 <div className="overflow-x-auto">
                     <table className="border-collapse text-sm">
@@ -140,7 +173,7 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
                             </tr>
                         </thead>
                         <tbody>
-                            {line.colours.map((c, ri) => (
+                            {colours.map((c, ri) => (
                                 <tr key={c.garment_colour_id} className="border-t border-slate-100">
                                     <td className="px-2 py-1 font-semibold text-slate-700">{c.name}{!c.is_active && <span className="ml-1 text-[10px] font-bold text-rose-600">inactive</span>}</td>
                                     {line.sizes.map((s, ci) => (

@@ -85,7 +85,7 @@ export function exportMaterialSheetPdf(d, { lh = null, company = null, printedBy
     autoTable(doc, {
         ...base, startY: y + 2,
         head: [['Line', 'Style', 'Style BOM', 'Ship date', 'Ordered pcs', 'Cut allowance', 'Planned pcs']],
-        body: active.map(l => [l.line_no, `${l.style_code}${l.style_name && l.style_name !== l.style_code ? ` — ${l.style_name}` : ''}`, `v${l.bom_version}`, dmy(l.ship_date),
+        body: active.map(l => [l.line_no, `${l.style_code}${l.style_name && l.style_name !== l.style_code ? ` — ${l.style_name}` : ''}`, (l.bom_version ? `v${l.bom_version}` : 'BOM pending'), dmy(l.ship_date),
             { content: fmt(l.ordered_pieces, 'pcs'), styles: { halign: 'right' } }, { content: `${fmt(l.cut_allowance_pct ?? 0, 'm')}%`, styles: { halign: 'right' } },
             { content: fmt(planned.get(String(l.line_no)) || 0, 'pcs'), styles: { halign: 'right', fontStyle: 'bold' } }]),
         columnStyles: { 0: { cellWidth: 12 }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 14 }, 3: { cellWidth: 22 }, 4: { cellWidth: 24 }, 5: { cellWidth: 24 }, 6: { cellWidth: 24 } },

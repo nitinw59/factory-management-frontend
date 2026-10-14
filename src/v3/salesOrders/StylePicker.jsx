@@ -7,7 +7,8 @@ import { Search, CheckCircle2, X } from 'lucide-react';
 import { salesOrdersApi } from '../api/salesOrdersApi';
 import { inputCls } from '../components/ui';
 
-export default function StylePicker({ customerId, value, onChange, autoFocus }) {
+// allowPending: a style without an approved Style BOM may be picked (draft orders: the line is "BOM pending").
+export default function StylePicker({ customerId, value, onChange, autoFocus, allowPending = true }) {
     const [q, setQ] = useState('');
     const [rows, setRows] = useState(null);
     const [active, setActive] = useState(0);
@@ -16,11 +17,11 @@ export default function StylePicker({ customerId, value, onChange, autoFocus }) 
     useEffect(() => {
         const t = setTimeout(() => {
             salesOrdersApi.styleOptions({ q: q.trim() || undefined, customer_id: customerId || undefined, limit: 30 })
-                .then(res => { setRows(res.data); setActive(res.data.findIndex(r => r.pickable)); setError(''); })
+                .then(res => { const data = res.data.map(r => ({ ...r, pickable: r.pickable && (allowPending || !r.bom_pending) })); setRows(data); setActive(data.findIndex(r => r.pickable)); setError(''); })
                 .catch(() => setError('Could not load styles.'));
         }, q ? 250 : 0);
         return () => clearTimeout(t);
-    }, [q, customerId]);
+    }, [q, customerId, allowPending]);
     useEffect(() => { list.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' }); }, [active]);
 
     const pick = (r) => { if (r?.pickable) onChange(r); };
@@ -38,6 +39,7 @@ export default function StylePicker({ customerId, value, onChange, autoFocus }) 
                 <div className="min-w-0 flex-1">
                     <p className="font-bold text-slate-800">{value.style_code} <span className="font-normal text-slate-600">— {value.name}</span></p>
                     <p className="text-xs text-slate-500">{[value.brand, value.product_type, value.fit, value.sam ? `SAM ${value.sam}` : null].filter(Boolean).join(' · ')}{value.bom_version ? ` · style BOM v${value.bom_version}, ${value.colour_count} colours, ${value.size_count} sizes` : ''}</p>
+                    {value.bom_pending && <p className="text-[11px] font-semibold text-amber-700 mt-0.5">BOM pending — {value.why_not}. You can enter quantities in any colour now; the order can be submitted once the Style BOM is approved (the line links to it by itself).</p>}
                 </div>
                 <button type="button" onClick={() => onChange(null)} className="p-1 rounded text-slate-500 hover:bg-white" aria-label="Choose another style"><X size={15} /></button>
             </div>
@@ -70,9 +72,10 @@ export default function StylePicker({ customerId, value, onChange, autoFocus }) 
                                 </span>
                                 <span className="block text-xs text-slate-500">
                                     {[r.buyer, r.brand, r.product_type, r.fit, r.sam ? `SAM ${r.sam}` : null].filter(Boolean).join(' · ')}
-                                    {r.pickable ? ` · style BOM v${r.bom_version}, ${r.colour_count} colours, ${r.size_count} sizes` : ''}
+                                    {r.bom_version ? ` · style BOM v${r.bom_version}, ${r.colour_count} colours, ${r.size_count} sizes` : ''}
                                 </span>
-                                {!r.pickable && <span className="block text-[11px] font-semibold text-amber-700">Can't order: {r.why_not}</span>}
+                                {!r.pickable && <span className="block text-[11px] font-semibold text-amber-700">Can't add to an approved order: {r.why_not}</span>}
+                                {r.pickable && r.bom_pending && <span className="block text-[11px] font-semibold text-amber-700">BOM pending: {r.why_not}</span>}
                                 {r.pickable && r.warning && <span className="block text-[11px] text-amber-700">{r.warning}</span>}
                             </button>
                         ))}

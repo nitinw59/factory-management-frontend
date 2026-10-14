@@ -166,7 +166,7 @@ export default function OrderRequirementsPage() {
                             <tr key={l.id} className={`border-t border-slate-100 ${l.status !== 'ACTIVE' ? 'opacity-50' : ''}`}>
                                 <td className="px-4 py-2">{l.line_no}{l.status !== 'ACTIVE' && <span className="ml-1 text-xs text-rose-600">cancelled</span>}</td>
                                 <td className="px-4 py-2 font-semibold">{l.style_code}</td>
-                                <td className="px-4 py-2">v{l.bom_version}</td>
+                                <td className="px-4 py-2">{l.bom_version ? `v${l.bom_version}` : <span className="font-semibold text-amber-700">BOM pending</span>}</td>
                                 <td className="px-4 py-2">{fmtDate(l.ship_date)}</td>
                                 <td className="px-4 py-2 text-right tabular-nums">{l.ordered_pieces.toLocaleString('en-IN')}</td>
                                 <td className="px-4 py-2 text-right tabular-nums">{l.cut_allowance_pct != null ? `${l.cut_allowance_pct}%` : <span className="text-slate-400">{data.settings.default_cut_allowance_pct}% (default)</span>}</td>

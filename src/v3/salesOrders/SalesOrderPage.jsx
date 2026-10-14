@@ -278,8 +278,8 @@ export default function SalesOrderPage() {
             {adding && (
                 <Modal title="Add style line" onClose={() => setAdding(null)}>
                     <div className="space-y-3 w-[min(640px,90vw)]">
-                        <Field label="Style *" hint="Only styles with an approved style BOM can be ordered.">
-                            <StylePicker customerId={order.customer_id} value={adding.style} autoFocus
+                        <Field label="Style *" hint={revising ? 'An approved order only takes styles with an approved Style BOM.' : 'A style without an approved Style BOM goes on as "BOM pending" — the order can be submitted once its BOM is approved.'}>
+                            <StylePicker customerId={order.customer_id} value={adding.style} autoFocus allowPending={!revising}
                                 onChange={(st) => setAdding({ ...adding, style: st, style_id: st ? String(st.id) : '' })} />
                         </Field>
                         <Field label={revising ? 'Ship date *' : 'Ship date'}><input className={inputCls} type="date" value={adding.ship_date} onChange={e => setAdding({ ...adding, ship_date: e.target.value })} /></Field>

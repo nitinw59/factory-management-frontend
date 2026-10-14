@@ -55,22 +55,24 @@ function CardPreview({ m, logo }) {
                 </table>
             )}
             <table className="w-full border-collapse table-fixed">
-                <colgroup><col style={{ width: '18%' }} />{m.colours.map(c => <col key={c.id} />)}</colgroup>
+                <colgroup><col style={{ width: '18%' }} />{m.colours.map(c => <col key={c.id} />)}{m.sample && <col style={{ width: '13%' }} />}</colgroup>
                 <thead>
                     <tr>
                         <th className={`${td} text-left`}>Colour</th>
                         {m.colours.map(c => <th key={c.id} className={`${td} text-center`}>{c.name}</th>)}
+                        {m.sample && <th className={`${td} text-center`}>Sample</th>}
                     </tr>
                 </thead>
                 <tbody>
                     {m.grid.map((r, i) => (
-                        <tr key={i} style={r.swatch ? { height: 84 } : undefined}>
+                        <tr key={i} style={r.swatch ? { height: 84 } : m.sample ? { height: 52 } : undefined}>
                             <td className={`${td} font-bold`}>{r.label}{r.sub && <span className="block font-normal text-[11px]">{r.sub}</span>}</td>
                             {r.cells.map((lines, k) => (
                                 <td key={k} className={`${td} ${r.bold ? 'font-bold' : ''}`}>
                                     {lines.map((t, j) => <span key={j} className={`block ${t.startsWith('! ') ? 'text-rose-700' : ''}`}>{t}</span>)}
                                 </td>
                             ))}
+                            {m.sample && <td className={td} />}
                         </tr>
                     ))}
                 </tbody>
@@ -219,6 +221,7 @@ export default function TrimCardDesignerPage() {
                             </select>
                         )}
                         <Tick checked={s.swatch_row} onChange={v => set({ swatch_row: v })}>Blank swatch row (to staple fabric)</Tick>
+                        <Tick checked={s.sample_column} onChange={v => set({ sample_column: v })}>Sample column (blank, to stick the real trim on each row)</Tick>
                         <Tick checked={s.consumption} onChange={v => set({ consumption: v })}>Consumption & wastage under each row name</Tick>
                     </Section>
 

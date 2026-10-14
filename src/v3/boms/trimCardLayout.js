@@ -112,6 +112,7 @@ export function defaultSettings(card) {
         fabric_header: true,
         header_fabric_key: head ? head[0] : null,
         swatch_row: true,
+        sample_column: true,      // blank column at the right of every row, to stick the real trim (13 Oct 2026)
         consumption: false,
         rows: [
             ...fabric.filter(([k]) => !head || k !== head[0]).map(([key]) => ({ key, show: true, as: 'SHADE' })),
@@ -153,7 +154,8 @@ export function normalizeSettings(card, saved) {
 
 const dmy = (d) => d.toLocaleDateString('en-GB');
 
-// The card as plain data: { title, company, header, colours, grid, strips, bottom, footer }.
+// The card as plain data: { title, company, header, colours, grid, strips, bottom, footer, sample }.
+// sample = a blank "Sample" column after the colours (rows made taller) to stick the real trims.
 export function buildCard(card, s, { order = null, company = null } = {}) {
     const sizeName = new Map(card.sizes.map(z => [z.id, z.name]));
     const lines = new Map([...lineKeys(card.fabric), ...lineKeys(card.trims)]);
@@ -210,7 +212,7 @@ export function buildCard(card, s, { order = null, company = null } = {}) {
     return {
         title: s.title || 'TRIM CARD',
         company: s.header.company && name ? { name, sub } : null,
-        header, colours, grid, strips, bottom, footer: s.footer,
+        header, colours, grid, strips, bottom, footer: s.footer, sample: !!s.sample_column,
         file: `Trim-card-${card.bom.style_code}-v${card.bom.version_no}${order ? `-${order.order_no}` : ''}`.replace(/[^\w.-]+/g, '_'),
     };
 }

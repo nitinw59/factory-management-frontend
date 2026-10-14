@@ -4,6 +4,7 @@
 //              fabric block (pocketing included) → trims block (per colour, or one "Same in all" row),
 //              with consumption per piece, unit, wastage, BOM qty and remarks.
 //   Style BOM: the same without order quantities — header (style), colourways, fabric, trims.
+// Fabric and trims tables end with a blank SAMPLE column (tall rows) to stick the real swatch / trim.
 // Offered next to layout v1 (to be removed later). One model → PDF (jsPDF + autotable) and Excel
 // (ExcelJS), one page / sheet per order line (style).
 import jsPDF from 'jspdf';
@@ -150,6 +151,12 @@ export function buildStyleBomV2(card) {
 // ── PDF ──────────────────────────────────────────────────────────────────
 const GRID = { lineWidth: 0.3, lineColor: [0, 0, 0], fillColor: false, textColor: [0, 0, 0], valign: 'middle', cellPadding: 1, fontSize: 7.5 };
 const HEAD = { ...GRID, fontStyle: 'bold', fillColor: [241, 245, 249] };
+// Blank SAMPLE column at the end of the fabric and trims tables, rows tall enough to stick the real
+// swatch / trim (asked 13 Oct 2026).
+const SAMPLE_W = 26;    // mm
+const SAMPLE_H = 13;    // mm
+const sampleCell = () => ({ content: '', styles: { minCellHeight: SAMPLE_H } });
+const sampleCols = (n) => ({ [n]: { cellWidth: SAMPLE_W } });
 
 export function exportBomV2Pdf(blocks, lh = null) {
     const doc = new jsPDF({ orientation: 'landscape' });
@@ -180,18 +187,19 @@ export function exportBomV2Pdf(blocks, lh = null) {
             y = doc.lastAutoTable.finalY + 3;
         }
         const qtyHead = bk.withQty ? ['BOM QTY'] : [];
-        autoTable(doc, { ...base, startY: y, showHead: 'everyPage',
-            head: [['SR.NO', 'ITEM CODE', 'CLASSIFICATION', 'DESCRIPTION', 'GARMENT COLOUR', 'SIZE', 'CONS./PC', 'UOM', 'WASTAGE', ...qtyHead, 'REMARKS']],
+        const sampleAt = 10 + qtyHead.length;   // column index of SAMPLE in the fabric / trims tables
+        autoTable(doc, { ...base, startY: y, showHead: 'everyPage', columnStyles: sampleCols(sampleAt),
+            head: [['SR.NO', 'ITEM CODE', 'CLASSIFICATION', 'DESCRIPTION', 'GARMENT COLOUR', 'SIZE', 'CONS./PC', 'UOM', 'WASTAGE', ...qtyHead, 'REMARKS', 'SAMPLE']],
             body: bk.fabric.map((f, k) => [k + 1, f.code, f.classification, f.description, f.colour, f.size, { content: f.cons, styles: { halign: 'right' } }, f.uom, { content: f.wastage, styles: { halign: 'right' } },
-                ...(bk.withQty ? [{ content: qty2(f.qty), styles: { halign: 'right', fontStyle: 'bold' } }] : []), { content: f.remarks, styles: { textColor: /! /.test(f.remarks) ? [190, 18, 60] : [0, 0, 0] } }]) });
+                ...(bk.withQty ? [{ content: qty2(f.qty), styles: { halign: 'right', fontStyle: 'bold' } }] : []), { content: f.remarks, styles: { textColor: /! /.test(f.remarks) ? [190, 18, 60] : [0, 0, 0] } }, sampleCell()]) });
         y = doc.lastAutoTable.finalY + 3;
         const body = [];
         bk.trims.forEach((t, k) => t.rows.forEach((r, j) => body.push([
             ...(j === 0 ? [{ content: String(k + 1), rowSpan: t.rows.length, styles: { valign: 'top' } }, { content: t.name, rowSpan: t.rows.length, styles: { valign: 'top', fontStyle: 'bold' } }] : []),
             r.classification, r.description, r.colour, r.size, { content: r.cons, styles: { halign: 'right' } }, r.uom, { content: r.wastage, styles: { halign: 'right' } },
-            ...(bk.withQty ? [{ content: qty2(r.qty), styles: { halign: 'right', fontStyle: 'bold' } }] : []), { content: r.remarks, styles: { textColor: /! /.test(r.remarks) ? [190, 18, 60] : [0, 0, 0] } }])));
-        autoTable(doc, { ...base, startY: y, showHead: 'everyPage',
-            head: [['SR.NO', 'ITEM NAME', 'CLASSIFICATION', 'DESCRIPTION', 'GARMENT COLOUR', 'SIZE', 'CONS./PC', 'UOM', 'WASTAGE', ...qtyHead, 'REMARKS']], body });
+            ...(bk.withQty ? [{ content: qty2(r.qty), styles: { halign: 'right', fontStyle: 'bold' } }] : []), { content: r.remarks, styles: { textColor: /! /.test(r.remarks) ? [190, 18, 60] : [0, 0, 0] } }, sampleCell()])));
+        autoTable(doc, { ...base, startY: y, showHead: 'everyPage', columnStyles: sampleCols(sampleAt),
+            head: [['SR.NO', 'ITEM NAME', 'CLASSIFICATION', 'DESCRIPTION', 'GARMENT COLOUR', 'SIZE', 'CONS./PC', 'UOM', 'WASTAGE', ...qtyHead, 'REMARKS', 'SAMPLE']], body });
         y = doc.lastAutoTable.finalY;
         doc.setFontSize(7); doc.setTextColor(90);
         doc.text(bk.footnote, 8, Math.min(y + 5, doc.internal.pageSize.getHeight() - 6));
@@ -213,8 +221,9 @@ export async function buildBomV2Workbook(blocks, lh = null) {
         used.add(name);
         const ws = wb.addWorksheet(name, { pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
         const sizes = bk.grid ? bk.grid.sizes : [];
-        const cols = Math.max(11, 6 + sizes.length + 1);
-        ws.columns = [{ width: 7 }, { width: 18 }, { width: 26 }, { width: 22 }, { width: 18 }, { width: 10 }, { width: 12 }, { width: 8 }, { width: 10 }, { width: 12 }, { width: 22 }, ...Array.from({ length: Math.max(0, cols - 11) }, () => ({ width: 10 }))];
+        const sampleCol = 11 + (bk.withQty ? 1 : 0);   // SAMPLE after REMARKS in the fabric / trims tables
+        const cols = Math.max(sampleCol, 6 + sizes.length + 1);
+        ws.columns = Array.from({ length: cols }, (_, k) => ({ width: k + 1 === sampleCol ? 20 : [7, 18, 26, 22, 18, 10, 12, 8, 10, 12, 22][k] ?? 10 }));
         // Company on the left, the BOM title on the right; plain title row without a profile.
         let r = addXlsxLetterhead(wb, ws, lh, { lastCol: cols, title: bk.title, titleColor: bk.estimate ? 'FFBE123C' : null });
         if (r === 1) { put(ws, r, [1, 4], bk.title, { font: { ...BOLD, size: 13, ...(bk.estimate ? { color: { argb: 'FFBE123C' } } : {}) } }); r++; }
@@ -235,13 +244,14 @@ export async function buildBomV2Workbook(blocks, lh = null) {
             r++;
         }
         const qh = bk.withQty ? ['BOM QTY'] : [];
-        ['SR.NO', 'ITEM CODE', 'CLASSIFICATION', 'DESCRIPTION', 'GARMENT COLOUR', 'SIZE', 'CONS./PC', 'UOM', 'WASTAGE', ...qh, 'REMARKS'].forEach((h, k) => put(ws, r, [k + 1, k + 1], h, { font: BOLD, fill: 'FFF1F5F9' })); r++;
-        bk.fabric.forEach((f, i) => { [i + 1, f.code, f.classification, f.description, f.colour, f.size, f.cons, f.uom, f.wastage, ...(bk.withQty ? [Math.round(f.qty * 100) / 100] : []), f.remarks].forEach((v, k) => put(ws, r, [k + 1, k + 1], v, { align: k === 6 || k === 8 || (bk.withQty && k === 9) ? 'right' : 'left' })); r++; });
+        ['SR.NO', 'ITEM CODE', 'CLASSIFICATION', 'DESCRIPTION', 'GARMENT COLOUR', 'SIZE', 'CONS./PC', 'UOM', 'WASTAGE', ...qh, 'REMARKS', 'SAMPLE'].forEach((h, k) => put(ws, r, [k + 1, k + 1], h, { font: BOLD, fill: 'FFF1F5F9' })); r++;
+        bk.fabric.forEach((f, i) => { [i + 1, f.code, f.classification, f.description, f.colour, f.size, f.cons, f.uom, f.wastage, ...(bk.withQty ? [Math.round(f.qty * 100) / 100] : []), f.remarks, ''].forEach((v, k) => put(ws, r, [k + 1, k + 1], v, { align: k === 6 || k === 8 || (bk.withQty && k === 9) ? 'right' : 'left' })); ws.getRow(r).height = 38; r++; });
         r++;
-        ['SR.NO', 'ITEM NAME', 'CLASSIFICATION', 'DESCRIPTION', 'GARMENT COLOUR', 'SIZE', 'CONS./PC', 'UOM', 'WASTAGE', ...qh, 'REMARKS'].forEach((h, k) => put(ws, r, [k + 1, k + 1], h, { font: BOLD, fill: 'FFF1F5F9' })); r++;
+        ['SR.NO', 'ITEM NAME', 'CLASSIFICATION', 'DESCRIPTION', 'GARMENT COLOUR', 'SIZE', 'CONS./PC', 'UOM', 'WASTAGE', ...qh, 'REMARKS', 'SAMPLE'].forEach((h, k) => put(ws, r, [k + 1, k + 1], h, { font: BOLD, fill: 'FFF1F5F9' })); r++;
         bk.trims.forEach((t, i) => t.rows.forEach((row, j) => {
-            [j === 0 ? i + 1 : '', j === 0 ? t.name : '', row.classification, row.description, row.colour, row.size, row.cons, row.uom, row.wastage, ...(bk.withQty ? [Math.round(row.qty * 100) / 100] : []), row.remarks]
+            [j === 0 ? i + 1 : '', j === 0 ? t.name : '', row.classification, row.description, row.colour, row.size, row.cons, row.uom, row.wastage, ...(bk.withQty ? [Math.round(row.qty * 100) / 100] : []), row.remarks, '']
                 .forEach((v, k) => put(ws, r, [k + 1, k + 1], v, { font: k === 1 && j === 0 ? BOLD : undefined, align: k === 6 || k === 8 || (bk.withQty && k === 9) ? 'right' : 'left' }));
+            ws.getRow(r).height = 38;
             r++;
         }));
         r++;

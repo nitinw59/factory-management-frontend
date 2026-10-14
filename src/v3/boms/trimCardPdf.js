@@ -48,16 +48,19 @@ export function exportTrimCardFactoryPdf(m, lh = null) {
     // Main grid: line label + one column per colour.
     const n = Math.max(1, m.colours.length);
     const labelW = Math.min(W * 0.2, 48);
-    const colW = (W - labelW) / n;
+    const sampleW = m.sample ? Math.min(W * 0.13, 36) : 0;   // blank column to stick the real trim
+    const colW = (W - labelW - sampleW) / n;
+    const rowH = m.sample ? 14 : undefined;                   // mm — room for a button / label / thread wrap
     const body = m.grid.map(r => [
-        { content: r.sub ? `${r.label}\n${r.sub}` : r.label, styles: { fontStyle: 'bold', ...(r.swatch && { minCellHeight: 22 }) } },
-        ...r.cells.map(lines => ({ content: lines.join('\n'), _bad: lines.some(t => t.startsWith('! ')), styles: { fontStyle: r.bold ? 'bold' : 'normal', ...(r.swatch && { minCellHeight: 22 }) } })),
+        { content: r.sub ? `${r.label}\n${r.sub}` : r.label, styles: { fontStyle: 'bold', minCellHeight: r.swatch ? 22 : rowH } },
+        ...r.cells.map(lines => ({ content: lines.join('\n'), _bad: lines.some(t => t.startsWith('! ')), styles: { fontStyle: r.bold ? 'bold' : 'normal', minCellHeight: r.swatch ? 22 : rowH } })),
+        ...(m.sample ? [{ content: '', styles: { minCellHeight: r.swatch ? 22 : rowH } }] : []),
     ]);
     autoTable(doc, {
         ...base, startY: y, showHead: 'everyPage',
-        head: [[{ content: 'Colour', styles: { fontStyle: 'bold' } }, ...m.colours.map(c => ({ content: c.name, styles: { halign: 'center' } }))]],
+        head: [[{ content: 'Colour', styles: { fontStyle: 'bold' } }, ...m.colours.map(c => ({ content: c.name, styles: { halign: 'center' } })), ...(m.sample ? [{ content: 'Sample', styles: { halign: 'center' } }] : [])]],
         body,
-        columnStyles: Object.fromEntries([[0, { cellWidth: labelW }], ...m.colours.map((_, k) => [k + 1, { cellWidth: colW }])]),
+        columnStyles: Object.fromEntries([[0, { cellWidth: labelW }], ...m.colours.map((_, k) => [k + 1, { cellWidth: colW }]), ...(m.sample ? [[n + 1, { cellWidth: sampleW }]] : [])]),
         didParseCell: (d) => { if (d.section === 'body' && d.cell.raw?._bad) d.cell.styles.textColor = RED; },
     });
     y = doc.lastAutoTable.finalY;

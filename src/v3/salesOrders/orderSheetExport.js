@@ -71,7 +71,7 @@ export function exportOrderPdf(order, company) {
     autoTable(doc, {
         startY: y,
         head: [['Line', 'Style', 'Style BOM', 'Ship date', 'Pieces']],
-        body: active.map(l => [l.line_no, `${l.style_code} — ${l.style_name}`, `v${l.bom_version}`, fmtDate(l.ship_date), fmt(l.total_qty)]),
+        body: active.map(l => [l.line_no, `${l.style_code} — ${l.style_name}`, (l.bom_version ? `v${l.bom_version}` : 'BOM pending'), fmtDate(l.ship_date), fmt(l.total_qty)]),
         foot: [['', 'Total', '', '', fmt(order.total_qty)]],
         styles: { fontSize: 8.5 }, headStyles: { fillColor: [79, 70, 229] }, footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42] },
         columnStyles: { 0: { cellWidth: 12 }, 4: { halign: 'right' } },
@@ -86,7 +86,7 @@ export function exportOrderPdf(order, company) {
         doc.setFontSize(10); doc.setFont(undefined, 'bold');
         doc.text(`Line ${l.line_no} · ${l.style_code} — ${l.style_name}`, 14, y);
         doc.setFont(undefined, 'normal'); doc.setFontSize(8.5);
-        doc.text(`BOM v${l.bom_version}   |   Ship ${fmtDate(l.ship_date)}   |   ${fmt(g.total)} pcs`, pageW - 14, y, { align: 'right' });
+        doc.text(`${l.bom_version ? `BOM v${l.bom_version}` : 'BOM pending'}   |   Ship ${fmtDate(l.ship_date)}   |   ${fmt(g.total)} pcs`, pageW - 14, y, { align: 'right' });
         autoTable(doc, {
             startY: y + 2,
             head: [['Colour', ...l.sizes.map(s => s.size_name), 'Total']],
@@ -137,7 +137,7 @@ export function exportOrderExcel(order) {
         ['Created by', order.created_by_name || ''], ['Approved', order.approved_at ? new Date(order.approved_at).toLocaleString('en-IN') : ''],
         ['Notes', order.notes || ''], [],
         ['Line', 'Style', 'Style name', 'Style BOM version', 'Ship date', 'Pieces', 'Status', 'Notes / reason'],
-        ...order.lines.map(l => [l.line_no, l.style_code, l.style_name, `v${l.bom_version}`, l.ship_date || '', l.total_qty, l.status, l.status === 'CANCELLED' ? l.cancelled_reason : (l.notes || '')]),
+        ...order.lines.map(l => [l.line_no, l.style_code, l.style_name, l.bom_version ? `v${l.bom_version}` : 'BOM pending', l.ship_date || '', l.total_qty, l.status, l.status === 'CANCELLED' ? l.cancelled_reason : (l.notes || '')]),
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(head), 'Order');
 
@@ -145,7 +145,7 @@ export function exportOrderExcel(order) {
     const grid = [];
     for (const l of active) {
         const g = lineGrid(l);
-        grid.push([`Line ${l.line_no}`, `${l.style_code} — ${l.style_name}`, `BOM v${l.bom_version}`, `Ship ${l.ship_date || ''}`]);
+        grid.push([`Line ${l.line_no}`, `${l.style_code} — ${l.style_name}`, l.bom_version ? `BOM v${l.bom_version}` : 'BOM pending', `Ship ${l.ship_date || ''}`]);
         grid.push(['Colour', ...l.sizes.map(s => s.size_name), 'Total']);
         g.rows.forEach(r => grid.push([r.colour, ...r.cells, r.total]));
         grid.push(['Total', ...g.colTotals, g.total], []);
@@ -158,7 +158,7 @@ export function exportOrderExcel(order) {
         const colour = new Map(l.colours.map(c => [c.garment_colour_id, c.name]));
         const size = new Map(l.sizes.map(s => [s.size_id, s.size_name]));
         for (const x of l.qty) {
-            flat.push({ 'Order no.': order.order_no, Customer: order.customer_name, Line: l.line_no, Style: l.style_code, 'BOM version': l.bom_version,
+            flat.push({ 'Order no.': order.order_no, Customer: order.customer_name, Line: l.line_no, Style: l.style_code, 'BOM version': l.bom_version ?? 'pending',
                 'Ship date': l.ship_date || '', Colour: colour.get(x.garment_colour_id) || '?', Size: size.get(x.size_id) || '?', Pieces: Number(x.qty) });
         }
     }
