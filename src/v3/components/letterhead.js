@@ -35,6 +35,9 @@ async function fetchLogo(url) {
     }
 }
 
+// Any company-profile image (logo, brand logo, signature, seal) as { dataUrl, format, w, h }, or null.
+export const loadImage = (url) => (url ? fetchLogo(assetUrl(url)) : Promise.resolve(null));
+
 let cached = null;
 let cachedAt = 0;
 export async function loadLetterhead() {

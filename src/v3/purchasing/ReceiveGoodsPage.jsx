@@ -85,7 +85,7 @@ function LineForm({ l, value, onChange }) {
                                                 <td className="pr-1"><input className={inputCls} value={r.dye_lot} onChange={e => setRoll(i, { dye_lot: e.target.value })} aria-label={`Roll ${i + 1} dye lot`} /></td>
                                                 <td className="pr-1"><input className={`${inputCls} text-right`} type="number" min="0" step="any" value={r.qty} onChange={e => setRoll(i, { qty: e.target.value })} aria-label={`Roll ${i + 1} quantity`} /></td>
                                                 <td className="pr-1"><input className={`${inputCls} text-right`} type="number" min="0" step="any" value={r.width} onChange={e => setRoll(i, { width: e.target.value })} aria-label={`Roll ${i + 1} width`} /></td>
-                                                <td className="pr-1"><input className={inputCls} value={r.location} onChange={e => setRoll(i, { location: e.target.value })} aria-label={`Roll ${i + 1} location`} /></td>
+                                                <td className="pr-1"><input className={inputCls} value={r.location} list="v3-store-locations" onChange={e => setRoll(i, { location: e.target.value })} aria-label={`Roll ${i + 1} location`} /></td>
                                                 <td><button type="button" className="p-1 text-rose-500" onClick={() => set({ rolls: rolls.filter((_, j) => j !== i) })} aria-label={`Remove roll ${i + 1}`}><Trash2 size={14} /></button></td>
                                             </tr>
                                         ))}
@@ -159,6 +159,9 @@ export default function ReceiveGoodsPage() {
                     <div className="sm:col-span-4"><Field label="Notes"><input className={inputCls} value={header.notes} onChange={e => setHeader({ ...header, notes: e.target.value })} /></Field></div>
                 </div>
                 <div className="space-y-3 mb-4">
+                    {/* Settings → Stores: locations offered for roll locations (free text still allowed) */}
+                    <datalist id="v3-store-locations">{(po.locations || []).filter(x => x.area === 'ALL' || x.area === 'FABRIC').map(x => <option key={x.code} value={x.code}>{x.name || ''}</option>)}</datalist>
+                    {po.label_check === 'BLIND' && <p className="text-xs font-semibold text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">Blind label check: type the code exactly as printed on the supplier's label — the PO's code is not shown (Settings → Stores).</p>}
                     {po.lines.map(l => <LineForm key={l.id} l={l} value={vals[l.id] || { on: false }} onChange={(v) => setVals({ ...vals, [l.id]: v })} />)}
                 </div>
                 <ErrorBox text={error} />

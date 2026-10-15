@@ -15,21 +15,39 @@ const toCells = (line) => Object.fromEntries(line.qty.map(x => [keyOf(x.garment_
 const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
 const rowTotalOf = (cells, cid) => Object.entries(cells).filter(([k]) => k.startsWith(`${cid}:`)).reduce((n, [, v]) => n + Number(v || 0), 0);
 
-export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDocuments, editable, canDelete, needsReason, onSave, onDelete, onCancelLine, onMoveBom }) {
+// proposing (15 Oct 2026): an approved order — saves go into its change request; the card shows the proposed values.
+export default function OrderLineCard({ line: approvedLine, orderId, onPpm, ppmCount = 0, onDocuments, editable, canDelete, needsReason, proposing = false, onSave, onDelete, onCancelLine, onMoveBom, onUndoCancel }) {
+    // What the card edits: the proposed values when this line has a proposed change, else the line as it is.
+    const line = useMemo(() => (proposing && approvedLine.proposed ? { ...approvedLine, ...approvedLine.proposed, qty: approvedLine.proposed.qty } : approvedLine), [approvedLine, proposing]);
     const [cells, setCells] = useState(() => toCells(line));
     const [shipDate, setShipDate] = useState(line.ship_date || '');
     const [notes, setNotes] = useState(line.notes || '');
     const [brand, setBrand] = useState(line.brand || '');   // starts from the style's brand
+
     const [reason, setReason] = useState('');
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
-    // Draft line: any colour can be added (search). One not on the approved Style BOM makes the line "BOM pending"
-    // until a BOM version with it is approved (it then links by itself). Approved order: the BOM's colours only.
-    const canAddColour = editable && !needsReason;
+    // Style BOM version (15 Oct 2026): a draft line picks one of the style's approved versions; its colours are the
+    // version's (others are refused on save). Only while the style has no approved version is the line "BOM pending"
+    // with any colour (search). Approved order (proposing): another version can be proposed — e.g. one with a colour
+    // the buyer added; the merchandiser approves it with the other changes.
+    const versions = line.approved_versions || [];
+    const pickVersion = editable && !needsReason && versions.length > 0;
+    const [bomId, setBomId] = useState(line.bom_id ? String(line.bom_id) : '');
+    useEffect(() => { setCells(toCells(line)); setShipDate(line.ship_date || ''); setNotes(line.notes || ''); setBrand(line.brand || ''); setBomId(line.bom_id ? String(line.bom_id) : ''); }, [line]);
+    const picked = pickVersion ? versions.find(v => v.id === bomId) || null : null;
+    const canAddColour = editable && !needsReason && !proposing && versions.length === 0;
     const [extraColours, setExtraColours] = useState([]);
     const [colourQ, setColourQ] = useState('');
     const [colourHits, setColourHits] = useState([]);
-    const colours = useMemo(() => [...line.colours, ...extraColours.filter(c => !line.colours.some(x => x.garment_colour_id === c.garment_colour_id))], [line.colours, extraColours]);
+    const colours = useMemo(() => {
+        if (picked) {
+            // The version's colours, plus any colour that has quantities but isn't on it (flagged; must be cleared).
+            const off = line.colours.filter(c => !picked.colours.some(b => b.garment_colour_id === c.garment_colour_id) && rowTotalOf(cells, c.garment_colour_id) > 0);
+            return [...picked.colours, ...off.map(c => ({ ...c, on_bom: false }))];
+        }
+        return [...line.colours, ...extraColours.filter(c => !line.colours.some(x => x.garment_colour_id === c.garment_colour_id))];
+    }, [picked, line.colours, extraColours, cells]);
     const offBom = colours.filter(c => c.on_bom === false && rowTotalOf(cells, c.garment_colour_id) > 0).map(c => c.name);
     useEffect(() => {
         if (!canAddColour || colourQ.trim().length < 2) { setColourHits([]); return undefined; }
@@ -37,8 +55,8 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
         return () => clearTimeout(t);
     }, [colourQ, canAddColour]);
 
-    const original = useMemo(() => JSON.stringify([toCells(line), line.ship_date || '', line.notes || '', line.brand || '']), [line]);
-    const dirty = JSON.stringify([Object.fromEntries(Object.entries(cells).filter(([, v]) => v !== '' && Number(v) !== 0)), shipDate, notes, brand]) !== original;
+    const original = useMemo(() => JSON.stringify([toCells(line), line.ship_date || '', line.notes || '', line.brand || '', line.bom_id ? String(line.bom_id) : '']), [line]);
+    const dirty = JSON.stringify([Object.fromEntries(Object.entries(cells).filter(([, v]) => v !== '' && Number(v) !== 0)), shipDate, notes, brand, bomId]) !== original;
 
     const val = (cid, sid) => Number(cells[keyOf(cid, sid)] || 0);
     const rowTotal = (cid) => line.sizes.reduce((n, s) => n + val(cid, s.size_id), 0);
@@ -69,7 +87,7 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
         setSaving(true); setError('');
         try {
             await onSave({
-                ship_date: shipDate || null, notes, brand, ...(needsReason && { reason }),
+                ship_date: shipDate || null, notes, brand, ...(needsReason && { reason }), ...(pickVersion && { bom_id: bomId || null }),
                 qty: Object.entries(cells).filter(([, v]) => v !== '' && Number(v) > 0).map(([k, v]) => {
                     const [garment_colour_id, size_id] = k.split(':');
                     return { garment_colour_id, size_id, qty: Number(v) };
@@ -81,18 +99,31 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
             setSaving(false);
         }
     };
-    const reset = () => { setCells(toCells(line)); setShipDate(line.ship_date || ''); setNotes(line.notes || ''); setBrand(line.brand || ''); setReason(''); setError(''); setExtraColours([]); };
+    const reset = () => { setCells(toCells(line)); setShipDate(line.ship_date || ''); setNotes(line.notes || ''); setBrand(line.brand || ''); setReason(''); setError(''); setExtraColours([]); setBomId(line.bom_id ? String(line.bom_id) : ''); };
 
     return (
-        <div className={`bg-white border rounded-xl p-4 ${cancelled ? 'border-slate-200 opacity-60' : dirty ? 'border-indigo-300' : 'border-slate-200'}`}>
+        <div className={`bg-white border rounded-xl p-4 ${cancelled ? 'border-slate-200 opacity-60' : dirty ? 'border-indigo-300' : approvedLine.proposed_new || approvedLine.proposed ? 'border-amber-300' : 'border-slate-200'}`}>
+            {approvedLine.proposed_new && <p className="mb-2 text-xs font-bold text-amber-800">Proposed new line — added when the merchandiser approves the changes.</p>}
+            {!approvedLine.proposed_new && approvedLine.proposed && <p className="mb-2 text-xs font-bold text-amber-800">Proposed change (shown below) — the approved line is {fmt(approvedLine.total_qty)} pcs{approvedLine.ship_date ? `, ship ${fmtDate(approvedLine.ship_date)}` : ''} until the merchandiser approves.</p>}
+            {approvedLine.cancel_requested && <p className="mb-2 text-xs font-bold text-rose-700">Cancellation proposed: {approvedLine.cancel_requested.reason}{onUndoCancel && <button type="button" onClick={onUndoCancel} className="ml-2 font-semibold text-indigo-700 underline">Undo</button>}</p>}
             <div className="flex flex-wrap items-start gap-3 mb-3">
                 <div className="flex-1 min-w-[220px]">
                     <p className="font-black text-slate-800">
-                        Line {line.line_no} · <Link to={`/v3/styles/${line.style_id}`} className="text-indigo-700 hover:underline">{line.style_code}</Link>
+                        {approvedLine.proposed_new ? 'New line' : `Line ${line.line_no}`} · <Link to={`/v3/styles/${line.style_id}`} className="text-indigo-700 hover:underline">{line.style_code}</Link>
                         <span className="font-normal text-slate-500"> {line.style_name}</span>
                     </p>
                     <p className="text-xs text-slate-500">
-                        {line.bom_pending ? (
+                        {pickVersion ? (
+                            <span className="inline-flex flex-wrap items-center gap-1.5">
+                                Style BOM
+                                <select className="px-1.5 py-0.5 text-xs font-semibold border border-slate-300 rounded" value={bomId} onChange={e => setBomId(e.target.value)} aria-label="Style BOM version">
+                                    <option value="">— pick the version —</option>
+                                    {versions.map((v, i) => <option key={v.id} value={v.id}>v{v.version_no}{i === 0 ? ' (latest)' : ''} · {v.colours.length} colour{v.colours.length === 1 ? '' : 's'}: {v.colours.map(c => c.name).join(', ')}</option>)}
+                                </select>
+                                {picked && <Link to={`/v3/boms/${picked.id}`} className="font-semibold text-indigo-700 hover:underline">open v{picked.version_no}</Link>}
+                                {picked && String(picked.id) === String(line.bom_id) && <Link to={`/v3/boms/${line.bom_id}/trim-card${orderId ? `?order=${orderId}` : ''}`} className="ml-1 inline-flex items-center gap-1 font-semibold text-indigo-700 hover:underline"><ClipboardList size={12} /> Trim card</Link>}
+                            </span>
+                        ) : line.bom_pending ? (
                             <span className="inline-flex items-center gap-1 font-bold text-amber-800 bg-amber-50 border border-amber-300 rounded px-1.5 py-0.5">
                                 <AlertTriangle size={12} /> BOM pending{line.open_boms ? ` — Style BOM ${line.open_boms.replace('pending_approval', 'waiting for approval')}` : ' — no Style BOM yet'}
                             </span>
@@ -136,12 +167,19 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
 
             {line.bom_outdated && (
                 <p className="mb-2 text-xs font-semibold text-amber-700 flex items-center gap-1">
-                    <AlertTriangle size={13} /> BOM v{line.current_bom_version} has been approved since.
-                    {editable && !needsReason ? ` Saving this line moves it to v${line.current_bom_version}.` : ` This line stays on v${line.bom_version} unless a merchandiser moves it.`}
+                    <AlertTriangle size={13} /> Style BOM v{line.current_bom_version} (newer) is also approved.
+                    {editable && !needsReason ? ` This line stays on v${line.bom_version} — pick v${line.current_bom_version} above if this order should use it.` : ` This line stays on v${line.bom_version} unless a merchandiser moves it.`}
                     {onMoveBom && <button type="button" onClick={onMoveBom} className="ml-2 inline-flex items-center gap-1 text-indigo-700 underline"><RefreshCw size={12} /> Move to v{line.current_bom_version}</button>}
                 </p>
             )}
-            {line.bom_pending && !cancelled && (
+            {picked && colours.some(c => c.on_bom === false) && (
+                <p className="mb-2 text-xs font-semibold text-rose-700">{colours.filter(c => c.on_bom === false).map(c => c.name).join(', ')} {colours.filter(c => c.on_bom === false).length === 1 ? 'is' : 'are'} not on Style BOM v{picked.version_no} — pick a version that has {colours.filter(c => c.on_bom === false).length === 1 ? 'it' : 'them'}, or clear the quantities.</p>
+            )}
+            {proposing && pickVersion && !cancelled && (
+                <p className="mb-2 text-xs text-slate-500">A colour missing? Pick a Style BOM version that has it — or, if no version has it, the merchandiser adds it to the <Link to={`/v3/styles/${line.style_id}`} className="font-semibold text-indigo-700 hover:underline">style's BOM</Link> and approves a new version first.</p>
+            )}
+            {pickVersion && !picked && !cancelled && <p className="mb-2 text-xs font-semibold text-amber-800">Pick the Style BOM version for this line (the colours come from it).</p>}
+            {line.bom_pending && !cancelled && !pickVersion && (
                 <p className="mb-2 text-xs text-amber-800">
                     {line.current_bom_id
                         ? <>Style BOM v{line.current_bom_version} is approved but doesn't have every colour on this line{offBom.length ? ` (${offBom.join(', ')})` : ''}. The order can be submitted once a Style BOM version with {offBom.length === 1 ? 'it' : 'them'} is approved — the line links to it by itself — or take {offBom.length === 1 ? 'that colour' : 'those colours'} off. </>
@@ -162,11 +200,10 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
                         <button key={c.id} type="button" onClick={() => { setExtraColours([...extraColours, { garment_colour_id: String(c.id), name: c.name, is_active: true, on_bom: false }]); setColourQ(''); }}
                             className="px-2 py-1 rounded border border-slate-200 text-xs font-semibold text-slate-700 hover:border-indigo-400">+ {c.name}</button>
                     ))}
-                    {!line.bom_pending && <span className="text-[11px] text-slate-500">A colour not on the Style BOM makes the line "BOM pending" until a BOM version with it is approved.</span>}
                 </div>
             )}
             {colours.length === 0 || line.sizes.length === 0 ? (
-                <p className="text-sm text-amber-700">{line.sizes.length === 0 ? 'The style has no sizes.' : line.bom_pending ? 'Add the colours being ordered (above).' : 'This style\'s BOM has no colours.'}</p>
+                <p className="text-sm text-amber-700">{line.sizes.length === 0 ? 'The style has no sizes.' : canAddColour ? 'Add the colours being ordered (above).' : pickVersion && !picked ? 'Pick the Style BOM version first.' : 'This style\'s BOM has no colours.'}</p>
             ) : (
                 <div className="overflow-x-auto">
                     <table className="border-collapse text-sm">
@@ -216,12 +253,12 @@ export default function OrderLineCard({ line, orderId, onPpm, ppmCount = 0, onDo
                     )}
                     {dirty && <SecondaryButton onClick={reset} disabled={saving}>Discard</SecondaryButton>}
                     <PrimaryButton onClick={save} busy={saving}
-                        disabled={saving || (needsReason ? (!dirty || !reason.trim()) : (!dirty && !line.bom_outdated && !line.stray_qty))}>
-                        {needsReason ? 'Save revision' : 'Save line'}
+                        disabled={saving || (needsReason ? (!dirty || !reason.trim()) : (!dirty && !line.stray_qty))}>
+                        {proposing ? 'Save as proposed change' : needsReason ? 'Save revision' : 'Save line'}
                     </PrimaryButton>
                 </div>
             ) : line.notes ? <p className="mt-2 text-xs text-slate-500">{line.notes}</p> : null}
-            {dirty && <p className="mt-1 text-[11px] font-bold text-indigo-700">Unsaved changes{needsReason ? ' — this order is approved, so saving creates a new revision' : ''}. Tip: paste a block copied from Excel into any cell.</p>}
+            {dirty && <p className="mt-1 text-[11px] font-bold text-indigo-700">Unsaved changes{proposing ? ' — this order is approved: saving adds it to the changes for the merchandiser' : needsReason ? ' — this order is approved, so saving creates a new revision' : ''}. Tip: paste a block copied from Excel into any cell.</p>}
             <div className="mt-2"><ErrorBox text={error} /></div>
         </div>
     );

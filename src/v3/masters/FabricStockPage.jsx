@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, Plus, History, SlidersHorizontal, Trash2 } f
 import Modal from '../../shared/Modal';
 import { mastersApi, apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading, fmtQty, useMastersPermissions } from '../components/ui';
+import LocationList from '../components/LocationList';
 
 const blankRow = () => ({ roll_no: '', dye_lot: '', qty: '', width: '', location: '' });
 const KIND = { OPENING: 'Opening count', GRN: 'Received (GRN)', ISSUE: 'Issued', RETURN: 'Returned', ADJUSTMENT: 'Adjustment' };
@@ -152,7 +153,7 @@ export default function FabricStockPage() {
                                 <SecondaryButton onClick={applyPaste} disabled={!opening.paste.trim()}>Add rows</SecondaryButton>
                             </div>
                         </Field>
-                        <table className="w-full text-sm">
+                        <LocationList area="FABRIC" /><table className="w-full text-sm">
                             <thead className="text-xs text-slate-500 text-left"><tr><th className="py-1">Roll no. *</th><th>Dye lot</th><th>Quantity *</th><th>Width (in)</th><th>Location</th><th /></tr></thead>
                             <tbody>
                                 {opening.rows.map((r, i) => (
@@ -161,7 +162,7 @@ export default function FabricStockPage() {
                                         <td className="pr-1"><input className={inputCls} value={r.dye_lot} onChange={e => setRow(i, { dye_lot: e.target.value })} aria-label={`Roll ${i + 1} dye lot`} /></td>
                                         <td className="pr-1"><input className={`${inputCls} text-right`} type="number" min="0" step="any" value={r.qty} onChange={e => setRow(i, { qty: e.target.value })} aria-label={`Roll ${i + 1} quantity`} /></td>
                                         <td className="pr-1"><input className={`${inputCls} text-right`} type="number" min="0" step="any" value={r.width} onChange={e => setRow(i, { width: e.target.value })} aria-label={`Roll ${i + 1} width`} /></td>
-                                        <td className="pr-1"><input className={inputCls} value={r.location} onChange={e => setRow(i, { location: e.target.value })} aria-label={`Roll ${i + 1} location`} /></td>
+                                        <td className="pr-1"><input className={inputCls} list="v3-locations-FABRIC" value={r.location} onChange={e => setRow(i, { location: e.target.value })} aria-label={`Roll ${i + 1} location`} /></td>
                                         <td><button type="button" className="p-1 text-rose-500" onClick={() => setOpening({ ...opening, rows: opening.rows.filter((_, j) => j !== i) })} aria-label={`Remove row ${i + 1}`}><Trash2 size={14} /></button></td>
                                     </tr>
                                 ))}

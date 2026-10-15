@@ -59,7 +59,7 @@ export default function OrderRequirementsPage() {
     const anyKind = myKinds.length > 0;
     const canKind = (k) => myKinds.includes(k);
     const [params] = useSearchParams();
-    const [tab, setTab] = useState(params.get('tab') === 'MILESTONES' ? 'MILESTONES' : 'FABRIC');
+    const [tab, setTab] = useState(['MILESTONES', 'TRIM'].includes(params.get('tab')) ? params.get('tab') : 'FABRIC');
     const [error, setError] = useState('');
     const [cell, setCell] = useState(null);           // drill-down { item, colour }
     const [allowance, setAllowance] = useState(null); // { line, pct, reason }

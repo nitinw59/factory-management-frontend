@@ -17,16 +17,18 @@ export default function PurchaseRequisitionsPage({ purpose }) {
     const [params, setParams] = useSearchParams();
     const status = params.get('status') || '';
     const attention = params.get('attention') === 'me';   // My work → requisitions sent back to me
+    const store = params.get('store') || '';   // My work (store) → that store's requisitions: TRIM = store + trim lines, FABRIC = fabric lines
+    const storeLabel = store === 'FABRIC' ? 'fabric' : store === 'TRIM' ? 'trims and store items' : store ? 'trims, fabric and store items' : '';
     const [rows, setRows] = useState(null);
     const [search, setSearch] = useState('');
     const [error, setError] = useState('');
 
     const [rev, setRev] = useState(0);   // bumped by the live refresh
     useEffect(() => {
-        const t = setTimeout(() => planningApi.prs({ status: status || undefined, q: search.trim() || undefined, purpose, attention: attention ? 'me' : undefined })
+        const t = setTimeout(() => planningApi.prs({ status: status || undefined, q: search.trim() || undefined, purpose, attention: attention ? 'me' : undefined, store: store || undefined })
             .then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load requisitions.'))), 250);
         return () => clearTimeout(t);
-    }, [status, search, purpose, attention, rev]);
+    }, [status, search, purpose, attention, store, rev]);
     useV3Live(() => setRev(r => r + 1));   // live: requisitions decided elsewhere show at once
 
     return (
@@ -35,13 +37,18 @@ export default function PurchaseRequisitionsPage({ purpose }) {
                 subtitle={attention ? 'Requisitions you raised that purchasing rejected, or where lines were rejected or closed. Open one, raise the need again (buy list / reorder list) or change and resubmit, then mark it handled.' : purpose === 'STORE' ? 'Spares and general items requested by the store (raise them from the reorder list). The purchase manager approves; approved ones are ordered on a PO.'
                     : status === 'SUBMITTED' ? 'Requisitions waiting for the purchase manager (production and store). Open one to approve or reject it.' : 'Raised from the buy list (production) and the reorder list (store). Approved requisitions are what purchasing orders.'}
                 actions={<>
-                    <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={status} onChange={e => setParams(e.target.value ? { status: e.target.value } : {})} aria-label="Filter by status">
+                    <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={status} onChange={e => setParams({ ...(e.target.value ? { status: e.target.value } : {}), ...(store ? { store } : {}) })} aria-label="Filter by status">
                         <option value="">All statuses</option>
                         <option value="DRAFT,REJECTED">To finish (draft + rejected)</option>
                         {Object.entries(PR_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                     </select>
                     <SearchInput value={search} onChange={setSearch} placeholder="PR number" />
                 </>} />
+            {store && (
+                <p className="mb-3 text-sm bg-indigo-50 text-indigo-800 rounded-lg px-3 py-2">
+                    Requisitions with {storeLabel}. <button type="button" className="underline font-semibold" onClick={() => setParams(status ? { status } : {})}>Show all</button>
+                </p>
+            )}
             <ErrorBox text={error} />
             {!rows ? <Loading /> : (
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">

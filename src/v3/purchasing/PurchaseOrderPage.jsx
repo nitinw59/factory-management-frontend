@@ -1,7 +1,9 @@
 // One purchase order: supplier and terms, lines (qty, rate, GST, delivery,
 // what each covers), totals with CGST + SGST or IGST, issue / revise / cancel,
 // documents, history, PDF / Excel. Draft: free editing. Issued: every change
-// needs a reason and becomes a revision. Quantity with no requisition (direct items, or a line raised above
+// needs a reason and becomes a revision. Approval (15 Oct 2026): every PO is checked on its total (incl. GST)
+// against Settings → Purchasing → PO approval limit — up to it the purchase manager issues, above it the factory
+// admin approves (Send for approval → Approve & issue / Send back). Quantity with no requisition (direct items, or a line raised above
 // its requisitions) needs a reason per line and factory admin approval: Send for approval → Approve & issue,
 // or sent back to draft with the approver's reason.
 import { useCallback, useEffect, useState } from 'react';
@@ -9,6 +11,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Send, Ban, Pencil, Trash2, Plus, FileDown, FileSpreadsheet, Upload, Info, PackageOpen, PackageX, ShieldCheck, Undo2, PackagePlus } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { purchasingApi } from '../api/purchasingApi';
+import { settingsApi } from '../api/settingsApi';
+import { loadImage } from '../components/letterhead';
 import { adminApi } from '../../api/adminApi';
 import { API_BASE_URL } from '../../utils/api';
 import { apiError } from '../api/mastersApi';
@@ -53,7 +57,8 @@ export default function PurchaseOrderPage() {
     const anyReceived = po.lines.some(l => l.received_qty > 0 || l.pending_qty > 0);
     const editLine = (l) => { setFormError(''); setLineEdit({ line: l, qty: String(l.qty), rate: String(l.rate), gst_pct: String(l.gst_pct), delivery_date: l.delivery_date || '', notes: l.notes || '', reason: '', extra_reason: l.extra_reason || '', extra_note: l.extra_note || '' }); };
     const pending = po.status === 'PENDING_APPROVAL';
-    const extraLines = po.lines.filter(l => l.extra_qty > 0);
+    const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+    const limitNote = Number(po.approval_limit) > 0 ? `${rupees(po.totals.total)} is above the ${rupees(po.approval_limit)} approval limit` : 'Every PO needs factory admin approval (no approval limit set)';
     const STICKY = 'sticky right-0 bg-white shadow-[-6px_0_6px_-6px_rgba(15,23,42,0.15)]';   // line actions stay in view when the table scrolls
 
     const run = async (fn, close) => {
@@ -64,7 +69,14 @@ export default function PurchaseOrderPage() {
     const exportPdf = async () => {
         let company = null;
         try { company = (await adminApi.getCompanyProfile()).data; } catch { /* letterhead is optional */ }
-        exportPoPdf(po, company);
+        // Settings → Documents (PO): which logo, signature and seal print.
+        const ds = po.doc_settings || {};
+        const [logo, signature, seal] = await Promise.all([
+            loadImage(ds.logo === 'NONE' ? null : ds.logo === 'BRAND' ? (company?.brand_logo_url || company?.logo_url) : company?.logo_url),
+            loadImage(ds.show_signature ? company?.signature_url : null),
+            loadImage(ds.show_seal ? company?.seal_url : null),
+        ]);
+        exportPoPdf(po, company, { logo, signature, seal });
     };
     const openAdd = () => {
         setFormError('');
@@ -86,7 +98,7 @@ export default function PurchaseOrderPage() {
             {po.status === 'SHORT_CLOSED' && <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Short-closed</b> — the rest of this PO is no longer expected.</div>}
             {pending && (
                 <div className="mb-3 text-sm bg-rose-50 border border-rose-200 text-rose-900 rounded-lg px-3 py-2">
-                    <b>Waiting for factory admin approval</b>{po.approval_requested_by_name ? ` — sent by ${po.approval_requested_by_name}` : ''}{po.approval_requested_at ? ` on ${new Date(po.approval_requested_at).toLocaleString()}` : ''}. {extraLines.length} line(s) have quantity with no requisition. No changes until it is approved or taken back.
+                    <b>Waiting for factory admin approval</b>{po.approval_requested_by_name ? ` — sent by ${po.approval_requested_by_name}` : ''}{po.approval_requested_at ? ` on ${new Date(po.approval_requested_at).toLocaleString()}` : ''}. {limitNote}. No changes until it is approved or taken back.
                 </div>
             )}
             {po.status === 'DRAFT' && po.approval_rejected_reason && (
@@ -95,9 +107,12 @@ export default function PurchaseOrderPage() {
                 </div>
             )}
             {po.status === 'DRAFT' && po.needs_approval && !po.approval_rejected_reason && (
-                <p className="text-sm text-amber-800 mb-3">{extraLines.length} line(s) have quantity with no requisition — {canApprove ? 'issuing it records your approval.' : 'it needs factory admin approval before it is issued.'}</p>
+                <p className="text-sm text-amber-800 mb-3">{limitNote} — {canApprove ? 'issuing it records your approval.' : 'it needs factory admin approval before it is issued.'}</p>
             )}
-            {issued && po.approved_by_name && <p className="text-sm text-emerald-700 mb-1">Approved by {po.approved_by_name}{po.approved_at ? ` on ${new Date(po.approved_at).toLocaleString()}` : ''} (quantity with no requisition).</p>}
+            {po.status === 'DRAFT' && !po.needs_approval && Number(po.approval_limit) > 0 && po.lines.length > 0 && (
+                <p className="text-sm text-emerald-700 mb-3">{rupees(po.totals.total)} — within the {rupees(po.approval_limit)} approval limit: issued without approval.</p>
+            )}
+            {issued && po.approved_by_name && <p className="text-sm text-emerald-700 mb-1">Approved by {po.approved_by_name}{po.approved_at ? ` on ${new Date(po.approved_at).toLocaleString()}` : ''} {po.approved_total ? ` for ${rupees(po.approved_total)}` : ''}. Changes that take it above that need the factory admin again.</p>}
             {issued && <p className="text-sm text-indigo-700 mb-3">Issued {new Date(po.issued_at).toLocaleString()}{po.issued_by_name ? ` by ${po.issued_by_name}` : ''}. Changes need a reason and become revisions.</p>}
 
             <div className="flex flex-wrap gap-2 mb-3">
@@ -107,8 +122,8 @@ export default function PurchaseOrderPage() {
                 {canApprove && pending && <SecondaryButton onClick={() => askReason({ title: `Send ${po.po_no} back`, confirm: 'Send back', hint: 'It goes back to draft; the purchase manager sees your reason.', run: (r) => purchasingApi.reject(id, r) })}><Ban size={14} /> Send back</SecondaryButton>}
                 {canManage && pending && <SecondaryButton onClick={() => run(() => purchasingApi.recall(id))}><Undo2 size={14} /> Take back to change</SecondaryButton>}
                 {editable && <SecondaryButton onClick={openAdd}><Plus size={14} /> Add requisition lines</SecondaryButton>}
-                {editable && (!issued || canApprove) && <SecondaryButton onClick={() => { setFormError(''); setAdding({ mode: 'direct', direct: [], reason: '' }); }}><PackagePlus size={14} /> Add item (no requisition)</SecondaryButton>}
-                {editable && <SecondaryButton onClick={() => { setFormError(''); setHeaderEdit({ delivery_date: po.delivery_date || '', terms: po.terms || '', notes: po.notes || '', reason: '' }); }}><Pencil size={14} /> Delivery / terms</SecondaryButton>}
+                {editable && <SecondaryButton onClick={() => { setFormError(''); setAdding({ mode: 'direct', direct: [], reason: '' }); }}><PackagePlus size={14} /> Add item (no requisition)</SecondaryButton>}
+                {editable && <SecondaryButton onClick={() => { setFormError(''); setHeaderEdit({ delivery_date: po.delivery_date || '', terms: po.terms || '', notes: po.notes || '', reason: '', delivery_address_id: po.delivery_address?.id || '', addresses: null }); settingsApi.addresses().then(res => setHeaderEdit(h => (h ? { ...h, addresses: res.data } : h))).catch(() => setHeaderEdit(h => (h ? { ...h, addresses: [] } : h))); }}><Pencil size={14} /> Delivery / terms</SecondaryButton>}
                 {canReceive && receivable && <PrimaryButton onClick={() => navigate(`/v3/purchasing/receive/${id}`)}><PackageOpen size={14} /> Receive goods</PrimaryButton>}
                 {canManage && po.status === 'PARTLY_RECEIVED' && <SecondaryButton onClick={() => askReason({ title: `Short-close ${po.po_no}`, confirm: 'Short-close', hint: 'The rest is no longer expected from the supplier. Planning stops counting it as incoming; the open requisition quantity can go on a new PO.', run: (r) => purchasingApi.shortClose(id, r) })}><PackageX size={14} /> Short-close</SecondaryButton>}
                 {(editable || (canManage && pending)) && !anyReceived && <SecondaryButton onClick={() => askReason({ title: `Cancel ${po.po_no}`, confirm: 'Cancel purchase order', run: (r) => purchasingApi.cancel(id, r) })}><Ban size={14} /> Cancel</SecondaryButton>}
@@ -132,6 +147,9 @@ export default function PurchaseOrderPage() {
                     <div><p className="text-xs font-bold text-slate-500">Payment terms</p><p className="font-semibold">{po.payment_terms_days} days</p></div>
                     <div><p className="text-xs font-bold text-slate-500">Tax</p><p className="font-semibold">{intra ? `CGST + SGST (both in ${po.company_state_name})` : `IGST (${po.supplier_state_name} → ${po.company_state_name})`}</p></div>
                     <div><p className="text-xs font-bold text-slate-500">Raised by</p><p>{po.created_by_name || '—'}</p></div>
+                    <div className="col-span-2"><p className="text-xs font-bold text-slate-500">Deliver to</p>
+                        <p className="text-slate-700">{po.delivery_address ? <>{po.delivery_address.name} — {[po.delivery_address.address_line1, po.delivery_address.city, po.delivery_address.pin_code].filter(Boolean).join(', ')}{po.delivery_address.gstin ? <span className="text-xs text-slate-500"> · GSTIN {po.delivery_address.gstin}</span> : null}</> : 'Registered address'}</p></div>
+                    {po.purchase_contact && <div className="col-span-2"><p className="text-xs font-bold text-slate-500">Our contact (printed)</p><p className="text-slate-700">{[po.purchase_contact.name, po.purchase_contact.phone, po.purchase_contact.email].filter(Boolean).join(' · ')}</p></div>}
                     {po.terms && <div className="col-span-2"><p className="text-xs font-bold text-slate-500">Terms</p><p className="whitespace-pre-line text-slate-700">{po.terms}</p></div>}
                     {po.notes && <div className="col-span-2"><p className="text-xs font-bold text-slate-500">Notes</p><p className="text-slate-700">{po.notes}</p></div>}
                 </div>
@@ -253,7 +271,7 @@ export default function PurchaseOrderPage() {
                         <p className="text-xs text-slate-500">= {fmt(Number(lineEdit.qty || 0) * lineEdit.line.factor, lineEdit.line.uom)} {lineEdit.line.uom} · taxable ₹{inr(Number(lineEdit.qty || 0) * Number(lineEdit.rate || 0))} · requisitions need {fmt(lineEdit.line.covered, lineEdit.line.uom)} {lineEdit.line.uom}{lineEdit.line.covered > 0 ? ` (${needUnits(lineEdit.line)} ${lineEdit.line.purchase_uom})` : ''}</p>
                         {Number(lineEdit.qty || 0) > needUnits(lineEdit.line) && (
                             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
-                                <p className="text-xs text-amber-900"><b>{fmt(Number(lineEdit.qty) - needUnits(lineEdit.line), 'm')} {lineEdit.line.purchase_uom} with no requisition</b> — give the reason{canApprove ? '.' : '; the PO then needs factory admin approval before it is issued.'}</p>
+                                <p className="text-xs text-amber-900"><b>{fmt(Number(lineEdit.qty) - needUnits(lineEdit.line), 'm')} {lineEdit.line.purchase_uom} with no requisition</b> — give the reason. The PO still follows the approval limit on its total.</p>
                                 <div className="grid grid-cols-2 gap-2">
                                     <select className={inputCls} value={lineEdit.extra_reason} onChange={e => setLineEdit({ ...lineEdit, extra_reason: e.target.value })} aria-label="Why more than the requisitions">
                                         <option value="">— why? —</option>
@@ -285,11 +303,19 @@ export default function PurchaseOrderPage() {
                         <Field label="Delivery date (whole PO)" hint="Empty = each line's own date."><input className={inputCls} type="date" value={headerEdit.delivery_date} onChange={e => setHeaderEdit({ ...headerEdit, delivery_date: e.target.value })} /></Field>
                         <Field label="Terms" hint="Printed on the PO (packing, inspection, delivery address…)."><textarea className={`${inputCls} min-h-[90px]`} value={headerEdit.terms} onChange={e => setHeaderEdit({ ...headerEdit, terms: e.target.value })} /></Field>
                         <Field label="Notes (internal)"><input className={inputCls} value={headerEdit.notes} onChange={e => setHeaderEdit({ ...headerEdit, notes: e.target.value })} /></Field>
+                        {headerEdit.addresses?.length > 0 && (
+                            <Field label="Deliver to" hint="A unit with its own GSTIN is billed on it — the PO's GST (CGST + SGST or IGST) is worked out again.">
+                                <select className={inputCls} value={headerEdit.delivery_address_id} onChange={e => setHeaderEdit({ ...headerEdit, delivery_address_id: e.target.value })}>
+                                    <option value="">Registered address</option>
+                                    {headerEdit.addresses.map(a => <option key={a.id} value={a.id}>{a.name}{a.gstin ? ` · GSTIN ${a.gstin}` : ''}</option>)}
+                                </select>
+                            </Field>
+                        )}
                         {issued && <Field label="Reason *"><input className={inputCls} value={headerEdit.reason} onChange={e => setHeaderEdit({ ...headerEdit, reason: e.target.value })} /></Field>}
                         <ErrorBox text={formError} />
                         <div className="flex justify-end gap-2">
                             <SecondaryButton onClick={() => setHeaderEdit(null)}>Cancel</SecondaryButton>
-                            <PrimaryButton busy={busy} disabled={busy || (issued && !headerEdit.reason.trim())} onClick={() => run(() => purchasingApi.updateOrder(id, { ...headerEdit, delivery_date: headerEdit.delivery_date || null }), () => setHeaderEdit(null))}>Save</PrimaryButton>
+                            <PrimaryButton busy={busy} disabled={busy || (issued && !headerEdit.reason.trim())} onClick={() => run(() => purchasingApi.updateOrder(id, { delivery_date: headerEdit.delivery_date || null, terms: headerEdit.terms, notes: headerEdit.notes, reason: headerEdit.reason, ...(headerEdit.addresses ? { delivery_address_id: headerEdit.delivery_address_id || null } : {}) }), () => setHeaderEdit(null))}>Save</PrimaryButton>
                         </div>
                     </div>
                 </Modal>

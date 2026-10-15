@@ -47,19 +47,28 @@ export function amountInWords(amount) {
 const fileBase = (po) => `PurchaseOrder-${po.po_no.replace(/[^\w-]+/g, '-')}${po.revision_no ? `-rev${po.revision_no}` : ''}`;
 const ddmmyyyy = (iso) => (iso ? iso.split('-').reverse().join('/') : '—');
 
-export function exportPoPdf(po, company) {
+// assets (Settings → Documents for POs): { logo, signature, seal } images from the company profile, or null.
+export function exportPoPdf(po, company, assets = {}) {
     const doc = new jsPDF();
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
     const intra = po.tax_mode === 'INTRA';
     let y = 14;
-    // Letterhead
-    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.text(company?.trade_name || company?.legal_name || 'Purchase order', 14, y); doc.setFont(undefined, 'normal');
+    // Letterhead (logo per Settings → Documents)
+    let x0 = 14;
+    if (assets.logo) {
+        const h = 14;
+        const w = Math.min(40, (h * assets.logo.w) / assets.logo.h);
+        try { doc.addImage(assets.logo.dataUrl, assets.logo.format, 14, 8, w, (w * assets.logo.h) / assets.logo.w, undefined, 'FAST'); x0 = 14 + w + 4; } catch { /* unreadable image: text only */ }
+    }
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.text(company?.trade_name || company?.legal_name || 'Purchase order', x0, y); doc.setFont(undefined, 'normal');
     doc.setFontSize(8);
     const addr = [company?.address_line1, company?.address_line2, [company?.city, company?.state].filter(Boolean).join(', ')].filter(Boolean).join(', ');
-    if (addr) { y += 4.5; doc.text(addr, 14, y, { maxWidth: pageW - 28 }); }
-    if (company?.gstin) { y += 4; doc.text(`GSTIN: ${company.gstin}   State: ${po.company_state_name || ''} (${po.company_state_code})`, 14, y); }
-    y += 7;
+    if (addr) { y += 4.5; doc.text(addr, x0, y, { maxWidth: pageW - x0 - 14 }); }
+    // Billed on the delivery unit's own GSTIN when it has one (Settings → Company addresses).
+    const billGstin = po.delivery_address?.gstin || company?.gstin;
+    if (billGstin) { y += 4; doc.text(`GSTIN: ${billGstin}   State: ${po.company_state_name || ''} (${po.company_state_code})${po.delivery_address?.gstin ? `   (${po.delivery_address.name})` : ''}`, x0, y); }
+    y = Math.max(y + 7, assets.logo ? 28 : 0);
     doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.text('PURCHASE ORDER', pageW / 2, y, { align: 'center' }); doc.setFont(undefined, 'normal');
     if (po.status === 'DRAFT' || po.status === 'PENDING_APPROVAL' || po.status === 'CANCELLED') {
         y += 5; doc.setFontSize(9); doc.setTextColor(190, 18, 60);
@@ -70,7 +79,7 @@ export function exportPoPdf(po, company) {
         startY: y + 3,
         body: [[
             { content: `Supplier\n${po.supplier_name}\n${[po.supplier_address, [po.supplier_city, po.supplier_pincode].filter(Boolean).join(' ')].filter(Boolean).join('\n')}\nGSTIN: ${po.supplier_gstin || 'unregistered'}\nState: ${po.supplier_state_name || ''} (${po.supplier_state_code})${po.supplier_contact || po.supplier_phone ? `\nContact: ${[po.supplier_contact, po.supplier_phone].filter(Boolean).join(', ')}` : ''}` },
-            { content: `PO no.: ${po.po_no}${po.revision_no ? `   (revision ${po.revision_no})` : ''}\nPO date: ${ddmmyyyy(po.po_date)}\nDelivery: ${ddmmyyyy(po.delivery_date) === '—' ? 'per line' : ddmmyyyy(po.delivery_date)}\nPayment terms: ${po.payment_terms_days} days\nTax: ${intra ? 'CGST + SGST (same state)' : 'IGST (inter-state)'}${po.issued_at ? `\nIssued: ${new Date(po.issued_at).toLocaleDateString('en-IN')}${po.issued_by_name ? ` by ${po.issued_by_name}` : ''}` : ''}` },
+            { content: `PO no.: ${po.po_no}${po.revision_no ? `   (revision ${po.revision_no})` : ''}\nPO date: ${ddmmyyyy(po.po_date)}\nDelivery: ${ddmmyyyy(po.delivery_date) === '—' ? 'per line' : ddmmyyyy(po.delivery_date)}\nPayment terms: ${po.payment_terms_days} days\nTax: ${intra ? 'CGST + SGST (same state)' : 'IGST (inter-state)'}${po.issued_at ? `\nIssued: ${new Date(po.issued_at).toLocaleDateString('en-IN')}${po.issued_by_name ? ` by ${po.issued_by_name}` : ''}` : ''}${po.delivery_address ? `\nDeliver to: ${po.delivery_address.name}, ${[po.delivery_address.address_line1, po.delivery_address.address_line2, po.delivery_address.city, po.delivery_address.pin_code].filter(Boolean).join(', ')}` : ''}${po.purchase_contact ? `\nContact: ${[po.purchase_contact.name, po.purchase_contact.phone, po.purchase_contact.email].filter(Boolean).join(', ')}` : ''}` },
         ]],
         theme: 'grid', styles: { fontSize: 8, cellPadding: 2, valign: 'top' }, columnStyles: { 0: { cellWidth: (pageW - 28) / 2 } },
         margin: { left: 14, right: 14 },
@@ -94,7 +103,13 @@ export function exportPoPdf(po, company) {
     if (y > pageH - 40) { doc.addPage(); y = 20; }
     y = Math.max(y + 18, pageH - 36);
     doc.text(`For ${company?.trade_name || company?.legal_name || ''}`, pageW - 14, y, { align: 'right' });
-    doc.text('Authorised signatory', pageW - 14, y + 16, { align: 'right' });
+    // Signature / seal / signatory (Settings → Documents for POs)
+    const img = (a, w, x, yy) => { try { doc.addImage(a.dataUrl, a.format, x, yy, w, (w * a.h) / a.w, undefined, 'FAST'); } catch { /* skip unreadable image */ } };
+    if (assets.seal) img(assets.seal, 18, pageW - 14 - 62, y + 1);
+    if (assets.signature) img(assets.signature, 30, pageW - 14 - 30, y + 1.5);
+    const ds = po.doc_settings || {};
+    doc.text(ds.signatory_name ? `${ds.signatory_name}${ds.signatory_designation ? `, ${ds.signatory_designation}` : ''}` : 'Authorised signatory', pageW - 14, y + 16, { align: 'right' });
+    if (ds.signatory_name) { doc.setFontSize(7); doc.text('Authorised signatory', pageW - 14, y + 19.5, { align: 'right' }); doc.setFontSize(8); }
     const pages = doc.getNumberOfPages();
     for (let i = 1; i <= pages; i++) {
         doc.setPage(i); doc.setFontSize(7.5); doc.setTextColor(100, 116, 139);

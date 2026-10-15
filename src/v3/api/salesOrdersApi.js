@@ -35,4 +35,11 @@ export const salesOrdersApi = {
     approve: (id) => api.post(`/v3/sales-orders/${id}/approve`),
     reject: (id, reason) => api.post(`/v3/sales-orders/${id}/reject`, { reason }),
     cancel: (id, reason) => api.post(`/v3/sales-orders/${id}/cancel`, { reason }),
+    // Changes to an approved order (15 Oct 2026): collected, sent to the merchandiser, approved / sent back.
+    submitChange: (id, reason) => api.post(`/v3/sales-orders/${id}/change-request/submit`, { reason }),
+    withdrawChange: (id) => api.post(`/v3/sales-orders/${id}/change-request/withdraw`),
+    discardChange: (id) => api.post(`/v3/sales-orders/${id}/change-request/discard`),
+    removeChange: (id, opId) => api.delete(`/v3/sales-orders/${id}/change-request/changes/${opId}`),
+    approveChange: (id) => api.post(`/v3/sales-orders/${id}/change-request/approve`),
+    rejectChange: (id, reason) => api.post(`/v3/sales-orders/${id}/change-request/reject`, { reason }),
 };

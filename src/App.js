@@ -280,6 +280,7 @@ const V3LinesAdminPage = lazyPage(() => import('./v3/admin/LinesPage'));
 const V3WorkstationsAdminPage = lazyPage(() => import('./v3/admin/WorkstationsPage'));
 const V3DefectCodesAdminPage = lazyPage(() => import('./v3/admin/DefectCodesPage'));
 const V3CompanyProfileAdminPage = lazyPage(() => import('./v3/admin/CompanyProfilePage'));
+const V3SettingsPage = lazyPage(() => import('./v3/admin/SettingsPage'));
 const V3OrderTrackerPage = lazyPage(() => import('./v3/tracker/OrderTrackerPage'));
 const V3OrderTrackPage = lazyPage(() => import('./v3/tracker/OrderTrackPage'));
 const V3StoreItemsPage = lazyPage(() => import('./v3/store/StoreItemsPage'));
@@ -375,6 +376,7 @@ const appRoutes = (
           <Route path="admin/workstations" element={<V3WorkstationsAdminPage />} />
           <Route path="admin/defect-codes" element={<V3DefectCodesAdminPage />} />
           <Route path="admin/company-profile" element={<V3CompanyProfileAdminPage />} />
+          <Route path="admin/settings" element={<V3SettingsPage />} />
           <Route path="tracker" element={<V3OrderTrackerPage />} />
           <Route path="tracker/orders/:id" element={<V3OrderTrackPage />} />
           <Route path="store/items" element={<V3StoreItemsPage />} />

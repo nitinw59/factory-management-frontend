@@ -1,7 +1,7 @@
 // One sales order: header (customer, buyer PO, dates), lines with colour ×
 // size grids, and history. Accounts edit while DRAFT / REJECTED and submit;
-// merchandisers approve or reject. After approval accounts still change the
-// order, but each save needs a reason and becomes a numbered revision.
+// merchandisers approve or reject. After approval accounts' changes (and a request
+// to cancel) go to the merchandiser as a change request; approved = a numbered revision.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Plus, Pencil, Send, Undo2, CheckCircle2, XCircle, Ban, FileDown, FileSpreadsheet } from 'lucide-react';
@@ -28,6 +28,7 @@ const EDITABLE = ['DRAFT', 'REJECTED'];
 const ACTION_LABEL = {
     CREATED: 'Created', SUBMITTED: 'Submitted', WITHDRAWN: 'Withdrawn', APPROVED: 'Approved', REJECTED: 'Rejected',
     REVISED: 'Revised', CANCELLED: 'Cancelled', BOM_CHANGED: 'BOM changed', DOCUMENT: 'Document uploaded', DOCUMENT_REMOVED: 'Document removed',
+    CHANGE_SENT: 'Changes sent for approval', CHANGE_APPROVED: 'Changes approved', CHANGE_REJECTED: 'Changes sent back', CHANGE_WITHDRAWN: 'Changes taken back',
 };
 // Remount a line card when its saved data changes, so it starts from the server copy.
 const lineKey = (l) => `${l.id}:${l.bom_id}:${l.ship_date}:${l.notes}:${l.status}:${JSON.stringify(l.qty)}`;
@@ -57,10 +58,15 @@ export default function SalesOrderPage() {
 
     if (!order) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
     const revising = order.status === 'APPROVED';
-    const editable = perms.edit && (EDITABLE.includes(order.status) || revising);
+    // Approved order: edits are collected in its change request (15 Oct 2026); locked while it waits for the merchandiser.
+    const cr = order.change_request;
+    const crWaiting = cr?.status === 'SUBMITTED';
+    const editable = perms.edit && (EDITABLE.includes(order.status) || (revising && !crWaiting));
     const neverApproved = !order.approved_at && order.revision_no === 0;
     const canMoveBom = perms.approve && ['SUBMITTED', 'APPROVED'].includes(order.status);
     const canCancel = (perms.edit && ['DRAFT', 'REJECTED', 'SUBMITTED'].includes(order.status)) || (perms.cancelApproved && order.status === 'APPROVED');
+    // Accounts on an approved order: the cancellation goes to the merchandiser with the order's change request.
+    const canRequestCancel = !perms.cancelApproved && perms.edit && revising && !crWaiting && !cr?.cancel_order;
     const activeLines = order.lines.filter(l => l.status === 'ACTIVE');
 
     // Run a flow action; a refused submit / approve lists every problem.
@@ -95,7 +101,8 @@ export default function SalesOrderPage() {
     const openHeader = () => {
         setFormError('');
         if (!customers.length) salesOrdersApi.customers().then(res => setCustomers(res.data)).catch(() => {});
-        setHeader({ customer_id: String(order.customer_id), buyer_po_no: order.buyer_po_no || '', order_type: order.order_type || 'FOB', order_date: order.order_date, notes: order.notes || '', reason: '' });
+        const ph = order.change_request?.proposed_header;   // an approved order shows its proposed header if there is one
+        setHeader({ customer_id: String(ph?.customer_id || order.customer_id), buyer_po_no: (ph ? ph.buyer_po_no : order.buyer_po_no) || '', order_type: ph?.order_type || order.order_type || 'FOB', order_date: ph?.order_date || order.order_date, notes: (ph ? ph.notes : order.notes) || '', reason: '' });
     };
     const openAdd = () => {
         setFormError('');
@@ -127,7 +134,7 @@ export default function SalesOrderPage() {
     };
     const saveLine = async (lineId, data) => setOrder((await salesOrdersApi.updateLine(id, lineId, data)).data);
     const deleteLine = async (l) => {
-        if (!window.confirm(`Delete line ${l.line_no} (${l.style_code})?`)) return;
+        if (!window.confirm(l.proposed_new ? `Remove the proposed new line ${l.style_code}?` : `Delete line ${l.line_no} (${l.style_code})?`)) return;
         await act(() => salesOrdersApi.deleteLine(id, l.id));
     };
 
@@ -141,7 +148,41 @@ export default function SalesOrderPage() {
                 <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Cancelled</b>{order.cancelled_by_name ? ` by ${order.cancelled_by_name}` : ''}: {order.cancelled_reason}</div>
             )}
             {order.status === 'SUBMITTED' && <p className="text-sm text-amber-700 mb-3">Waiting for a merchandiser to approve. {perms.edit ? 'Withdraw it to make changes.' : ''}</p>}
-            {revising && <p className="text-sm text-emerald-700 mb-3"><Link to={`/v3/planning/orders/${order.id}`} className="font-bold text-indigo-700 hover:underline mr-2">Order BOM →</Link>Approved {order.approved_at ? new Date(order.approved_at).toLocaleString() : ''}{order.approved_by_name ? ` by ${order.approved_by_name}` : ''}. BOM versions are locked.{perms.edit ? ' Changes need a reason and are saved as revisions.' : ''}</p>}
+            {revising && <p className="text-sm text-emerald-700 mb-3"><Link to={`/v3/planning/orders/${order.id}`} className="font-bold text-indigo-700 hover:underline mr-2">Order BOM →</Link>Approved {order.approved_at ? new Date(order.approved_at).toLocaleString() : ''}{order.approved_by_name ? ` by ${order.approved_by_name}` : ''}. Each line keeps its Style BOM version unless a change moves it.{perms.edit ? ' Changes go to the merchandiser for approval.' : ''}</p>}
+
+            {revising && (cr ? (
+                <div className={`mb-3 rounded-xl border p-4 ${crWaiting ? 'bg-sky-50 border-sky-200' : cr.sent_back_reason ? 'bg-amber-50 border-amber-300' : 'bg-indigo-50/60 border-indigo-200'}`}>
+                    <div className="flex flex-wrap items-start gap-2">
+                        <div className="flex-1 min-w-[240px]">
+                            <p className="font-bold text-slate-800">{crWaiting ? `Changes waiting for the merchandiser${cr.submitted_by_name ? ` — sent by ${cr.submitted_by_name}` : ''}` : 'Changes to this approved order — not sent yet'}</p>
+                            {crWaiting && cr.reason && <p className="text-sm text-slate-700">Reason: {cr.reason}</p>}
+                            {!crWaiting && cr.sent_back_reason && <p className="text-sm font-semibold text-amber-800">Sent back{cr.decided_by_name ? ` by ${cr.decided_by_name}` : ''}: {cr.sent_back_reason}</p>}
+                            <p className="text-xs text-slate-500 mt-0.5">The order, its Order BOM and planning stay as approved until the merchandiser approves these changes.</p>
+                        </div>
+                        {perms.edit && !crWaiting && <>
+                            <PrimaryButton disabled={busy || cr.problems.length > 0 || !cr.summary.length} onClick={() => askReason({ title: `Send changes of ${order.order_no} to the merchandiser`, label: 'Why does the order change? *', hint: 'e.g. "Buyer revised PO 31 → 32, +300 pcs navy". The merchandiser sees this with the changes.', confirm: 'Send for approval', run: (r) => salesOrdersApi.submitChange(id, r) })}><Send size={14} /> Send for approval</PrimaryButton>
+                            <SecondaryButton disabled={busy} onClick={() => { if (window.confirm('Discard all these changes? The approved order stays as it is.')) act(() => salesOrdersApi.discardChange(id)); }}><XCircle size={14} /> Discard changes</SecondaryButton>
+                        </>}
+                        {perms.edit && crWaiting && <SecondaryButton disabled={busy} onClick={() => act(() => salesOrdersApi.withdrawChange(id))}><Undo2 size={14} /> Take back to change</SecondaryButton>}
+                        {perms.approve && crWaiting && <>
+                            <PrimaryButton disabled={busy} onClick={() => { if (window.confirm(`Approve these changes? ${order.order_no} becomes revision ${order.revision_no + 1} and its material requirements are recalculated.`)) act(() => salesOrdersApi.approveChange(id)); }}><CheckCircle2 size={14} /> Approve changes</PrimaryButton>
+                            <SecondaryButton disabled={busy} onClick={() => askReason({ title: 'Send the changes back', label: 'Reason *', hint: 'Accounts see this; the order stays as approved.', confirm: 'Send back', run: (r) => salesOrdersApi.rejectChange(id, r) })}><Ban size={14} /> Send back</SecondaryButton>
+                        </>}
+                    </div>
+                    {cr.cancel_order && <p className="mt-2 text-sm font-bold text-rose-700">Cancel the whole order: {cr.cancel_order.reason}. When approved, its requirements close and allocated material goes back to stock.</p>}
+                    {cr.summary.length > 0 && <ul className="mt-2 ml-5 list-disc text-sm text-slate-700">{cr.summary.map((x, i) => <li key={i}>{x}</li>)}</ul>}
+                    {cr.problems.length > 0 && <ul className="mt-2 ml-5 list-disc text-sm font-semibold text-rose-700">{cr.problems.map((x, i) => <li key={i}>{x}</li>)}</ul>}
+                    {perms.edit && !crWaiting && cr.changes.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">{cr.changes.map(ch => {
+                            const ln = ch.line_id ? order.lines.find(l => String(l.id) === ch.line_id) : null;
+                            const label = ch.type === 'ORDER_CANCEL' ? 'Cancel order' : ch.type === 'HEADER' ? 'Order details' : ch.type === 'LINE_ADD' ? `New line ${ch.style_code || ''}` : ch.type === 'LINE_CANCEL' ? `Cancel line ${ln?.line_no ?? ''}` : `Line ${ln?.line_no ?? ''}`;
+                            return <button key={ch.id} type="button" onClick={() => act(() => salesOrdersApi.removeChange(id, ch.id))} className="px-2 py-0.5 rounded border border-slate-300 bg-white text-xs text-slate-700 hover:border-rose-400" title="Remove this change">{label} ×</button>;
+                        })}</div>
+                    )}
+                </div>
+            ) : perms.edit ? (
+                <p className="mb-3 text-xs text-slate-500">This order is approved. Changes you make below are collected and sent to the merchandiser for approval; production and planning keep the approved order until then.</p>
+            ) : null)}
 
             {/* Actions for this status and the signed-in user's rights */}
             <div className="flex flex-wrap gap-2 mb-3">
@@ -171,7 +212,8 @@ export default function SalesOrderPage() {
                     <SecondaryButton onClick={exportPdf} disabled={busy}><FileDown size={14} /> PDF</SecondaryButton>
                     <SecondaryButton onClick={() => exportOrderExcel(order)}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                 </span>
-                {canCancel && <SecondaryButton onClick={() => askReason({ title: `Cancel ${order.order_no}`, label: 'Reason *', hint: 'The order and its number stay on record; nothing can be changed afterwards.', confirm: 'Cancel order', danger: true, run: (r) => salesOrdersApi.cancel(id, r) })} disabled={busy}><Ban size={14} /> Cancel order</SecondaryButton>}
+                {canCancel && <SecondaryButton onClick={() => askReason({ title: `Cancel ${order.order_no}`, label: 'Reason *', hint: revising ? 'The order and its number stay on record; its material requirements close and allocated material goes back to stock. Material already issued and cut batches stay on record.' : 'The order and its number stay on record; nothing can be changed afterwards.', confirm: 'Cancel order', danger: true, run: (r) => salesOrdersApi.cancel(id, r) })} disabled={busy}><Ban size={14} /> Cancel order</SecondaryButton>}
+                {canRequestCancel && <SecondaryButton onClick={() => askReason({ title: `Request cancellation of ${order.order_no}`, label: 'Reason *', hint: `Goes to the merchandiser for approval${cr?.changes.length ? ' and replaces the other changes not sent yet' : ''}. The order stays approved until then.`, confirm: 'Propose cancellation', danger: true, run: (r) => salesOrdersApi.cancel(id, r) })} disabled={busy}><Ban size={14} /> Request cancellation</SecondaryButton>}
             </div>
             <ErrorBox text={error} />
             {problems.length > 0 && (
@@ -206,14 +248,19 @@ export default function SalesOrderPage() {
             {tab === 'lines' && (
                 <div className="space-y-3">
                     {order.lines.map(l => (
-                        <OrderLineCard key={lineKey(l)} line={l} orderId={id} onPpm={(format) => ppmTemplate(l, format)} ppmCount={(order.documents || []).filter(d => d.doc_type === 'PPM' && d.line_id === String(l.id)).length} onDocuments={() => setTab('documents')} editable={editable && l.status === 'ACTIVE'} canDelete={neverApproved} needsReason={revising}
+                        <OrderLineCard key={lineKey(l)} line={l} orderId={id} onPpm={(format) => ppmTemplate(l, format)} ppmCount={(order.documents || []).filter(d => d.doc_type === 'PPM' && d.line_id === String(l.id)).length} onDocuments={() => setTab('documents')} editable={editable && l.status === 'ACTIVE'} canDelete={neverApproved} needsReason={false} proposing={revising}
+                            onUndoCancel={l.cancel_requested && editable ? () => act(() => salesOrdersApi.removeChange(id, l.cancel_requested.op_id)) : null}
                             onSave={(data) => saveLine(l.id, data)} onDelete={() => deleteLine(l)}
-                            onCancelLine={editable && revising && l.status === 'ACTIVE' && activeLines.length > 1
-                                ? () => askReason({ title: `Cancel line ${l.line_no} (${l.style_code})`, label: 'Reason *', hint: 'The line stays on the order, marked cancelled. This is saved as a revision.', confirm: 'Cancel line', danger: true, run: (r) => salesOrdersApi.cancelLine(id, l.id, r) })
+                            onCancelLine={editable && revising && l.status === 'ACTIVE' && activeLines.length > 1 && !l.cancel_requested
+                                ? () => askReason({ title: `Cancel line ${l.line_no} (${l.style_code})`, label: 'Reason *', hint: 'Proposed with the other changes; the line is cancelled when the merchandiser approves them.', confirm: 'Cancel line', danger: true, run: (r) => salesOrdersApi.cancelLine(id, l.id, r) })
                                 : null}
                             onMoveBom={canMoveBom && l.status === 'ACTIVE' && l.bom_outdated
                                 ? () => askReason({ title: `Move line ${l.line_no} to BOM v${l.current_bom_version}`, label: 'Reason *', hint: `The line now uses v${l.bom_version}. v${l.current_bom_version} must cover all its colours and resolve fully.`, confirm: 'Move line', run: (r) => salesOrdersApi.moveLineBom(id, l.id, r) })
                                 : null} />
+                    ))}
+                    {(order.proposed_lines || []).map(l => (
+                        <OrderLineCard key={l.id} line={l} orderId={id} editable={editable} canDelete={editable} needsReason={false} proposing
+                            onSave={(data) => saveLine(l.id, data)} onDelete={() => deleteLine(l)} />
                     ))}
                     {order.lines.length === 0 && <p className="text-sm text-slate-400">No lines yet.{editable ? ' Add a style to start.' : ''}</p>}
                     {editable && <SecondaryButton onClick={openAdd}><Plus size={14} /> Add style line</SecondaryButton>}
@@ -264,12 +311,12 @@ export default function SalesOrderPage() {
                             <Field label="Order date *"><input className={inputCls} type="date" value={header.order_date} onChange={e => setHeader({ ...header, order_date: e.target.value })} /></Field>
                         </div>
                         <Field label="Notes"><textarea className={`${inputCls} min-h-[60px]`} value={header.notes} onChange={e => setHeader({ ...header, notes: e.target.value })} /></Field>
-                        {revising && <Field label="Reason for the change *" hint="The order is approved; this is saved as a revision."><input className={inputCls} value={header.reason} onChange={e => setHeader({ ...header, reason: e.target.value })} /></Field>}
+                        {revising && <p className="text-xs text-slate-500">The order is approved: this is proposed with the other changes and applies when the merchandiser approves them.</p>}
                         <ErrorBox text={formError} />
                         <div className="flex justify-end gap-2">
                             <SecondaryButton onClick={() => setHeader(null)}>Cancel</SecondaryButton>
                             <PrimaryButton onClick={() => submitForm(() => salesOrdersApi.updateOrder(id, header), () => setHeader(null))} busy={busy}
-                                disabled={busy || !header.customer_id || !header.order_date || (revising && !header.reason.trim())}>Save</PrimaryButton>
+                                disabled={busy || !header.customer_id || !header.order_date}>{revising ? 'Save as proposed change' : 'Save'}</PrimaryButton>
                         </div>
                     </div>
                 </Modal>
@@ -280,15 +327,22 @@ export default function SalesOrderPage() {
                     <div className="space-y-3 w-[min(640px,90vw)]">
                         <Field label="Style *" hint={revising ? 'An approved order only takes styles with an approved Style BOM.' : 'A style without an approved Style BOM goes on as "BOM pending" — the order can be submitted once its BOM is approved.'}>
                             <StylePicker customerId={order.customer_id} value={adding.style} autoFocus allowPending={!revising}
-                                onChange={(st) => setAdding({ ...adding, style: st, style_id: st ? String(st.id) : '' })} />
+                                onChange={(st) => setAdding({ ...adding, style: st, style_id: st ? String(st.id) : '', bom_id: st?.approved_versions?.[0]?.id || '' })} />
                         </Field>
+                        {adding.style?.approved_versions?.length > 0 && (
+                            <Field label="Style BOM version *" hint="Several versions can be approved at once (e.g. per buyer's colours). The line's colours come from the version picked.">
+                                <select className={inputCls} value={adding.bom_id} onChange={e => setAdding({ ...adding, bom_id: e.target.value })}>
+                                    {adding.style.approved_versions.map((v, i) => <option key={v.id} value={v.id}>v{v.version_no}{i === 0 ? ' (latest)' : ''} — {v.colour_count} colour{v.colour_count === 1 ? '' : 's'}: {v.colours || '—'}</option>)}
+                                </select>
+                            </Field>
+                        )}
                         <Field label={revising ? 'Ship date *' : 'Ship date'}><input className={inputCls} type="date" value={adding.ship_date} onChange={e => setAdding({ ...adding, ship_date: e.target.value })} /></Field>
-                        {revising && <Field label="Reason *" hint="The order is approved; adding a line is saved as a revision, and the line's BOM is locked now."><input className={inputCls} value={adding.reason} onChange={e => setAdding({ ...adding, reason: e.target.value })} /></Field>}
+                        {revising && <p className="text-xs text-slate-500">The order is approved: the new line is proposed with the other changes — enter its quantities on the card, then send the changes to the merchandiser.</p>}
                         <ErrorBox text={formError} />
                         <div className="flex justify-end gap-2">
                             <SecondaryButton onClick={() => setAdding(null)}>Cancel</SecondaryButton>
-                            <PrimaryButton onClick={() => submitForm(() => salesOrdersApi.addLine(id, { style_id: adding.style_id, ship_date: adding.ship_date, reason: adding.reason }), () => setAdding(null))} busy={busy}
-                                disabled={busy || !adding.style_id || (revising && (!adding.ship_date || !adding.reason.trim()))}>Add line</PrimaryButton>
+                            <PrimaryButton onClick={() => submitForm(() => salesOrdersApi.addLine(id, { style_id: adding.style_id, bom_id: adding.bom_id || undefined, ship_date: adding.ship_date }), () => setAdding(null))} busy={busy}
+                                disabled={busy || !adding.style_id || (revising && !adding.ship_date)}>{revising ? 'Propose line' : 'Add line'}</PrimaryButton>
                         </div>
                     </div>
                 </Modal>

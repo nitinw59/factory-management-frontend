@@ -3,7 +3,7 @@
 // approved orders where they have the next step, and their pages as quick links.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Inbox, ArrowRight, RefreshCw, PackageCheck } from 'lucide-react';
+import { Inbox, ArrowRight, RefreshCw, PackageCheck, ClipboardList } from 'lucide-react';
 import { useV3Live } from '../live';
 import { PageHeader, Loading } from '../components/ui';
 import { useV3Access } from '../V3Access';
@@ -56,6 +56,53 @@ function AllocateBanner({ a, changed }) {
     );
 }
 
+// Approved orders whose Order BOM needs the store's action (15 Oct 2026): allocate from free stock, or raise a
+// requisition for what nothing covers. "New" = the store has not allocated or issued anything to it yet.
+function OrderMaterialBanner({ m, changed }) {
+    const what = m.kinds.length === 1 ? (m.kinds[0] === 'TRIM' ? 'trims' : 'fabric') : 'material';
+    const tab = m.kinds.length === 1 && m.kinds[0] === 'TRIM' ? '?tab=TRIM' : '';
+    const kindQ = m.kinds.length === 1 ? `&kind=${m.kinds[0]}` : '';
+    const names = (list, n) => `${list.map(i => i.label).join(', ')}${n > list.length ? ` +${n - list.length}` : ''}`;
+    return (
+        <div className={`rounded-xl p-4 border bg-amber-50 border-amber-200 ${changed ? 'ring-2 ring-amber-400' : ''}`}>
+            <Link to="/v3/tracker?mine=1" className="flex items-center gap-3 group">
+                <ClipboardList size={22} className="text-amber-700" />
+                <p className="font-black text-slate-800 text-lg group-hover:text-amber-800">{m.total} approved order{m.total === 1 ? '' : 's'} need{m.total === 1 ? 's' : ''} {what}</p>
+                {m.new > 0 && <span className="text-[11px] font-black uppercase tracking-wider bg-indigo-600 text-white rounded px-1.5 py-0.5">{m.new} new</span>}
+                <ArrowRight size={16} className="ml-auto text-slate-400" />
+            </Link>
+            <p className="text-sm text-slate-600 mt-1 ml-9">
+                From the Order BOM: {m.to_allocate} to allocate from stock · {m.to_raise} to raise a requisition for — so the orders count as ready for cutting.
+            </p>
+            <div className="mt-2 ml-9 divide-y divide-amber-100">
+                {m.orders.map(o => (
+                    <div key={o.order_id} className="py-2 text-sm">
+                        <Link to={`/v3/planning/orders/${o.order_id}${tab}`} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 hover:text-amber-800">
+                            <b className="text-slate-800">{o.order_no}</b>
+                            {o.is_new && <span className="text-[10px] font-black uppercase tracking-wider text-indigo-700 bg-indigo-100 rounded px-1.5">New</span>}
+                            <span className="text-xs text-slate-500">{o.customer_name} · approved {fmtDate(new Date(o.approved_at).toLocaleDateString('en-CA'))}{o.revision_no > 0 ? ` (rev ${o.revision_no})` : ''}</span>
+                            {o.needed_by && <span className="ml-auto text-xs text-slate-500">needed by <b className="text-slate-700">{fmtDate(o.needed_by)}</b> · ship {fmtDate(o.ship_date)}</span>}
+                        </Link>
+                        <div className="flex flex-col gap-0.5 mt-1">
+                            {o.allocate_count > 0 && (
+                                <Link to={`/v3/planning/orders/${o.order_id}${tab}`} className="text-xs text-emerald-800 hover:underline">
+                                    <b>Allocate {o.allocate_count} item{o.allocate_count === 1 ? '' : 's'} from stock</b> <span className="text-slate-500">— {names(o.allocate, o.allocate_count)}</span>
+                                </Link>
+                            )}
+                            {o.raise_count > 0 && (
+                                <Link to={`/v3/planning/buy-list?order=${o.order_id}${kindQ}`} className="text-xs text-rose-700 hover:underline">
+                                    <b>Raise a requisition for {o.raise_count} item{o.raise_count === 1 ? '' : 's'}</b> <span className="text-slate-500">— {names(o.raise, o.raise_count)}</span>
+                                </Link>
+                            )}
+                        </div>
+                    </div>
+                ))}
+                {m.total > m.orders.length && <Link to="/v3/tracker?mine=1" className="block py-1.5 text-xs font-bold text-amber-800">… and {m.total - m.orders.length} more in the order tracker</Link>}
+            </div>
+        </div>
+    );
+}
+
 export default function V3HomePage() {
     const { me } = useV3Access();
     const [work, setWork] = useState(null);
@@ -66,7 +113,7 @@ export default function V3HomePage() {
     const prev = useRef(null);
     const load = useCallback(() => {
         workApi.myWork().then(res => {
-            const next = Object.fromEntries([...res.data.cards.map(c => [c.key, c.count]), ['approvals', res.data.approvals.total], ['allocate', res.data.allocate?.total ?? 0]]);
+            const next = Object.fromEntries([...res.data.cards.map(c => [c.key, c.count]), ['approvals', res.data.approvals.total], ['allocate', res.data.allocate?.total ?? 0], ['order_material', res.data.order_material?.total ?? 0]]);
             if (prev.current) {
                 const diff = new Set(Object.keys(next).filter(k => prev.current[k] !== undefined && prev.current[k] !== next[k]));
                 if (diff.size) { setChanged(diff); setTimeout(() => setChanged(new Set()), 5000); }
@@ -115,6 +162,8 @@ export default function V3HomePage() {
                 </div>
             ) : (
                 <div className="space-y-6">
+                    {work.order_material?.total > 0 && <OrderMaterialBanner m={work.order_material} changed={changed.has('order_material')} />}
+
                     {mainArea && section(mainArea)}
 
                     {work.approvals.kinds.length > 0 && (

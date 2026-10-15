@@ -32,9 +32,20 @@ function consText(pairs) {
     pairs.forEach(p => { if (!seen.has(p.s)) seen.set(p.s, p.c); });
     return [...seen.entries()].map(([s, c]) => `${s}: ${num(c)}`).join(' · ');
 }
+// Order BOM (15 Oct 2026): consumption that changes by size → one average, weighted by the ordered pieces
+// per size (so BOM qty = pieces × … × average still holds); sizes not ordered don't count.
+function avgCons(det) {
+    const vals = [...new Set(det.map(t => Number(t.consumption)))];
+    if (vals.length <= 1) return num(vals[0]);
+    const w = det.filter(t => Number(t.ordered) > 0);
+    const pcs = w.reduce((s, t) => s + Number(t.ordered), 0);
+    const avg = pcs ? w.reduce((s, t) => s + Number(t.ordered) * Number(t.consumption), 0) / pcs : vals.reduce((a, b) => a + b, 0) / vals.length;
+    return `${num(avg)} avg`;
+}
+// "buy 31.92 ROLL (1 ROLL = 40 m)": the BOM qty in the item's purchase unit.
 const purchaseNote = (usageQty, uom, info) => {
     if (!info || !info.purchase_uom || !info.factor || Number(info.factor) === 1) return '';   // same quantity in both units: nothing to add
-    return `= ${num(usageQty / Number(info.factor), 2)} ${info.purchase_uom}`;
+    return `buy ${num(usageQty / Number(info.factor), 2)} ${info.purchase_uom} (1 ${info.purchase_uom} = ${num(info.factor)} ${uom})`;
 };
 
 // ── Order BOM ────────────────────────────────────────────────────────────
@@ -56,7 +67,7 @@ export function buildOrderBomV2(d) {
         const totals = L.sizes.map((_, k) => grid.reduce((s, g) => s + g.per[k], 0));
         const line = (x) => {
             const det = x.r.detail || [];
-            return { size: sizeRange(det.filter(t => Number(t.ordered) > 0).map(t => t.size), sizeOrder), cons: consText(det.map(t => ({ s: t.size, c: t.consumption }))), wastage: det[0] ? `${num(det[0].wastage_pct, 2)}%` : '' };
+            return { size: sizeRange(det.filter(t => Number(t.ordered) > 0).map(t => t.size), sizeOrder), cons: avgCons(det), wastage: det[0] ? `${num(det[0].wastage_pct, 2)}%` : '' };
         };
         const fabric = fabricRows
             .sort((a, b) => ROLE_ORDER.indexOf(a.r.fabric_role) - ROLE_ORDER.indexOf(b.r.fabric_role) || a.r.colour.localeCompare(b.r.colour))
@@ -69,20 +80,35 @@ export function buildOrderBomV2(d) {
         const trims = [...byLine.values()].sort((a, b) => (a[0].r.bom_sort ?? 0) - (b[0].r.bom_sort ?? 0)).map(group => {
             const items = new Set(group.map(x => x.it.key));
             const name = `${group[0].r.trim_type || group[0].r.bom_line}${group[0].r.placement ? ` (${group[0].r.placement})` : ''}`;
-            const mk = (x, colour, qty, det) => {
+            const mk = (x, colour, qty, det, notes = [x.r.notes]) => {
                 const info = { purchase_uom: x.it.purchase_uom, factor: x.it.usage_per_purchase_uom };
                 return { classification: x.it.info?.code || x.it.label, description: x.it.info?.description || '', colour,
-                    size: sizeRange(det.filter(t => Number(t.ordered) > 0).map(t => t.size), sizeOrder), cons: consText(det.map(t => ({ s: t.size, c: t.consumption }))),
+                    size: sizeRange([...new Set(det.filter(t => Number(t.ordered) > 0).map(t => t.size))], sizeOrder), cons: avgCons(det),
                     uom: x.it.uom, wastage: det[0] ? `${num(det[0].wastage_pct, 2)}%` : '', qty,
-                    remarks: [purchaseNote(qty, x.it.uom, info), x.r.notes || ''].filter(Boolean).join(' · ') };
+                    remarks: [purchaseNote(qty, x.it.uom, info), ...new Set(notes.filter(Boolean))].filter(Boolean).join(' · ') };
             };
+            // DTM (dyed to match) shade items (15 Oct 2026): one row for all colours — the base item, colour "DTM", qty summed.
+            const dtm = group.filter(x => x.it.info?.dtm);
+            if (dtm.length) {
+                const rest = group.filter(x => !x.it.info?.dtm);
+                const r = mk(dtm[0], 'DTM', dtm.reduce((s, x) => s + x.r.required_qty, 0), dtm.flatMap(x => x.r.detail || []), dtm.map(x => x.r.notes));
+                r.classification = dtm[0].it.info.base_code || r.classification;
+                r.description = dtm[0].it.info.base_description || '';   // never one colour's shade text
+                r.remarks = [r.remarks, `Dyed to match each colour's fabric${rest.length ? ` (${[...new Set(dtm.map(x => x.r.colour))].join(', ')})` : ''}`].filter(Boolean).join(' · ');
+                const others = new Map();
+                for (const x of [...rest].sort((a, b) => a.r.colour.localeCompare(b.r.colour))) { if (!others.has(x.it.key)) others.set(x.it.key, []); others.get(x.it.key).push(x); }
+                return { name, rows: [r, ...[...others.values()].map(xs => mk(xs[0], xs.map(x => x.r.colour).join(', '), xs.reduce((s, x) => s + x.r.required_qty, 0), xs.flatMap(x => x.r.detail || []), xs.map(x => x.r.notes)))] };
+            }
             if (items.size === 1 && group.length > 1) {
                 const det = group.flatMap(x => x.r.detail || []);
                 const r = mk(group[0], 'Same in all', group.reduce((s, x) => s + x.r.required_qty, 0), det);
                 r.remarks = [r.remarks, 'Same in all colours'].filter(Boolean).join(' · ');
                 return { name, rows: [r] };
             }
-            return { name, rows: group.sort((a, b) => a.r.colour.localeCompare(b.r.colour)).map(x => mk(x, x.r.colour, x.r.required_qty, x.r.detail || [])) };
+            // several items (e.g. by tone: black on dark colours, white on light): one row per item, its colours listed, qty summed
+            const perItem = new Map();
+            for (const x of [...group].sort((a, b) => a.r.colour.localeCompare(b.r.colour))) { if (!perItem.has(x.it.key)) perItem.set(x.it.key, []); perItem.get(x.it.key).push(x); }
+            return { name, rows: [...perItem.values()].map(xs => mk(xs[0], xs.map(x => x.r.colour).join(', '), xs.reduce((s, x) => s + x.r.required_qty, 0), xs.flatMap(x => x.r.detail || []), xs.map(x => x.r.notes))) };
         });
         return {
             title: `ORDER BOM${d.estimate ? ' — ESTIMATE' : ''}`, sheet: `L${L.line_no} ${L.style_code}`, estimate: !!d.estimate,

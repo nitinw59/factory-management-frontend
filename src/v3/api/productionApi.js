@@ -4,6 +4,7 @@ import api from '../../utils/api';
 export const productionApi = {
     permissions: () => api.get('/v3/production/permissions'),
     station: () => api.get('/v3/production/station'),
+    reworkStatus: (stageTypeId, lineId) => api.get('/v3/production/rework-status', { params: { stage_type_id: stageTypeId, line_id: lineId } }),   // Settings → Production thresholds
     defectCodes: (stageTypeId) => api.get('/v3/production/defect-codes', { params: { stage_type_id: stageTypeId } }),
     queue: (stageTypeId) => api.get('/v3/production/queue', { params: { stage_type_id: stageTypeId } }),
     batchStage: (batchId, stageTypeId) => api.get(`/v3/production/batches/${batchId}/stages/${stageTypeId}`),

@@ -48,7 +48,7 @@ export default function ApprovalPreviewModal({ bomId, busy, onApprove, onClose }
                         <p className="text-sm text-slate-500">First approved version of this style — nothing to compare against.</p>
                     ) : (
                         <div className="space-y-3 border border-slate-200 rounded-lg p-3">
-                            <p className="text-sm font-bold text-slate-700">Changes against the approved version {p.against.version_no} (which will be archived)</p>
+                            <p className="text-sm font-bold text-slate-700">Changes against the latest approved version {p.against.version_no} (it stays approved — orders pick their version; archive it by hand when retired)</p>
                             {nothingChanged && <p className="text-sm text-slate-500">No changes.</p>}
                             {(d.colours_added.length > 0 || d.colours_removed.length > 0) && (
                                 <Block title="Colours">

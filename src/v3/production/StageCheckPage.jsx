@@ -34,6 +34,13 @@ export default function StageCheckPage() {
     const [error, setError] = useState('');
     const [msg, setMsg] = useState('');
     const [busy, setBusy] = useState(false);
+    // Settings → Production: pending rework at this station (line × stage) vs the warning / block thresholds.
+    const [rework, setRework] = useState(null);
+    const effLine = st?.station ? st.station.line_id : lineId;
+    const loadRework = useCallback(() => {
+        if (stageId && effLine) productionApi.reworkStatus(stageId, effLine).then(r => setRework(r.data)).catch(() => setRework(null)); else setRework(null);
+    }, [stageId, effLine]);
+    useEffect(() => { loadRework(); }, [loadRework]);
 
     useEffect(() => {
         productionApi.station().then(res => { setSt(res.data); if (res.data.stage) setStageId(res.data.stage.id); else if (focusStage && res.data.can_pick_line && res.data.stages.some(s => String(s.id) === focusStage)) setStageId(res.data.stages.find(s => String(s.id) === focusStage).id); }).catch(err => setError(apiError(err, 'Failed to load your workstation.')));
@@ -49,7 +56,7 @@ export default function StageCheckPage() {
     const base = () => ({ batch_id: batchId, stage_type_id: stageId, production_line_id: st.station ? undefined : lineId || undefined });
     const act = async (fn, label) => {
         setBusy(true); setError(''); setMsg('');
-        try { const res = await fn(); setMsg(`${label}: ${res.data.checked ?? res.data.repaired} piece(s). Stage ${String(res.data.progress).toLowerCase().replace('_', ' ')}.`); setSel({}); loadBatch(); loadQueue(); }
+        try { const res = await fn(); setMsg(`${label}: ${res.data.checked ?? res.data.repaired} piece(s). Stage ${String(res.data.progress).toLowerCase().replace('_', ' ')}.`); setSel({}); loadRework(); loadBatch(); loadQueue(); }
         catch (err) { setError(apiError(err, 'Failed.')); } finally { setBusy(false); }
     };
     const groupBody = (g, n) => ({ group: { batch_roll_id: g.batch_roll_id, style_part_id: g.style_part_id, size_id: g.size_id, garment_colour_id: g.garment_colour_id, qty: n } });
@@ -70,6 +77,11 @@ export default function StageCheckPage() {
             )}
             {st.station && !st.stage && <ErrorBox text={`Your line ${st.station.line} works a stage 3.0 doesn't run yet.`} />}
             <ErrorBox text={error} />
+            {rework?.blocked ? (
+                <p className="mb-3 text-sm font-bold text-rose-800 bg-rose-50 border border-rose-300 rounded-lg px-3 py-2">{rework.pending} piece(s) / garment(s) are waiting for rework at this station — no new approvals until they are repaired (limit {rework.block}).</p>
+            ) : rework?.warn ? (
+                <p className="mb-3 text-sm font-semibold text-amber-800 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">{rework.pending} piece(s) / garment(s) waiting for rework at this station — repair them soon{rework.block ? ` (approvals stop at ${rework.block})` : ''}.</p>
+            ) : null}
             {msg && <p className="mb-3 text-sm text-emerald-700">{msg}</p>}
             {stage && (
                 <div className="grid lg:grid-cols-[280px_1fr] gap-4">

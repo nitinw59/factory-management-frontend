@@ -11,6 +11,7 @@ import { apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading, ActiveBadge } from '../components/ui';
 import { todayLocal } from '../salesOrders/SalesOrderStatusBadge';
 import { UNITS, GROUP_LABEL, inr, fmt, useStorePermissions, exportStock } from './storeShared';
+import LocationList from '../components/LocationList';
 
 const blank = { category_id: '', name: '', code: '', make: '', description: '', usage_uom: 'pcs', purchase_uom: '', usage_per_purchase_uom: '1', hsn_code: '', gst_pct: '', min_stock: '', reorder_qty: '', location: '', is_active: true };
 
@@ -136,7 +137,7 @@ export default function StoreItemsPage() {
                             <Field label={`${form.usage_uom} per ${form.purchase_uom || form.usage_uom}`}><input className={inputCls} type="number" min="0" step="any" value={form.usage_per_purchase_uom} disabled={!form.purchase_uom || form.purchase_uom === form.usage_uom} onChange={e => set({ usage_per_purchase_uom: e.target.value })} /></Field>
                             <Field label="HSN code"><input className={inputCls} value={form.hsn_code || ''} onChange={e => set({ hsn_code: e.target.value })} /></Field>
                             <Field label="GST %"><input className={inputCls} type="number" min="0" max="40" step="0.01" value={form.gst_pct} onChange={e => set({ gst_pct: e.target.value })} /></Field>
-                            <Field label="Location"><input className={inputCls} value={form.location || ''} onChange={e => set({ location: e.target.value })} placeholder="Shelf 3, row 2" /></Field>
+                            <Field label="Location"><LocationList area="STORE" /><input className={inputCls} list="v3-locations-STORE" value={form.location || ''} onChange={e => set({ location: e.target.value })} placeholder="Shelf 3, row 2" /></Field>
                             <Field label={`Minimum stock (${form.usage_uom})`} hint="Reorder level; 0 = not watched"><input className={inputCls} type="number" min="0" step="any" value={form.min_stock} onChange={e => set({ min_stock: e.target.value })} /></Field>
                             <Field label={`Reorder quantity (${form.usage_uom})`} hint="Usual quantity to buy"><input className={inputCls} type="number" min="0" step="any" value={form.reorder_qty} onChange={e => set({ reorder_qty: e.target.value })} /></Field>
                             {form.id && <Field label="Status"><label className="flex items-center gap-2 text-sm py-2"><input type="checkbox" checked={form.is_active} onChange={e => set({ is_active: e.target.checked })} /> Active</label></Field>}

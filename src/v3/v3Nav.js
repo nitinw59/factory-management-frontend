@@ -64,6 +64,7 @@ export const NAV = [
     { to: '/v3/admin/workstations', label: 'Workstations', icon: MonitorSmartphone, key: 'admin.workstations', text: 'Workstations, operators, approval rights — shared with 2.0' },
     { to: '/v3/admin/defect-codes', label: 'Defect codes', icon: Bug, key: 'admin.defects', text: 'Defect codes and codes per line type — shared with 2.0' },
     { to: '/v3/admin/company-profile', label: 'Company profile', icon: Landmark, key: 'admin.company', text: 'Legal details, bank, logos — shared with 2.0' },
+    { to: '/v3/admin/settings', label: 'Settings', icon: SlidersHorizontal, key: 'admin.settings', text: 'Addresses, documents, purchasing, planning, calendar, production, stores, alerts, approvals' },
 ];
 
 // Detail pages whose address doesn't start with their menu page's address.

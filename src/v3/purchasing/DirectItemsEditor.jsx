@@ -1,6 +1,6 @@
 // Items with no requisition on a purchase order (13 Oct 2026): fabric, trims, spares or general items picked
-// straight from the masters, with a quantity in purchase units and a reason per line. A PO holding any is
-// issued only after factory admin approval. Used by New purchase order and "Add item (no requisition)".
+// straight from the masters, with a quantity in purchase units and a reason per line. Approval follows the PO
+// approval limit like any PO (Settings → Purchasing). Used by New purchase order and "Add item (no requisition)".
 import { useEffect, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import { purchasingApi } from '../api/purchasingApi';

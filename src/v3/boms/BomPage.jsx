@@ -96,7 +96,11 @@ export default function BomPage() {
                     <PrimaryButton onClick={() => setApproving(true)} disabled={busy}><CheckCircle2 size={14} /> Approve…</PrimaryButton>
                     <SecondaryButton onClick={() => setRejecting('')} disabled={busy}><XCircle size={14} /> Reject</SecondaryButton>
                 </>}
-                {perms.bomApprove && bom.status === 'APPROVED' && <SecondaryButton onClick={() => { if (window.confirm('Archive this approved BOM? The style will have no approved BOM until another version is approved.')) run(() => stylesApi.archiveBom(id, 'Archived')); }} disabled={busy}><Archive size={14} /> Archive</SecondaryButton>}
+                {(perms.bomApprove || perms.bomEdit) && bom.status === 'APPROVED' && <SecondaryButton onClick={() => {
+                    // Several versions can be approved at once (15 Oct 2026); archiving retires this one for new order lines.
+                    const reason = window.prompt('Archive this version? New order lines can no longer pick it; approved orders already on it keep it; draft lines on it must pick another version.\n\nReason:');
+                    if (reason && reason.trim()) run(() => stylesApi.archiveBom(id, reason.trim()));
+                }} disabled={busy}><Archive size={14} /> Archive</SecondaryButton>}
                 {perms.bomEdit && <SecondaryButton onClick={() => run(() => stylesApi.createBom(bom.style_id, bom.id), (res) => navigate(`/v3/boms/${res.data.id}`))} disabled={busy}><Copy size={14} /> New version from this</SecondaryButton>}
                 {perms.bomEdit && bom.status === 'DRAFT' && !bom.submitted_at && <SecondaryButton onClick={() => { if (window.confirm('Delete this draft?')) run(() => stylesApi.deleteBom(id), () => navigate(`/v3/styles/${bom.style_id}`)); }} disabled={busy}><Trash2 size={14} /> Delete draft</SecondaryButton>}
             </div>
