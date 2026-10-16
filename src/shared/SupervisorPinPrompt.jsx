@@ -13,7 +13,8 @@ import React, { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ShieldAlert } from 'lucide-react';
 
-export const useSupervisorPinPrompt = () => {
+// title: dialog heading, e.g. 'QA manager password' where only QA may authorise.
+export const useSupervisorPinPrompt = ({ title = 'Supervisor password' } = {}) => {
     const [request, setRequest] = useState(null); // { message, error }
     const resolverRef = useRef(null);
     const [value, setValue] = useState('');
@@ -44,7 +45,7 @@ export const useSupervisorPinPrompt = () => {
                         <ShieldAlert className="w-5 h-5 text-amber-600" />
                     </div>
                     <div>
-                        <h3 className="font-black text-slate-900">Supervisor password</h3>
+                        <h3 className="font-black text-slate-900">{title}</h3>
                         <p className="text-xs text-slate-500 font-medium">{request.message}</p>
                     </div>
                 </div>

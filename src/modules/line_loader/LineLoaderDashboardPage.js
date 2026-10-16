@@ -5,6 +5,8 @@ import { productionManagerApi } from '../../api/productionManagerApi';
 import { Link } from 'react-router-dom';
 import Modal from '../../shared/Modal';
 import PriorityChip from '../../shared/PriorityChip';
+import StageRejectionsList from '../../shared/StageRejectionsList';
+import { useSupervisorPinPrompt, withSupervisorPin } from '../../shared/SupervisorPinPrompt';
 import {
     Loader, CheckCircle2, X,
     Package, FileText, ExternalLink,
@@ -1775,6 +1777,11 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onAssignSizes, onRefresh, 
     const [detailData, setDetailData] = useState(null); // { stageIndex }
     const [changeLineData, setChangeLineData] = useState(null); // { stage, progress }
     const [checkingStageId, setCheckingStageId] = useState(null);
+    // Stage whose rolls are all done but which still holds rejected pieces —
+    // { stageName, productionLineId, data } (server reason REJECTED_PIECES).
+    const [rejectionBlock, setRejectionBlock] = useState(null);
+    const [isOverriding, setIsOverriding] = useState(false);
+    const [pinDialog, askQaPin] = useSupervisorPinPrompt({ title: 'QA manager password' });
 
     const cycleFlow = batch.cycle_flow || [];
     const progressMap = useMemo(() => {
@@ -1857,12 +1864,46 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onAssignSizes, onRefresh, 
     const handleCheckComplete = async (stageId, productionLineId) => {
         setCheckingStageId(stageId);
         try {
-            await lineLoaderApi.checkAndCompleteStage(batch.batch_id, productionLineId);
+            const { data } = await lineLoaderApi.checkAndCompleteStage(batch.batch_id, productionLineId);
+            if (data?.reason === 'REJECTED_PIECES') {
+                const stage = cycleFlow.find(cf => cf.id === stageId);
+                setRejectionBlock({ stageName: stage?.line_type_name, productionLineId, data });
+            } else if (data && !data.isComplete && data.reason !== 'ALREADY_COMPLETE' && data.message) {
+                alert(data.message);
+            }
             await onRefresh();
         } catch (err) {
             alert(err.response?.data?.error || `Failed to check stage completion.`);
         } finally {
             setCheckingStageId(null);
+        }
+    };
+
+    // QA manager override: close a stage held open ONLY by rejected pieces.
+    // The password is checked (QA managers only) and logged on the server.
+    const handleQaOverrideComplete = async () => {
+        const { productionLineId, data } = rejectionBlock;
+        setIsOverriding(true);
+        try {
+            const res = await withSupervisorPin(
+                askQaPin,
+                `Complete stage with ${data.rejectedCount} rejected piece(s) still open`,
+                pin => lineLoaderApi.checkAndCompleteStage(batch.batch_id, productionLineId, pin)
+            );
+            if (!res) return; // cancelled
+            if (res.data?.isComplete) {
+                setRejectionBlock(null);
+            } else if (res.data?.reason === 'REJECTED_PIECES') {
+                setRejectionBlock(rb => ({ ...rb, data: res.data }));
+            } else {
+                setRejectionBlock(null);
+                if (res.data?.message) alert(res.data.message);
+            }
+            await onRefresh();
+        } catch (err) {
+            alert(err.response?.data?.error || 'Failed to complete stage.');
+        } finally {
+            setIsOverriding(false);
         }
     };
 
@@ -2079,6 +2120,44 @@ const BatchPipelineCard = ({ batch, wipMap, onAssign, onAssignSizes, onRefresh, 
                     />
                 </Modal>
             )}
+
+            {/* Stage blocked only by rejected pieces — QA manager may override */}
+            {rejectionBlock && (
+                <div className="fixed inset-0 z-[200] bg-black/70 flex items-center justify-center p-4" onClick={() => !isOverriding && setRejectionBlock(null)}>
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden border-4 border-rose-400" onClick={e => e.stopPropagation()}>
+                        <div className="bg-rose-500 px-6 py-5 flex justify-between items-start text-white">
+                            <div className="flex items-start gap-3">
+                                <AlertTriangle className="w-8 h-8 shrink-0 mt-0.5" />
+                                <div>
+                                    <h3 className="font-black text-xl uppercase tracking-wider">
+                                        Stage blocked — rejected pieces{rejectionBlock.stageName ? ` · ${rejectionBlock.stageName}` : ''}
+                                    </h3>
+                                    <p className="text-sm font-medium mt-1 text-rose-50">{rejectionBlock.data.message}</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setRejectionBlock(null)} disabled={isOverriding} className="p-1.5 rounded-full hover:bg-rose-600">
+                                <X className="w-6 h-6" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <StageRejectionsList rejections={rejectionBlock.data.rejections} />
+                            <p className="text-xs text-slate-500">
+                                Completing now removes these pieces from the checkers' screens on this stage. Only a QA manager can authorise it; the override is recorded under their name.
+                            </p>
+                            <div className="flex justify-end gap-2">
+                                <button onClick={() => setRejectionBlock(null)} disabled={isOverriding} className="px-4 py-2 rounded-xl border-2 border-slate-200 font-bold text-sm text-slate-700">
+                                    Keep stage open
+                                </button>
+                                <button onClick={handleQaOverrideComplete} disabled={isOverriding} className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-sm flex items-center gap-2 disabled:opacity-50">
+                                    {isOverriding && <Loader className="w-4 h-4 animate-spin" />}
+                                    QA override &amp; complete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {pinDialog}
         </div>
     );
 };

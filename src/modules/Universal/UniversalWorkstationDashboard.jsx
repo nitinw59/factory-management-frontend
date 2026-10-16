@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { LuClock, LuLayers, LuChevronRight, LuDownload, LuLoader, LuCircleCheck, LuX } from 'react-icons/lu';
 import { universalApi } from '../../api/universalApi';
 import { useSupervisorPinPrompt, withSupervisorPin } from '../../shared/SupervisorPinPrompt';
+import StageRejectionsList from '../../shared/StageRejectionsList';
 import PriorityChip from '../../shared/PriorityChip';
 import { materialReplacementApi } from '../../api/materialReplacementApi';
 import { MaterialReplacementRequestModal, MaterialReplacementStatusModal } from './MaterialReplacementModals';
@@ -707,7 +708,11 @@ const StageCompletionHandoff = ({ batchId, lineId, onBatchComplete }) => {
                             </div>
                             <button onClick={() => setWipReport(null)} className="text-black hover:bg-amber-500 p-2 rounded-full"><X className="w-8 h-8" /></button>
                         </div>
-                        <div className="p-8 text-center text-slate-600 font-bold bg-slate-100 uppercase tracking-widest">Review batch for unscanned items.</div>
+                        {wipReport.reason === 'REJECTED_PIECES' && wipReport.rejections?.length > 0 ? (
+                            <div className="p-6 bg-slate-50"><StageRejectionsList rejections={wipReport.rejections} /></div>
+                        ) : (
+                            <div className="p-8 text-center text-slate-600 font-bold bg-slate-100 uppercase tracking-widest">Review batch for unscanned items.</div>
+                        )}
                     </div>
                 </div>
             )}
