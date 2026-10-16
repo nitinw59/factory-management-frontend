@@ -17,6 +17,7 @@ export const purchasingApi = {
     addLines: (id, lines, reason, direct) => api.post(`/v3/purchasing/purchase-orders/${id}/lines`, { lines, reason, direct }),
     items: (params) => api.get('/v3/purchasing/items', { params }),   // fabric / trim / store items for a line with no requisition
     updateLine: (id, lineId, data) => api.put(`/v3/purchasing/purchase-orders/${id}/lines/${lineId}`, data),
+    lineRates: (id, lines, reason) => api.put(`/v3/purchasing/purchase-orders/${id}/line-rates`, { lines, reason }),   // several lines' rate / GST
     removeLine: (id, lineId, reason) => api.delete(`/v3/purchasing/purchase-orders/${id}/lines/${lineId}`, { data: reason ? { reason } : undefined }),
     issue: (id) => api.post(`/v3/purchasing/purchase-orders/${id}/issue`),
     sendForApproval: (id) => api.post(`/v3/purchasing/purchase-orders/${id}/send`),

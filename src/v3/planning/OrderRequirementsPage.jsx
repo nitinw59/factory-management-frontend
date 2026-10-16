@@ -1,11 +1,12 @@
-// One approved order's material requirements: fabric and trim grids (rows =
-// exact items, columns = garment colours), with the calculation behind every
-// cell, the cut allowance per order line, and the change log. Numbers come
-// from requirementsEngine.js and update automatically when the order changes.
-import { useCallback, useEffect, useState } from 'react';
+// One approved order's material requirements (the Order BOM): fabric and trims (MaterialRequirements), the
+// calculation behind every number, the cut allowance per order line, and the change log. Numbers come from
+// requirementsEngine.js and update automatically when the order changes.
+// Layout (16 Oct 2026): one compact header — order facts, readiness chips, the order lines as chips (folded when
+// more than 3), one Download menu and a "⋯" menu (Recalculate); a sticky tab bar carrying the tab's filter and view.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import OrderTabs from '../orders/OrderTabs';
-import { Pencil, RefreshCw, FileSpreadsheet, FileDown, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Pencil, FileDown, AlertTriangle, ShieldCheck, MoreHorizontal, ChevronDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Modal from '../../shared/Modal';
 import { planningApi } from '../api/planningApi';
@@ -14,20 +15,44 @@ import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } fr
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import AllocateModal from './AllocateModal';
 import OrderMilestonesPanel from './OrderMilestonesPanel';
-import TrimStatusGrid from './TrimStatusGrid';
+import MaterialRequirements from './MaterialRequirements';
 import { exportTrimReservationPdf } from './trimReservationPdf';
-import { downloadMaterialSheet } from './materialSheetPdf';
 import { downloadOrderBomV2 } from '../boms/bomV2';
 import { loadLetterhead, sheetWithLetterhead } from '../components/letterhead';
-import { adminApi } from '../../api/adminApi';
 import { useV3Access } from '../V3Access';
 import { ReadinessChip, READY_STATUS, daysText } from './readinessShared';
 
 const fmt = (n, uom) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 2 });
 const SOURCE = { EXACT: 'exact colour', TONE: 'by tone', ALL: 'all colours' };
-const COVER = { FULL: ['covered', 'bg-emerald-50 text-emerald-700 border-emerald-200'], PARTIAL: ['part', 'bg-amber-50 text-amber-800 border-amber-200'], NONE: ['none', 'bg-rose-50 text-rose-700 border-rose-200'] };
 const ALLOC_ACTION = { ALLOCATE: 'Allocated', RELEASE: 'Released', AUTO_RELEASE: 'Released automatically', ISSUE: 'Issued to production', ISSUE_RETURN: 'Returned from production' };
 const CAUSE = { APPROVED: 'Approved', REVISED: 'Order revised', BOM_CHANGED: 'BOM changed', CANCELLED: 'Order cancelled', ALLOWANCE_CHANGED: 'Allowance changed', RECALCULATED: 'Recalculated' };
+
+// A button that opens a small menu: items = [{ label, hint, run, disabled }] (null = a divider).
+function MenuButton({ children, items, title, align = 'right' }) {
+    const [open, setOpen] = useState(false);
+    const box = useRef(null);
+    useEffect(() => {
+        if (!open) return undefined;
+        const close = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', close);
+        return () => document.removeEventListener('mousedown', close);
+    }, [open]);
+    return (
+        <span ref={box} className="relative inline-block">
+            <SecondaryButton onClick={() => setOpen(o => !o)} title={title}>{children}</SecondaryButton>
+            {open && (
+                <div className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} z-30 mt-1 w-72 rounded-lg border border-slate-200 bg-white p-1 shadow-lg`}>
+                    {items.map((it, i) => (it === null ? <div key={i} className="my-1 border-t border-slate-100" /> : (
+                        <button key={i} type="button" disabled={it.disabled} onClick={() => { setOpen(false); it.run(); }} className="block w-full rounded px-3 py-1.5 text-left hover:bg-slate-50 disabled:opacity-40">
+                            <span className="block text-sm font-semibold text-slate-800">{it.label}</span>
+                            {it.hint && <span className="block text-[11px] text-slate-500">{it.hint}</span>}
+                        </button>
+                    )))}
+                </div>
+            )}
+        </span>
+    );
+}
 
 function exportExcel(data, lh = null) {
     const wb = XLSX.utils.book_new();
@@ -62,6 +87,9 @@ export default function OrderRequirementsPage() {
     const [tab, setTab] = useState(['MILESTONES', 'TRIM'].includes(params.get('tab')) ? params.get('tab') : 'FABRIC');
     const [error, setError] = useState('');
     const [cell, setCell] = useState(null);           // drill-down { item, colour }
+    const [fabFilter, setFabFilter] = useState('all'); // Fabric / Trims tab: all / short / covered
+    const [fabView, setFabView] = useState('list');    // Fabric / Trims tab: list / colour (matrix)
+    const [linesOpen, setLinesOpen] = useState(false); // more than 3 order lines: folded
     const [allowance, setAllowance] = useState(null); // { line, pct, reason }
     const [target, setTarget] = useState(null);       // allocate / release
     const [ov, setOv] = useState(null);               // readiness override / revoke { mode, reason }
@@ -77,7 +105,6 @@ export default function OrderRequirementsPage() {
 
     if (!data) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
     const { order } = data;
-    const shown = data.items.filter(i => i.kind === tab);
     const approved = order.status === 'APPROVED';
 
     const saveAllowance = async () => {
@@ -94,6 +121,18 @@ export default function OrderRequirementsPage() {
             setData(res.data); setOv(null);
         } catch (err) { setFormError(apiError(err, 'Failed.')); } finally { setBusy(false); }
     };
+    // Every item of the tab's kind takes what it still needs from free stock (one transaction on the server).
+    const allocateFree = async () => {
+        const kindName = tab === 'FABRIC' ? 'fabric' : 'trims';
+        const n = data.items.filter(i => i.kind === tab && i.shortfall > 0 && i.free > 0).length;
+        if (!window.confirm(`Allocate free stock to ${order.order_no} for ${n} ${kindName} item${n === 1 ? '' : 's'}? Each takes what it still needs, as far as free stock goes.`)) return;
+        setBusy(true); setError('');
+        try {
+            const res = await planningApi.allocateFree(orderId, tab);
+            setData(res.data);
+            window.alert(`Allocated: ${res.data.allocated_now.map(a => `${a.label} ${fmt(a.qty, a.uom)} ${a.uom}`).join('; ')}`);
+        } catch (err) { setError(apiError(err, 'Failed to allocate.')); } finally { setBusy(false); }
+    };
     const recalc = async () => {
         if (!window.confirm('Recalculate this order\'s requirements from its lines and BOMs now? (Normally automatic; this is a repair tool.)')) return;
         setBusy(true); setError('');
@@ -103,153 +142,88 @@ export default function OrderRequirementsPage() {
     return (
         <div>
             <OrderTabs orderId={orderId} active={tab === 'MILESTONES' ? 'milestones' : 'materials'} />
-            <div className="flex flex-wrap items-center gap-3 mb-1">
-                <h1 className="text-2xl font-black text-slate-900">{order.order_no}</h1>
-                <span className="text-sm text-slate-500">{order.customer_name}{order.buyer_po_no ? ` · PO ${order.buyer_po_no}` : ''} · first ship {fmtDate(order.first_ship_date)}{order.revision_no ? ` · rev ${order.revision_no}` : ''}</span>
-                {me.menu['sales.orders'] && <Link to={`/v3/sales-orders/${order.id}`} className="text-sm font-semibold text-indigo-700 hover:underline">Open sales order</Link>}
-                <span className="ml-auto flex gap-2">
-                    <SecondaryButton onClick={() => downloadMaterialSheet(planningApi, adminApi, order.id, me?.user?.name).catch(err => setError(apiError(err, 'Failed to make the material PDF.')))}
-                        title="Layout v1 (to be retired): fabric and trims per line and colour, with the calculation"><FileDown size={14} /> Order BOM PDF (v1)</SecondaryButton>
-                    <SecondaryButton onClick={() => downloadOrderBomV2(planningApi, order.id, 'pdf').catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.')))}
-                        title="Layout v2: the factory's order BOM layout"><FileDown size={14} /> Order BOM v2 PDF</SecondaryButton>
-                    <SecondaryButton onClick={() => downloadOrderBomV2(planningApi, order.id, 'xlsx').catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.')))}
-                        title="Layout v2 as Excel"><FileSpreadsheet size={14} /> v2 Excel</SecondaryButton>
-                    <SecondaryButton onClick={async () => exportExcel(data, await loadLetterhead())} disabled={!data.items.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
-                    <SecondaryButton onClick={() => exportTrimReservationPdf(data, me?.user?.name)} disabled={!data.items.some(i => i.kind === 'TRIM')} title="Trims grouped by type and item, quantities merged — for the store to reserve"><FileDown size={14} /> Trim reservation PDF</SecondaryButton>
-                    {perms.settings && approved && <SecondaryButton onClick={recalc} disabled={busy}><RefreshCw size={14} /> Recalculate</SecondaryButton>}
-                </span>
-            </div>
-            {!approved && (
-                <p className="my-2 text-sm font-semibold text-amber-700 flex items-center gap-1"><AlertTriangle size={14} />
-                    {order.status === 'CANCELLED' ? 'This order is cancelled; its requirements are closed.' : 'Requirements are calculated when the order is approved.'}</p>
-            )}
             <ErrorBox text={error} />
 
-            {/* Readiness and the cutting gate */}
-            {data.readiness && (() => {
-                const r = data.readiness;
-                return (
-                    <div className="bg-white border border-slate-200 rounded-xl p-4 my-4 flex flex-wrap items-start gap-x-6 gap-y-2">
-                        <div>
-                            <p className="text-xs font-bold text-slate-500 mb-1">Readiness</p>
-                            <ReadinessChip r={r} />
-                            <p className="text-xs text-slate-500 mt-1">{READY_STATUS[r.status]?.hint}</p>
-                        </div>
-                        <div><p className="text-xs font-bold text-slate-500">Allocated</p><p className="font-black text-slate-900">{r.items_allocated} / {r.items_total} items</p></div>
-                        {r.needed_by && <div><p className="text-xs font-bold text-slate-500">Materials needed by</p><p className={`font-semibold ${r.late ? 'text-rose-700' : 'text-slate-800'}`}>{fmtDate(r.needed_by)} <span className="text-xs font-normal">({daysText(r.days_to_needed_by)})</span></p></div>}
-                        <div>
-                            <p className="text-xs font-bold text-slate-500">Cutting</p>
-                            <p className={`font-semibold ${r.cut_allowed ? 'text-emerald-700' : 'text-rose-700'}`}>{r.status === 'READY' ? 'Cleared — all materials in hand' : r.override ? 'Released by override' : 'Blocked until ready'}</p>
-                        </div>
-                        {r.override && (
-                            <div className="basis-full text-sm bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-lg px-3 py-2 flex flex-wrap items-center gap-2">
-                                <ShieldCheck size={15} /> Released for cutting by {r.override.by_name || '—'} on {new Date(r.override.at).toLocaleString()}: {r.override.reason}
-                                {r.override.stale && <span className="font-bold text-amber-700">· given before the order's latest revision</span>}
-                                {perms.release && <button type="button" className="ml-auto text-xs font-bold text-indigo-700 underline" onClick={() => { setFormError(''); setOv({ mode: 'revoke', reason: '' }); }}>Revoke</button>}
-                            </div>
-                        )}
-                        {perms.release && !r.override && r.status !== 'READY' && (
-                            <div className="ml-auto"><SecondaryButton onClick={() => { setFormError(''); setOv({ mode: 'override', reason: '' }); }}><ShieldCheck size={14} /> Release for cutting…</SecondaryButton></div>
-                        )}
-                    </div>
-                );
-            })()}
-
-            {/* Lines and their cut allowance */}
-            <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto my-4">
-                <table className="w-full text-sm min-w-[640px]">
-                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
-                        <tr><th className="px-4 py-2">Line</th><th className="px-4 py-2">Style</th><th className="px-4 py-2">Style BOM</th><th className="px-4 py-2">Ship</th><th className="px-4 py-2 text-right">Ordered</th><th className="px-4 py-2 text-right">Cut allowance</th><th className="px-4 py-2 w-10" /></tr>
-                    </thead>
-                    <tbody>
-                        {data.lines.map(l => (
-                            <tr key={l.id} className={`border-t border-slate-100 ${l.status !== 'ACTIVE' ? 'opacity-50' : ''}`}>
-                                <td className="px-4 py-2">{l.line_no}{l.status !== 'ACTIVE' && <span className="ml-1 text-xs text-rose-600">cancelled</span>}</td>
-                                <td className="px-4 py-2 font-semibold">{l.style_code}</td>
-                                <td className="px-4 py-2">{l.bom_version ? `v${l.bom_version}` : <span className="font-semibold text-amber-700">BOM pending</span>}</td>
-                                <td className="px-4 py-2">{fmtDate(l.ship_date)}</td>
-                                <td className="px-4 py-2 text-right tabular-nums">{l.ordered_pieces.toLocaleString('en-IN')}</td>
-                                <td className="px-4 py-2 text-right tabular-nums">{l.cut_allowance_pct != null ? `${l.cut_allowance_pct}%` : <span className="text-slate-400">{data.settings.default_cut_allowance_pct}% (default)</span>}</td>
-                                <td className="px-4 py-2">
-                                    {perms.plan && l.status === 'ACTIVE' && order.status !== 'CANCELLED' && (
-                                        <button type="button" className="p-1 rounded text-slate-500 hover:bg-slate-100" aria-label={`Change cut allowance of line ${l.line_no}`}
-                                            onClick={() => { setFormError(''); setAllowance({ line: l, pct: String(l.cut_allowance_pct ?? data.settings.default_cut_allowance_pct), reason: '' }); }}><Pencil size={14} /></button>
-                                    )}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+            {/* Compact header: order facts · readiness chips · menus; then the order lines as chips */}
+            <div className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 mb-3 space-y-2">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <h1 className="text-xl font-black text-slate-900">{order.order_no}</h1>
+                    <span className="text-sm text-slate-500">{order.customer_name}{order.buyer_po_no ? ` · PO ${order.buyer_po_no}` : ''} · first ship {fmtDate(order.first_ship_date)}{order.revision_no ? ` · rev ${order.revision_no}` : ''}</span>
+                    {me.menu['sales.orders'] && <Link to={`/v3/sales-orders/${order.id}`} className="text-sm font-semibold text-indigo-700 hover:underline">Open sales order</Link>}
+                    {data.readiness && (() => {
+                        const r = data.readiness;
+                        return <>
+                            <span title={READY_STATUS[r.status]?.hint}><ReadinessChip r={r} /></span>
+                            <span className="text-xs font-bold text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">{r.items_allocated}/{r.items_total} allocated</span>
+                            {r.needed_by && <span className={`text-xs font-bold rounded px-1.5 py-0.5 ${r.late ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>needed by {fmtDate(r.needed_by)} ({daysText(r.days_to_needed_by)})</span>}
+                            <span className={`text-xs font-bold rounded px-1.5 py-0.5 ${r.cut_allowed ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}
+                                title={r.override ? `Released by ${r.override.by_name || '—'} on ${new Date(r.override.at).toLocaleString()}: ${r.override.reason}${r.override.stale ? ' (given before the latest revision)' : ''}` : undefined}>
+                                {r.override ? <><ShieldCheck size={11} className="inline -mt-0.5" /> cutting released{r.override.stale ? ' (old)' : ''}</> : r.status === 'READY' ? 'cutting cleared' : 'cutting blocked'}
+                            </span>
+                            {perms.release && !r.override && r.status !== 'READY' && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline" onClick={() => { setFormError(''); setOv({ mode: 'override', reason: '' }); }}>Release for cutting…</button>}
+                            {perms.release && r.override && <button type="button" className="text-xs font-bold text-slate-600 hover:underline" onClick={() => { setFormError(''); setOv({ mode: 'revoke', reason: '' }); }}>Revoke release</button>}
+                        </>;
+                    })()}
+                    {!approved && <span className="text-xs font-bold text-amber-700 flex items-center gap-1"><AlertTriangle size={12} />{order.status === 'CANCELLED' ? 'Cancelled — requirements closed' : 'Calculated when the order is approved (estimate)'}</span>}
+                    <span className="ml-auto flex gap-2">
+                        <MenuButton title="Downloads" items={[
+                            { label: 'Order BOM PDF — detailed', hint: 'Every garment colour on its own row', run: () => downloadOrderBomV2(planningApi, order.id, 'pdf', { summary: false }).catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.'))) },
+                            { label: 'Order BOM PDF — summary', hint: 'MATCH TO COLOR / BY SIZE / DTM rows', run: () => downloadOrderBomV2(planningApi, order.id, 'pdf', { summary: true }).catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.'))) },
+                            { label: 'Order BOM Excel — detailed', run: () => downloadOrderBomV2(planningApi, order.id, 'xlsx', { summary: false }).catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.'))) },
+                            { label: 'Order BOM Excel — summary', run: () => downloadOrderBomV2(planningApi, order.id, 'xlsx', { summary: true }).catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.'))) },
+                            null,
+                            { label: 'Requirements Excel', hint: 'Items × colours, the calculation per size, the change log', disabled: !data.items.length, run: async () => exportExcel(data, await loadLetterhead()) },
+                            { label: 'Trim reservation PDF', hint: 'Trims by type and item, for the store to reserve', disabled: !data.items.some(i => i.kind === 'TRIM'), run: () => exportTrimReservationPdf(data, me?.user?.name) },
+                        ]}><FileDown size={14} /> Download <ChevronDown size={13} /></MenuButton>
+                        {perms.settings && approved && <MenuButton title="More" items={[{ label: 'Recalculate', hint: 'Repair tool — requirements are normally recalculated by themselves', run: recalc }]}><MoreHorizontal size={15} /></MenuButton>}
+                    </span>
+                </div>
+                {/* Order lines as chips: style · Style BOM · ship · pieces · cut allowance (pencil edits it) */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                    {(data.lines.length > 3 && !linesOpen ? [] : data.lines).map(l => (
+                        <span key={l.id} className={`inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-xs ${l.status !== 'ACTIVE' ? 'border-slate-200 text-slate-400 line-through' : 'border-slate-200 text-slate-700 bg-slate-50'}`}>
+                            <b className="text-slate-800">L{l.line_no}</b> · {l.style_code} · {l.bom_version ? `BOM v${l.bom_version}` : <span className="font-semibold text-amber-700">BOM pending</span>} · ship {fmtDate(l.ship_date)} · {l.ordered_pieces.toLocaleString('en-IN')} pcs · cut {l.cut_allowance_pct != null ? `${l.cut_allowance_pct}%` : `${data.settings.default_cut_allowance_pct}% (default)`}
+                            {perms.plan && l.status === 'ACTIVE' && order.status !== 'CANCELLED' && (
+                                <button type="button" className="ml-0.5 rounded p-0.5 text-slate-500 hover:bg-slate-200" aria-label={`Change cut allowance of line ${l.line_no}`} title="Change the cut allowance"
+                                    onClick={() => { setFormError(''); setAllowance({ line: l, pct: String(l.cut_allowance_pct ?? data.settings.default_cut_allowance_pct), reason: '' }); }}><Pencil size={11} /></button>
+                            )}
+                        </span>
+                    ))}
+                    {data.lines.length > 3 && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline" onClick={() => setLinesOpen(o => !o)}>{linesOpen ? 'Hide lines' : `Lines (${data.lines.length}) ▸`}</button>}
+                </div>
             </div>
 
-            <div className="flex gap-1 border-b border-slate-200 mb-4">
-                {[['FABRIC', `Fabric (${data.totals.fabric_items})`], ['TRIM', `Trims (${data.totals.trim_items})`], ['CHANGES', `Changes (${data.changes.length + data.allocation_log.length})`], ...(approved ? [['MILESTONES', 'Milestones']] : [])].map(([k, label]) => (
+            {/* Sticky tab bar; the Fabric / Trims tabs carry their filter and view on the right */}
+            <div className="sticky top-14 z-20 -mx-1 px-1 bg-slate-50 flex flex-wrap items-end gap-1 border-b border-slate-200 mb-3">
+                {[['FABRIC', `Fabric (${data.totals.fabric_items}${data.items.some(i => i.kind === 'FABRIC' && i.shortfall > 0) ? ` · ${data.items.filter(i => i.kind === 'FABRIC' && i.shortfall > 0).length} short` : ''})`],
+                    ['TRIM', `Trims (${data.totals.trim_items}${data.items.some(i => i.kind === 'TRIM' && i.shortfall > 0) ? ` · ${data.items.filter(i => i.kind === 'TRIM' && i.shortfall > 0).length} short` : ''})`],
+                    ['CHANGES', `Changes (${data.changes.length + data.allocation_log.length})`], ...(approved ? [['MILESTONES', 'Milestones']] : [])].map(([k, label]) => (
                     <button key={k} type="button" onClick={() => setTab(k)}
                         className={`px-4 py-2 text-sm font-bold border-b-2 -mb-px ${tab === k ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{label}</button>
                 ))}
+                {(tab === 'FABRIC' || tab === 'TRIM') && (
+                    <span className="ml-auto mb-1.5 flex flex-wrap items-center gap-2">
+                        <span className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs font-bold">
+                            {[['all', 'All'], ['short', 'Short'], ['covered', 'Covered']].map(([k, l]) => (
+                                <button key={k} type="button" onClick={() => setFabFilter(k)} className={`px-2.5 py-1 ${fabFilter === k ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{l}</button>
+                            ))}
+                        </span>
+                        <span className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs font-bold">
+                            {[['list', 'List'], ['colour', 'By colour']].map(([k, l]) => (
+                                <button key={k} type="button" onClick={() => setFabView(k)} className={`px-2.5 py-1 ${fabView === k ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{l}</button>
+                            ))}
+                        </span>
+                    </span>
+                )}
             </div>
 
-            {tab === 'TRIM' && (
-                <TrimStatusGrid data={data} approved={approved} canAct={canKind} orderId={order.id}
+            {(tab === 'FABRIC' || tab === 'TRIM') && (
+                <MaterialRequirements data={data} kind={tab} approved={approved} showActions={anyKind && approved} canAct={canKind} busy={busy}
+                    filter={fabFilter} view={fabView}
+                    onCell={(item, colour) => setCell({ item, colour })}
+                    onAllocateFree={allocateFree}
                     onAllocate={(it) => setTarget({ mode: 'allocate', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })}
                     onRelease={(it) => setTarget({ mode: 'release', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })} />
-            )}
-
-            {tab === 'FABRIC' && (
-                shown.length === 0 ? <p className="text-sm text-slate-400">No {tab === 'FABRIC' ? 'fabric' : 'trim'} requirements.</p> : (
-                    <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
-                        <table className="border-collapse text-sm min-w-full">
-                            <thead className="bg-slate-50">
-                                <tr>
-                                    <th className="px-3 py-2 text-left text-xs font-bold text-slate-500 min-w-[240px]">Item</th>
-                                    {data.colours.map(c => <th key={c.id} className="px-3 py-2 text-right text-xs font-black text-slate-700 min-w-[90px]">{c.name}</th>)}
-                                    <th className="px-3 py-2 text-right text-xs font-bold text-slate-500 min-w-[100px]">Total</th>
-                                    {tab === 'TRIM' && <th className="px-3 py-2 text-right text-xs font-bold text-slate-500 min-w-[100px]">To buy in</th>}
-                                    <th className="px-3 py-2 text-right text-xs font-bold text-slate-500 min-w-[120px]">Allocated</th>
-                                    <th className="px-3 py-2 text-right text-xs font-bold text-slate-500 min-w-[100px]">Short</th>
-                                    {anyKind && approved && <th className="px-3 py-2 w-40" />}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {shown.map(it => (
-                                    <tr key={it.key} className="border-t border-slate-100 align-top">
-                                        <td className="px-3 py-2">
-                                            <p className="font-semibold text-slate-800">{it.label}{!it.active && <span className="ml-1 text-[10px] font-bold text-rose-600">inactive</span>}</p>
-                                            <p className="text-xs text-slate-500">{it.usage.join(', ')}{it.issue_stages.length ? ` · issued at ${it.issue_stages.join(', ')}` : ''}</p>
-                                        </td>
-                                        {data.colours.map(c => (
-                                            <td key={c.id} className="px-3 py-2 text-right tabular-nums">
-                                                {it.by_colour[c.id] ? (
-                                                    <button type="button" className="text-indigo-700 hover:underline" onClick={() => setCell({ item: it, colour: c })}>{fmt(it.by_colour[c.id], it.uom)}</button>
-                                                ) : <span className="text-slate-300">—</span>}
-                                            </td>
-                                        ))}
-                                        <td className="px-3 py-2 text-right font-black tabular-nums whitespace-nowrap">{fmt(it.required_display, it.uom)} <span className="text-xs font-normal text-slate-500">{it.uom}</span></td>
-                                        {tab === 'TRIM' && <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{it.purchase_qty != null ? <>{fmt(it.purchase_qty, 'pcs')} <span className="text-xs text-slate-500">{it.purchase_uom}</span></> : '—'}</td>}
-                                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
-                                            {fmt(it.allocated, it.uom)} <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded border ${COVER[it.cover][1]}`}>{COVER[it.cover][0]}</span>
-                                            {it.issued > 0 && <span className="block text-[11px] font-semibold text-indigo-700">+ {fmt(it.issued, it.uom)} issued</span>}
-                                            {it.kind === 'TRIM' && <span className="block text-[11px] text-slate-400">free {fmt(it.free, it.uom)}</span>}
-                                        </td>
-                                        <td className={`px-3 py-2 text-right tabular-nums font-bold ${it.shortfall > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{it.shortfall > 0 ? fmt(it.shortfall, it.uom) : '—'}
-                                            {it.pr_pending + it.pr_approved > 0 && <span className="block text-[11px] font-semibold text-slate-500">{fmt(it.pr_pending + it.pr_approved, it.uom)} on requisition{it.pr_approved > 0 ? ` (${fmt(it.pr_approved, it.uom)} approved)` : ''}</span>}
-                                            {it.from_stock > 0 && <span className="block text-[11px] font-semibold text-emerald-700">{fmt(it.from_stock, it.uom)} in free stock — allocate</span>}
-                                            {it.shortfall > 0 && it.to_raise > 0 && <span className="block text-[11px] font-semibold text-amber-700">{fmt(it.to_raise, it.uom)} still to raise</span>}</td>
-                                        {anyKind && approved && (
-                                            <td className="px-3 py-2 text-right whitespace-nowrap">{canKind(it.kind) && <>
-                                                {it.to_raise > 0 && <Link to={`/v3/planning/buy-list?order=${order.id}&kind=${it.kind}`} className="text-xs font-bold text-amber-700 hover:underline mr-3">Raise</Link>}
-                                                {it.shortfall > 0 && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline mr-3"
-                                                    onClick={() => setTarget({ mode: 'allocate', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })}>Allocate</button>}
-                                                {it.allocated > 0 && <button type="button" className="text-xs font-bold text-slate-600 hover:underline"
-                                                    onClick={() => setTarget({ mode: 'release', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })}>Release</button>}
-                                            </>}</td>
-                                        )}
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )
             )}
 
             {tab === 'MILESTONES' && approved && <OrderMilestonesPanel orderId={orderId} canEdit={perms.plan} />}

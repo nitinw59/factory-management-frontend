@@ -22,6 +22,7 @@ export const planningApi = {
     position: (params) => api.get('/v3/planning/position', { params }),
     positionItem: (kind, itemId) => api.get(`/v3/planning/position/${kind}/${itemId}`),
     allocate: (data) => api.post('/v3/planning/allocations', data),
+    allocateFree: (orderId, kind) => api.post(`/v3/planning/orders/${orderId}/allocate-free`, { kind }),   // every item of a kind from free stock
     release: (data) => api.post('/v3/planning/allocations/release', data),
 
     // Buy list and purchase requisitions

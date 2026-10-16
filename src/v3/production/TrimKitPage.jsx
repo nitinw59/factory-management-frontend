@@ -10,6 +10,7 @@ import Modal from '../../shared/Modal';
 import { trimKitsApi } from '../api/trimKitsApi';
 import { apiError } from '../api/mastersApi';
 import { useV3Live } from '../live';
+import { useV3Access } from '../V3Access';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading, PageHeader } from '../components/ui';
 import { KIT_STATUS, ACTION, qty, handout } from './trimKitShared';
 
@@ -115,6 +116,7 @@ export default function TrimKitPage() {
 }
 
 function KitView({ id }) {
+    const { me } = useV3Access();
     const [k, setK] = useState(null);
     const [perm, setPerm] = useState({ prepare: false, sign: false });
     const [error, setError] = useState('');
@@ -200,7 +202,7 @@ function KitView({ id }) {
                     <p className="font-bold text-slate-800 mb-2">Handovers</p>
                     {k.handovers.length === 0 ? <p className="text-sm text-slate-400">Nothing handed over yet.</p> : k.handovers.map(h => (
                         <div key={h.id} className="py-2 border-t border-slate-100 first:border-0 text-sm">
-                            <Link to={`/v3/material-issue/issues/${h.issue_id}`} className="font-bold text-indigo-700 hover:underline">{h.issue_no}</Link>
+                            {me?.menu['issue.materialIssue'] ? <Link to={`/v3/material-issue/issues/${h.issue_id}`} className="font-bold text-indigo-700 hover:underline">{h.issue_no}</Link> : <b className="text-slate-800">{h.issue_no}</b>}
                             <span className="text-slate-600"> · {h.production_line_name} · {h.signed_by_name || '—'} · {new Date(h.signed_at).toLocaleString()}{h.partial ? ' · part of the kit' : ''}</span>
                             {h.note && <span className="block text-xs text-slate-500">{h.note}</span>}
                             <ul className="ml-5 list-disc text-xs text-slate-600">{h.lines.map(x => <li key={x.kit_line_id}>{x.label}: {x.units ? `${x.units} ${k.lines.find(l => l.id === x.kit_line_id)?.purchase_uom} = ` : ''}{qty(x.qty, x.uom)} {x.uom}</li>)}</ul>

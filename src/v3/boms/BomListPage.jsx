@@ -8,20 +8,20 @@ import { apiError } from '../api/mastersApi';
 import { PageHeader, ErrorBox, Loading, SearchInput } from '../components/ui';
 import BomStatusBadge, { BOM_STATUS } from './BomStatusBadge';
 
-// "To finish" = draft + rejected (My work opens it); ?status= picks the tab.
-const TABS = ['DRAFT,REJECTED', 'DRAFT', 'REJECTED', 'PENDING_APPROVAL', 'APPROVED', 'ARCHIVED'];
-const tabLabel = (s) => (s === 'DRAFT,REJECTED' ? 'To finish' : BOM_STATUS[s]?.label || s);
+// "All" (16 Oct 2026, the default) = every status; "To finish" = draft + rejected (My work opens it); ?status= picks the tab.
+const TABS = ['ALL', 'DRAFT,REJECTED', 'DRAFT', 'REJECTED', 'PENDING_APPROVAL', 'APPROVED', 'ARCHIVED'];
+const tabLabel = (s) => (s === 'ALL' ? 'All' : s === 'DRAFT,REJECTED' ? 'To finish' : BOM_STATUS[s]?.label || s);
 
 export default function BomListPage() {
     const [params, setParams] = useSearchParams();
-    const status = TABS.includes(params.get('status')) ? params.get('status') : 'DRAFT';
-    const setStatus = (s) => setParams({ status: s }, { replace: true });
+    const status = TABS.includes(params.get('status')) ? params.get('status') : 'ALL';
+    const setStatus = (s) => setParams(s === 'ALL' ? {} : { status: s }, { replace: true });
     const [rows, setRows] = useState(null);
     const [q, setQ] = useState('');
     const [error, setError] = useState('');
     useEffect(() => {
         setRows(null);
-        stylesApi.boms({ status }).then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load BOMs.')));
+        stylesApi.boms(status === 'ALL' ? {} : { status }).then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load BOMs.')));
     }, [status]);
     const list = (rows || []).filter(b => !q || `${b.style_code} ${b.style_name}`.toLowerCase().includes(q.toLowerCase()));
 
@@ -37,7 +37,7 @@ export default function BomListPage() {
             </div>
             <ErrorBox text={error} />
             {!rows ? (!error && <Loading />) : list.length === 0 ? (
-                <p className="text-sm text-slate-400 py-6">No {status === 'DRAFT,REJECTED' ? 'BOMs to finish' : `${tabLabel(status).toLowerCase()} BOMs`}.</p>
+                <p className="text-sm text-slate-400 py-6">No {status === 'ALL' ? 'BOMs yet' : status === 'DRAFT,REJECTED' ? 'BOMs to finish' : `${tabLabel(status).toLowerCase()} BOMs`}.</p>
             ) : (
                 <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
                     {list.map(b => (

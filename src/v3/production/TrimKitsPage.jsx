@@ -3,7 +3,7 @@
 // pickup"; the store on everything open.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Plus, ChevronRight } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { trimKitsApi } from '../api/trimKitsApi';
 import { apiError } from '../api/mastersApi';
 import { useV3Live } from '../live';
@@ -60,7 +60,6 @@ export default function TrimKitsPage() {
                             <span className="text-xs text-slate-500">{k.customer_name} · {k.line_count} item(s){k.status === 'PARTLY_ISSUED' ? ` · ${k.open_lines} still to hand` : ''}</span>
                             {k.last_action === 'SENT_BACK' && <span className="basis-full text-xs font-semibold text-rose-700">{ACTION.SENT_BACK}: {k.last_reason}</span>}
                             <span className="ml-auto text-xs text-slate-500">{k.status === 'READY' && k.ready_at ? `ready ${new Date(k.ready_at).toLocaleString()}${k.ready_by_name ? ` · ${k.ready_by_name}` : ''}` : new Date(k.created_at).toLocaleDateString()}</span>
-                            <ChevronRight size={16} className="text-slate-300" />
                         </Link>
                     ))}
                 </div>

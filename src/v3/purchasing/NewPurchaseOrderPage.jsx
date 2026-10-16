@@ -20,6 +20,7 @@ export default function NewPurchaseOrderPage() {
     const [form, setForm] = useState({ supplier_id: '', delivery_date: '', notes: '', delivery_address_id: '' });
     const [addresses, setAddresses] = useState([]);   // Settings → Company: works / warehouse addresses
     const [kind, setKind] = useState('');
+    const [type, setType] = useState('');   // trim type (store: category) — only the types on the open lines
     const [direct, setDirect] = useState([]);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
@@ -29,7 +30,16 @@ export default function NewPurchaseOrderPage() {
         purchasingApi.suppliers().then(res => setSuppliers(res.data.filter(s => s.is_active))).catch(() => {});
         settingsApi.addresses().then(res => { setAddresses(res.data); const d = res.data.find(a => a.is_default_delivery); if (d) setForm(f => ({ ...f, delivery_address_id: f.delivery_address_id || d.id })); }).catch(() => {});
     }, []);
-    const shown = useMemo(() => (lines || []).filter(l => !kind || l.kind === kind), [lines, kind]);
+    const ofKind = useMemo(() => (lines || []).filter(l => !kind || l.kind === kind), [lines, kind]);
+    // Types on the lines of the chosen kind (fabric lines have none), with how many lines each.
+    const types = useMemo(() => {
+        const m = new Map();
+        for (const l of ofKind) if (l.kind !== 'FABRIC' && l.type_name) m.set(l.type_name, (m.get(l.type_name) || 0) + 1);
+        return [...m].sort((a, b) => a[0].localeCompare(b[0]));
+    }, [ofKind]);
+    useEffect(() => { if (type && !types.some(([t]) => t === type)) setType(''); }, [types, type]);
+    const shown = useMemo(() => ofKind.filter(l => !type || l.type_name === type), [ofKind, type]);
+    const hiddenPicks = [...picks.keys()].filter(id => !shown.some(l => String(l.id) === String(id))).length;
     const supplier = suppliers.find(s => String(s.id) === form.supplier_id);
 
     const create = async () => {
@@ -62,11 +72,17 @@ export default function NewPurchaseOrderPage() {
                     </Field>
                 )}
             </div>
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
                 <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={kind} onChange={e => setKind(e.target.value)} aria-label="Fabric or trims">
                     <option value="">All items</option><option value="FABRIC">Fabric</option><option value="TRIM">Trims</option><option value="STORE">Store (spares / general)</option>
                 </select>
-                <span className="text-sm text-slate-600">{picks.size} line(s) selected</span>
+                {types.length > 0 && (
+                    <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={type} onChange={e => setType(e.target.value)} aria-label={kind === 'STORE' ? 'Category' : 'Trim type'}>
+                        <option value="">{kind === 'STORE' ? 'All categories' : kind === 'TRIM' ? 'All trim types' : 'All types'}</option>
+                        {types.map(([t, n]) => <option key={t} value={t}>{t} ({n})</option>)}
+                    </select>
+                )}
+                <span className="text-sm text-slate-600">{picks.size} line(s) selected{hiddenPicks > 0 && <span className="text-slate-400"> · {hiddenPicks} not shown by the filter</span>}</span>
             </div>
             <div className="bg-white border border-slate-200 rounded-xl mb-4">
                 {!lines ? <Loading /> : <RequisitionLinePicker lines={shown} picks={picks} setPicks={setPicks} />}

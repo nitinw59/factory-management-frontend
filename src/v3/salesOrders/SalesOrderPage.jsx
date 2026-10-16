@@ -3,7 +3,7 @@
 // merchandisers approve or reject. After approval accounts' changes (and a request
 // to cancel) go to the merchandiser as a change request; approved = a numbered revision.
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { Plus, Pencil, Send, Undo2, CheckCircle2, XCircle, Ban, FileDown, FileSpreadsheet } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { salesOrdersApi } from '../api/salesOrdersApi';
@@ -19,8 +19,7 @@ import OrderDocumentsTab from './OrderDocumentsTab';
 import { exportPpmTemplate } from './ppmTemplatePdf';
 import { exportPpmTemplateXlsx } from './ppmTemplateXlsx';
 import { planningApi } from '../api/planningApi';
-import { downloadMaterialSheet } from '../planning/materialSheetPdf';
-import { downloadOrderBomV2 } from '../boms/bomV2';
+import OrderBomExcelButton, { OrderBomPdfButton } from '../boms/OrderBomExcelButton';
 
 const ORDER_TYPES = ['FOB', 'CMT', 'CM', 'DOMESTIC'];   // sales order type (13 Oct 2026)
 
@@ -148,7 +147,6 @@ export default function SalesOrderPage() {
                 <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Cancelled</b>{order.cancelled_by_name ? ` by ${order.cancelled_by_name}` : ''}: {order.cancelled_reason}</div>
             )}
             {order.status === 'SUBMITTED' && <p className="text-sm text-amber-700 mb-3">Waiting for a merchandiser to approve. {perms.edit ? 'Withdraw it to make changes.' : ''}</p>}
-            {revising && <p className="text-sm text-emerald-700 mb-3"><Link to={`/v3/planning/orders/${order.id}`} className="font-bold text-indigo-700 hover:underline mr-2">Order BOM →</Link>Approved {order.approved_at ? new Date(order.approved_at).toLocaleString() : ''}{order.approved_by_name ? ` by ${order.approved_by_name}` : ''}. Each line keeps its Style BOM version unless a change moves it.{perms.edit ? ' Changes go to the merchandiser for approval.' : ''}</p>}
 
             {revising && (cr ? (
                 <div className={`mb-3 rounded-xl border p-4 ${crWaiting ? 'bg-sky-50 border-sky-200' : cr.sent_back_reason ? 'bg-amber-50 border-amber-300' : 'bg-indigo-50/60 border-indigo-200'}`}>
@@ -180,41 +178,17 @@ export default function SalesOrderPage() {
                         })}</div>
                     )}
                 </div>
-            ) : perms.edit ? (
-                <p className="mb-3 text-xs text-slate-500">This order is approved. Changes you make below are collected and sent to the merchandiser for approval; production and planning keep the approved order until then.</p>
             ) : null)}
 
-            {/* Actions for this status and the signed-in user's rights */}
-            <div className="flex flex-wrap gap-2 mb-3">
+            {/* Workflow actions for this status and the signed-in user's rights (Cancel sits in the header card, 16 Oct 2026) */}
+            {((perms.edit && (EDITABLE.includes(order.status) || order.status === 'SUBMITTED')) || (perms.approve && order.status === 'SUBMITTED')) && <div className="flex flex-wrap gap-2 mb-3">
                 {perms.edit && EDITABLE.includes(order.status) && <PrimaryButton onClick={() => act(() => salesOrdersApi.submit(id))} busy={busy} disabled={busy}><Send size={14} /> Submit for approval</PrimaryButton>}
                 {perms.edit && order.status === 'SUBMITTED' && <SecondaryButton onClick={() => act(() => salesOrdersApi.withdraw(id))} disabled={busy}><Undo2 size={14} /> Withdraw</SecondaryButton>}
                 {perms.approve && order.status === 'SUBMITTED' && <>
                     <PrimaryButton onClick={() => { setProblems([]); setError(''); setApproving(true); }} disabled={busy}><CheckCircle2 size={14} /> Approve…</PrimaryButton>
                     <SecondaryButton onClick={() => askReason({ title: 'Reject order', label: 'Reason *', hint: 'Accounts see this and fix the order.', confirm: 'Reject', run: (r) => salesOrdersApi.reject(id, r) })} disabled={busy}><XCircle size={14} /> Reject</SecondaryButton>
                 </>}
-                <span className="ml-auto flex gap-2">
-                    {order.status !== 'CANCELLED' && activeLines.length > 0 && (
-                        <SecondaryButton disabled={busy} title={revising ? 'Fabric and trims per line and colour (the planned requirement)' : 'Estimate of fabric and trims from the BOMs — final once the order is approved'}
-                            onClick={() => { setError(''); downloadMaterialSheet(planningApi, adminApi, order.id).catch(err => setError(apiError(err, 'Failed to make the material PDF.'))); }}>
-                            <FileDown size={14} /> Order BOM PDF (v1){revising ? '' : ' (estimate)'}
-                        </SecondaryButton>
-                    )}
-                    {order.status !== 'CANCELLED' && activeLines.length > 0 && <>
-                        <SecondaryButton disabled={busy} title="Layout v2: the factory's order BOM layout (one page per style line)"
-                            onClick={() => { setError(''); downloadOrderBomV2(planningApi, order.id, 'pdf').catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.'))); }}>
-                            <FileDown size={14} /> Order BOM v2 PDF{revising ? '' : ' (estimate)'}
-                        </SecondaryButton>
-                        <SecondaryButton disabled={busy} title="Layout v2 as Excel (one sheet per style line)"
-                            onClick={() => { setError(''); downloadOrderBomV2(planningApi, order.id, 'xlsx').catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.'))); }}>
-                            <FileSpreadsheet size={14} /> v2 Excel
-                        </SecondaryButton>
-                    </>}
-                    <SecondaryButton onClick={exportPdf} disabled={busy}><FileDown size={14} /> PDF</SecondaryButton>
-                    <SecondaryButton onClick={() => exportOrderExcel(order)}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
-                </span>
-                {canCancel && <SecondaryButton onClick={() => askReason({ title: `Cancel ${order.order_no}`, label: 'Reason *', hint: revising ? 'The order and its number stay on record; its material requirements close and allocated material goes back to stock. Material already issued and cut batches stay on record.' : 'The order and its number stay on record; nothing can be changed afterwards.', confirm: 'Cancel order', danger: true, run: (r) => salesOrdersApi.cancel(id, r) })} disabled={busy}><Ban size={14} /> Cancel order</SecondaryButton>}
-                {canRequestCancel && <SecondaryButton onClick={() => askReason({ title: `Request cancellation of ${order.order_no}`, label: 'Reason *', hint: `Goes to the merchandiser for approval${cr?.changes.length ? ' and replaces the other changes not sent yet' : ''}. The order stays approved until then.`, confirm: 'Propose cancellation', danger: true, run: (r) => salesOrdersApi.cancel(id, r) })} disabled={busy}><Ban size={14} /> Request cancellation</SecondaryButton>}
-            </div>
+            </div>}
             <ErrorBox text={error} />
             {problems.length > 0 && (
                 <ul className="mb-3 text-xs text-rose-800 list-disc pl-5 space-y-0.5 bg-rose-50 border border-rose-200 rounded-lg py-2 pr-3">
@@ -222,8 +196,9 @@ export default function SalesOrderPage() {
                 </ul>
             )}
 
-            {/* Header */}
-            <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 flex flex-wrap gap-x-8 gap-y-3 items-start">
+            {/* Header: order facts, and on the right the downloads (order sheet, Order BOM — detailed or summary) and Edit */}
+            <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 flex flex-wrap gap-4 items-start">
+                <div className="flex-1 min-w-[320px] flex flex-wrap gap-x-8 gap-y-3 items-start">
                 <div><p className="text-xs font-bold text-slate-500">Customer</p><p className="font-bold text-slate-800">{order.customer_name}</p></div>
                 <div><p className="text-xs font-bold text-slate-500">Buyer PO no.</p><p className="font-semibold text-slate-800">{order.buyer_po_no || '—'}</p></div>
                 <div><p className="text-xs font-bold text-slate-500">Order type</p><p className="font-semibold text-slate-800">{order.order_type === 'DOMESTIC' ? 'Domestic' : order.order_type || 'FOB'}</p></div>
@@ -233,7 +208,22 @@ export default function SalesOrderPage() {
                 <div><p className="text-xs font-bold text-slate-500">Created by</p><p className="text-sm text-slate-700">{order.created_by_name || '—'}</p></div>
                 {order.submitted_by_name && <div><p className="text-xs font-bold text-slate-500">Submitted by</p><p className="text-sm text-slate-700">{order.submitted_by_name}</p></div>}
                 {order.notes && <div className="basis-full"><p className="text-xs font-bold text-slate-500">Notes</p><p className="text-sm text-slate-700 whitespace-pre-line">{order.notes}</p></div>}
-                {editable && <div className="ml-auto"><SecondaryButton onClick={openHeader}><Pencil size={14} /> Edit</SecondaryButton></div>}
+                </div>
+                <div className="ml-auto flex flex-col items-end gap-2">
+                    <div className="flex flex-wrap justify-end gap-2">
+                        <SecondaryButton onClick={exportPdf} disabled={busy} title="The sales order sheet"><FileDown size={14} /> Order PDF</SecondaryButton>
+                        <SecondaryButton onClick={() => exportOrderExcel(order)} title="The sales order sheet"><FileSpreadsheet size={14} /> Order Excel</SecondaryButton>
+                        {editable && <SecondaryButton onClick={openHeader}><Pencil size={14} /> Edit</SecondaryButton>}
+                        {canCancel && <SecondaryButton onClick={() => askReason({ title: `Cancel ${order.order_no}`, label: 'Reason *', hint: revising ? 'The order and its number stay on record; its material requirements close and allocated material goes back to stock. Material already issued and cut batches stay on record.' : 'The order and its number stay on record; nothing can be changed afterwards.', confirm: 'Cancel order', danger: true, run: (r) => salesOrdersApi.cancel(id, r) })} disabled={busy}><Ban size={14} /> Cancel order</SecondaryButton>}
+                        {canRequestCancel && <SecondaryButton onClick={() => askReason({ title: `Request cancellation of ${order.order_no}`, label: 'Reason *', hint: `Goes to the merchandiser for approval${cr?.changes.length ? ' and replaces the other changes not sent yet' : ''}. The order stays approved until then.`, confirm: 'Propose cancellation', danger: true, run: (r) => salesOrdersApi.cancel(id, r) })} disabled={busy}><Ban size={14} /> Request cancellation</SecondaryButton>}
+                    </div>
+                    {order.status !== 'CANCELLED' && activeLines.length > 0 && (
+                        <div className="flex flex-wrap justify-end gap-2">
+                            <OrderBomPdfButton planningApi={planningApi} orderId={order.id} disabled={busy} label={`Order BOM PDF${revising ? '' : ' (estimate)'}`} onError={err => setError(apiError(err, err.message || 'Failed to make the Order BOM.'))} />
+                            <OrderBomExcelButton planningApi={planningApi} orderId={order.id} disabled={busy} label={`Order BOM Excel${revising ? '' : ' (estimate)'}`} onError={err => setError(apiError(err, err.message || 'Failed to make the Order BOM.'))} />
+                        </div>
+                    )}
+                </div>
             </div>
 
             <div className="flex gap-1 border-b border-slate-200 mb-4">

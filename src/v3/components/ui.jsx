@@ -2,6 +2,26 @@
 import { useEffect, useState } from 'react';
 import { Search, AlertTriangle, Loader2 } from 'lucide-react';
 import { mastersApi } from '../api/mastersApi';
+import { useNavigate } from 'react-router-dom';
+
+// A table row that opens its record (16 Oct 2026: "the whole row must open the record" — no arrow column).
+// Usage: const rowLink = useRowLink(); <tr {...rowLink(`/v3/…/${id}`)} className="… cursor-pointer hover:bg-slate-50 focus-visible:bg-indigo-50 focus:outline-none">
+// Links, buttons and inputs inside the row keep their own action; selecting text doesn't open; Cmd / Ctrl-click
+// or middle-click opens a new tab; Enter opens it from the keyboard.
+const INNER = 'a, button, input, select, textarea, label, [role="button"]';
+export function useRowLink() {
+    const navigate = useNavigate();
+    return (to) => ({
+        role: 'link',
+        tabIndex: 0,
+        onClick: (e) => {
+            if (e.target.closest(INNER) || window.getSelection()?.toString()) return;
+            if (e.metaKey || e.ctrlKey) window.open(to, '_blank', 'noopener'); else navigate(to);
+        },
+        onAuxClick: (e) => { if (e.button === 1 && !e.target.closest(INNER)) window.open(to, '_blank', 'noopener'); },
+        onKeyDown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) navigate(to); },
+    });
+}
 
 export const PageHeader = ({ title, subtitle, actions }) => (
     <div className="flex flex-wrap items-start gap-3 mb-5">

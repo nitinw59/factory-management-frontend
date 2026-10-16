@@ -151,6 +151,8 @@ export default function OrderTrackPage() {
                     )}
                     {d.grns.length > 0 && <p className="px-3 py-1.5 text-xs border-t border-slate-100">GRNs: {d.grns.map((g, i) => <span key={g.id}>{i ? ', ' : ''}<L to={`/v3/purchasing/grns/${g.id}`} k="purchasing.grns">{g.grn_no}</L> ({lower(g.status)}, {fmtDate(g.received_date)})</span>)}</p>}
                 </Box>
+                {/* hidden while material issue is switched off (16 Oct 2026) */}
+                {!(me.hidden || []).includes('issue.materialIssue') && (
                 <Box title="Material issue" right={`${d.issues.length} slip(s)`}>
                     {!d.issues.length ? <p className="px-3 py-3 text-sm text-slate-500">Nothing issued yet.</p> : (
                         <table className="w-full text-sm"><tbody>{d.issues.map(s => (
@@ -161,6 +163,7 @@ export default function OrderTrackPage() {
                         ))}</tbody></table>
                     )}
                 </Box>
+                )}
                 <Box title="Milestones">
                     <table className="w-full text-sm"><tbody>{d.milestones.map(m => (
                         <tr key={m.code} className="border-t border-slate-100">

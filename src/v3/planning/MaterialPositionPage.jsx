@@ -3,11 +3,11 @@
 // allocate it to orders, earliest ship date first.
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ChevronRight, AlertTriangle, FileSpreadsheet } from 'lucide-react';
+import { AlertTriangle, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { planningApi } from '../api/planningApi';
 import { apiError } from '../api/mastersApi';
-import { PageHeader, SearchInput, SecondaryButton, ErrorBox, Loading } from '../components/ui';
+import { PageHeader, SearchInput, SecondaryButton, ErrorBox, Loading, useRowLink } from '../components/ui';
 import { todayLocal } from '../salesOrders/SalesOrderStatusBadge';
 
 function exportExcel(rows) {
@@ -23,6 +23,7 @@ function exportExcel(rows) {
 const fmt = (n, uom) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 2 });
 
 export default function MaterialPositionPage() {
+    const rowLink = useRowLink();   // the whole row opens the record
     const [params] = useSearchParams();   // ?kind=TRIM&to_allocate=1 from the My work banner
     const [rows, setRows] = useState(null);
     const [kind, setKind] = useState(['FABRIC', 'TRIM'].includes(params.get('kind')) ? params.get('kind') : '');
@@ -55,12 +56,12 @@ export default function MaterialPositionPage() {
                     <table className="w-full text-sm min-w-[900px]">
                         <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider">
                             <tr className="text-right"><th className="px-4 py-2.5 text-left">Item</th><th className="px-4 py-2.5">On hand</th><th className="px-4 py-2.5">Allocated</th><th className="px-4 py-2.5">Free</th>
-                                <th className="px-4 py-2.5">Required</th><th className="px-4 py-2.5">Shortfall</th><th className="px-4 py-2.5">On requisition</th><th className="px-4 py-2.5">To raise</th><th className="px-4 py-2.5">Orders</th><th className="px-4 py-2.5 w-10" /></tr>
+                                <th className="px-4 py-2.5">Required</th><th className="px-4 py-2.5">Shortfall</th><th className="px-4 py-2.5">On requisition</th><th className="px-4 py-2.5">To raise</th><th className="px-4 py-2.5">Orders</th></tr>
                         </thead>
                         <tbody>
-                            {rows.length === 0 && <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400">Nothing {shortOnly ? 'short' : 'needed by approved orders'}.</td></tr>}
+                            {rows.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-400">Nothing {shortOnly ? 'short' : 'needed by approved orders'}.</td></tr>}
                             {rows.map(r => (
-                                <tr key={r.key} className="border-t border-slate-100 hover:bg-slate-50 text-right tabular-nums">
+                                <tr key={r.key} {...rowLink(`/v3/planning/position/${r.kind}/${r.item_id}`)} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50 focus-visible:bg-indigo-50 focus:outline-none text-right tabular-nums">
                                     <td className="px-4 py-2.5 text-left">
                                         <Link to={`/v3/planning/position/${r.kind}/${r.item_id}`} className="font-semibold text-indigo-700 hover:underline">{r.label}</Link>
                                         <span className="block text-xs text-slate-500">{r.type_name}{!r.active && <span className="ml-1 font-bold text-rose-600">inactive</span>}</span>
@@ -76,7 +77,6 @@ export default function MaterialPositionPage() {
                                         {r.from_stock > 0 && <span className="block text-[11px] font-semibold text-emerald-700">{fmt(r.from_stock, r.uom)} in free stock</span>}
                                         {r.incoming_uncommitted > 0 && <span className="block text-[11px] font-semibold text-sky-700">+{fmt(r.incoming_uncommitted, r.uom)} incoming, uncommitted</span>}</td>
                                     <td className="px-4 py-2.5">{r.orders}{r.short_orders > 0 && <span className="block text-[11px] text-rose-600">{r.short_orders} short</span>}</td>
-                                    <td className="px-4 py-2.5"><Link to={`/v3/planning/position/${r.kind}/${r.item_id}`} className="text-slate-400 hover:text-indigo-600" aria-label={`Open ${r.label}`}><ChevronRight size={16} /></Link></td>
                                 </tr>
                             ))}
                         </tbody>

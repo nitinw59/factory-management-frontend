@@ -2,13 +2,14 @@
 // edited on its own page.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, ChevronRight } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { stylesApi } from '../api/stylesApi';
 import { apiError } from '../api/mastersApi';
-import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, ActiveBadge, Loading } from '../components/ui';
+import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, ActiveBadge, Loading, useRowLink } from '../components/ui';
 
 export default function StylesPage() {
+    const rowLink = useRowLink();   // the whole row opens the record
     const navigate = useNavigate();
     const [rows, setRows] = useState(null);
     const [canEdit, setCanEdit] = useState(false);
@@ -59,14 +60,15 @@ export default function StylesPage() {
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
                     <table className="w-full text-sm min-w-[760px]">
                         <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
-                            <tr><th className="px-4 py-2.5">Style</th><th className="px-4 py-2.5">Buyer</th><th className="px-4 py-2.5">Category · fit</th><th className="px-4 py-2.5 text-right">SAM</th><th className="px-4 py-2.5">Set up</th><th className="px-4 py-2.5">Status</th><th className="px-4 py-2.5 w-10" /></tr>
+                            <tr><th className="px-4 py-2.5">Style</th><th className="px-4 py-2.5">Buyer</th><th className="px-4 py-2.5">Category · fit</th><th className="px-4 py-2.5 text-right">SAM</th><th className="px-4 py-2.5">Set up</th><th className="px-4 py-2.5">Status</th></tr>
                         </thead>
                         <tbody>
-                            {shown.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No styles yet.</td></tr>}
+                            {shown.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No styles yet.</td></tr>}
                             {shown.map(r => {
                                 const gaps = setupGaps(r);
                                 return (
-                                    <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
+                                    // the whole row opens the style (16 Oct 2026)
+                                    <tr key={r.id} {...rowLink(`/v3/styles/${r.id}`)} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50 focus-visible:bg-indigo-50 focus:outline-none">
                                         <td className="px-4 py-2.5">
                                             <Link to={`/v3/styles/${r.id}`} className="font-semibold text-indigo-700 hover:underline">{r.style_code}</Link>
                                             <span className="block text-xs text-slate-500">{r.name}</span>
@@ -79,7 +81,6 @@ export default function StylesPage() {
                                             {gaps.length > 0 && <span className="block font-bold text-amber-700">missing: {gaps.join(', ')}</span>}
                                         </td>
                                         <td className="px-4 py-2.5"><ActiveBadge active={r.is_active} /></td>
-                                        <td className="px-4 py-2.5 text-right"><Link to={`/v3/styles/${r.id}`} className="text-slate-400 hover:text-indigo-600" aria-label={`Open ${r.style_code}`}><ChevronRight size={16} /></Link></td>
                                     </tr>
                                 );
                             })}

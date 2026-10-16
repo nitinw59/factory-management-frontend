@@ -1,9 +1,9 @@
 // Trim items (v3.trim_items): one record per vendor item (brand + code), with
 // usage unit, purchase unit and conversion, plus on-hand stock, the movement
-// ledger and stock adjustments.
+// ledger and stock adjustments. Listed in one card per trim type (16 Oct 2026), each with its own search.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Pencil, History, Copy } from 'lucide-react';
+import { Plus, Pencil, History, Copy, Search, X } from 'lucide-react';
 import { DtmChip } from '../boms/dtmShared';
 import Modal from '../../shared/Modal';
 import { mastersApi, apiError } from '../api/mastersApi';
@@ -35,6 +35,7 @@ export default function TrimItemsPage() {
     const [saving, setSaving] = useState(false);
     const [formError, setFormError] = useState('');
     const [ledgerItem, setLedgerItem] = useState(null);
+    const [groupSearch, setGroupSearch] = useState({});   // trim type id → text, when that group's search is open
 
     const load = useCallback(() => {
         Promise.all([mastersApi.trimItems(), mastersApi.trimTypes()])
@@ -50,6 +51,18 @@ export default function TrimItemsPage() {
             && (!dtmFilter || (dtmFilter === 'dtm') === Boolean(it.dtm_base_item_id))
             && (!q || `${it.brand} ${it.code} ${it.description || ''} ${it.dtm_reference || ''}`.toLowerCase().includes(q)));
     }, [items, search, typeFilter, dtmFilter]);
+
+    // Grouped by trim type (16 Oct 2026), types in name order; each group can be searched on its own.
+    const groups = useMemo(() => {
+        const m = new Map();
+        for (const it of shown) {
+            const k = String(it.trim_type_id);
+            if (!m.has(k)) m.set(k, { id: k, name: it.trim_type_name || 'No type', items: [] });
+            m.get(k).items.push(it);
+        }
+        return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
+    }, [shown]);
+    const matchesGroup = (it, q) => !q || `${it.brand} ${it.code} ${it.description || ''} ${it.dtm_reference || ''}`.toLowerCase().includes(q.trim().toLowerCase());
 
     const editingType = editing ? types.find(t => String(t.id) === String(editing.trim_type_id)) : null;
 
@@ -102,44 +115,71 @@ export default function TrimItemsPage() {
             />
             {perms.trims && types.length === 0 && items && <p className="text-sm text-amber-700 mb-3">Add a trim type first.</p>}
             <ErrorBox text={error} />
-            {!items ? <Loading /> : (
-                <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
-                    <table className="w-full text-sm min-w-[900px]">
-                        <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
-                            <tr>
-                                <th className="px-4 py-2.5">Brand · code</th><th className="px-4 py-2.5">Type</th><th className="px-4 py-2.5">Specs</th>
-                                <th className="px-4 py-2.5">Units</th><th className="px-4 py-2.5 text-right">On hand</th><th className="px-4 py-2.5">Status</th><th className="px-4 py-2.5 w-20" />
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {shown.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No trim items.</td></tr>}
-                            {shown.map(it => (
-                                <tr key={it.id} className="border-t border-slate-100 align-top">
-                                    <td className="px-4 py-2.5">
-                                        <span className="font-semibold text-slate-800">{it.brand} · {it.code}</span>
-                                        {it.description && <span className="block text-xs text-slate-500">{it.description}</span>}
-                                        {it.dtm_base_item_id && <span className="block mt-1 text-xs text-slate-600"><DtmChip /> dyed to match <b>{it.dtm_reference}</b> <span className="text-slate-500">· base {it.dtm_base_label}</span></span>}
-                                    </td>
-                                    <td className="px-4 py-2.5 text-slate-600">{it.trim_type_name}</td>
-                                    <td className="px-4 py-2.5 text-xs text-slate-600">
-                                        {(it.spec_fields || []).filter(f => it.specs?.[f.key] !== undefined).map(f => `${f.label}: ${it.specs[f.key]}${f.unit ? ` ${f.unit}` : ''}`).join(' · ') || '—'}
-                                    </td>
-                                    <td className="px-4 py-2.5 text-xs text-slate-600">{UOM_LABEL[it.usage_uom]} · {conversionText(it)}</td>
-                                    <td className="px-4 py-2.5 text-right tabular-nums">
-                                        <span className="font-bold text-slate-800">{fmtQty(it.on_hand)} {UOM_LABEL[it.usage_uom]}</span>
-                                        {Number(it.usage_per_purchase_uom) !== 1 && <span className="block text-xs text-slate-400">≈ {inPurchaseUnits(it)}</span>}
-                                        {!it.has_opening && <span className="block text-[11px] font-bold text-amber-600">no opening stock</span>}
-                                    </td>
-                                    <td className="px-4 py-2.5"><ActiveBadge active={it.is_active} /></td>
-                                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                                        <button type="button" onClick={() => setLedgerItem(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Stock history of ${it.brand} ${it.code}`}><History size={15} /></button>
-                                        {perms.trims && <button type="button" onClick={() => { setFormError(''); setEditing({ ...it, trim_type_id: String(it.trim_type_id), description: it.description || '' }); }} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Edit ${it.brand} ${it.code}`}><Pencil size={15} /></button>}
-                                        {perms.trims && <button type="button" onClick={() => startCopy(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Copy ${it.brand} ${it.code} into a new item`} title="Copy into a new item"><Copy size={15} /></button>}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+            {!items ? <Loading /> : groups.length === 0 ? (
+                <p className="bg-white border border-slate-200 rounded-xl px-4 py-8 text-center text-sm text-slate-400">No trim items.</p>
+            ) : (
+                <div className="space-y-4">
+                    {groups.map(g => {
+                        const q = groupSearch[g.id];
+                        const open = q !== undefined;
+                        const list = g.items.filter(it => matchesGroup(it, q));
+                        return (
+                            <div key={g.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                                <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-slate-50 border-b border-slate-200">
+                                    <p className="font-black text-slate-800">{g.name}</p>
+                                    <span className="text-xs font-semibold text-slate-500">{open && q ? `${list.length} of ${g.items.length}` : g.items.length} item{g.items.length === 1 ? '' : 's'}</span>
+                                    <div className="ml-auto flex items-center gap-1">
+                                        {open && (
+                                            <input className={`${inputCls} !py-1 w-64`} autoFocus value={q} placeholder={`Search ${g.name}: brand, code, description`}
+                                                onChange={e => setGroupSearch({ ...groupSearch, [g.id]: e.target.value })}
+                                                onKeyDown={e => { if (e.key === 'Escape') { const n = { ...groupSearch }; delete n[g.id]; setGroupSearch(n); } }}
+                                                aria-label={`Search in ${g.name}`} />
+                                        )}
+                                        <button type="button" title={open ? 'Close search' : `Search in ${g.name}`} aria-label={open ? `Close search in ${g.name}` : `Search in ${g.name}`}
+                                            onClick={() => { const n = { ...groupSearch }; if (open) delete n[g.id]; else n[g.id] = ''; setGroupSearch(n); }}
+                                            className={`p-1.5 rounded-md ${open ? 'text-indigo-700 bg-indigo-50' : 'text-slate-500 hover:bg-slate-200'}`}>{open ? <X size={15} /> : <Search size={15} />}</button>
+                                    </div>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm min-w-[820px]">
+                                        <thead className="text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                            <tr>
+                                                <th className="px-4 py-2">Brand · code</th><th className="px-4 py-2">Specs</th>
+                                                <th className="px-4 py-2">Units</th><th className="px-4 py-2 text-right">On hand</th><th className="px-4 py-2">Status</th><th className="px-4 py-2 w-20" />
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {list.length === 0 && <tr><td colSpan={6} className="px-4 py-4 text-center text-slate-400">Nothing in {g.name} matches “{q}”.</td></tr>}
+                                            {list.map(it => (
+                                                <tr key={it.id} className="border-t border-slate-100 align-top">
+                                                    <td className="px-4 py-2.5">
+                                                        <span className="font-semibold text-slate-800">{it.brand} · {it.code}</span>
+                                                        {it.description && <span className="block text-xs text-slate-500">{it.description}</span>}
+                                                        {it.dtm_base_item_id && <span className="block mt-1 text-xs text-slate-600"><DtmChip /> dyed to match <b>{it.dtm_reference}</b> <span className="text-slate-500">· base {it.dtm_base_label}</span></span>}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-xs text-slate-600">
+                                                        {(it.spec_fields || []).filter(f => it.specs?.[f.key] !== undefined).map(f => `${f.label}: ${it.specs[f.key]}${f.unit ? ` ${f.unit}` : ''}`).join(' · ') || '—'}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-xs text-slate-600">{UOM_LABEL[it.usage_uom]} · {conversionText(it)}</td>
+                                                    <td className="px-4 py-2.5 text-right tabular-nums">
+                                                        <span className="font-bold text-slate-800">{fmtQty(it.on_hand)} {UOM_LABEL[it.usage_uom]}</span>
+                                                        {Number(it.usage_per_purchase_uom) !== 1 && <span className="block text-xs text-slate-400">≈ {inPurchaseUnits(it)}</span>}
+                                                        {!it.has_opening && <span className="block text-[11px] font-bold text-amber-600">no opening stock</span>}
+                                                    </td>
+                                                    <td className="px-4 py-2.5"><ActiveBadge active={it.is_active} /></td>
+                                                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                                                        <button type="button" onClick={() => setLedgerItem(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Stock history of ${it.brand} ${it.code}`}><History size={15} /></button>
+                                                        {perms.trims && <button type="button" onClick={() => { setFormError(''); setEditing({ ...it, trim_type_id: String(it.trim_type_id), description: it.description || '' }); }} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Edit ${it.brand} ${it.code}`}><Pencil size={15} /></button>}
+                                                        {perms.trims && <button type="button" onClick={() => startCopy(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Copy ${it.brand} ${it.code} into a new item`} title="Copy into a new item"><Copy size={15} /></button>}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        );
+                    })}
                 </div>
             )}
 

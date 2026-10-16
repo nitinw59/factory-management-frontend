@@ -1,15 +1,21 @@
-// View BOM (formerly "Trim card"): every BOM line × garment colour, with the item each cell
-// resolves to and where it came from; unresolved cells are highlighted.
+// View BOM (formerly "Trim card"). Opens on the SUMMARY (15 Oct 2026, like the Order BOM summary Excel): one row
+// per BOM line — "Same in all", "MATCH TO COLOR" (picked by colour), "BY SIZE" (an item per size), DTM, or a row per
+// tone item. "Show detailed": every BOM line × garment colour, with the item each cell resolves to and where it came
+// from; unresolved cells are highlighted.
 // Same data gates submit / approve. Exports to PDF and Excel.
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FileDown, FileSpreadsheet, AlertTriangle, CheckCircle2, ClipboardList } from 'lucide-react';
+import { FileDown, AlertTriangle, CheckCircle2, ClipboardList } from 'lucide-react';
 import { stylesApi } from '../api/stylesApi';
 import { apiError } from '../api/mastersApi';
-import { SecondaryButton, ErrorBox, Loading } from '../components/ui';
-import { SOURCE_LABEL, consumptionText, lineDetail, exportTrimCardPdf, exportTrimCardExcel } from './trimCardExport';
-import { buildStyleBomV2, exportBomV2Pdf, exportBomV2Xlsx } from './bomV2';
+import { ErrorBox, Loading } from '../components/ui';
+import { SOURCE_LABEL, consumptionText, lineDetail } from './trimCardExport';
+import { buildStyleBomV2, exportBomV2Pdf, exportBomV2Xlsx, summariseStyleLine, styleCons } from './bomV2';
+import BomExcelChoice from './BomExcelChoice';
 import { loadLetterhead } from '../components/letterhead';
+
+const MATCH = 'MATCH TO COLOR';
+const num3 = (n) => Number(n ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
 
 const SOURCE_CLS = { EXACT: 'bg-violet-100 text-violet-700', TONE: 'bg-sky-100 text-sky-700', ALL: 'bg-slate-100 text-slate-600' };
 
@@ -27,6 +33,7 @@ export function ProblemList({ problems, max = 50 }) {
 export default function TrimCardTab({ bomId, refreshKey }) {
     const [card, setCard] = useState(null);
     const [error, setError] = useState('');
+    const [detailed, setDetailed] = useState(false);   // opens on the summary
 
     useEffect(() => {
         setCard(null);
@@ -53,6 +60,32 @@ export default function TrimCardTab({ bomId, refreshKey }) {
             </td>
         );
     };
+
+    const summarySection = (title, lines) => (
+        <>
+            <tr><td colSpan={7} className="bg-slate-100 px-2 py-1.5 text-xs font-black uppercase tracking-wide text-slate-600 border border-slate-200">{title} ({lines.length})</td></tr>
+            {lines.map(l => {
+                const rows = summariseStyleLine(l, card);
+                return rows.map((r, j) => (
+                    <tr key={`${l.kind}${l.id}:${j}`} className={r.problems ? 'bg-rose-50' : ''}>
+                        {j === 0 && <td rowSpan={rows.length} className="p-2 border border-slate-200 align-top">
+                            <p className="text-sm font-bold text-slate-800">{l.title}</p>
+                            {lineDetail(l) && <p className="text-[11px] text-slate-500">{lineDetail(l)}</p>}
+                        </td>}
+                        <td className="p-2 border border-slate-200 align-top text-xs font-semibold text-slate-800">{r.item}{r.desc && <span className="block font-normal text-slate-500">{r.desc}</span>}</td>
+                        <td className={`p-2 border border-slate-200 align-top text-xs ${r.colour === MATCH || r.colour === 'DTM' ? 'font-black text-indigo-700' : 'text-slate-700'}`}>{r.colour}</td>
+                        <td className={`p-2 border border-slate-200 align-top text-xs whitespace-nowrap ${r.size === 'BY SIZE' ? 'font-black text-indigo-700' : 'text-slate-700'}`}>{r.size}</td>
+                        {j === 0 && <td rowSpan={rows.length} className="p-2 border border-slate-200 align-top text-xs text-slate-600 whitespace-nowrap" title={consumptionText(l)}>{styleCons(l)} {l.uom}{Number(l.wastage_pct) ? ` +${num3(l.wastage_pct)}%` : ''}</td>}
+                        <td className="p-2 border border-slate-200 align-top text-xs text-slate-600">{r.notes}</td>
+                        {j === 0 && <td rowSpan={rows.length} className="p-2 border border-slate-200 align-top text-xs">
+                            {r.problems ? <button type="button" onClick={() => setDetailed(true)} className="font-bold text-rose-700 underline">⚠ {r.problems} problem{r.problems === 1 ? '' : 's'}</button> : <span className="text-emerald-700 font-bold">OK</span>}
+                        </td>}
+                    </tr>
+                ));
+            })}
+            {lines.length === 0 && <tr><td colSpan={7} className="p-2 text-xs text-slate-400 border border-slate-200">No lines.</td></tr>}
+        </>
+    );
 
     const section = (title, lines) => (
         <>
@@ -85,15 +118,34 @@ export default function TrimCardTab({ bomId, refreshKey }) {
                 )}
                 <div className="ml-auto flex gap-2">
                     <Link to={`/v3/boms/${bomId}/trim-card`} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"><ClipboardList size={14} /> Trim card</Link>
-                    <SecondaryButton onClick={async () => exportBomV2Pdf(buildStyleBomV2(card), await loadLetterhead())} title="Layout v2: the factory's BOM layout"><FileDown size={14} /> Style BOM v2 PDF</SecondaryButton>
-                    <SecondaryButton onClick={async () => exportBomV2Xlsx(buildStyleBomV2(card), await loadLetterhead()).catch(err => setError(err.message || 'Failed to make the Excel file.'))} title="Layout v2 as Excel"><FileSpreadsheet size={14} /> v2 Excel</SecondaryButton>
-                    <SecondaryButton onClick={async () => exportTrimCardPdf(card, await loadLetterhead())} title="Layout v1 (to be retired)"><FileDown size={14} /> Style BOM PDF (v1)</SecondaryButton>
-                    <SecondaryButton onClick={async () => exportTrimCardExcel(card, await loadLetterhead())}><FileSpreadsheet size={14} /> Excel (v1)</SecondaryButton>
+                    <BomExcelChoice label="Style BOM PDF" icon={FileDown} title="Style BOM as PDF: detailed or summary" onPick={async (summary) => exportBomV2Pdf(buildStyleBomV2(card, { summary }), await loadLetterhead())} />
+                    <BomExcelChoice label="Style BOM Excel" title="Style BOM as Excel: detailed or summary" onPick={async (summary) => exportBomV2Xlsx(buildStyleBomV2(card, { summary }), await loadLetterhead()).catch(err => setError(err.message || 'Failed to make the Excel file.'))} />
                 </div>
             </div>
             {card.warnings.map((w, i) => <p key={i} className="text-xs font-semibold text-amber-700">{w}</p>)}
-            <p className="text-xs text-slate-500">Sizes: {card.sizes.map(s => s.name).join(', ') || '—'}</p>
-            {card.colours.length === 0 ? <p className="text-sm text-slate-400">No garment colours on this BOM yet.</p> : (
+            <div className="flex flex-wrap items-center gap-3">
+                <p className="text-xs text-slate-500">Sizes: {card.sizes.map(s => s.name).join(', ') || '—'} · Colours: {card.colours.map(c => c.name).join(', ') || '—'}</p>
+                {card.colours.length > 0 && (
+                    <div className="ml-auto inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs font-bold">
+                        <button type="button" onClick={() => setDetailed(false)} className={`px-3 py-1.5 ${!detailed ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Summary</button>
+                        <button type="button" onClick={() => setDetailed(true)} className={`px-3 py-1.5 ${detailed ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Show detailed</button>
+                    </div>
+                )}
+            </div>
+            {card.colours.length === 0 ? <p className="text-sm text-slate-400">No garment colours on this BOM yet.</p> : !detailed ? (
+                <div className="overflow-x-auto">
+                    <table className="min-w-full border-collapse">
+                        <thead>
+                            <tr>{['Line', 'Item', 'Garment colour', 'Size', 'Consumption', 'Remarks', 'Check'].map(h => <th key={h} className="p-2 border border-slate-200 bg-slate-50 text-left text-xs font-bold text-slate-600">{h}</th>)}</tr>
+                        </thead>
+                        <tbody>
+                            {summarySection('Fabric', card.fabric)}
+                            {summarySection('Trims', card.trims)}
+                        </tbody>
+                    </table>
+                    <p className="mt-1 text-[11px] text-slate-500">Summary: a line picked by colour shows as one <b>MATCH TO COLOR</b> row, an item per size as <b>BY SIZE</b>, DTM shades as <b>DTM</b>. "Show detailed" lists every colour.</p>
+                </div>
+            ) : (
                 <div className="overflow-x-auto">
                     <table className="min-w-full border-collapse">
                         <thead>
