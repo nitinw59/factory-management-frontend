@@ -218,7 +218,7 @@ export default function OrderRequirementsPage() {
             </div>
 
             {(tab === 'FABRIC' || tab === 'TRIM') && (
-                <MaterialRequirements data={data} kind={tab} approved={approved} showActions={anyKind && approved} canAct={canKind} busy={busy}
+                <MaterialRequirements key={tab} data={data} kind={tab} approved={approved} showActions={anyKind && approved} canAct={canKind} busy={busy}
                     filter={fabFilter} view={fabView}
                     onCell={(item, colour) => setCell({ item, colour })}
                     onAllocateFree={allocateFree}

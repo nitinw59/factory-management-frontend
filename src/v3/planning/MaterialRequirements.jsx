@@ -4,6 +4,7 @@
 // item × colour matrix ("By colour"). Both scroll in their own box with the heading and the item column frozen.
 // Under each status: the purchase orders reserved for this order with their due date — red when it is after the
 // item's needed-by date. Fabric spelled two ways on one order (two fabric records) is flagged.
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle } from 'lucide-react';
 
@@ -12,12 +13,14 @@ const dmy = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-I
 const COVER = { FULL: ['covered', 'bg-emerald-50 text-emerald-700 border-emerald-200'], PARTIAL: ['part', 'bg-amber-50 text-amber-800 border-amber-200'], NONE: ['none', 'bg-rose-50 text-rose-700 border-rose-200'] };
 const ROLE_ORDER = ['Shell fabric', 'Contrast fabric', 'Lining fabric', 'Pocketing fabric', 'Other fabric'];
 const onPr = (it) => (it.pr_pending || 0) + (it.pr_approved || 0);
+// "On requisition but no PO yet" (16 Oct 2026): still short, on a requisition, and no purchase order reserved for this order.
+const reqNoPo = (it) => it.shortfall > 0 && onPr(it) > 0 && !(it.incoming_pos || []).length;
 const STICKY_COL = 'sticky left-0 z-[1]';
 
 function statusOf(it) {
     const u = it.uom;
     if (it.shortfall <= 0) return { text: it.issued > 0 ? `Covered · ${fmt(it.issued, u)} issued` : 'Covered', cls: 'text-emerald-700' };
-    if (it.from_stock > 0) return { text: `${fmt(it.from_stock, u)} ${u} in free stock — allocate`, cls: 'text-emerald-700' };
+    if (it.from_stock > 0) return { text: `${fmt(it.from_stock, u)} ${u} in free stock — allocate`, cls: 'text-blue-900' };
     if (it.to_raise > 0) return { text: `${fmt(it.to_raise, u)} ${u} to raise`, cls: 'text-rose-700' };
     if (it.incoming_pos?.length) return { text: `${fmt(it.shortfall, u)} ${u} short · on PO`, cls: 'text-sky-700' };
     if (onPr(it) > 0) return { text: `${fmt(it.shortfall, u)} ${u} short · on requisition`, cls: 'text-amber-700' };
@@ -30,17 +33,19 @@ function StatusBar({ it }) {
     const alloc = Math.min(it.allocated || 0, req - issued);
     const po = Math.min((it.incoming_pos || []).reduce((n, p) => n + p.qty, 0), Math.max(req - issued - alloc, 0));
     const pr = Math.min(onPr(it), Math.max(req - issued - alloc - po, 0));
-    const raise = Math.max(req - issued - alloc - po - pr, 0);
+    // free stock that can be allocated (16 Oct 2026: dark navy, not counted as "to raise")
+    const free = Math.min(it.from_stock || 0, Math.max(req - issued - alloc - po - pr, 0));
+    const raise = Math.max(req - issued - alloc - po - pr - free, 0);
     const seg = (v, cls) => (v > 0 ? <span className={cls} style={{ width: `${(v / req) * 100}%` }} /> : null);
     const u = it.uom;
     const tip = [`Required ${fmt(it.required_display, u)} ${u}`, `Issued ${fmt(it.issued, u)}`, `Allocated ${fmt(it.allocated, u)}`, `On PO for this order ${fmt(po, u)}`,
         `On requisition ${fmt(onPr(it), u)}`, `Short ${fmt(it.shortfall, u)}`, `Still to raise ${fmt(it.to_raise, u)}`, it.from_stock > 0 ? `In free stock ${fmt(it.from_stock, u)}` : '',
-        it.needed_by ? `Needed by ${dmy(it.needed_by)}` : '', 'Bar: issued (indigo) · allocated (green) · on PO (blue) · on requisition (light blue) · to raise (red)'].filter(Boolean).join('\n');
+        it.needed_by ? `Needed by ${dmy(it.needed_by)}` : '', 'Bar: issued (indigo) · allocated (green) · on PO (blue) · on requisition (light blue) · free stock to allocate (dark navy) · to raise (red)'].filter(Boolean).join('\n');
     const s = statusOf(it);
     return (
         <div title={tip} className="min-w-[190px]">
             <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                {seg(issued, 'bg-indigo-500')}{seg(alloc, 'bg-emerald-500')}{seg(po, 'bg-sky-600')}{seg(pr, 'bg-sky-300')}{seg(raise, 'bg-rose-400')}
+                {seg(issued, 'bg-indigo-500')}{seg(alloc, 'bg-emerald-500')}{seg(po, 'bg-sky-600')}{seg(pr, 'bg-sky-300')}{seg(free, 'bg-blue-900')}{seg(raise, 'bg-rose-400')}
             </div>
             <p className={`mt-1 text-xs font-bold ${s.cls}`}>{s.text}</p>
             {(it.incoming_pos || []).map(p => (
@@ -88,7 +93,18 @@ const subOf = (it, groupTitle) => {
 export default function MaterialRequirements({ data, kind, approved, showActions, canAct, filter, view, onCell, onAllocate, onRelease, onAllocateFree, busy }) {
     const items = data.items.filter(i => i.kind === kind);
     const colours = data.colours;
-    const shown = items.filter(i => (filter === 'short' ? i.shortfall > 0 : filter === 'covered' ? i.shortfall <= 0 : true));
+    // Filters (16 Oct 2026): the tab bar's All / Short / Covered, plus a clicked count chip (covered / part / none),
+    // a group (trim type, or fabric line + article) and a search on name, code and description.
+    const [coverPick, setCoverPick] = useState('');
+    const [groupPick, setGroupPick] = useState('');
+    const [q, setQ] = useState('');
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const shown = items.filter(i => (filter === 'short' ? i.shortfall > 0 : filter === 'covered' ? i.shortfall <= 0 : true)
+        && (!coverPick || (coverPick === 'REQ_NO_PO' ? reqNoPo(i) : i.cover === coverPick))
+        && (!groupPick || groupOf(i).key === groupPick)
+        && (!words.length || words.every(w => `${i.label} ${nameOf(i)} ${i.info?.description || ''} ${i.usage.join(' ')}`.toLowerCase().includes(w))));
+    const groupChoices = [...new Map(items.map(i => { const g = groupOf(i); return [g.key, g]; })).values()]
+        .sort((a, b) => a.sort - b.sort || a.title.localeCompare(b.title) || a.sub.localeCompare(b.sub));
     const noun = kind === 'FABRIC' ? 'fabric' : 'trims';
 
     const byUnit = new Map();
@@ -131,7 +147,13 @@ export default function MaterialRequirements({ data, kind, approved, showActions
         <div className="space-y-2">
             {/* One-line summary + bulk actions */}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
-                <span className="flex items-center gap-1 font-bold">{['FULL', 'PARTIAL', 'NONE'].map(k => <span key={k} className={`px-1.5 py-0.5 rounded border ${COVER[k][1]}`}>{cover[k] || 0} {COVER[k][0]}</span>)}</span>
+                <span className="flex items-center gap-1 font-bold">{['FULL', 'PARTIAL', 'NONE'].map(k => (
+                    <button key={k} type="button" onClick={() => setCoverPick(coverPick === k ? '' : k)} title={coverPick === k ? 'Show all again' : `Show only ${COVER[k][0]} items`}
+                        className={`px-1.5 py-0.5 rounded border ${COVER[k][1]} ${coverPick === k ? 'ring-2 ring-offset-1 ring-indigo-500' : coverPick ? 'opacity-50 hover:opacity-100' : 'hover:brightness-95'}`}>{cover[k] || 0} {COVER[k][0]}</button>
+                ))}
+                    <button type="button" onClick={() => setCoverPick(coverPick === 'REQ_NO_PO' ? '' : 'REQ_NO_PO')} title={coverPick === 'REQ_NO_PO' ? 'Show all again' : 'Show only items on a requisition with no purchase order yet'}
+                        className={`px-1.5 py-0.5 rounded border bg-sky-50 text-sky-800 border-sky-200 ${coverPick === 'REQ_NO_PO' ? 'ring-2 ring-offset-1 ring-indigo-500' : coverPick ? 'opacity-50 hover:opacity-100' : 'hover:brightness-95'}`}>{items.filter(reqNoPo).length} on req. · no PO</button>
+                </span>
                 {[...byUnit.entries()].map(([u, t]) => (
                     <span key={u} className="text-slate-600"><b className="text-slate-800">{fmt(t.req, u)} {u}</b> · {fmt(t.alloc, u)} allocated · {fmt(t.pr, u)} on req. · <b className={t.raise > 0 ? 'text-rose-700' : 'text-emerald-700'}>{fmt(t.raise, u)} {u} to raise</b></span>
                 ))}
@@ -142,6 +164,18 @@ export default function MaterialRequirements({ data, kind, approved, showActions
                         {toRaise.length > 0 && <Link to={`/v3/planning/buy-list?order=${data.order.id}&kind=${kind}`} className="font-bold text-amber-700 hover:underline">Raise all short ({toRaise.length})</Link>}
                     </span>
                 )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+                <select value={groupPick} onChange={e => setGroupPick(e.target.value)} aria-label={kind === 'FABRIC' ? 'Fabric line' : 'Trim type'}
+                    className="px-2 py-1 text-xs border border-slate-300 rounded-lg bg-white max-w-[280px]">
+                    <option value="">{kind === 'FABRIC' ? 'All fabric lines' : 'All trim types'} ({items.length})</option>
+                    {groupChoices.map(g => <option key={g.key} value={g.key}>{g.title}{g.sub ? ` — ${g.sub}` : ''} ({items.filter(i => groupOf(i).key === g.key).length})</option>)}
+                </select>
+                <input value={q} onChange={e => setQ(e.target.value)} placeholder={kind === 'FABRIC' ? 'Search shade, article, mill…' : 'Search item, code, description…'} aria-label="Search items"
+                    className="px-2 py-1 text-xs border border-slate-300 rounded-lg bg-white w-60" />
+                {(coverPick || groupPick || q) && <button type="button" onClick={() => { setCoverPick(''); setGroupPick(''); setQ(''); }} className="text-xs font-bold text-indigo-700 hover:underline">Clear filters</button>}
+                {(coverPick || groupPick || q || filter !== 'all') && <span className="text-xs text-slate-500">{shown.length} of {items.length} shown</span>}
             </div>
 
             {shown.length === 0 ? <p className="text-sm text-slate-400">{items.length ? 'Nothing matches this filter.' : `No ${noun} requirements.`}</p> : view === 'list' ? (

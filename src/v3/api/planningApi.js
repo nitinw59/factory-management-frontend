@@ -28,9 +28,11 @@ export const planningApi = {
     // Buy list and purchase requisitions
     buyList: (params) => api.get('/v3/planning/buy-list', { params }),
     prs: (params) => api.get('/v3/planning/purchase-requisitions', { params }),
+    prCounts: (params) => api.get('/v3/planning/purchase-requisitions-counts', { params }),   // status tabs
     pr: (id) => api.get(`/v3/planning/purchase-requisitions/${id}`),
     createPr: (data) => api.post('/v3/planning/purchase-requisitions', data),
     addPrLines: (id, items, orderId) => api.post(`/v3/planning/purchase-requisitions/${id}/lines`, { items, order_id: orderId || undefined }),
+    prOpenItems: (keys) => api.get('/v3/planning/purchase-requisitions-open-items', { params: { keys: keys.join(',') } }),   // items already on requisitions in play
     updatePrLine: (id, lineId, data) => api.put(`/v3/planning/purchase-requisitions/${id}/lines/${lineId}`, data),
     removePrLine: (id, lineId) => api.delete(`/v3/planning/purchase-requisitions/${id}/lines/${lineId}`),
     prAction: (id, action, reason) => api.post(`/v3/planning/purchase-requisitions/${id}/${action}`, reason ? { reason } : undefined),

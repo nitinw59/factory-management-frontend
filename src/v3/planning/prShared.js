@@ -77,8 +77,10 @@ export function exportPrExcel(pr) {
 export function exportBuyListExcel(rows) {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.map(r => ({
-        Item: r.label, Type: r.type_name || '', 'To raise': r.to_raise, Unit: r.uom, 'Buy qty': r.purchase_qty, 'Buy unit': r.purchase_uom,
+        Item: r.label, Type: r.type_name || '', Brand: r.brand || '', Needed: r.required ?? '', Allocated: r.allocated ?? '', 'Free stock': r.from_stock ?? '',
+        'On PR': r.on_pr ?? '', 'On PO': r.on_po ?? '', 'To raise': r.to_raise, Unit: r.uom, 'Buy qty': r.purchase_qty, 'Buy unit': r.purchase_uom,
         'Needed by': r.needed_by || '', Late: r.late ? 'yes' : '', Orders: r.orders.map(o => `${o.order_no} (${o.to_raise})`).join(', '),
+        'Already on': (r.on_prs || []).map(x => `${x.pr_no} (${x.status.toLowerCase()})`).join(', '), 'Check units': r.unit_check ? `1 ${r.purchase_uom} = 1 ${r.uom}` : '',
     }))), 'Buy list');
     XLSX.writeFile(wb, `BuyList-${todayLocal()}.xlsx`);
 }
