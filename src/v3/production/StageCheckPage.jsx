@@ -12,6 +12,7 @@ import { productionApi } from '../api/productionApi';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, Field, inputCls, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
+import { PriorityBadge } from '../cutting/cutShared';
 import GarmentPanel from './GarmentPanel';
 
 const STATUS_CLS = { APPROVED: 'bg-emerald-100 text-emerald-800', REPAIRED: 'bg-emerald-50 text-emerald-700', RECUT_CLEARED: 'bg-emerald-50 text-emerald-700', NEEDS_REWORK: 'bg-amber-100 text-amber-800', QC_REJECTED: 'bg-rose-100 text-rose-800' };
@@ -89,7 +90,7 @@ export default function StageCheckPage() {
                         <p className="px-3 py-2 text-xs font-black uppercase tracking-wider text-slate-500 bg-slate-50">Batches waiting</p>
                         {!queue ? <Loading /> : queue.length === 0 ? <p className="px-3 py-4 text-sm text-slate-400">Nothing waiting.</p> : queue.map(q => (
                             <button key={q.id} type="button" onClick={() => setBatchId(q.id)} className={`block w-full text-left px-3 py-2 border-t border-slate-100 text-sm ${batchId === q.id ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
-                                <span className="font-semibold">{q.batch_code}</span><span className="block text-xs text-slate-500">{q.style_code} · {q.customer_name} · ships {fmtDate(q.ship_date)}</span>
+                                <span className="font-semibold">{q.batch_code}</span> <PriorityBadge p={q.priority} note={q.priority_note} /><span className="block text-xs text-slate-500">{q.style_code} · {q.customer_name} · ships {fmtDate(q.ship_date)}</span>
                                 <span className="block text-xs">{q.pending} {q.unit === 'GARMENT' ? 'garment(s) ' : ''}to check{q.rework ? ` · ${q.rework} in rework` : ''}{q.waiting_earlier ? ` · ${q.waiting_earlier} waiting earlier stage` : ''}</span>
                             </button>
                         ))}

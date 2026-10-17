@@ -5,6 +5,7 @@ export const PHASES = [
     { key: 'issue', label: 'Issue' },
     { key: 'cutting', label: 'Cutting' },
     { key: 'production', label: 'Production' },
+    { key: 'dispatch', label: 'Dispatch' },
     { key: 'milestones', label: 'Milestones' },
 ];
 const DOT = { GREEN: 'bg-emerald-500', AMBER: 'bg-amber-400', RED: 'bg-rose-500', GREY: 'bg-slate-300' };

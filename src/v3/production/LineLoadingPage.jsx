@@ -13,6 +13,7 @@ import { productionApi } from '../api/productionApi';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
+import { PriorityBadge } from '../cutting/cutShared';
 
 export default function LineLoadingPage() {
     const [perms, setPerms] = useState({});
@@ -77,7 +78,7 @@ export default function LineLoadingPage() {
                     return (
                         <div key={bt.id} className={`bg-white border rounded-xl p-4 ${bt.id === focusBatch ? 'border-indigo-400 ring-2 ring-indigo-200' : 'border-slate-200'}`}>
                             <div className="flex flex-wrap items-center gap-2 mb-2">
-                                <Link to={`/v3/cutting/batches/${bt.id}`} className="font-bold text-indigo-700 hover:underline">{bt.batch_code}</Link>
+                                <Link to={`/v3/cutting/batches/${bt.id}`} className="font-bold text-indigo-700 hover:underline">{bt.batch_code}</Link> <PriorityBadge p={bt.priority} note={bt.priority_note} />
                                 <span className="text-xs text-slate-500">{bt.style_code} · {bt.customer_name} · ships {fmtDate(bt.ship_date)}</span>
                                 {openLine && <span className="text-xs font-semibold text-indigo-700">on {openLine.line}</span>}
                                 {perms.changeLine && openLine && <button type="button" className="ml-auto text-xs font-semibold text-slate-600 hover:underline inline-flex items-center gap-1" onClick={() => setMove({ bt, line: '', reason: '' })}><ArrowRightLeft size={12} /> Change line</button>}

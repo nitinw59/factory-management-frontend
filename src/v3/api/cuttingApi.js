@@ -13,5 +13,6 @@ export const cuttingApi = {
     removeRoll: (id, rollRowId) => api.delete(`/v3/cutting/batches/${id}/rolls/${rollRowId}`),
     cutRoll: (id, rollRowId, data) => api.post(`/v3/cutting/batches/${id}/rolls/${rollRowId}/cut`, data),
     finalize: (id) => api.post(`/v3/cutting/batches/${id}/finalize`),
+    setPriority: (id, priority, note) => api.put(`/v3/cutting/batches/${id}/priority`, { priority, note }),
     cancel: (id, reason) => api.post(`/v3/cutting/batches/${id}/cancel`, { reason }),
 };

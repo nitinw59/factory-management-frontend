@@ -339,6 +339,7 @@ function ProductionSection({ data, save, busy }) {
                 {n('efficiency_target_pct', 'Efficiency target %', 'Earned minutes (SAM × pieces) ÷ available minutes; for the efficiency reports.')}
                 {n('dhu_target_pct', 'DHU target %', 'Defects per hundred units; for the quality reports.')}
                 <Field label="AQL level (final inspection)"><select className={inputCls} value={f.aql_level || ''} onChange={e => set({ aql_level: e.target.value })}><option value="">—</option>{['0.65', '1.0', '1.5', '2.5', '4.0', '6.5'].map(a => <option key={a} value={a}>{a}</option>)}</select></Field>
+                {n('ship_tolerance_pct', 'Ship tolerance %', 'Dispatch: shipping more than ordered + this % per colour × size needs a reason. An order can have its own.', { max: 50 })}
             </div>
             <div className="mt-3 flex justify-end"><PrimaryButton busy={busy} disabled={busy} onClick={() => save(() => settingsApi.saveProduction(f), 'Production settings saved.')}>Save</PrimaryButton></div>
         </Card>

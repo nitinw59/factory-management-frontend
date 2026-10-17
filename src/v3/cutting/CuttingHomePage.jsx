@@ -5,7 +5,7 @@ import { cuttingApi } from '../api/cuttingApi';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
-import { CUT_STATUS, useCuttingPermissions } from './cutShared';
+import { CUT_STATUS, useCuttingPermissions, PriorityBadge } from './cutShared';
 
 export default function CuttingHomePage() {
     const perms = useCuttingPermissions();
@@ -65,7 +65,7 @@ export default function CuttingHomePage() {
                                     {batches.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No cut batches.</td></tr>}
                                     {batches.map(b => (
                                         <tr key={b.id} className="border-t border-slate-100">
-                                            <td className="px-3 py-2.5"><Link to={`/v3/cutting/batches/${b.id}`} className="font-semibold text-indigo-700 hover:underline">{b.batch_code}</Link><span className="block text-xs text-slate-500">{b.customer_name} · {b.numbering_mode === 'MODE_2' ? 'continuous' : 'per roll'}</span></td>
+                                            <td className="px-3 py-2.5"><Link to={`/v3/cutting/batches/${b.id}`} className="font-semibold text-indigo-700 hover:underline">{b.batch_code}</Link> <PriorityBadge p={b.priority} /><span className="block text-xs text-slate-500">{b.customer_name} · {b.numbering_mode === 'MODE_2' ? 'continuous' : 'per roll'}</span></td>
                                             <td className="px-3 py-2.5">{b.style_code}</td>
                                             <td className="px-3 py-2.5"><span className={`text-[11px] font-black px-2 py-0.5 rounded border ${CUT_STATUS[b.status].cls}`}>{CUT_STATUS[b.status].label}</span></td>
                                             <td className="px-3 py-2.5 text-right tabular-nums">{b.rolls_cut} / {b.rolls}</td>

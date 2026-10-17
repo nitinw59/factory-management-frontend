@@ -9,9 +9,11 @@ import Modal from '../../shared/Modal';
 import { cuttingApi } from '../api/cuttingApi';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
-import { CUT_STATUS, OrderGrid, perLay, layerText, fmt, exportCutSheet, useCuttingPermissions } from './cutShared';
+import { CUT_STATUS, OrderGrid, perLay, layerText, fmt, useCuttingPermissions, PriorityBadge, PRIORITY } from './cutShared';
+import { exportCutSheet, exportLaySheet } from './cutPrint';
+import { loadLetterhead } from '../components/letterhead';
 
-const ACTION = { CREATED: 'Created', EDITED: 'Edited', ROLL_ADDED: 'Roll added', ROLL_REMOVED: 'Roll removed', ROLL_CUT: 'Roll cut', ROLL_RECUT: 'Roll re-cut', END_BIT: 'End bit returned', FINALIZED: 'Finalised', CANCELLED: 'Cancelled' };
+const ACTION = { PRIORITY: 'Priority', CREATED: 'Created', EDITED: 'Edited', ROLL_ADDED: 'Roll added', ROLL_REMOVED: 'Roll removed', ROLL_CUT: 'Roll cut', ROLL_RECUT: 'Roll re-cut', END_BIT: 'End bit returned', FINALIZED: 'Finalised', CANCELLED: 'Cancelled' };
 
 export default function CutBatchPage() {
     const { id } = useParams();
@@ -22,6 +24,7 @@ export default function CutBatchPage() {
     const [edit, setEdit] = useState(null);
     const [add, setAdd] = useState(null);       // { rolls (available), picks }
     const [cancel, setCancel] = useState(null);
+    const [prio, setPrio] = useState(null);     // { priority, note }
     const [formError, setFormError] = useState('');
     const [busy, setBusy] = useState(false);
     const load = useCallback(() => cuttingApi.batch(id).then(res => setB(res.data)).catch(err => setError(apiError(err, 'Failed to load the batch.'))), [id]);
@@ -32,6 +35,8 @@ export default function CutBatchPage() {
         setBusy(true); setFormError(''); setError('');
         try { setB((await fn()).data); if (close) close(); } catch (err) { (close ? setFormError : setError)(apiError(err, 'Failed.')); } finally { setBusy(false); }
     };
+    // Company letterhead (name + logo) on the cutting documents.
+    const printDoc = async (fn) => { const lh = await loadLetterhead(); fn(b, lh.company, { logo: lh.logo }); };
     const openAdd = async () => {
         setFormError('');
         try { const res = await cuttingApi.orderLine(b.order_line_id); setAdd({ rolls: res.data.rolls.filter(r => r.available > 0), picks: {} }); } catch (err) { setError(apiError(err, 'Failed.')); }
@@ -42,16 +47,29 @@ export default function CutBatchPage() {
             <div className="flex flex-wrap items-center gap-3 mb-1">
                 <h1 className="text-2xl font-black text-slate-900">{b.batch_code}</h1>
                 <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${CUT_STATUS[b.status].cls}`}>{CUT_STATUS[b.status].label}</span>
+                <PriorityBadge p={b.priority} note={b.priority_note} always />
+                {perms.priority && b.status !== 'CANCELLED' && <button type="button" className="text-xs font-semibold text-indigo-700 hover:underline" onClick={() => { setFormError(''); setPrio({ priority: String(b.priority), note: b.priority_note || '' }); }}>Set priority</button>}
+                {b.priority_note && <span className="text-xs text-slate-500">— {b.priority_note}</span>}
             </div>
             <p className="text-sm text-slate-500 mb-1">{b.line.customer_name} · {b.line.style_code} {b.line.style_name} · {b.numbering_mode === 'MODE_2' ? 'numbering continuous across rolls (mode 2)' : 'numbering per roll (mode 1)'} · layer {b.layer_length_in} in ({layerText(b.layer_length_in)}) · ratio {b.ratios.map(r => `${r.size}:${r.ratio}`).join('  ')} ({b.ratio_sum}/lay)</p>
             {b.gate_override && <p className="text-sm text-rose-700 mb-1">Created under a release for cutting (order not fully allocated).</p>}
+            {b.fabric_warnings?.length > 0 && (
+                <div className="my-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    <p className="font-bold flex items-center gap-1.5"><AlertTriangle size={14} /> Fabric not accounted for ({fmt(b.totals.unaccounted_m)} {b.totals.uom || ''} in all)</p>
+                    {b.fabric_warnings.map(w => <p key={w} className="text-xs">{w}</p>)}
+                </div>
+            )}
             {b.status === 'CANCELLED' && <p className="text-sm text-slate-600 mb-1"><b>Cancelled:</b> {b.cancelled_reason}</p>}
             <div className="flex flex-wrap gap-2 my-3">
                 {perms.manage && b.status === 'DRAFT' && <SecondaryButton onClick={() => { setFormError(''); setEdit({ layer_length_in: String(b.layer_length_in), numbering_mode: b.numbering_mode, ratio: Object.fromEntries(b.ratios.map(r => [r.size_id, String(r.ratio)])) }); }}><Pencil size={14} /> Ratio / length</SecondaryButton>}
                 {perms.manage && open && <SecondaryButton onClick={openAdd}><Plus size={14} /> Add rolls</SecondaryButton>}
-                {perms.manage && b.status === 'CUTTING' && <PrimaryButton onClick={() => { if (window.confirm(`Finalise ${b.batch_code}? The pieces go to the numbering check and the batch can't be cut any more.`)) run(() => cuttingApi.finalize(id)); }} busy={busy} disabled={busy}><CheckCircle2 size={14} /> Finalise cutting</PrimaryButton>}
+                {perms.manage && b.status === 'CUTTING' && <PrimaryButton onClick={() => { if (window.confirm(`Finalise ${b.batch_code}? The pieces go to the numbering check and the batch can't be cut any more.${b.fabric_warnings?.length ? `\n\nFabric not accounted for:\n${b.fabric_warnings.join('\n')}` : ''}`)) run(() => cuttingApi.finalize(id)); }} busy={busy} disabled={busy}><CheckCircle2 size={14} /> Finalise cutting</PrimaryButton>}
                 {perms.manage && b.status === 'DRAFT' && <SecondaryButton onClick={() => { setFormError(''); setCancel(''); }}><Ban size={14} /> Cancel batch</SecondaryButton>}
-                <span className="ml-auto"><SecondaryButton onClick={() => exportCutSheet(b)}><FileDown size={14} /> Cut sheet</SecondaryButton></span>
+                <span className="ml-auto flex gap-2">
+                    {/* Lay sheet (A5, 2.0's): for the cutting table — blank boxes before cutting, filled after */}
+                    <SecondaryButton onClick={() => printDoc(exportLaySheet)}><FileDown size={14} /> Lay sheet</SecondaryButton>
+                    {b.rolls.some(r => r.lays) && <SecondaryButton onClick={() => printDoc(exportCutSheet)}><FileDown size={14} /> Cut sheet</SecondaryButton>}
+                </span>
             </div>
             <ErrorBox text={error} />
             {b.stages?.length > 0 && (
@@ -61,13 +79,13 @@ export default function CutBatchPage() {
                 ))}{b.recuts?.open > 0 && <span className="px-2 py-1 rounded border bg-rose-50 border-rose-300 text-rose-800">{b.recuts.open} re-cut(s) open</span>}</div>
             )}
             <div className="grid sm:grid-cols-4 gap-3 mb-4">
-                {[['Rolls cut', `${b.totals.rolls_cut} / ${b.totals.rolls}`], ['Garments', b.totals.garments], ['Pieces', b.totals.pieces], ['Fabric', `${fmt(b.totals.consumed_m)} m used · ${fmt(b.totals.expected_m)} m expected`]].map(([k, v]) => (
+                {[['Rolls cut', `${b.totals.rolls_cut} / ${b.totals.rolls}`], ['Garments', b.totals.garments], ['Pieces', b.totals.pieces], ['Fabric', `${fmt(b.totals.consumed_m)} ${b.totals.uom || ''} used · ${fmt(b.totals.expected_m)} ${b.totals.uom || ''} by the lays`]].map(([k, v]) => (
                     <div key={k} className="bg-white border border-slate-200 rounded-xl p-3"><p className="text-xs font-bold text-slate-500">{k}</p><p className="font-black text-slate-800">{v}</p></div>
                 ))}
             </div>
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
                 <table className="w-full text-sm min-w-[980px]">
-                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2">#</th><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Colour → parts</th><th className="px-3 py-2 text-right">Taken</th><th className="px-3 py-2 text-right">Lays</th><th className="px-3 py-2 text-right">Expected</th><th className="px-3 py-2 text-right">Used</th><th className="px-3 py-2 text-right">End bit</th><th className="px-3 py-2 text-right">Pieces</th><th className="px-3 py-2" /></tr></thead>
+                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2">#</th><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Colour → parts</th><th className="px-3 py-2 text-right">Taken</th><th className="px-3 py-2 text-right">Lays</th><th className="px-3 py-2 text-right">Expected</th><th className="px-3 py-2 text-right">Used</th><th className="px-3 py-2 text-right">End bit</th><th className="px-3 py-2 text-right">Short</th><th className="px-3 py-2 text-right" title="Taken − lays × layer − end bit − short">Unaccounted</th><th className="px-3 py-2 text-right">Pieces</th><th className="px-3 py-2" /></tr></thead>
                     <tbody>
                         {b.rolls.map(r => (
                             <tr key={r.id} className="border-t border-slate-100">
@@ -79,9 +97,11 @@ export default function CutBatchPage() {
                                 <td className="px-3 py-2 text-right tabular-nums">{r.expected_m != null ? fmt(r.expected_m) : '—'}</td>
                                 <td className={`px-3 py-2 text-right tabular-nums ${r.variance_m != null && Math.abs(r.variance_m) > r.metres * 0.03 ? 'text-amber-700 font-bold' : ''}`}>{r.consumed_m != null ? fmt(r.consumed_m) : '—'}{r.variance_m ? <span className="block text-[11px]">{r.variance_m > 0 ? '+' : ''}{fmt(r.variance_m)} {r.uom}</span> : null}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{r.end_bit_m ? fmt(r.end_bit_m) : '—'}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{r.short_m ? fmt(r.short_m) : '—'}</td>
+                                <td className={`px-3 py-2 text-right tabular-nums ${r.unaccounted_m != null && r.unaccounted_m > Math.max(0.05, r.metres * 0.03) ? 'text-rose-700 font-bold' : ''}`}>{r.unaccounted_m != null ? <>{fmt(r.unaccounted_m)}{r.unaccounted_pct ? <span className="block text-[11px]">{r.unaccounted_pct} %</span> : null}</> : '—'}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{r.pieces || '—'}</td>
                                 <td className="px-3 py-2 text-right whitespace-nowrap">
-                                    {perms.cut && open && <button type="button" className="text-sm font-semibold text-indigo-700 hover:underline mr-2" onClick={() => { setFormError(''); setCut({ roll: r, lays: r.lays ? String(r.lays) : '', end: r.end_bit_m ? String(r.end_bit_m) : '', reason: '' }); }}><Scissors size={13} className="inline" /> {r.lays ? 'Re-cut' : 'Cut'}</button>}
+                                    {perms.cut && open && <button type="button" className="text-sm font-semibold text-indigo-700 hover:underline mr-2" onClick={() => { setFormError(''); setCut({ roll: r, lays: r.lays ? String(r.lays) : '', end: r.end_bit_m ? String(r.end_bit_m) : '', short: r.short_m ? String(r.short_m) : '', reason: '' }); }}><Scissors size={13} className="inline" /> {r.lays ? 'Re-cut' : 'Cut'}</button>}
                                     {perms.manage && open && !r.lays && <button type="button" className="p-1 text-rose-500" aria-label={`Remove roll ${r.roll_no}`} onClick={() => { if (window.confirm(`Remove roll ${r.roll_no} from the batch?`)) run(() => cuttingApi.removeRoll(id, r.id)); }}><Trash2 size={14} /></button>}
                                 </td>
                             </tr>
@@ -108,19 +128,41 @@ export default function CutBatchPage() {
                     {h.detail?.summary?.length > 0 && <ul className="ml-6 list-disc text-xs text-slate-600">{h.detail.summary.map((x, i) => <li key={i}>{x}</li>)}</ul>}</div>)}
             </div>
 
+            {prio && (
+                <Modal title={`Priority — ${b.batch_code}`} onClose={() => setPrio(null)}>
+                    <div className="space-y-3 w-[min(400px,85vw)]">
+                        <p className="text-sm text-slate-600">Line loading, the stage check queue and WIP ageing list higher priority batches first, then by ship date.</p>
+                        <Field label="Priority"><select className={inputCls} value={prio.priority} onChange={e => setPrio({ ...prio, priority: e.target.value })}>{[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{PRIORITY[n][0]}</option>)}</select></Field>
+                        <Field label="Why (optional)"><input className={inputCls} value={prio.note} onChange={e => setPrio({ ...prio, note: e.target.value })} placeholder="e.g. buyer moved the ship date forward" /></Field>
+                        <ErrorBox text={formError} />
+                        <div className="flex justify-end gap-2">
+                            <SecondaryButton onClick={() => setPrio(null)}>Back</SecondaryButton>
+                            <PrimaryButton busy={busy} disabled={busy} onClick={() => run(() => cuttingApi.setPriority(id, Number(prio.priority), prio.note || undefined), () => setPrio(null))}>Save</PrimaryButton>
+                        </div>
+                    </div>
+                </Modal>
+            )}
             {cut && (() => { const cutLay = perLay(b.layer_length_in, cut.roll.uom); return (
                 <Modal title={`${cut.roll.lays ? 'Re-cut' : 'Cut'} roll ${cut.roll.roll_no}`} onClose={() => setCut(null)}>
                     <div className="space-y-3 w-[min(460px,88vw)]">
-                        <p className="text-sm text-slate-600">{fmt(cut.roll.metres)} {cut.roll.uom}{cutLay ? <> · layer {fmt(cutLay, 2)} {cut.roll.uom} → up to {Math.floor((cut.roll.metres - (Number(cut.end) || 0)) / cutLay + 1e-9)} lays</> : ' · weighed fabric: no lay-length check'}. Parts: {cut.roll.parts.map(p => p.part_name).join(', ')}.</p>
-                        <div className="grid grid-cols-2 gap-3">
+                        <p className="text-sm text-slate-600">{fmt(cut.roll.metres)} {cut.roll.uom}{cutLay ? <> · layer {fmt(cutLay, 2)} {cut.roll.uom} → up to {Math.floor((cut.roll.metres - (Number(cut.end) || 0) - (Number(cut.short) || 0)) / cutLay + 0.001)} lays</> : ' · weighed fabric: no lay-length check'}. Parts: {cut.roll.parts.map(p => p.part_name).join(', ')}.</p>
+                        <div className="grid grid-cols-3 gap-3">
                             <Field label="Lays made *" hint={Number(cut.lays) > 0 ? `${Number(cut.lays) * b.ratio_sum} garments${cutLay ? ` · ${fmt(Number(cut.lays) * cutLay, 2)} ${cut.roll.uom}` : ''}` : ' '}><input className={inputCls} type="number" min="1" step="1" value={cut.lays} onChange={e => setCut({ ...cut, lays: e.target.value })} autoFocus /></Field>
                             <Field label={`End bit (${cut.roll.uom})`} hint={cut.roll.end_bit_m ? `${cut.roll.end_bit_m} ${cut.roll.uom} already returned` : 'Goes back to the roll'}><input className={inputCls} type="number" min={cut.roll.end_bit_m || 0} step="any" value={cut.end} onChange={e => setCut({ ...cut, end: e.target.value })} /></Field>
+                            <Field label={`Short (${cut.roll.uom})`} hint="Roll had less than its label"><input className={inputCls} type="number" min="0" step="any" value={cut.short} onChange={e => setCut({ ...cut, short: e.target.value })} /></Field>
                         </div>
+                        {(() => {   // what is left unaccounted with these numbers (warned above 3 %, never blocked)
+                            if (!cutLay || !(Number(cut.lays) > 0)) return null;
+                            const un = cut.roll.metres - Number(cut.lays) * cutLay - (Number(cut.end) || 0) - (Number(cut.short) || 0);
+                            return un > Math.max(0.05, cut.roll.metres * 0.03)
+                                ? <p className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">{fmt(un, 2)} {cut.roll.uom} not accounted for ({fmt((un / cut.roll.metres) * 100, 1)} % of the roll) — enter the end bit left on the roll, or what the roll was short.</p>
+                                : null;
+                        })()}
                         {cut.roll.lays && <Field label="Reason for correcting *"><input className={inputCls} value={cut.reason} onChange={e => setCut({ ...cut, reason: e.target.value })} /></Field>}
                         <ErrorBox text={formError} />
                         <div className="flex justify-end gap-2">
                             <SecondaryButton onClick={() => setCut(null)}>Back</SecondaryButton>
-                            <PrimaryButton onClick={() => run(() => cuttingApi.cutRoll(id, cut.roll.id, { lays: Number(cut.lays), end_bit_m: cut.end === '' ? undefined : Number(cut.end), reason: cut.reason || undefined }), () => setCut(null))}
+                            <PrimaryButton onClick={() => run(() => cuttingApi.cutRoll(id, cut.roll.id, { lays: Number(cut.lays), end_bit_m: cut.end === '' ? undefined : Number(cut.end), short_m: cut.short === '' ? undefined : Number(cut.short), reason: cut.reason || undefined }), () => setCut(null))}
                                 busy={busy} disabled={busy || !(Number(cut.lays) > 0) || (cut.roll.lays && !cut.reason.trim())}>Save</PrimaryButton>
                         </div>
                     </div>

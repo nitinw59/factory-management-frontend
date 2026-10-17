@@ -283,6 +283,11 @@ const V3CompanyProfileAdminPage = lazyPage(() => import('./v3/admin/CompanyProfi
 const V3SettingsPage = lazyPage(() => import('./v3/admin/SettingsPage'));
 const V3OrderTrackerPage = lazyPage(() => import('./v3/tracker/OrderTrackerPage'));
 const V3OrderTrackPage = lazyPage(() => import('./v3/tracker/OrderTrackPage'));
+const V3InsightsPage = lazyPage(() => import('./v3/insights/InsightsPage'));
+const V3OrderCostPage = lazyPage(() => import('./v3/insights/OrderCostPage'));
+const V3PackingPage = lazyPage(() => import('./v3/packing/PackingPage'));
+const V3PackOrderPage = lazyPage(() => import('./v3/packing/PackOrderPage'));
+const V3DispatchPage = lazyPage(() => import('./v3/packing/DispatchPage'));
 const V3StoreItemsPage = lazyPage(() => import('./v3/store/StoreItemsPage'));
 const V3StoreItemPage = lazyPage(() => import('./v3/store/StoreItemPage'));
 const V3StoreOpeningStockPage = lazyPage(() => import('./v3/store/StoreOpeningStockPage'));
@@ -379,6 +384,11 @@ const appRoutes = (
           <Route path="admin/settings" element={<V3SettingsPage />} />
           <Route path="tracker" element={<V3OrderTrackerPage />} />
           <Route path="tracker/orders/:id" element={<V3OrderTrackPage />} />
+          <Route path="insights" element={<V3InsightsPage />} />
+          <Route path="insights/cost/:orderId" element={<V3OrderCostPage />} />
+          <Route path="packing" element={<V3PackingPage />} />
+          <Route path="packing/orders/:orderId" element={<V3PackOrderPage />} />
+          <Route path="packing/dispatches/:id" element={<V3DispatchPage />} />
           <Route path="store/items" element={<V3StoreItemsPage />} />
           <Route path="store/items/:id" element={<V3StoreItemPage />} />
           <Route path="store/opening-stock" element={<V3StoreOpeningStockPage />} />

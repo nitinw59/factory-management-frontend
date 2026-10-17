@@ -120,7 +120,7 @@ export default function FabricStockPage() {
                                                                 <td className="text-left pl-4">{x.location || '—'}</td>
                                                                 <td className="text-left">{x.source === 'OPENING' ? 'Opening' : 'GRN'}</td>
                                                                 <td className="text-right whitespace-nowrap">
-                                                                    {perms.fabricStock && <button type="button" className="mr-2 inline-flex items-center gap-0.5 font-semibold text-indigo-700" onClick={() => { setFormError(''); setAdjust({ roll: x, quantity: '', reason: '' }); }}><SlidersHorizontal size={11} /> Adjust</button>}
+                                                                    {perms.fabricStock && <button type="button" className="mr-2 inline-flex items-center gap-0.5 font-semibold text-indigo-700" onClick={() => { setFormError(''); setAdjust({ roll: x, item: r, quantity: '', reason: '' }); }}><SlidersHorizontal size={11} /> Adjust</button>}
                                                                     <button type="button" className="inline-flex items-center gap-0.5 font-semibold text-slate-600" onClick={() => showLedger(x)}><History size={11} /> History</button>
                                                                 </td>
                                                             </tr>
@@ -186,6 +186,7 @@ export default function FabricStockPage() {
                 <Modal title={`Adjust roll ${adjust.roll.roll_no}`} onClose={() => setAdjust(null)}>
                     <div className="space-y-3 w-[min(440px,85vw)]">
                         <p className="text-sm text-slate-600">{adjust.roll.item_label} · now {fmtQty(adjust.roll.qty)} {adjust.roll.uom}</p>
+                        {adjust.item?.allocated > 0 && <p className="text-xs rounded-lg bg-amber-50 border border-amber-200 text-amber-900 px-2.5 py-1.5">This fabric: {fmtQty(adjust.item.allocated)} {adjust.roll.uom} allocated to orders, <b>{fmtQty(Math.max(0, adjust.item.free))} {adjust.roll.uom} free</b>. A reduction can't take allocated fabric — release it from the order (Order BOM) first.</p>}
                         <Field label={`Change (${adjust.roll.uom}) *`} hint="Negative to reduce (damage, recount), positive to add. The roll can't go below 0."><input className={inputCls} type="number" step="any" value={adjust.quantity} onChange={e => setAdjust({ ...adjust, quantity: e.target.value })} autoFocus /></Field>
                         <Field label="Reason *"><input className={inputCls} value={adjust.reason} onChange={e => setAdjust({ ...adjust, reason: e.target.value })} /></Field>
                         <ErrorBox text={formError} />

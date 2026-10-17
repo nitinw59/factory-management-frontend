@@ -280,6 +280,7 @@ function LedgerModal({ item, canAdjust, onClose, onChanged }) {
                 {canAdjust && data?.movements?.length > 0 && (
                     <div className="border border-slate-200 rounded-lg p-3 space-y-2">
                         <p className="text-xs font-bold text-slate-600">Adjustment (count correction, damage …)</p>
+                        {data.item.allocated > 0 && <p className="text-xs text-amber-900">{fmtQty(data.item.allocated)} {unit} allocated to orders, <b>{fmtQty(Math.max(0, Number(data.item.on_hand) - data.item.allocated))} {unit} free</b>. A reduction can't take allocated stock — release it from the order (Order BOM) first.</p>}
                         <div className="flex flex-wrap items-center gap-2">
                             <select className={`${inputCls} w-28`} value={adj.direction} onChange={e => setAdj({ ...adj, direction: e.target.value })} aria-label="Add or reduce">
                                 <option value="-">Reduce</option><option value="">Add</option>

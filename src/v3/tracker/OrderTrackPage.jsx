@@ -100,7 +100,7 @@ export default function OrderTrackPage() {
                 <div className="ml-auto text-right">
                     <p className={`text-sm font-bold ${d.days_to_ship != null && d.days_to_ship < 0 ? 'text-rose-700' : 'text-slate-800'}`}>Ship {fmtDate(d.ship_date)} · {daysText(d.days_to_ship)}</p>
                     <p className="text-xs text-slate-500">{d.ordered} ordered · {d.cut} cut</p>
-                    <span className="text-xs space-x-2">{can('sales.orders') && <Link to={`/v3/sales-orders/${d.order_id}`} className="text-indigo-700 underline">Sales order</Link>}{can('planning.requirements') && <Link to={`/v3/planning/orders/${d.order_id}`} className="text-indigo-700 underline">Requirements</Link>}</span>
+                    <span className="text-xs space-x-2">{can('sales.orders') && <Link to={`/v3/sales-orders/${d.order_id}`} className="text-indigo-700 underline">Sales order</Link>}{can('planning.requirements') && <Link to={`/v3/planning/orders/${d.order_id}`} className="text-indigo-700 underline">Requirements</Link>}{can('production.insightsCost') && <Link to={`/v3/insights/cost/${d.order_id}`} className="text-indigo-700 underline">Material cost</Link>}</span>
                 </div>
             </div>
 

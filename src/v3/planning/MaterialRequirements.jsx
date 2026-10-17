@@ -23,7 +23,8 @@ function statusOf(it) {
     if (it.from_stock > 0) return { text: `${fmt(it.from_stock, u)} ${u} in free stock — allocate`, cls: 'text-blue-900' };
     if (it.to_raise > 0) return { text: `${fmt(it.to_raise, u)} ${u} to raise`, cls: 'text-rose-700' };
     if (it.incoming_pos?.length) return { text: `${fmt(it.shortfall, u)} ${u} short · on PO`, cls: 'text-sky-700' };
-    if (onPr(it) > 0) return { text: `${fmt(it.shortfall, u)} ${u} short · on requisition`, cls: 'text-amber-700' };
+    // light blue, the bar's requisition colour (17 Oct 2026; was amber)
+    if (onPr(it) > 0) return { text: `${fmt(it.shortfall, u)} ${u} short · on requisition`, cls: 'text-sky-500' };
     return { text: `${fmt(it.shortfall, u)} ${u} short`, cls: 'text-rose-700' };
 }
 

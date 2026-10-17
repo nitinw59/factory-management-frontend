@@ -1,7 +1,6 @@
-// Shared bits for 3.0 cutting: status labels, the order grid (planned / cut / to cut per colour × size), cut sheet PDF.
+// Shared bits for 3.0 cutting: status labels, the order grid (planned / cut / to cut per colour × size).
+// The lay sheet and cut sheet PDFs are in cutPrint.js (17 Oct 2026).
 import { useEffect, useState } from 'react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { cuttingApi } from '../api/cuttingApi';
 
 export const CUT_STATUS = {
@@ -18,10 +17,15 @@ export const layerText = (inches) => `${fmt(inches * LEN_PER_IN.m, 2)} m = ${fmt
 export const fmt = (v, d = 3) => Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: d });
 
 export function useCuttingPermissions() {
-    const [p, setP] = useState({ manage: false, cut: false, view: false });
+    const [p, setP] = useState({ manage: false, cut: false, view: false, priority: false });
     useEffect(() => { cuttingApi.permissions().then(res => setP(res.data)).catch(() => {}); }, []);
     return p;
 }
+
+// Batch priority (17 Oct 2026): 1 = most urgent … 5 = lowest, 3 = normal (shown only when not normal).
+export const PRIORITY = { 1: ['P1 urgent', 'bg-rose-600 text-white border-rose-600'], 2: ['P2 high', 'bg-orange-100 text-orange-800 border-orange-300'], 3: ['P3 normal', 'bg-slate-50 text-slate-600 border-slate-300'], 4: ['P4 low', 'bg-slate-50 text-slate-500 border-slate-200'], 5: ['P5 lowest', 'bg-slate-50 text-slate-400 border-slate-200'] };
+export const PriorityBadge = ({ p, note, always = false }) => (p && (always || Number(p) !== 3)
+    ? <span title={note || ''} className={`inline-block text-[10px] font-black px-1.5 py-0.5 rounded border align-middle ${PRIORITY[p]?.[1] || ''}`}>{PRIORITY[p]?.[0] || `P${p}`}</span> : null);
 
 // planned / cut per colour × size, with an optional projection (extra garments per colour × size).
 export function OrderGrid({ grid, extra = null }) {
@@ -56,24 +60,4 @@ export function OrderGrid({ grid, extra = null }) {
             <p className="px-3 py-1.5 text-[11px] text-slate-500 border-t border-slate-100">Garments cut / planned (ordered + {grid.allowance_pct}% cut allowance). Red = over-cut (allowed, with a warning).</p>
         </div>
     );
-}
-
-export function exportCutSheet(b) {
-    const doc = new jsPDF();
-    doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.text(`CUT SHEET  ${b.batch_code}`, 14, 16); doc.setFont(undefined, 'normal'); doc.setFontSize(9);
-    doc.text(`Order ${b.line.order_no} line ${b.line.line_no} · ${b.line.customer_name} · style ${b.line.style_code} ${b.line.style_name}`, 14, 23);
-    doc.text(`Numbering ${b.numbering_mode === 'MODE_2' ? 'continuous across rolls (MODE 2)' : 'per roll (MODE 1)'} · layer ${b.layer_length_in} in (${layerText(b.layer_length_in)}) · ratio ${b.ratios.map(r => `${r.size}:${r.ratio}`).join('  ')}`, 14, 28);
-    autoTable(doc, {
-        startY: 33, head: [['#', 'Roll', 'Lot', 'Fabric', 'Colour', 'Parts', 'Taken', 'Lays', 'End bit', 'Pieces']],
-        body: b.rolls.map(r => [r.roll_sequence, r.roll_no, r.dye_lot || '', r.fabric_label, r.colour, r.parts.map(p => p.part_name).join(', '), `${fmt(r.metres)} ${r.uom || 'm'}`, r.lays ?? '', r.end_bit_m ? `${fmt(r.end_bit_m)} ${r.uom || 'm'}` : '', r.pieces || '']),
-        styles: { fontSize: 7.5 }, headStyles: { fillColor: [79, 70, 229] },
-    });
-    autoTable(doc, {
-        startY: doc.lastAutoTable.finalY + 6, head: [['Colour', 'Part', 'Size', 'Pieces', 'Numbers']],
-        body: b.piece_summary.map(p => [p.colour, p.part_name, p.size, p.pieces, `${p.first_no}–${p.last_no}`]),
-        styles: { fontSize: 7.5 }, headStyles: { fillColor: [79, 70, 229] },
-    });
-    const y = doc.lastAutoTable.finalY + 18;
-    doc.text('Cutting manager', 14, y); doc.text('Cutter', 90, y); doc.text('Checked by', 160, y);
-    doc.save(`CutSheet-${b.batch_code.replace(/[^\w-]+/g, '-')}.pdf`);
 }
