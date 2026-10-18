@@ -1,12 +1,15 @@
 // Full-screen inspection (18 Oct 2026, modelled on 2.0's universal workstation, which checkers found far easier on
-// tablets): big numbered tiles to tap, SELECT ALL, and a bottom bar of three big buttons — APPROVE / REWORK / REJECT
-// (or PASSED / FAILED when rework pieces are picked). Rework / Reject then ask the reason on big tiles (category →
-// defect). Tapping a checked tile (OK / rejected) offers to undo it. Used for pieces and for garments.
+// tablets): big numbered tiles to tap, SELECT ALL, and a bottom bar of big buttons. Used for pieces and for garments.
+// No Reject (18 Oct 2026, "remove reject option … complete approval flow is scrapped") — a faulty piece is:
+//   REPAIR NOW   the defect is recorded and repaired on the spot (counts OK)
+//   REWORK       to the rework queue → PASSED there, or MATERIAL REPLACEMENT from there
+//   MATERIAL     straight to the cutting manager for new material (pieces only) → back to check here
+// Repair now / Rework / Material ask the defect on big tiles (category → defect). Tapping a checked tile offers undo.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Check, CheckCircle2, XCircle, Hammer, Lock, RotateCcw, CheckSquare, Square, ArrowLeft, Send, AlertCircle, Loader2, Flag } from 'lucide-react';
+import { X, Check, CheckCircle2, Wrench, Scissors, Hammer, Lock, RotateCcw, CheckSquare, Square, ArrowLeft, Send, AlertCircle, Loader2, Flag } from 'lucide-react';
 
-// fresh = to check here · fix = in rework here, or rejected at an earlier stage (repair or reject) ·
+// fresh = to check here · fix = in rework here, or rejected at an earlier stage (repair it) ·
 // done = checked here (tap to undo) · locked = waiting for an earlier stage / re-cut cleared
 export const kindOf = (it) => {
     if (it.waiting_replacement) return 'locked';   // flagged for new material — the cutting manager fulfils it (as 2.0)
@@ -28,10 +31,17 @@ function tileCls(it, selected) {
     return 'bg-white border-slate-300 text-slate-900 hover:border-indigo-400';
 }
 
-export default function InspectOverlay({ head, items, codes, unit = 'piece', startFix = false, highlightId, onClose, onApprove, onRework, onReject, onRepair, onUndo }) {
+// The defect picker for each fault action.
+const PICK = {
+    REPAIRED: { title: 'Repaired on the spot', confirm: 'Confirm repaired', bar: 'bg-teal-600', dark: 'bg-teal-700', on: 'bg-teal-600 border-teal-300', code: 'text-teal-300', hover: 'hover:border-teal-400', btn: 'bg-teal-600' },
+    NEEDS_REWORK: { title: 'Reason for rework', confirm: 'Confirm rework', bar: 'bg-amber-500', dark: 'bg-amber-600', on: 'bg-amber-600 border-amber-300', code: 'text-amber-300', hover: 'hover:border-amber-400', btn: 'bg-amber-600', black: true },
+    REPLACE: { title: 'New material needed', confirm: 'Send to cutting', bar: 'bg-violet-600', dark: 'bg-violet-700', on: 'bg-violet-600 border-violet-300', code: 'text-violet-300', hover: 'hover:border-violet-400', btn: 'bg-violet-600' },
+};
+
+export default function InspectOverlay({ head, items, codes, unit = 'piece', startFix = false, highlightId, onClose, onApprove, onRepairNow, onRework, onReplace, onRepair, onReplaceRework, onUndo }) {
     const byId = useMemo(() => new Map(items.map(i => [i.id, i])), [items]);
     const [sel, setSel] = useState(() => { const h = highlightId && byId.get(highlightId); return new Set(h && ['fresh', 'fix'].includes(kindOf(h)) ? [h.id] : []); });
-    const [picker, setPicker] = useState(null);   // NEEDS_REWORK | QC_REJECTED
+    const [picker, setPicker] = useState(null);   // REPAIRED | NEEDS_REWORK | REPLACE
     const [category, setCategory] = useState(null);
     const [code, setCode] = useState(null);
     const [search, setSearch] = useState('');
@@ -71,9 +81,12 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
     const ask = (status) => { setPicker(status); setCode(null); setSearch(''); setCategory(cats.length === 1 ? cats[0] : null); };
     const groups = [];
     for (const it of items) { const g = it.group || ''; let x = groups.find(y => y.name === g); if (!x) { x = { name: g, items: [] }; groups.push(x); } x.items.push(it); }
-    const amber = picker === 'NEEDS_REWORK';
+    const tone = PICK[picker] || PICK.NEEDS_REWORK;
+    const onPicked = { REPAIRED: onRepairNow, NEEDS_REWORK: onRework, REPLACE: onReplace }[picker];
     const shownCodes = codes.filter(c => (c.category || 'Other') === category && (!search.trim() || `${c.code} ${c.description}`.toLowerCase().includes(search.trim().toLowerCase())));
     const picked = [...sel].map(id => byId.get(id)).filter(Boolean);
+    // Material replacement from the rework queue: only for pieces in rework here (not ones flagged at an earlier stage).
+    const replaceFix = Boolean(onReplaceRework) && picked.every(p => p.status === 'NEEDS_REWORK');
 
     return createPortal(
         <div className="fixed inset-0 bg-slate-950 z-[300] flex flex-col">
@@ -93,13 +106,13 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
             {picker ? (
                 !category ? (
                     <div className="flex-grow flex flex-col bg-slate-900 min-h-0">
-                        <PickedStrip amber={amber} title={amber ? 'Reason for rework' : 'Reason for rejection'} picked={picked} />
+                        <PickedStrip tone={tone} picked={picked} />
                         <div className="flex-grow overflow-y-auto p-6 flex flex-col justify-center">
                             <p className="text-slate-400 text-xs font-black uppercase tracking-widest text-center mb-6">Choose the defect category</p>
                             <div className="grid grid-cols-2 gap-4 max-w-xl mx-auto w-full">
                                 {cats.map(c => (
-                                    <button key={c} type="button" onClick={() => setCategory(c)} className={`bg-slate-800 border-2 border-slate-600 rounded-2xl p-8 font-black text-white text-xl uppercase tracking-widest active:scale-95 flex flex-col items-center gap-3 ${amber ? 'hover:border-amber-400' : 'hover:border-rose-400'}`}>
-                                        <AlertCircle className={`w-10 h-10 ${amber ? 'text-amber-400' : 'text-rose-400'}`} />{c}
+                                    <button key={c} type="button" onClick={() => setCategory(c)} className={`bg-slate-800 border-2 border-slate-600 rounded-2xl p-8 font-black text-white text-xl uppercase tracking-widest active:scale-95 flex flex-col items-center gap-3 ${tone.hover}`}>
+                                        <AlertCircle className={`w-10 h-10 ${tone.code}`} />{c}
                                     </button>
                                 ))}
                             </div>
@@ -108,18 +121,18 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
                     </div>
                 ) : (
                     <div className="flex-grow flex flex-col bg-slate-900 min-h-0">
-                        <div className={`px-6 py-3 shrink-0 flex items-center gap-3 ${amber ? 'bg-amber-500' : 'bg-rose-700'}`}>
-                            {cats.length > 1 && <button type="button" onClick={() => { setCategory(null); setCode(null); setSearch(''); }} className={`p-3 rounded-lg ${amber ? 'bg-amber-600' : 'bg-rose-800'}`} aria-label="Back"><ArrowLeft className="w-6 h-6 text-white" /></button>}
+                        <div className={`px-6 py-3 shrink-0 flex items-center gap-3 ${tone.bar}`}>
+                            {cats.length > 1 && <button type="button" onClick={() => { setCategory(null); setCode(null); setSearch(''); }} className={`p-3 rounded-lg ${tone.dark}`} aria-label="Back"><ArrowLeft className="w-6 h-6 text-white" /></button>}
                             <div className="min-w-0">
-                                <p className={`font-black text-base uppercase tracking-widest ${amber ? 'text-black' : 'text-white'}`}>{category} — {word(picked.length)}</p>
-                                <p className={`text-sm font-mono font-black ${amber ? 'text-amber-950' : 'text-rose-100'}`}>{picked.map(p => `#${p.label}`).join(' ')}</p>
+                                <p className={`font-black text-base uppercase tracking-widest ${tone.black ? 'text-black' : 'text-white'}`}>{tone.title}: {category} — {word(picked.length)}</p>
+                                <p className={`text-sm font-mono font-black ${tone.black ? 'text-amber-950' : 'text-white/80'}`}>{picked.map(p => `#${p.label}`).join(' ')}</p>
                             </div>
                         </div>
                         <div className="px-6 py-3 bg-slate-800 border-b border-slate-700 shrink-0 flex flex-col sm:flex-row gap-3">
                             <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search defect…" className="flex-1 px-4 py-3 bg-slate-700 text-white placeholder-slate-400 rounded-xl border border-slate-600 focus:outline-none focus:border-indigo-400 text-base" />
-                            <button type="button" disabled={!code || busy} onClick={() => run((ids) => (amber ? onRework : onReject)(ids, code))}
-                                className={`sm:w-72 disabled:opacity-30 text-white font-black py-3 rounded-xl uppercase tracking-widest active:scale-95 flex items-center justify-center gap-2 text-base ${amber ? 'bg-amber-600' : 'bg-rose-600'}`}>
-                                {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />} Confirm {amber ? 'rework' : 'reject'}
+                            <button type="button" disabled={!code || busy} onClick={() => run((ids) => onPicked(ids, code))}
+                                className={`sm:w-72 disabled:opacity-30 text-white font-black py-3 rounded-xl uppercase tracking-widest active:scale-95 flex items-center justify-center gap-2 text-base ${tone.btn}`}>
+                                {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />} {tone.confirm}
                             </button>
                         </div>
                         <div className="flex-grow min-h-0 overflow-y-auto p-4">
@@ -128,9 +141,9 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
                                     const on = code === d.id;
                                     return (
                                         <button key={d.id} type="button" onClick={() => setCode(on ? null : d.id)}
-                                            className={`relative p-4 rounded-xl text-left active:scale-95 border-2 ${on ? (amber ? 'bg-amber-600 border-amber-300' : 'bg-rose-700 border-rose-300') : 'bg-slate-800 border-slate-600 hover:border-slate-400'}`}>
+                                            className={`relative p-4 rounded-xl text-left active:scale-95 border-2 ${on ? tone.on : 'bg-slate-800 border-slate-600 hover:border-slate-400'}`}>
                                             {on && <Check className="absolute top-2 right-2 w-5 h-5 text-white" strokeWidth={3} />}
-                                            <span className={`block text-sm font-bold uppercase tracking-widest mb-1 ${amber ? 'text-amber-300' : 'text-rose-300'} ${on ? '!text-white' : ''}`}>{d.code}</span>
+                                            <span className={`block text-sm font-bold uppercase tracking-widest mb-1 ${tone.code} ${on ? '!text-white' : ''}`}>{d.code}</span>
                                             <span className="text-white text-[17px] font-black leading-snug">{d.description}</span>
                                         </button>
                                     );
@@ -145,7 +158,7 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
                 <>
                     <div className="bg-slate-900 px-5 py-2 border-b border-slate-800 flex flex-wrap justify-between items-center gap-2 shrink-0">
                         <span className="text-xs font-black uppercase tracking-widest text-slate-400">
-                            {fresh.length} to check · {fix.length} to fix · {n('APPROVED') + n('REPAIRED')} OK · {n('QC_REJECTED')} rejected{items.some(i => kindOf(i) === 'locked' && !i.status) ? ` · ${items.filter(i => kindOf(i) === 'locked' && !i.status).length} waiting` : ''}
+                            {fresh.length} to check · {fix.length} to fix · {n('APPROVED') + n('REPAIRED')} OK{n('QC_REJECTED') ? ` · ${n('QC_REJECTED')} rejected earlier` : ''}{items.some(i => i.waiting_replacement) ? ` · ${items.filter(i => i.waiting_replacement).length} new material` : ''}{items.some(i => kindOf(i) === 'locked' && !i.status) ? ` · ${items.filter(i => kindOf(i) === 'locked' && !i.status).length} waiting` : ''}
                         </span>
                         <span className="flex gap-2">
                             {fresh.length > 0 && <button type="button" onClick={() => selectAll('fresh')} className="px-4 py-2.5 bg-white text-black font-black rounded-xl active:scale-95 flex items-center tracking-widest text-sm">
@@ -181,7 +194,7 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
                                 </div>
                             ))}
                         </div>
-                        <p className="mt-8 text-xs text-slate-500 text-center">Tap numbers to pick. White = to check · amber = rework · red edge = rejected earlier (fix it) · dark = done here — tap a done tile to undo it.</p>
+                        <p className="mt-8 text-xs text-slate-500 text-center">Tap numbers to pick. White = to check · amber = rework · violet = waiting for new material · red edge = rejected earlier (fix it) · dark = done here — tap a done tile to undo it.</p>
                     </div>
                     <div className={`bg-white p-4 border-t-4 ${mode === 'fix' ? 'border-amber-400' : 'border-slate-300'} shrink-0`}>
                         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4">
@@ -190,15 +203,16 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
                                 <span className="text-4xl font-black text-black leading-none">{sel.size}</span>
                             </div>
                             {mode === 'fix' ? (
-                                <div className="flex-grow grid grid-cols-2 gap-4 h-[64px]">
-                                    <BigBtn tone="rose" disabled={!sel.size || busy} onClick={() => ask('QC_REJECTED')}><XCircle className="w-6 h-6 mr-2" /> FAILED</BigBtn>
+                                <div className={`flex-grow grid ${replaceFix ? 'grid-cols-2' : 'grid-cols-1'} gap-4 h-[64px]`}>
+                                    {replaceFix && <BigBtn tone="violet" disabled={!sel.size || busy} onClick={() => run(onReplaceRework)}><Scissors className="w-6 h-6 mr-2" /> MATERIAL REPLACEMENT</BigBtn>}
                                     <BigBtn tone="emerald" disabled={!sel.size || busy} onClick={() => run(onRepair)}>{busy ? <Loader2 className="w-6 h-6 mr-2 animate-spin" /> : <CheckCircle2 className="w-6 h-6 mr-2" />} PASSED</BigBtn>
                                 </div>
                             ) : (
-                                <div className="flex-grow grid grid-cols-3 gap-3 md:gap-4 h-[64px]">
+                                <div className={`flex-grow grid ${onReplace ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-3'} gap-3 md:gap-4 ${onReplace ? 'h-[140px] md:h-[64px]' : 'h-[64px]'}`}>
                                     <BigBtn tone="emerald" disabled={!sel.size || busy} onClick={() => run(onApprove)}>{busy ? <Loader2 className="w-6 h-6 mr-2 animate-spin" /> : <CheckCircle2 className="w-6 h-6 mr-2" />} APPROVE</BigBtn>
+                                    <BigBtn tone="teal" disabled={!sel.size || busy} onClick={() => ask('REPAIRED')}><Wrench className="w-6 h-6 mr-2" /> REPAIR NOW</BigBtn>
                                     <BigBtn tone="amber" disabled={!sel.size || busy} onClick={() => ask('NEEDS_REWORK')}><Hammer className="w-6 h-6 mr-2" /> REWORK</BigBtn>
-                                    <BigBtn tone="rose" disabled={!sel.size || busy} onClick={() => ask('QC_REJECTED')}><XCircle className="w-6 h-6 mr-2" /> REJECT</BigBtn>
+                                    {onReplace && <BigBtn tone="violet" disabled={!sel.size || busy} onClick={() => ask('REPLACE')}><Scissors className="w-6 h-6 mr-2" /> MATERIAL</BigBtn>}
                                 </div>
                             )}
                         </div>
@@ -210,16 +224,16 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
     );
 }
 
-const BTN = { emerald: 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-800', amber: 'bg-amber-400 hover:bg-amber-500 text-black border-amber-600', rose: 'bg-rose-600 hover:bg-rose-700 text-white border-rose-800' };
+const BTN = { emerald: 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-800', teal: 'bg-teal-600 hover:bg-teal-700 text-white border-teal-800', amber: 'bg-amber-400 hover:bg-amber-500 text-black border-amber-600', violet: 'bg-violet-600 hover:bg-violet-700 text-white border-violet-800' };
 const BigBtn = ({ tone, children, ...p }) => <button type="button" {...p} className={`w-full h-full rounded-xl font-black text-base md:text-lg shadow-xl active:scale-95 disabled:opacity-30 flex items-center justify-center border-b-4 ${BTN[tone]}`}>{children}</button>;
 const CancelBar = ({ onClick }) => (
     <div className="px-6 py-4 bg-slate-800 border-t border-slate-700 shrink-0">
         <button type="button" onClick={onClick} className="w-full bg-slate-700 text-slate-200 font-black py-4 rounded-xl uppercase tracking-widest hover:bg-slate-600 text-base">Cancel</button>
     </div>
 );
-const PickedStrip = ({ amber, title, picked }) => (
-    <div className={`px-6 py-3 shrink-0 ${amber ? 'bg-amber-500' : 'bg-rose-700'}`}>
-        <p className={`text-xs font-black uppercase tracking-widest mb-2 flex items-center gap-1.5 ${amber ? 'text-black' : 'text-white'}`}><Flag className="w-3.5 h-3.5" /> {title} — {picked.length}</p>
-        <div className="flex flex-wrap gap-1.5">{picked.map(p => <span key={p.id} className={`px-2 py-0.5 rounded-md font-mono font-black text-sm ${amber ? 'bg-amber-600 text-black' : 'bg-rose-900 text-rose-200'}`}>{p.label}</span>)}</div>
+const PickedStrip = ({ tone, picked }) => (
+    <div className={`px-6 py-3 shrink-0 ${tone.bar}`}>
+        <p className={`text-xs font-black uppercase tracking-widest mb-2 flex items-center gap-1.5 ${tone.black ? 'text-black' : 'text-white'}`}><Flag className="w-3.5 h-3.5" /> {tone.title} — {picked.length}</p>
+        <div className="flex flex-wrap gap-1.5">{picked.map(p => <span key={p.id} className={`px-2 py-0.5 rounded-md font-mono font-black text-sm ${tone.dark} ${tone.black ? 'text-black' : 'text-white'}`}>{p.label}</span>)}</div>
     </div>
 );

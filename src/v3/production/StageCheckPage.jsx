@@ -244,9 +244,11 @@ export default function StageCheckPage() {
             <InspectOverlay key={inspect.key} head={[['Batch', `#${view.batch.floor_no}`], ...node.head]} items={items} codes={codes} unit="piece" startFix={inspect.fix} highlightId={inspect.highlightId}
                 onClose={() => setInspect(null)}
                 onApprove={(x) => act((e) => productionApi.check({ ...base(), status: 'APPROVED', ...ids(x), ...e }), 'Approved')}
+                onRepairNow={(x, code) => act((e) => productionApi.check({ ...base(), status: 'REPAIRED', defect_code_id: code, ...ids(x), ...e }), 'Repaired now')}
                 onRework={(x, code) => act((e) => productionApi.check({ ...base(), status: 'NEEDS_REWORK', defect_code_id: code, ...ids(x), ...e }), 'To rework')}
-                onReject={(x, code) => act((e) => productionApi.check({ ...base(), status: 'QC_REJECTED', defect_code_id: code, ...ids(x), ...e }), 'Rejected')}
+                onReplace={(x, code) => act((e) => productionApi.check({ ...base(), status: 'NEEDS_REWORK', replacement: true, defect_code_id: code, ...ids(x), ...e }), 'Sent for new material')}
                 onRepair={(x) => act((e) => productionApi.repair({ ...base(), ...ids(x), ...e }), 'Repaired')}
+                onReplaceRework={(x) => act(async () => { await productionApi.requestReplacement({ batch_id: openId, stage_type_id: stageId, piece_ids: x }); return { data: { checked: x.length, progress: view.progress.status } }; }, 'Sent for new material')}
                 onUndo={(it) => askUndo({ text: `Piece #${it.label} is ${label(it.status)}.`, unit: 'piece', body: ids([it.id]) })} />
         );
     }

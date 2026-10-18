@@ -12,9 +12,9 @@ import MaterialReplacementsPage from '../initialisation_portal/MaterialReplaceme
 import {
     Shirt, Layers, ClipboardCheck, Component, Check, X,
     Hammer, Loader2, Menu, ChevronDown, ChevronRight, CheckCircle2,
-    Square, CheckSquare, XCircle, ArrowLeft, Package, Send, AlertCircle, Zap,
+    Square, CheckSquare, ArrowLeft, Package, Send, AlertCircle, Zap,
     LogOut, FileText, ThumbsUp, LayoutGrid, History, ChevronLeft, BarChart2,
-    ShieldAlert, ShieldCheck, RefreshCw, Ruler, Lock, RotateCcw, PackageX, AlertTriangle, Flag,
+    ShieldAlert, ShieldCheck, RefreshCw, Ruler, Lock, RotateCcw, PackageX, AlertTriangle, Flag, Wrench,
 } from 'lucide-react';
 
 // Supervisor overrides (unlock a rejected piece / revert an approval) are
@@ -722,7 +722,18 @@ const StageCompletionHandoff = ({ batchId, lineId, onBatchComplete }) => {
 // ============================================================================
 // PRIMARY INSPECTION MODAL (Black/Industrial)
 // ============================================================================
-const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidationSubmit, onRepairSubmit, onRevertToPending, isApproveBlocked, highlightPieceId }) => {
+// Defect picker per fault action (18 Oct 2026 — no Reject: "remove reject option and in re work give user option for
+// direct repair or material replacement and re work"):
+//   REPAIRED      repair now — the defect is logged and resolved on the spot, the piece counts OK
+//   NEEDS_REWORK  to the rework queue (Fix rework → PASSED, or MATERIAL REPLACEMENT from there)
+//   MATERIAL      rework + straight to the cutting manager for new material (accept → fulfil → back here to check)
+const DEFECT_PICKER = {
+    REPAIRED: { title: 'REPAIRED ON THE SPOT', label: 'REPAIRED', bar: 'bg-teal-600 border-teal-700', chosen: 'bg-teal-600 border-teal-300 shadow-lg', confirm: 'bg-teal-600 hover:bg-teal-700', back: 'bg-teal-700 hover:bg-teal-800', chip: 'bg-teal-800 text-teal-100', selChip: 'bg-teal-900 text-teal-200', cat: 'border-slate-600 hover:border-teal-500 hover:bg-slate-700', code: 'text-teal-300', icon: 'text-teal-400', text: 'text-white' },
+    NEEDS_REWORK: { title: 'REASON FOR REWORK', label: 'REWORK', bar: 'bg-amber-500 border-amber-600', chosen: 'bg-amber-600 border-amber-400 shadow-lg', confirm: 'bg-amber-600 hover:bg-amber-700', back: 'bg-amber-600 hover:bg-amber-700', chip: 'bg-amber-600 text-black', selChip: 'bg-amber-900 text-amber-200', cat: 'border-slate-600 hover:border-amber-500 hover:bg-slate-700', code: 'text-amber-300', icon: 'text-amber-400', text: 'text-black' },
+    MATERIAL: { title: 'NEW MATERIAL NEEDED — SENT TO CUTTING', label: 'MATERIAL REPLACEMENT', bar: 'bg-violet-600 border-violet-700', chosen: 'bg-violet-600 border-violet-300 shadow-lg', confirm: 'bg-violet-600 hover:bg-violet-700', back: 'bg-violet-700 hover:bg-violet-800', chip: 'bg-violet-800 text-violet-100', selChip: 'bg-violet-900 text-violet-200', cat: 'border-slate-600 hover:border-violet-500 hover:bg-slate-700', code: 'text-violet-300', icon: 'text-violet-400', text: 'text-white' },
+};
+
+const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidationSubmit, onRepairSubmit, onReplaceRework, onRevertToPending, isApproveBlocked, highlightPieceId }) => {
     const pieces = itemInfo.pieces || [];
 
     // Bundles with any piece not cleared upstream (cutting) — shown as a WARNING
@@ -830,10 +841,11 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
         else { setIntendedAction(action); setDefectSearch(''); setSelectedCategory(null); setSelectedDefectIds(new Set()); }
     };
 
+    // Fix rework: PASSED, or MATERIAL REPLACEMENT (18 Oct 2026 — FAILED / reject is gone).
     const handleRepairAction = (status) => {
         if (selectedIds.size === 0) return;
-        if (status === 'APPROVED') { submitRepair('APPROVED', []); }
-        else { setIntendedAction('REPAIR_FAILED'); setDefectSearch(''); setSelectedCategory(null); setSelectedDefectIds(new Set()); }
+        if (status === 'APPROVED') submitRepair('APPROVED', []);
+        else submitReplaceRework();
     };
 
     const submitRepair = async (status, defectCodeIds = []) => {
@@ -886,15 +898,25 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
 
     const handleDefectSubmit = () => {
         if (selectedDefectIds.size === 0) return;
-        submitValidation(intendedAction, Array.from(selectedDefectIds));
+        if (intendedAction === 'MATERIAL') submitValidation('NEEDS_REWORK', Array.from(selectedDefectIds), { materialReplacement: true });
+        else submitValidation(intendedAction, Array.from(selectedDefectIds));
     };
 
-    const handleRepairDefectSubmit = () => {
-        if (selectedDefectIds.size === 0) return;
-        submitRepair('QC_REJECTED', Array.from(selectedDefectIds));
+    // Rework piece → straight to the cutting manager for new material (its rework defect is carried onto the request).
+    const submitReplaceRework = async () => {
+        if (selectedIds.size === 0) return;
+        setIsSubmitting(true);
+        try {
+            await onReplaceRework(Array.from(selectedIds));
+            setSelectedIds(new Set());
+        } catch {
+            // onReplaceRework already shows an alert on failure
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
-    const submitValidation = async (qcStatus, defectCodeIds = []) => {
+    const submitValidation = async (qcStatus, defectCodeIds = [], extra = {}) => {
         const selectedPiecesList = pieces.filter(p => selectedIds.has(p.id));
         let payloads = [];
 
@@ -912,7 +934,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                 if (!acc[key]) {
                     acc[key] = {
                         batchId: itemInfo.batchId, rollId: itemInfo.rollId, partId: p.part_id || itemInfo.partId,
-                        size: p.size || itemInfo.size, pieceIds: [], qcStatus, defectCodeIds, bundleId: p.bundle_id || null
+                        size: p.size || itemInfo.size, pieceIds: [], qcStatus, defectCodeIds, bundleId: p.bundle_id || null, ...extra
                     };
                 }
                 acc[key].pieceIds.push(p.id);
@@ -922,7 +944,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
         } else {
             payloads = [{
                 batchId: itemInfo.batchId, rollId: itemInfo.rollId, partId: itemInfo.partId,
-                size: itemInfo.size, pieceIds: Array.from(selectedIds), qcStatus, defectCodeIds, bundleId: itemInfo.bundle_id || null
+                size: itemInfo.size, pieceIds: Array.from(selectedIds), qcStatus, defectCodeIds, bundleId: itemInfo.bundle_id || null, ...extra
             }];
         }
 
@@ -943,10 +965,10 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
             d.description.toLowerCase().includes(defectSearch.trim().toLowerCase()))
         : [];
     const selectedPiecesForPicker = pieces.filter(p => selectedIds.has(p.id));
-    const pickerIsAmber = intendedAction === 'NEEDS_REWORK';
-    const pickerOnConfirm = intendedAction === 'REPAIR_FAILED' ? handleRepairDefectSubmit : handleDefectSubmit;
-    const pickerTitle = intendedAction === 'NEEDS_REWORK' ? 'REASON FOR REWORK' : intendedAction === 'QC_REJECTED' ? 'REASON FOR REJECTION' : 'REPAIR FAILURE REASON';
-    const pickerLabel = intendedAction === 'NEEDS_REWORK' ? 'REWORK' : intendedAction === 'QC_REJECTED' ? 'REJECT' : 'FAILED';
+    const pc = DEFECT_PICKER[intendedAction] || DEFECT_PICKER.NEEDS_REWORK;
+    const pickerOnConfirm = handleDefectSubmit;
+    const pickerTitle = pc.title;
+    const pickerLabel = pc.label;
 
     return (
         <div className="fixed inset-0 bg-black/95 z-[150] flex flex-col p-0 font-inter">
@@ -969,15 +991,15 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                 </div>
             )}
 
-            {(intendedAction === 'REPAIR_FAILED' || intendedAction === 'NEEDS_REWORK' || intendedAction === 'QC_REJECTED') ? (
+            {DEFECT_PICKER[intendedAction] ? (
                 !selectedCategory ? (
                     /* Step 1 — category selection */
                     <div className="flex-grow flex flex-col bg-slate-900">
-                        <div className={`px-6 py-3 border-b shrink-0 ${pickerIsAmber ? 'bg-amber-500 border-amber-600' : 'bg-rose-700 border-rose-800'}`}>
-                            <p className={`text-xs font-black uppercase tracking-widest mb-2 ${pickerIsAmber ? 'text-black' : 'text-white'}`}>{pickerTitle} — {selectedPiecesForPicker.length} piece(s)</p>
+                        <div className={`px-6 py-3 border-b shrink-0 ${pc.bar}`}>
+                            <p className={`text-xs font-black uppercase tracking-widest mb-2 ${pc.text}`}>{pickerTitle} — {selectedPiecesForPicker.length} piece(s)</p>
                             <div className="flex flex-wrap gap-1.5">
                                 {selectedPiecesForPicker.map(p => (
-                                    <span key={p.id} className={`px-2 py-0.5 rounded-md font-mono font-black text-sm ${pickerIsAmber ? 'bg-amber-600 text-black' : 'bg-rose-900 text-rose-200'}`}>{p.piece_sequence}</span>
+                                    <span key={p.id} className={`px-2 py-0.5 rounded-md font-mono font-black text-sm ${pc.chip}`}>{p.piece_sequence}</span>
                                 ))}
                             </div>
                         </div>
@@ -986,8 +1008,8 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                             <div className="grid grid-cols-2 gap-4 max-w-lg mx-auto w-full">
                                 {categories.map(cat => (
                                     <button key={cat} onClick={() => setSelectedCategory(cat)}
-                                        className={`bg-slate-800 border-2 rounded-2xl p-8 font-black text-white text-xl uppercase tracking-widest transition-all active:scale-95 flex flex-col items-center gap-3 ${pickerIsAmber ? 'border-slate-600 hover:border-amber-500 hover:bg-slate-700' : 'border-slate-600 hover:border-rose-500 hover:bg-slate-700'}`}>
-                                        <AlertCircle className={`w-10 h-10 ${pickerIsAmber ? 'text-amber-400' : 'text-rose-400'}`} />
+                                        className={`bg-slate-800 border-2 rounded-2xl p-8 font-black text-white text-xl uppercase tracking-widest transition-all active:scale-95 flex flex-col items-center gap-3 ${pc.cat}`}>
+                                        <AlertCircle className={`w-10 h-10 ${pc.icon}`} />
                                         {cat}
                                     </button>
                                 ))}
@@ -1003,16 +1025,16 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                 ) : (
                     /* Step 2 — scrollable code list */
                     <div className="flex-grow flex flex-col bg-slate-900 min-h-0">
-                        <div className={`px-6 py-3 border-b shrink-0 flex items-center gap-3 ${pickerIsAmber ? 'bg-amber-500 border-amber-600' : 'bg-rose-700 border-rose-800'}`}>
+                        <div className={`px-6 py-3 border-b shrink-0 flex items-center gap-3 ${pc.bar}`}>
                             <button onClick={() => { setSelectedCategory(null); setDefectSearch(''); }}
-                                className={`p-2 rounded-lg transition-colors shrink-0 ${pickerIsAmber ? 'bg-amber-600 hover:bg-amber-700' : 'bg-rose-800 hover:bg-rose-900'}`}>
+                                className={`p-2 rounded-lg transition-colors shrink-0 ${pc.back}`}>
                                 <ArrowLeft className="w-5 h-5 text-white" />
                             </button>
                             <div className="flex-grow min-w-0">
-                                <p className={`font-black text-sm uppercase tracking-widest ${pickerIsAmber ? 'text-black' : 'text-white'}`}>{selectedCategory}</p>
+                                <p className={`font-black text-sm uppercase tracking-widest ${pc.text}`}>{selectedCategory}</p>
                                 <div className="flex flex-wrap gap-1 mt-1">
                                     {selectedPiecesForPicker.map(p => (
-                                        <span key={p.id} className={`px-1.5 py-0 rounded font-mono font-black text-xs ${pickerIsAmber ? 'bg-amber-600 text-black' : 'bg-rose-900 text-rose-200'}`}>{p.piece_sequence}</span>
+                                        <span key={p.id} className={`px-1.5 py-0 rounded font-mono font-black text-xs ${pc.chip}`}>{p.piece_sequence}</span>
                                     ))}
                                 </div>
                             </div>
@@ -1026,7 +1048,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                     {Array.from(selectedDefectIds).map(id => {
                                         const d = defectCodes.find(dc => dc.id === id);
                                         return d ? (
-                                            <span key={id} className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${pickerIsAmber ? 'bg-amber-900 text-amber-200' : 'bg-rose-900 text-rose-200'}`}>
+                                            <span key={id} className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${pc.selChip}`}>
                                                 {d.code}
                                                 <button onClick={() => toggleDefect(id)} className="ml-0.5 hover:text-white"><X className="w-3 h-3" /></button>
                                             </span>
@@ -1035,7 +1057,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                 </div>
                             )}
                             <button onClick={pickerOnConfirm} disabled={selectedDefectIds.size === 0}
-                                className={`w-full disabled:opacity-30 disabled:bg-slate-600 text-white font-black py-3 rounded-xl uppercase tracking-widest transition-colors active:scale-95 flex items-center justify-center gap-2 text-sm ${pickerIsAmber ? 'bg-amber-600 hover:bg-amber-700' : 'bg-rose-600 hover:bg-rose-700'}`}>
+                                className={`w-full disabled:opacity-30 disabled:bg-slate-600 text-white font-black py-3 rounded-xl uppercase tracking-widest transition-colors active:scale-95 flex items-center justify-center gap-2 text-sm ${pc.confirm}`}>
                                 <Send className="w-4 h-4" /> CONFIRM {pickerLabel} ({selectedDefectIds.size})
                             </button>
                         </div>
@@ -1046,10 +1068,10 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                     return (
                                         <button key={defect.id} onClick={() => toggleDefect(defect.id)}
                                             className={`relative p-3 rounded-xl text-left transition-all active:scale-95 border-2 ${isChosen
-                                                ? (pickerIsAmber ? 'bg-amber-600 border-amber-400 shadow-lg' : 'bg-rose-700 border-rose-400 shadow-lg')
+                                                ? (pc.chosen)
                                                 : 'bg-slate-800 border-slate-600 hover:border-slate-400'}`}>
                                             {isChosen && <Check className="absolute top-2 right-2 w-4 h-4 text-white" strokeWidth={3} />}
-                                            <span className={`block text-sm font-bold uppercase tracking-widest mb-1 ${pickerIsAmber ? 'text-amber-300' : 'text-rose-300'}`}>{defect.code}</span>
+                                            <span className={`block text-sm font-bold uppercase tracking-widest mb-1 ${pc.code}`}>{defect.code}</span>
                                             <span className="text-white text-[17px] font-black leading-snug">{defect.description}</span>
                                         </button>
                                     );
@@ -1133,9 +1155,9 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                 <span className="text-4xl font-black text-amber-700 leading-none">{selectedIds.size}</span>
                             </div>
                             <div className="flex-grow grid grid-cols-2 gap-4 h-[60px]">
-                                <button onClick={() => handleRepairAction('QC_REJECTED')} disabled={selectedIds.size === 0}
-                                    className="w-full h-full bg-rose-600 text-white rounded-xl font-black text-lg shadow-xl hover:bg-rose-700 active:scale-95 disabled:opacity-30 flex items-center justify-center border-b-4 border-rose-800">
-                                    <XCircle className="w-5 h-5 mr-2" /> FAILED
+                                <button onClick={() => handleRepairAction('MATERIAL')} disabled={selectedIds.size === 0 || isSubmitting}
+                                    className="w-full h-full bg-violet-600 text-white rounded-xl font-black text-base md:text-lg shadow-xl hover:bg-violet-700 active:scale-95 disabled:opacity-30 flex items-center justify-center border-b-4 border-violet-800">
+                                    <PackageX className="w-5 h-5 mr-2" /> MATERIAL REPLACEMENT
                                 </button>
                                 <button onClick={() => handleRepairAction('APPROVED')} disabled={selectedIds.size === 0}
                                     className="w-full h-full bg-emerald-600 text-white rounded-xl font-black text-lg shadow-xl hover:bg-emerald-700 active:scale-95 disabled:opacity-30 flex items-center justify-center border-b-4 border-emerald-800">
@@ -1296,9 +1318,9 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                         <span className="text-4xl font-black text-amber-700 leading-none">{selectedIds.size}</span>
                                     </div>
                                     <div className="flex-grow grid grid-cols-2 gap-4 h-[60px]">
-                                        <button onClick={() => handleRepairAction('QC_REJECTED')} disabled={selectedIds.size === 0}
-                                            className="w-full h-full bg-rose-600 text-white rounded-xl font-black text-lg shadow-xl hover:bg-rose-700 active:scale-95 disabled:opacity-30 flex items-center justify-center border-b-4 border-rose-800">
-                                            <XCircle className="w-5 h-5 mr-2" /> FAILED
+                                        <button onClick={() => handleRepairAction('MATERIAL')} disabled={selectedIds.size === 0 || isSubmitting}
+                                            className="w-full h-full bg-violet-600 text-white rounded-xl font-black text-base md:text-lg shadow-xl hover:bg-violet-700 active:scale-95 disabled:opacity-30 flex items-center justify-center border-b-4 border-violet-800">
+                                            <PackageX className="w-5 h-5 mr-2" /> MATERIAL REPLACEMENT
                                         </button>
                                         <button onClick={() => handleRepairAction('APPROVED')} disabled={selectedIds.size === 0 || isSubmitting}
                                             className="w-full h-full bg-emerald-600 text-white rounded-xl font-black text-lg shadow-xl hover:bg-emerald-700 active:scale-95 disabled:opacity-30 flex items-center justify-center border-b-4 border-emerald-800">
@@ -1314,17 +1336,18 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                     <span className="block text-slate-500 text-xs font-black uppercase mb-0.5 tracking-widest">Selected</span>
                                     <span className="text-4xl font-black text-black leading-none">{selectedIds.size}</span>
                                 </div>
-                                <div className="flex-grow grid grid-cols-3 gap-4 h-[60px]">
+                                <div className="flex-grow grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 md:h-[60px] auto-rows-[60px]">
                                     <div className="relative h-full">
                                         {isBundleLocked && selectedIds.size > 0 && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Bundle Locked: Active Reworks</span></div>}
-                                        {itemInfo.isBundle && !isBundleLocked && selectedIds.size > 0 && selectedIds.size !== actionablePieces.length && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Partial Selection: Reject/Rework Only</span></div>}
+                                        {itemInfo.isBundle && !isBundleLocked && selectedIds.size > 0 && selectedIds.size !== actionablePieces.length && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Partial Selection: Repair / Rework Only</span></div>}
                                         {isApproveBlocked && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-red-700 text-white text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Rework Backlog: Approve Disabled</span></div>}
-                                        <button onClick={() => handleActionInitiation('APPROVED')} disabled={selectedIds.size === 0 || isBundleLocked || isApproveBlocked || (itemInfo.isBundle && selectedIds.size !== actionablePieces.length)} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it via Repair or Reject before approving new pieces.' : undefined} className="w-full h-full bg-black text-white rounded-xl font-black text-lg shadow-xl hover:bg-slate-800 active:scale-95 disabled:opacity-20 disabled:bg-slate-400 flex items-center justify-center border-b-4 border-slate-800">
+                                        <button onClick={() => handleActionInitiation('APPROVED')} disabled={selectedIds.size === 0 || isBundleLocked || isApproveBlocked || (itemInfo.isBundle && selectedIds.size !== actionablePieces.length)} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it (Passed, or material replacement) before approving new pieces.' : undefined} className="w-full h-full bg-black text-white rounded-xl font-black text-lg shadow-xl hover:bg-slate-800 active:scale-95 disabled:opacity-20 disabled:bg-slate-400 flex items-center justify-center border-b-4 border-slate-800">
                                             <CheckCircle2 className="w-5 h-5 mr-2" /> APPROVE
                                         </button>
                                     </div>
+                                    <button onClick={() => handleActionInitiation('REPAIRED')} disabled={selectedIds.size === 0 || isApproveBlocked} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it first.' : 'Defect found and repaired on the spot'} className="w-full h-full bg-teal-600 text-white rounded-xl font-black text-base md:text-lg shadow-xl hover:bg-teal-700 active:scale-95 disabled:opacity-30 disabled:bg-slate-200 flex items-center justify-center border-b-4 border-teal-800"><Wrench className="w-5 h-5 mr-2" /> REPAIR NOW</button>
                                     <button onClick={() => handleActionInitiation('NEEDS_REWORK')} disabled={selectedIds.size === 0} className="w-full h-full bg-amber-400 text-black rounded-xl font-black text-lg shadow-xl hover:bg-amber-500 active:scale-95 disabled:opacity-30 disabled:bg-slate-200 flex items-center justify-center border-b-4 border-amber-600"><Hammer className="w-5 h-5 mr-2" /> REWORK</button>
-                                    <button onClick={() => handleActionInitiation('QC_REJECTED')} disabled={selectedIds.size === 0} className="w-full h-full bg-rose-600 text-white rounded-xl font-black text-lg shadow-xl hover:bg-rose-700 active:scale-95 disabled:opacity-30 disabled:bg-slate-200 flex items-center justify-center border-b-4 border-rose-800"><XCircle className="w-5 h-5 mr-2" /> REJECT</button>
+                                    <button onClick={() => handleActionInitiation('MATERIAL')} disabled={selectedIds.size === 0} title="Needs new material — sent straight to the cutting manager" className="w-full h-full bg-violet-600 text-white rounded-xl font-black text-base md:text-lg shadow-xl hover:bg-violet-700 active:scale-95 disabled:opacity-30 disabled:bg-slate-200 flex items-center justify-center border-b-4 border-violet-800"><PackageX className="w-5 h-5 mr-2" /> MATERIAL</button>
                                 </div>
                             </div>
                         )}
@@ -1577,7 +1600,7 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
                     <>
                         <button onClick={() => onInspect(entity)} className="px-6 py-2 text-sm bg-white text-slate-800 border-2 border-slate-300 rounded-xl hover:border-indigo-500 hover:text-indigo-700 font-black shadow-sm active:scale-95 flex items-center transition-all">INSPECT</button>
                         {canApproveBundle && (
-                            <button onClick={() => onQuickApprove(entity)} disabled={isApproveBlocked || pending_alter > 0} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it via Repair or Reject before approving new pieces.' : pending_alter > 0 ? 'Fix or reject the rework pieces first' : undefined} className="px-4 py-2 text-sm bg-emerald-100 text-emerald-800 border-2 border-emerald-200 rounded-xl hover:bg-emerald-200 font-black shadow-sm active:scale-95 flex items-center transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100">
+                            <button onClick={() => onQuickApprove(entity)} disabled={isApproveBlocked || pending_alter > 0} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it (Passed, or material replacement) before approving new pieces.' : pending_alter > 0 ? 'Fix or reject the rework pieces first' : undefined} className="px-4 py-2 text-sm bg-emerald-100 text-emerald-800 border-2 border-emerald-200 rounded-xl hover:bg-emerald-200 font-black shadow-sm active:scale-95 flex items-center transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100">
                                 <CheckCircle2 className="w-4 h-4 mr-2" /> QUICK APPROVE
                             </button>
                         )}
@@ -2375,6 +2398,22 @@ const UniversalWorkstationDashboard = () => {
         }
     };
 
+    // Fix rework → MATERIAL REPLACEMENT (in place of FAILED, 18 Oct 2026): same request as the Replacement button.
+    const handleReplaceRework = async (pieceIds) => {
+        setIsProcessing(true);
+        try {
+            await materialReplacementApi.createRequests({ pieceIds });
+            const newBatches = await fetchQueue();
+            refreshLiveModalPieces(newBatches);
+            loadStats();
+        } catch (err) {
+            alert(err.response?.data?.error || `Error: ${err.message}`);
+            throw err;
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
     const handleSubmitReplacementRequest = async (pieceIds, notes) => {
         await materialReplacementApi.createRequests({ pieceIds, notes });
         await fetchQueue(); // flagged pieces need to disappear from the normal queue immediately
@@ -2906,7 +2945,7 @@ const UniversalWorkstationDashboard = () => {
                     onDateChange={handleModalDateChange}
                 />
             )}
-            {modalState && modalState.type === 'validate' && <UniversalValidationModal itemInfo={modalState} defectCodes={defectCodes} onClose={() => { setModalState(null); setHighlightPieceId(null); }} onValidationSubmit={handleValidationSubmit} onRepairSubmit={handleApproveAlterSubmit} onRevertToPending={handleRevertToPending} isApproveBlocked={isApproveBlocked} highlightPieceId={highlightPieceId} />}
+            {modalState && modalState.type === 'validate' && <UniversalValidationModal itemInfo={modalState} defectCodes={defectCodes} onClose={() => { setModalState(null); setHighlightPieceId(null); }} onValidationSubmit={handleValidationSubmit} onRepairSubmit={handleApproveAlterSubmit} onReplaceRework={handleReplaceRework} onRevertToPending={handleRevertToPending} isApproveBlocked={isApproveBlocked} highlightPieceId={highlightPieceId} />}
             {showReplacementRequestModal && (
                 <MaterialReplacementRequestModal
                     pieces={replacementModalPieces}

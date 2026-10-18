@@ -87,8 +87,7 @@ export function useV3Live(onChange, enabled = true) {
     return up;
 }
 
-// Receive typed websocket messages (e.g. V3_STAGE_APPROVAL for QA / floor in-charge, V3_STAGE_APPROVAL_DECIDED for the
-// person who asked) — shares the one socket with useV3Live.
+// Receive typed websocket messages — shares the one socket with useV3Live.
 export function useV3Message(onMessage, enabled = true) {
     const cb = useRef(onMessage);
     cb.current = onMessage;

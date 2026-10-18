@@ -51,8 +51,8 @@ export default function GarmentPanel({ batchId, stageId, lineId, codes, act, ask
             <InspectOverlay key={inspect.key} head={[['Batch', `#${view.batch.floor_no}`], ['Size', grp ? grp.size : ''], ['Colour', grp ? grp.colour : '']]} items={items} codes={codes} unit="garment"
                 startFix={inspect.fix} highlightId={inspect.highlightId} onClose={() => setInspect(null)}
                 onApprove={(x) => act((e) => productionApi.garmentCheck({ ...base(x), status: 'APPROVED', ...e }), 'Approved', 'garment')}
+                onRepairNow={(x, code) => act((e) => productionApi.garmentCheck({ ...base(x), status: 'REPAIRED', defect_code_id: code, ...e }), 'Repaired now', 'garment')}
                 onRework={(x, code) => act((e) => productionApi.garmentCheck({ ...base(x), status: 'NEEDS_REWORK', defect_code_id: code, ...e }), 'To rework', 'garment')}
-                onReject={(x, code) => act((e) => productionApi.garmentCheck({ ...base(x), status: 'QC_REJECTED', defect_code_id: code, ...e }), 'Rejected', 'garment')}
                 onRepair={(x) => act((e) => productionApi.garmentRepair({ ...base(x), ...e }), 'Repaired', 'garment')}
                 onUndo={(it) => askUndo({ text: `Garment ${it.label} is ${label(it.status)}.`, unit: 'garment', body: { garment_ids: [it.id] } })} />
         );
@@ -61,7 +61,7 @@ export default function GarmentPanel({ batchId, stageId, lineId, codes, act, ask
     return (
         <div className="p-4 md:p-6 bg-slate-100 space-y-4">
             <div className="flex flex-wrap items-center gap-3">
-                <span className="text-sm font-bold text-slate-600">Stage <b className="uppercase">{label(view.progress.status)}</b> · {c.total} garments · {c.pending} to check{c.flagged ? ` · ${c.flagged} flagged` : ''} · {c.approved} OK · {c.rework} rework · {c.rejected} rejected · route {view.route.map(r => r.name).join(' → ')}</span>
+                <span className="text-sm font-bold text-slate-600">Stage <b className="uppercase">{label(view.progress.status)}</b> · {c.total} garments · {c.pending} to check{c.flagged ? ` · ${c.flagged} flagged` : ''} · {c.approved} OK · {c.rework} rework{c.rejected ? ` · ${c.rejected} rejected earlier` : ''} · route {view.route.map(r => r.name).join(' → ')}</span>
                 <span className="ml-auto"><WhyPanel floorNo={view.batch.floor_no} batchId={batchId} stageId={stageId} complete={view.progress.status === 'COMPLETED'} tick={tick} onFixed={load} /></span>
             </div>
             {!view.first && <p className="text-sm font-semibold text-slate-600">Loaded: {view.loads.length ? view.loads.map(l => `${l.size} → ${l.line}${l.status === 'COMPLETED' ? ' (done)' : ''}`).join(' · ') : 'nothing yet — the line loader loads sizes onto your line'}</p>}

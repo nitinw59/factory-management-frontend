@@ -4,12 +4,11 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
-import { CalendarDays, Download, HelpCircle, RefreshCw, KeyRound, Hammer, CheckCircle2, Check, Clock, ThumbsUp, XCircle, Undo2, Loader2 } from 'lucide-react';
+import { CalendarDays, Download, HelpCircle, RefreshCw, KeyRound, Hammer, CheckCircle2, Check, Clock, ThumbsUp, Undo2, Loader2, Wrench } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { productionApi } from '../api/productionApi';
-import { CompletionDialog } from './stageApproval';
 import { apiError } from '../api/mastersApi';
-import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
+import { Field, inputCls, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 
 const label = (s) => String(s || '').toLowerCase().replace('_', ' ');
 
@@ -79,8 +78,7 @@ function WorkLog({ onClose }) {
 
 // "Why isn't this stage complete?": the recorded status vs what the pieces / garments say, what is holding it,
 // and Recalculate (re-runs the handoff for every started stage of the batch).
-export function WhyPanel({ batchId, stageId, complete, tick, onFixed, floorNo, stageName }) {
-    const [completing, setCompleting] = useState(false);
+export function WhyPanel({ batchId, stageId, complete, tick, onFixed }) {
     const [open, setOpen] = useState(false);
     const [d, setD] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -114,14 +112,6 @@ export function WhyPanel({ batchId, stageId, complete, tick, onFixed, floorNo, s
             {msg && <p className="text-sm text-emerald-700 mt-1">{msg}</p>}
             {!d ? (!error && <Loading />) : (
                 <>
-                    {d.held > 0 && (
-                        <div className="mt-2 flex flex-wrap items-center gap-2 bg-rose-50 border border-rose-300 rounded-lg px-3 py-2">
-                            <span className="text-sm font-bold text-rose-800">{d.held} rejected — the stage completes only with approval from QA or the floor in-charge.
-                                {d.request?.status === 'PENDING' && ' Waiting for approval.'}{d.request?.status === 'REJECTED' && ` Last request rejected: “${d.request.decision_note}”.`}</span>
-                            <button type="button" onClick={() => setCompleting(true)} className="ml-auto px-3 py-2 rounded-lg bg-rose-600 text-white text-xs font-black uppercase tracking-widest">Check &amp; complete</button>
-                        </div>
-                    )}
-                    {completing && <CompletionDialog batch={{ id: batchId, floor_no: floorNo }} stageId={stageId} stageName={stageName || d.stage} onClose={() => setCompleting(false)} onDone={() => { onFixed?.(); }} />}
                     {d.out_of_step && <p className="mt-1 text-sm font-semibold text-amber-800">The recorded status is out of date — Recalculate puts it right (and hands the batch on to the next stage).</p>}
                     {d.reasons.length === 0 ? <p className="mt-1 text-sm text-emerald-700">Nothing is holding this stage{d.actual === 'COMPLETED' ? ' — it is complete.' : '.'}</p> : (
                         <ul className="mt-1 space-y-1">{d.reasons.map((r, i) => (
@@ -146,7 +136,7 @@ export function StatsBar({ stageId, lineId, tick }) {
         [Hammer, 'Pending rework', v(s?.rework?.pending ?? '—'), s?.rework?.blocked ? 'text-rose-600' : s?.rework?.pending ? 'text-amber-500' : 'text-emerald-600', 'text-amber-500'],
         [ThumbsUp, 'Today OK', v((s?.me.approved || 0) + (s?.me.repaired || 0)), 'text-emerald-600', 'text-emerald-500'],
         [Hammer, 'Today rework', v(s?.me.rework), 'text-indigo-600', 'text-indigo-400'],
-        [XCircle, 'Today rejected', v(s?.me.rejected), 'text-rose-600', 'text-rose-400'],
+        [Wrench, 'Today repaired', v(s?.me.repaired), 'text-teal-600', 'text-teal-500'],
         [Clock, 'This hour', v(s?.me.this_hour), 'text-sky-600', 'text-sky-500'],
     ];
     return (

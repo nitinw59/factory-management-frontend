@@ -269,7 +269,6 @@ const V3NewCutBatchPage = lazyPage(() => import('./v3/cutting/NewCutBatchPage'))
 const V3CutBatchPage = lazyPage(() => import('./v3/cutting/CutBatchPage'));
 const V3StageCheckPage = lazyPage(() => import('./v3/production/StageCheckPage'));
 const V3RecutsPage = lazyPage(() => import('./v3/production/RecutsPage'));
-const V3CompletionsPage = lazyPage(() => import('./v3/production/stageApproval'));
 const V3LineLoadingPage = lazyPage(() => import('./v3/production/LineLoadingPage'));
 const V3TrimKitsPage = lazyPage(() => import('./v3/production/TrimKitsPage'));
 const V3TrimKitPage = lazyPage(() => import('./v3/production/TrimKitPage'));
@@ -374,7 +373,6 @@ const appRoutes = (
           <Route path="cutting/batches/:id" element={<V3CutBatchPage />} />
           <Route path="production/check" element={<V3StageCheckPage />} />
           <Route path="production/recuts" element={<V3RecutsPage />} />
-          <Route path="production/completions" element={<V3CompletionsPage />} />
           <Route path="production/loading" element={<V3LineLoadingPage />} />
           <Route path="trim-kits" element={<V3TrimKitsPage />} />
           <Route path="trim-kits/:id" element={<V3TrimKitPage />} />

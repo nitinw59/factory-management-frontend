@@ -22,12 +22,6 @@ export const productionApi = {
     acceptReplacement: (id) => api.post(`/v3/production/replacements/${id}/accept`),
     fulfilReplacement: (id) => api.post(`/v3/production/replacements/${id}/fulfil`),
     cancelReplacement: (id, reason) => api.post(`/v3/production/replacements/${id}/cancel`, { reason }),
-    // stage completion over rejected pieces: approval by QA / floor in-charge (18 Oct 2026)
-    completion: (batchId, stageTypeId) => api.get(`/v3/production/batches/${batchId}/stages/${stageTypeId}/completion`),
-    requestCompletion: (batchId, stageTypeId, note) => api.post(`/v3/production/batches/${batchId}/stages/${stageTypeId}/completion`, { note }),
-    completionRequests: (params) => api.get('/v3/production/completion-requests', { params }),
-    approveCompletion: (id, note) => api.post(`/v3/production/completion-requests/${id}/approve`, { note }),
-    rejectCompletion: (id, note) => api.post(`/v3/production/completion-requests/${id}/reject`, { note }),
     load: (data) => api.post('/v3/production/loads', data),
     changeLine: (data) => api.post('/v3/production/loads/change-line', data),
     batchGarments: (batchId, stageTypeId) => api.get(`/v3/production/batches/${batchId}/garments/${stageTypeId}`),

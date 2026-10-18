@@ -16,7 +16,6 @@ import { apiError } from './api/mastersApi';
 import { NAV, keyForPath, visibleNav, trailFor } from './v3Nav';
 import { V3AccessContext } from './V3Access';
 import { useV3Live } from './live';
-import { StageApprovalCenter } from './production/stageApproval';
 
 const store = {
     get: (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
@@ -224,7 +223,6 @@ export default function V3Layout() {
                         )}
                     </TopBar>
                     <main className="flex-1 min-w-0 p-3 md:p-5">{outlet}</main>
-                    <StageApprovalCenter me={me} />
                 </div>
             </V3AccessContext.Provider>
         );
@@ -256,7 +254,6 @@ export default function V3Layout() {
                         <Trail />
                         {outlet}
                     </main>
-                    <StageApprovalCenter me={me} />
                 </div>
             </div>
         </V3AccessContext.Provider>

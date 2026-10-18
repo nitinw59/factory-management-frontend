@@ -2396,6 +2396,7 @@ const LineLoaderDashboardPage = () => {
     const [allBatches, setAllBatches] = useState([]);
     const [wipMap, setWipMap] = useState({}); // { lineId: { currentWip, wipLimit, isAtCapacity } }
     const [isLoading, setIsLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);   // background refresh — cards stay on screen
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(false);
     const [error, setError] = useState(null);
@@ -2411,8 +2412,11 @@ const LineLoaderDashboardPage = () => {
     // top, but for as many batches as were already loaded (not just one
     // page), so a batch loaded via scroll doesn't disappear from view just
     // because its line assignment changed.
+    // 18 Oct 2026: only the FIRST load shows the full-page spinner. A refresh after an action (Check & Complete,
+    // assign, change line) used to swap every card for the spinner — the screen jumped to the top and the card's
+    // "Stage blocked" popup (opened by Check & Complete) was thrown away with it ("whole screen refresh").
     const fetchData = useCallback(async () => {
-        setIsLoading(true);
+        if (loadedCountRef.current === 0) setIsLoading(true); else setRefreshing(true);
         setError(null);
         try {
             const limit = Math.max(loadedCountRef.current, PAGE_SIZE);
@@ -2430,6 +2434,7 @@ const LineLoaderDashboardPage = () => {
             setError("Could not load data. Please try again.");
         } finally {
             setIsLoading(false);
+            setRefreshing(false);
         }
     }, []);
 
@@ -2511,7 +2516,7 @@ const LineLoaderDashboardPage = () => {
                         <History size={14} /> History
                     </button>
                     <button onClick={fetchData} className="flex items-center gap-2 text-sm font-bold text-slate-600 bg-white border border-slate-200 px-4 py-2.5 rounded-xl hover:bg-slate-50 shadow-sm active:scale-95 transition-all">
-                        <Loader size={14} className={isLoading ? 'animate-spin' : ''} /> Refresh
+                        <Loader size={14} className={isLoading || refreshing ? 'animate-spin' : ''} /> Refresh
                     </button>
                 </div>
             </header>

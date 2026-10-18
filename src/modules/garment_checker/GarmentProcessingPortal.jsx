@@ -3,7 +3,7 @@ import {
     QrCode, ShieldCheck, ShieldAlert, Check, X,
     Hammer, AlertCircle, ArrowLeft, Package, CheckCircle2,
     RefreshCw, Maximize, HardDrive, List, Barcode, Clock, Layers,
-    ThumbsUp, FileText, Download, ChevronRight, Loader2,
+    ThumbsUp, FileText, Download, ChevronRight, Loader2, Wrench,
 } from 'lucide-react';
 import { assemblyApi } from '../../api/assemblyApi';
 import { universalApi } from '../../api/universalApi';
@@ -375,11 +375,11 @@ const WorkLogModal = ({ workData, loading, onClose, onDateChange, onExport }) =>
     );
 };
 
-// Standard Enterprise Status Enums
+// Standard Enterprise Status Enums. No Reject (18 Oct 2026, "remove reject option … garments too"): a faulty garment
+// is repaired now (REPAIRED + the defect, logged as fixed on the spot) or sent to rework (→ REPAIRED there).
 const STATUS = {
     APPROVED: 'APPROVED',
     REWORK: 'NEEDS_REWORK',
-    REJECT: 'QC_REJECTED',
     REPAIRED: 'REPAIRED',
 };
 
@@ -1343,7 +1343,7 @@ const AssemblyProcessingPortal = () => {
                         )}
 
                         {/* GARMENT VERIFICATION VIEW — fits one screen: info + parts on the
-                            left, a tall APPROVE with REWORK / REJECT side by side on the right. */}
+                            left, a tall APPROVE with REWORK / REPAIR NOW side by side on the right. */}
                         {garment && garment.qc_status !== STATUS.APPROVED && (
                             <div className="flex-1 min-h-0 grid grid-cols-1 grid-rows-[minmax(0,1fr)_auto] md:grid-cols-3 md:grid-rows-[minmax(0,1fr)] gap-3 animate-in slide-in-from-bottom-10">
                                 {/* LEFT: garment info + DNA component map */}
@@ -1420,7 +1420,7 @@ const AssemblyProcessingPortal = () => {
                                 </div>
 
                                 {/* RIGHT: COMMAND CONSOLE — button heights follow the screen height (vh),
-                                    so APPROVE never pushes REWORK / REJECT off screen. */}
+                                    so APPROVE never pushes REWORK / REPAIR NOW off screen. */}
                                 <div className="min-h-0 overflow-y-auto flex flex-col gap-2 md:gap-3">
                                     {garment.qc_status === 'NEEDS_REWORK' ? (
                                         /* ── REPAIR VALIDATION MODE ── */
@@ -1448,14 +1448,6 @@ const AssemblyProcessingPortal = () => {
                                                 <ShieldCheck className="w-[clamp(24px,5vh,44px)] h-[clamp(24px,5vh,44px)] mb-1" />
                                                 <span className="text-[length:clamp(1.1rem,3.2vh,1.5rem)] font-black">REPAIRED</span>
                                                 <span className="text-[10px] font-bold opacity-60 mt-1 uppercase tracking-widest">Defect Fixed ✓</span>
-                                            </button>
-                                            <button
-                                                onClick={() => setShowDefectModal('REJECT')}
-                                                disabled={isProcessingAction}
-                                                className="shrink-0 h-[clamp(56px,11vh,110px)] bg-rose-600 text-white rounded-2xl shadow-lg flex items-center justify-center hover:bg-rose-700 transition-all active:scale-95"
-                                            >
-                                                <X size={22} className="mr-2" />
-                                                <span className="text-lg font-black">STILL DEFECTIVE</span>
                                             </button>
                                             <button onClick={() => setGarment(null)} className="shrink-0 py-2 text-slate-400 font-bold hover:text-slate-600 transition-colors uppercase text-xs tracking-widest">
                                                 Cancel Scan
@@ -1495,12 +1487,12 @@ const AssemblyProcessingPortal = () => {
                                                     <span className="text-lg font-black">REWORK</span>
                                                 </button>
                                                 <button
-                                                    onClick={() => setShowDefectModal('REJECT')}
+                                                    onClick={() => setShowDefectModal('REPAIR NOW')}
                                                     disabled={isProcessingAction}
-                                                    className="h-[clamp(56px,11vh,110px)] bg-rose-600 text-white rounded-2xl shadow-lg flex items-center justify-center hover:bg-rose-700 transition-all active:scale-95"
+                                                    className="h-[clamp(56px,11vh,110px)] bg-teal-600 text-white rounded-2xl shadow-lg flex items-center justify-center hover:bg-teal-700 transition-all active:scale-95"
                                                 >
-                                                    <X size={22} className="mr-2" />
-                                                    <span className="text-lg font-black">REJECT</span>
+                                                    <Wrench size={22} className="mr-2" />
+                                                    <span className="text-lg font-black">REPAIR NOW</span>
                                                 </button>
                                             </div>
                                             <button onClick={() => setGarment(null)} className="shrink-0 py-2 text-slate-400 font-bold hover:text-slate-600 transition-colors uppercase text-xs tracking-widest">
@@ -1907,11 +1899,11 @@ const AssemblyProcessingPortal = () => {
                                             <Hammer size={16} /> REWORK
                                         </button>
                                         <button
-                                            onClick={() => setShowDefectModal('REJECT')}
+                                            onClick={() => setShowDefectModal('REPAIR NOW')}
                                             disabled={isProcessingAction}
-                                            className="flex-1 bg-rose-600 text-white rounded-2xl py-3.5 font-black text-sm flex items-center justify-center gap-2 hover:bg-rose-700 active:scale-95 disabled:opacity-40 transition-all"
+                                            className="flex-1 bg-teal-600 text-white rounded-2xl py-3.5 font-black text-sm flex items-center justify-center gap-2 hover:bg-teal-700 active:scale-95 disabled:opacity-40 transition-all"
                                         >
-                                            <X size={16} /> REJECT
+                                            <Wrench size={16} /> REPAIR NOW
                                         </button>
                                     </div>
                                 </div>
@@ -1924,9 +1916,9 @@ const AssemblyProcessingPortal = () => {
             {/* DEFECT DICTIONARY MODAL */}
             {showDefectModal && (() => {
                 const isReworkModal = showDefectModal === 'REWORK';
-                const accentBg = isReworkModal ? 'bg-amber-500' : 'bg-rose-600';
-                const accentText = isReworkModal ? 'text-amber-600' : 'text-rose-600';
-                const targetStatus = STATUS[isReworkModal ? 'REWORK' : 'REJECT'];
+                const accentBg = isReworkModal ? 'bg-amber-500' : 'bg-teal-600';
+                const accentText = isReworkModal ? 'text-amber-600' : 'text-teal-600';
+                const targetStatus = isReworkModal ? STATUS.REWORK : STATUS.REPAIRED;   // REPAIR NOW: defect logged as fixed
 
                 const q = defectSearch.trim().toLowerCase();
                 const categories = [...new Set(defectCodes.map(c => c.category).filter(Boolean))].sort();
@@ -2024,7 +2016,7 @@ const AssemblyProcessingPortal = () => {
                                             onClick={() => toggleDefect(code.id)}
                                             className={`p-3 text-left border-2 rounded-2xl transition-all active:scale-95 ${
                                                 isSelected
-                                                    ? `${isReworkModal ? 'border-amber-400 bg-amber-50' : 'border-rose-400 bg-rose-50'}`
+                                                    ? `${isReworkModal ? 'border-amber-400 bg-amber-50' : 'border-teal-400 bg-teal-50'}`
                                                     : 'border-slate-100 bg-slate-50 hover:border-indigo-400 hover:bg-indigo-50'
                                             }`}
                                         >
@@ -2046,7 +2038,7 @@ const AssemblyProcessingPortal = () => {
                                 <button
                                     onClick={confirmSelection}
                                     disabled={selectedDefectIds.size === 0}
-                                    className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-black text-white text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed ${isReworkModal ? 'bg-amber-500 hover:bg-amber-600' : 'bg-rose-600 hover:bg-rose-700'}`}
+                                    className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-black text-white text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed ${isReworkModal ? 'bg-amber-500 hover:bg-amber-600' : 'bg-teal-600 hover:bg-teal-700'}`}
                                 >
                                     Confirm {showDefectModal}
                                     {selectedDefectIds.size > 0 && (

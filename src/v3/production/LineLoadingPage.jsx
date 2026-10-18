@@ -12,7 +12,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Package, ArrowRight, X, RefreshCw, Zap, Loader2, CheckCircle2, AlertTriangle, History, Layers, Ruler, Shirt } from 'lucide-react';
 import { trimKitsApi } from '../api/trimKitsApi';
-import { CompletionDialog } from './stageApproval';
 import { useV3Live } from '../live';
 import Modal from '../../shared/Modal';
 import { productionApi } from '../api/productionApi';
@@ -24,7 +23,6 @@ import { PriorityBadge } from '../cutting/cutShared';
 const unitWord = (b, n = 2) => (b.mode === 'MODE_2' ? (n === 1 ? 'size' : 'sizes') : (n === 1 ? 'roll' : 'rolls'));
 const stageState = (st) => {
     const units = st.units;
-    if (st.approval) return 'APPROVAL';   // everything checked, rejected pieces wait for QA / floor in-charge (18 Oct 2026)
     if (st.status === 'COMPLETED') return 'COMPLETE';
     if (st.first || units.some(u => u.state === 'ON_LINE' || u.state === 'DONE')) return 'ACTIVE';
     if (units.some(u => u.state === 'READY')) return 'ACTIVATABLE';
@@ -32,7 +30,6 @@ const stageState = (st) => {
 };
 const STATE = {
     COMPLETE: { ring: 'ring-emerald-400', bg: 'bg-emerald-50', header: 'bg-emerald-600 text-white', label: 'COMPLETE', chip: 'bg-emerald-100 text-emerald-800' },
-    APPROVAL: { ring: 'ring-rose-400', bg: 'bg-rose-50', header: 'bg-rose-600 text-white', label: 'APPROVAL', chip: 'bg-rose-100 text-rose-800' },
     ACTIVE: { ring: 'ring-blue-400', bg: 'bg-blue-50', header: 'bg-blue-600 text-white', label: 'ACTIVE', chip: 'bg-blue-100 text-blue-800' },
     ACTIVATABLE: { ring: 'ring-amber-400', bg: 'bg-amber-50', header: 'bg-slate-800 text-white', label: 'READY', chip: 'bg-amber-100 text-amber-800' },
     LOCKED: { ring: 'ring-slate-200', bg: 'bg-slate-50', header: 'bg-slate-300 text-slate-500', label: 'WAITING', chip: 'bg-slate-100 text-slate-500' },
@@ -114,14 +111,8 @@ function StageNode({ batch, st, onOpen, onComplete, busy }) {
                 {state === 'ACTIVATABLE' && <span className="flex items-center text-[11px] font-black text-amber-700"><Zap size={11} className="mr-1" /> {ready} {w} ready — tap to assign</span>}
                 {state === 'ACTIVE' && !st.first && ready > 0 && <span className="flex items-center text-[11px] font-black text-amber-700"><Zap size={11} className="mr-1" /> {ready} more {w} ready — tap to add</span>}
                 {state === 'ACTIVE' && (st.first || ready === 0) && <span className="flex items-center text-[11px] font-black text-blue-600"><Loader2 size={11} className="mr-1 animate-spin" /> In progress</span>}
-                {state === 'APPROVAL' && (
-                    <span className="text-[11px] font-black text-rose-700">{st.approval.held} rejected — needs QA / floor in-charge approval
-                        {st.approval.request?.status === 'PENDING' && <span className="block text-indigo-700">Waiting for approval…</span>}
-                        {st.approval.request?.status === 'REJECTED' && <span className="block font-bold">Rejected by {st.approval.request.decided_by || 'approver'}: “{st.approval.request.decision_note}”</span>}
-                    </span>
-                )}
-                {(state === 'ACTIVE' || state === 'APPROVAL') && (
-                    <button type="button" onClick={e => { e.stopPropagation(); onComplete(); }} disabled={busy} title="Complete this stage — asks QA / the floor in-charge when pieces are rejected"
+                {state === 'ACTIVE' && (
+                    <button type="button" onClick={e => { e.stopPropagation(); onComplete(); }} disabled={busy} title="Recalculate: completes the stage when every piece is OK, and says what is holding it otherwise"
                         className="mt-1 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg border-2 border-emerald-400 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50">
                         {busy ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />} Check &amp; complete
                     </button>
@@ -476,8 +467,7 @@ export default function LineLoadingPage() {
     const [move, setMove] = useState(false);
     const [history, setHistory] = useState(false);
     const [kits, setKits] = useState(null);       // trim kits ready for pickup (13 Oct 2026)
-    const [busyId] = useState(null);
-    const [completing, setCompleting] = useState(null);   // { b, st } — Check & complete dialog
+    const [busyId, setBusyId] = useState(null);
     const [error, setError] = useState('');
     const [msg, setMsg] = useState('');
     const load = useCallback(() => {
@@ -488,6 +478,21 @@ export default function LineLoadingPage() {
     useEffect(() => { load(); }, [load]);
     const live = useV3Live(load);
     const done = (text) => { setAssign(false); setMove(false); setMsg(text); load(); };
+    // Check & complete (as 2.0): recalculate the batch; the stage closes once every piece / garment is OK (no Reject
+    // since 18 Oct 2026 — rework and material replacement hold it open), else say what is holding it.
+    const complete = async (b, st) => {
+        const name = st.first && st.name === 'Cutting' ? 'Numbering' : st.name;
+        setBusyId(b.id); setError(''); setMsg('');
+        try {
+            const now = (await productionApi.refresh(b.id)).data.stages[st.stage_type_id];
+            if (now === 'COMPLETED') setMsg(`Batch #${b.floor_no} ${name}: complete.`);
+            else {
+                const why = (await productionApi.stageWhy(b.id, st.stage_type_id)).data;
+                setError(`Batch #${b.floor_no} ${name} is not complete — ${why.reasons.length ? why.reasons.map(r => `${r.count} ${r.label}`).join(' · ') : 'nothing loaded yet'}.`);
+            }
+            load();
+        } catch (err) { setError(apiError(err, 'Failed to check the stage.')); } finally { setBusyId(null); }
+    };
     const ob = open && rows?.find(b => b.id === open.batchId);
     const oi = ob ? ob.stages.findIndex(s => s.stage_type_id === open.stageId) : -1;
     const ost = oi >= 0 ? ob.stages[oi] : null;
@@ -523,7 +528,7 @@ export default function LineLoadingPage() {
                     <h3 className="text-lg font-black text-slate-700 mt-2">No active batches</h3>
                     <p className="text-sm text-slate-500">Batches appear here once they are finalised at cutting.</p>
                 </div>
-            ) : list.map(b => <BatchCard key={b.id} b={b} focus={b.id === focusBatch} busyId={busyId} onComplete={(bt, st) => setCompleting({ b: bt, st })} onOpen={(bt, st) => setOpen({ batchId: bt.id, stageId: st.stage_type_id })} />)}
+            ) : list.map(b => <BatchCard key={b.id} b={b} focus={b.id === focusBatch} busyId={busyId} onComplete={complete} onOpen={(bt, st) => setOpen({ batchId: bt.id, stageId: st.stage_type_id })} />)}
 
             {ost && (
                 <Modal title="" fullScreen hideCloseButton onClose={() => setOpen(null)}>
@@ -534,7 +539,6 @@ export default function LineLoadingPage() {
             {assign && ost && <AssignModal b={ob} st={ost} onClose={() => setAssign(false)} onDone={done} />}
             {move && ost && <ChangeLineModal b={ob} st={ost} onClose={() => setMove(false)} onDone={done} />}
             {history && <HistoryModal onClose={() => setHistory(false)} />}
-            {completing && <CompletionDialog batch={completing.b} stageId={completing.st.stage_type_id} stageName={completing.st.first && completing.st.name === 'Cutting' ? 'Numbering' : completing.st.name} onClose={() => setCompleting(null)} onDone={load} />}
             <p className="text-[11px] text-slate-400 flex items-center gap-3"><Ruler size={12} /> Size mode = continuous numbering (loaded by size) <Shirt size={12} /> garment stages count garments</p>
         </div>
     );
