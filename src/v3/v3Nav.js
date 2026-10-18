@@ -2,11 +2,12 @@
 // answers for (controllers/v3/access.js pageRoles). The layout shows only the
 // pages the user may open; the home page shows them as tiles; the page guard
 // maps any /v3 address (detail pages too) to its key by the longest prefix.
-import { Home, Radar, Building2, Ruler, Network, MonitorSmartphone, Bug, Landmark, Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, Shirt, Route, ClipboardCheck, FileText, Calculator, Settings2, Boxes, ShoppingCart, FileCheck, Gauge, Warehouse, CalendarDays, Truck, ShoppingBag, PackageCheck, PackageOpen, BadgeCheck, Wrench, PackageMinus, ListRestart, ClipboardPlus, PackageX, Receipt, BarChart3, Forklift, Scissors, ScanLine, RotateCcw, Container, UserCog, Inbox, Activity } from 'lucide-react';
+import { Home, Radar, Building2, Ruler, Network, MonitorSmartphone, Bug, Landmark, Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, Shirt, Route, ClipboardCheck, FileText, Calculator, Settings2, Boxes, ShoppingCart, FileCheck, Gauge, Warehouse, CalendarDays, Truck, ShoppingBag, PackageCheck, PackageOpen, BadgeCheck, Wrench, PackageMinus, ListRestart, ClipboardPlus, PackageX, Receipt, BarChart3, Forklift, Scissors, ScanLine, RotateCcw, Container, UserCog, Inbox, Activity, LifeBuoy, ShieldCheck } from 'lucide-react';
 
 export const NAV = [
     { section: 'Home' },
     { to: '/v3', label: 'My work', icon: Home, end: true, key: 'home', text: 'What is waiting for you' },
+    { to: '/v3/problems', label: 'Problems & ideas', icon: LifeBuoy, key: 'problems', text: 'Report a problem or an idea; answers from the factory admin' },
     { to: '/v3/approvals', label: 'Approvals', icon: Inbox, key: 'approvals', text: 'Style BOMs, orders, requisitions and receipts waiting for your approval' },
     { section: 'Orders' },
     { to: '/v3/sales-orders', label: 'Sales orders', icon: FileText, key: 'sales.orders', text: 'Orders with colour × size quantities, PPM, documents' },
@@ -48,6 +49,7 @@ export const NAV = [
     { to: '/v3/production/loading', label: 'Line loading', icon: Container, key: 'production.loading', text: 'Load sizes onto lines' },
     { to: '/v3/production/check', label: 'Stage check', icon: ScanLine, key: 'production.check', text: 'Check pieces, bundles and garments' },
     { to: '/v3/production/recuts', label: 'Re-cuts', icon: RotateCcw, key: 'production.recuts', text: 'Replacements for rejected pieces' },
+    { to: '/v3/production/completions', label: 'Stage completions', icon: ShieldCheck, key: 'production.completions', text: 'Stages holding rejected pieces — approve to complete (QA / floor in-charge)' },
     { to: '/v3/packing', label: 'Packing & dispatch', icon: PackageCheck, key: 'production.packing', text: 'Pack finished garments into cartons, dispatch notes' },
     { to: '/v3/packing/dispatches', label: 'Dispatch notes', icon: PackageCheck, key: 'production.dispatch', hidden: true },
     { to: '/v3/insights', label: 'Production insights', icon: Activity, key: 'production.insights', text: 'WIP ageing, quality by stage and line, material cost per order' },

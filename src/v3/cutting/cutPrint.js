@@ -56,7 +56,7 @@ export function exportLaySheet(b, company = null, assets = {}) {
     autoTable(doc, {
         ...GRID, startY: y, margin: { left: M, right: M },
         body: [
-            ['Batch no.', b.batch_code, 'Date', dmy(b.finalized_at || b.created_at)],
+            ['Batch no.', `${b.floor_no}   (${b.batch_code})`, 'Date', dmy(b.finalized_at || b.created_at)],
             ['Order', `${b.line.order_no} · line ${b.line.line_no}`, 'Ship', dmy(b.line.ship_date)],
             ['Customer', b.line.customer_name, 'Style', `${b.line.style_code} ${b.line.style_name || ''}`],
             ['Layer length', layerLine(b), 'Numbering', b.numbering_mode === 'MODE_2' ? 'Continuous (mode 2)' : 'Per roll (mode 1)'],
@@ -70,7 +70,7 @@ export function exportLaySheet(b, company = null, assets = {}) {
     y = doc.lastAutoTable.finalY + (b.gate_override ? 8 : 6);
     doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text('CUTTING LAY DETAILS', M, y);
     const body = b.rolls.map(r => [
-        r.roll_sequence, r.roll_no, r.dye_lot || '', `${r.colour}`, `${num(r.metres)}`, r.max_lays ?? '',
+        r.floor_roll_no ?? r.roll_sequence, r.roll_no, r.dye_lot || '', `${r.colour}`, `${num(r.metres)}`, r.max_lays ?? '',
         r.lays ?? '', r.lays && r.short_m ? num(r.short_m) : '', r.lays ? num(r.end_bit_m) : '',
         r.lays && r.garments ? fixed((r.metres - (r.end_bit_m || 0)) / r.garments, 3) : '',
     ]);
@@ -78,7 +78,7 @@ export function exportLaySheet(b, company = null, assets = {}) {
     body.push(['', 'TOTAL', '', '', num(tot.m), '', cut ? tot.lays : '', cut && tot.sh ? num(tot.sh) : '', cut ? num(tot.eb) : '', '']);
     autoTable(doc, {
         ...GRID, startY: y + 2, margin: { left: M, right: M },
-        head: [['#', 'Roll', 'Lot', 'Colour', `Assigned (${u})`, 'Max lays', 'Lays', 'Short', 'End bit', `Cons (${u}/pc)`]],
+        head: [['Roll no.', 'Store tag', 'Lot', 'Colour', `Assigned (${u})`, 'Max lays', 'Lays', 'Short', 'End bit', `Cons (${u}/pc)`]],
         body,
         styles: { ...GRID.styles, fontSize: 7, cellPadding: 1.4, halign: 'center', valign: 'middle', minCellHeight: 7 },
         headStyles: { ...GRID.headStyles, fontSize: 6.5 },
@@ -119,13 +119,23 @@ export function exportCutSheet(b, company = null, assets = {}) {
     const W = doc.internal.pageSize.width; const H = doc.internal.pageSize.height; const M = 10; const CW = W - 2 * M;
     const u = unitOf(b);
     const sizes = b.ratios.map(r => r.size);
-    let y = letterhead(doc, { company, assets, title: `CUT SHEET  ${b.batch_code}`, x0: M, width: CW });
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
-    doc.text(`Order ${b.line.order_no} · line ${b.line.line_no} · ${b.line.customer_name} · style ${b.line.style_code} ${b.line.style_name || ''} · ship ${dmy(b.line.ship_date)}`, M, y);
-    doc.text(`Layer ${layerLine(b)} · ratio ${ratioLine(b, '  ')} (${b.ratio_sum} per lay) · numbering ${b.numbering_mode === 'MODE_2' ? 'continuous across rolls (mode 2)' : 'per roll (mode 1)'}`, M, y + 4.5);
-    doc.text(`Status ${b.status.toLowerCase()}${b.finalized_at ? ` · finalised ${dmy(b.finalized_at)} by ${b.finalized_by_name || ''}` : ''} · created by ${b.created_by_name || ''} ${dmy(b.created_at)}`, M, y + 9);
-    if (b.gate_override) { doc.setTextColor(170, 30, 30); doc.text('Released for cutting before all material was allocated.', W - M, y + 9, { align: 'right' }); doc.setTextColor(0); }
-    y += 13;
+    let y = letterhead(doc, { company, assets, title: `CUT SHEET  #${b.floor_no}  ${b.batch_code}`, x0: M, width: CW });
+    // Batch facts as a label / value grid (17 Oct 2026: the three run-on "·" lines were hard to read).
+    const who = (when, name) => [dmy(when), name ? `by ${name}` : ''].filter(Boolean).join(' ');
+    const L = (t) => ({ content: t, styles: { fontStyle: 'bold', textColor: [90, 90, 90], fillColor: [245, 246, 248] } });
+    autoTable(doc, {
+        ...GRID, startY: y, margin: { left: M, right: M },
+        body: [
+            [L('Order'), `${b.line.order_no} · line ${b.line.line_no}`, L('Customer'), b.line.customer_name, L('Style'), `${b.line.style_code} ${b.line.style_name || ''}`, L('Ship'), dmy(b.line.ship_date)],
+            [L('Layer length'), layerLine(b), L('Size ratio'), { content: ratioLine(b, '   '), colSpan: 3 }, L('Per lay'), `${b.ratio_sum} garments`],
+            [L('Numbering'), b.numbering_mode === 'MODE_2' ? 'Continuous across rolls (mode 2)' : 'Per roll (mode 1)', L('Status'), b.status === 'CUT' ? 'Cut' : b.status.charAt(0) + b.status.slice(1).toLowerCase(),
+                L('Finalised'), who(b.finalized_at, b.finalized_by_name) || '—', L('Created'), who(b.created_at, b.created_by_name)],
+            ...(b.gate_override ? [[L('Note'), { content: 'Released for cutting before all material was allocated.', colSpan: 7, styles: { textColor: [180, 20, 20], fontStyle: 'bold' } }]] : []),
+        ],
+        styles: { ...GRID.styles, fontSize: 7.8, cellPadding: 1, valign: 'middle' },
+        columnStyles: { 0: { cellWidth: 24 }, 2: { cellWidth: 20 }, 4: { cellWidth: 18 }, 6: { cellWidth: 18 } },
+    });
+    y = doc.lastAutoTable.finalY + 3;
 
     // Rolls: garments by size, fabric reconciliation, consumption vs BOM.
     const rows = b.rolls.map(r => {
@@ -137,7 +147,7 @@ export function exportCutSheet(b, company = null, assets = {}) {
     const T = rows.reduce((s, x) => ({ taken: s.taken + Number(x.r.metres || 0), lays: s.lays + (x.r.lays || 0), garments: s.garments + (x.r.garments || 0), pieces: s.pieces + (x.r.pieces || 0),
         used: s.used + (x.used || 0), eb: s.eb + Number(x.r.end_bit_m || 0), sh: s.sh + Number(x.r.short_m || 0), un: s.un + (x.un || 0) }), { taken: 0, lays: 0, garments: 0, pieces: 0, used: 0, eb: 0, sh: 0, un: 0 });
     const body = rows.map(({ r, g, used, un, cons }) => [
-        r.roll_sequence, r.roll_no, r.dye_lot || '', r.fabric_label, r.colour, num(r.metres), r.lays ?? '',
+        r.floor_roll_no ?? r.roll_sequence, r.roll_no, r.dye_lot || '', r.fabric_label, r.colour, num(r.metres), r.lays ?? '',
         ...sizes.map(s => (g[s] || '')), r.garments || '', r.pieces || '',
         used != null ? num(used) : '', num(r.end_bit_m), r.short_m ? num(r.short_m) : '', un != null ? num(un) : '',
         cons != null ? fixed(cons, 3) : '', r.bom_per_garment != null ? fixed(r.bom_per_garment, 3) : '',
@@ -145,7 +155,7 @@ export function exportCutSheet(b, company = null, assets = {}) {
     const totGarmentsBySize = Object.fromEntries(sizes.map(s => [s, rows.reduce((t, x) => t + (x.g[s] || 0), 0)]));
     body.push(['', 'TOTAL', '', '', '', num(T.taken), T.lays, ...sizes.map(s => totGarmentsBySize[s] || ''), T.garments, T.pieces, num(T.used), num(T.eb), num(T.sh), num(T.un),
         T.garments ? fixed((T.taken - T.eb) / T.garments, 3) : '', '']);
-    const head = [['#', 'Roll', 'Lot', 'Fabric', 'Colour', `Taken ${u}`, 'Lays', ...sizes, 'Garm.', 'Pieces', `Used ${u}`, `End bit`, `Short`, `Unacc.`, `Cons/pc`, `BOM/pc`]];
+    const head = [['Roll no.', 'Store tag', 'Lot', 'Fabric', 'Colour', `Taken ${u}`, 'Lays', ...sizes, 'Garm.', 'Pieces', `Used ${u}`, `End bit`, `Short`, `Unacc.`, `Cons/pc`, `BOM/pc`]];
     const unIdx = 7 + sizes.length + 5; const consIdx = unIdx + 1;
     autoTable(doc, {
         ...GRID, startY: y, margin: { left: M, right: M }, head, body,
@@ -163,7 +173,7 @@ export function exportCutSheet(b, company = null, assets = {}) {
     y = doc.lastAutoTable.finalY + 3;
     doc.setFontSize(6.8); doc.setFont('helvetica', 'normal');
     doc.text(`Used = lays x layer length.  Unaccounted = taken - used - end bit - short (red above 3 % of the roll: waste or fabric not returned).  Cons/pc = (taken - end bit) / garments;  BOM/pc = Order BOM fabric per planned garment.  Parts: ${[...new Set(b.rolls.flatMap(r => r.parts.map(p => p.part_name)))].join(', ')}.`, M, y, { maxWidth: CW });
-    y += 7;
+    y += 5;
 
     // Fabric reconciliation box (left) and planned vs cut (right).
     const leftW = 92;
@@ -193,7 +203,7 @@ export function exportCutSheet(b, company = null, assets = {}) {
             if (x?.over > 0) { d.cell.styles.textColor = [180, 20, 20]; d.cell.styles.fontStyle = 'bold'; }
         },
     });
-    y = Math.max(afterLeft, doc.lastAutoTable.finalY) + 6;
+    y = Math.max(afterLeft, doc.lastAutoTable.finalY) + 4;
 
     // Piece numbers: per roll (mode 1) — rows roll × part, columns sizes, "first–last".
     const nums = b.roll_numbers || [];
@@ -209,7 +219,7 @@ export function exportCutSheet(b, company = null, assets = {}) {
             head: [[sameAcrossParts ? 'Piece numbers per roll (all parts)' : 'Piece numbers (roll · part)', ...sizes]],
             body: list.map(n => {
                 const rl = rollOf(n.roll_sequence);
-                return [`${n.roll_sequence}. Roll ${rl?.roll_no || ''} · ${rl?.colour || ''}${sameAcrossParts ? '' : ` · ${n.part_name}`}`,
+                return [`Roll ${rl?.floor_roll_no ?? n.roll_sequence} (tag ${rl?.roll_no || ''}) · ${rl?.colour || ''}${sameAcrossParts ? '' : ` · ${n.part_name}`}`,
                     ...sizes.map(s => { const x = nums.find(z => z.roll_sequence === n.roll_sequence && z.size === s && z.part_name === n.part_name); return x ? `${x.first_no}–${x.last_no}` : ''; })];
             }),
             styles: { ...GRID.styles, fontSize: 7, cellPadding: 1.1, halign: 'center' }, columnStyles: { 0: { halign: 'left', cellWidth: 70 } },
@@ -217,13 +227,13 @@ export function exportCutSheet(b, company = null, assets = {}) {
         y = doc.lastAutoTable.finalY + 4;
     }
 
-    // Signatures.
-    y = Math.max(y + 14, H - 16);
-    if (y > H - 6) { doc.addPage(); y = 30; }
+    // Signatures (kept on the last page when there is room: line at least 8 mm below the tables).
+    y = Math.max(y + 8, H - 14);
+    if (y > H - 10) { doc.addPage(); y = 30; }
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
     const sig = ['Cutting manager', 'Cutter', 'Fabric store', 'Checked by'];
     sig.forEach((t, i) => { const x = M + (i * CW) / sig.length; doc.line(x, y, x + CW / sig.length - 10, y); doc.text(t, x, y + 4); });
     const pages = doc.getNumberOfPages();
-    for (let p = 1; p <= pages; p += 1) { doc.setPage(p); doc.setFontSize(7); doc.setTextColor(110); doc.text(`${b.batch_code} · page ${p} of ${pages} · printed ${dmy(new Date())}`, W - M, H - 4, { align: 'right' }); doc.setTextColor(0); }
+    for (let p = 1; p <= pages; p += 1) { doc.setPage(p); doc.setFontSize(7); doc.setTextColor(110); doc.text(`#${b.floor_no} ${b.batch_code} · page ${p} of ${pages} · printed ${dmy(new Date())}`, W - M, H - 4, { align: 'right' }); doc.setTextColor(0); }
     doc.save(`CutSheet-${b.batch_code.replace(/[^\w-]+/g, '-')}.pdf`);
 }

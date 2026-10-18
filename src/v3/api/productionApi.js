@@ -13,6 +13,21 @@ export const productionApi = {
     bundleCheck: (data) => api.post('/v3/production/bundle-checks', data),
     lines: (stageTypeId) => api.get('/v3/production/lines', { params: { stage_type_id: stageTypeId } }),
     loading: (stageTypeId) => api.get('/v3/production/loading', { params: { stage_type_id: stageTypeId } }),
+    pipeline: (params) => api.get('/v3/production/pipeline', { params }),           // line loader board (2.0's pipeline)
+    loadHistory: (params) => api.get('/v3/production/load-history', { params }),
+    // material replacement, as 2.0 (18 Oct 2026)
+    problems: (batchId, stageTypeId) => api.get(`/v3/production/batches/${batchId}/stages/${stageTypeId}/problems`),
+    replacements: (params) => api.get('/v3/production/replacements', { params }),
+    requestReplacement: (data) => api.post('/v3/production/replacements', data),
+    acceptReplacement: (id) => api.post(`/v3/production/replacements/${id}/accept`),
+    fulfilReplacement: (id) => api.post(`/v3/production/replacements/${id}/fulfil`),
+    cancelReplacement: (id, reason) => api.post(`/v3/production/replacements/${id}/cancel`, { reason }),
+    // stage completion over rejected pieces: approval by QA / floor in-charge (18 Oct 2026)
+    completion: (batchId, stageTypeId) => api.get(`/v3/production/batches/${batchId}/stages/${stageTypeId}/completion`),
+    requestCompletion: (batchId, stageTypeId, note) => api.post(`/v3/production/batches/${batchId}/stages/${stageTypeId}/completion`, { note }),
+    completionRequests: (params) => api.get('/v3/production/completion-requests', { params }),
+    approveCompletion: (id, note) => api.post(`/v3/production/completion-requests/${id}/approve`, { note }),
+    rejectCompletion: (id, note) => api.post(`/v3/production/completion-requests/${id}/reject`, { note }),
     load: (data) => api.post('/v3/production/loads', data),
     changeLine: (data) => api.post('/v3/production/loads/change-line', data),
     batchGarments: (batchId, stageTypeId) => api.get(`/v3/production/batches/${batchId}/garments/${stageTypeId}`),
@@ -23,4 +38,11 @@ export const productionApi = {
     recutRolls: (id) => api.get(`/v3/production/recuts/${id}/rolls`),
     cutRecut: (id, data) => api.post(`/v3/production/recuts/${id}/cut`, data),
     cancelRecut: (id, reason) => api.post(`/v3/production/recuts/${id}/cancel`, { reason }),
+    // 18 Oct 2026: station tools — why a stage isn't complete / recalculate, undo a check, scan a piece, today's numbers, work log
+    stageWhy: (batchId, stageTypeId) => api.get(`/v3/production/batches/${batchId}/stages/${stageTypeId}/why`),
+    refresh: (batchId) => api.post(`/v3/production/batches/${batchId}/refresh`),
+    revert: (data) => api.post('/v3/production/revert', data),
+    pieceLookup: (code, stageTypeId) => api.get('/v3/production/pieces/lookup', { params: { code, stage_type_id: stageTypeId } }),
+    myStats: (stageTypeId, lineId) => api.get('/v3/production/my-stats', { params: { stage_type_id: stageTypeId || undefined, line_id: lineId || undefined } }),
+    workLog: (params) => api.get('/v3/production/work-log', { params }),
 };

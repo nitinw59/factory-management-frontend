@@ -45,7 +45,7 @@ export default function CutBatchPage() {
         <div>
             <Link to="/v3/cutting?tab=batches" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Cut batches</Link>
             <div className="flex flex-wrap items-center gap-3 mb-1">
-                <h1 className="text-2xl font-black text-slate-900">{b.batch_code}</h1>
+                <h1 className="text-2xl font-black text-slate-900"><span className="mr-2 px-2 py-0.5 rounded-lg bg-slate-900 text-white" title="Batch number on the pieces">#{b.floor_no}</span>{b.batch_code}</h1>
                 <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${CUT_STATUS[b.status].cls}`}>{CUT_STATUS[b.status].label}</span>
                 <PriorityBadge p={b.priority} note={b.priority_note} always />
                 {perms.priority && b.status !== 'CANCELLED' && <button type="button" className="text-xs font-semibold text-indigo-700 hover:underline" onClick={() => { setFormError(''); setPrio({ priority: String(b.priority), note: b.priority_note || '' }); }}>Set priority</button>}
@@ -85,11 +85,11 @@ export default function CutBatchPage() {
             </div>
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
                 <table className="w-full text-sm min-w-[980px]">
-                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2">#</th><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Colour → parts</th><th className="px-3 py-2 text-right">Taken</th><th className="px-3 py-2 text-right">Lays</th><th className="px-3 py-2 text-right">Expected</th><th className="px-3 py-2 text-right">Used</th><th className="px-3 py-2 text-right">End bit</th><th className="px-3 py-2 text-right">Short</th><th className="px-3 py-2 text-right" title="Taken − lays × layer − end bit − short">Unaccounted</th><th className="px-3 py-2 text-right">Pieces</th><th className="px-3 py-2" /></tr></thead>
+                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2">Roll no.</th><th className="px-3 py-2">Store tag</th><th className="px-3 py-2">Colour → parts</th><th className="px-3 py-2 text-right">Taken</th><th className="px-3 py-2 text-right">Lays</th><th className="px-3 py-2 text-right">Expected</th><th className="px-3 py-2 text-right">Used</th><th className="px-3 py-2 text-right">End bit</th><th className="px-3 py-2 text-right">Short</th><th className="px-3 py-2 text-right" title="Taken − lays × layer − end bit − short">Unaccounted</th><th className="px-3 py-2 text-right">Pieces</th><th className="px-3 py-2" /></tr></thead>
                     <tbody>
                         {b.rolls.map(r => (
                             <tr key={r.id} className="border-t border-slate-100">
-                                <td className="px-3 py-2">{r.roll_sequence}</td>
+                                <td className="px-3 py-2 text-lg font-black" title="Number on the pieces">{r.floor_roll_no}</td>
                                 <td className="px-3 py-2 font-semibold">{r.roll_no}<span className="block text-xs font-normal text-slate-500">{r.dye_lot ? `lot ${r.dye_lot} · ` : ''}{r.fabric_label}</span></td>
                                 <td className="px-3 py-2 text-xs">{r.colour}<span className="block text-slate-500">{r.parts.map(p => p.part_name).join(', ')}</span></td>
                                 <td className="px-3 py-2 text-right tabular-nums">{fmt(r.metres)} {r.uom}</td>
@@ -143,7 +143,7 @@ export default function CutBatchPage() {
                 </Modal>
             )}
             {cut && (() => { const cutLay = perLay(b.layer_length_in, cut.roll.uom); return (
-                <Modal title={`${cut.roll.lays ? 'Re-cut' : 'Cut'} roll ${cut.roll.roll_no}`} onClose={() => setCut(null)}>
+                <Modal title={`${cut.roll.lays ? 'Re-cut' : 'Cut'} roll ${cut.roll.floor_roll_no} (tag ${cut.roll.roll_no})`} onClose={() => setCut(null)}>
                     <div className="space-y-3 w-[min(460px,88vw)]">
                         <p className="text-sm text-slate-600">{fmt(cut.roll.metres)} {cut.roll.uom}{cutLay ? <> · layer {fmt(cutLay, 2)} {cut.roll.uom} → up to {Math.floor((cut.roll.metres - (Number(cut.end) || 0) - (Number(cut.short) || 0)) / cutLay + 0.001)} lays</> : ' · weighed fabric: no lay-length check'}. Parts: {cut.roll.parts.map(p => p.part_name).join(', ')}.</p>
                         <div className="grid grid-cols-3 gap-3">

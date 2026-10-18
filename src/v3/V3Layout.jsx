@@ -7,6 +7,7 @@
 // - a page outside the user's roles shows "not for your role" instead of failing calls.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import ReportProblemButton from './problems/ReportProblem';
 import { ArrowLeftRight, LogOut, ShieldOff, Search, ChevronDown, ChevronRight, ArrowLeft, Menu, X, Eye } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { accessApi } from './api/accessApi';
@@ -15,6 +16,7 @@ import { apiError } from './api/mastersApi';
 import { NAV, keyForPath, visibleNav, trailFor } from './v3Nav';
 import { V3AccessContext } from './V3Access';
 import { useV3Live } from './live';
+import { StageApprovalCenter } from './production/stageApproval';
 
 const store = {
     get: (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
@@ -74,6 +76,7 @@ function TopBar({ me, user, logout, navigate, onMenu, children }) {
             <span className="text-xs font-black uppercase tracking-widest bg-indigo-600 text-white px-2.5 py-1 rounded-md shrink-0">3.0</span>
             {children}
             <div className="ml-auto flex items-center gap-2 shrink-0">
+                <ReportProblemButton />
                 <span className="text-xs text-slate-500 hidden lg:inline">{me?.user?.name || user?.name} · {me?.role_label || user?.role}{extra}</span>
                 <button type="button" onClick={() => navigate('/choose-version')} title="Switch version"
                     className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:border-indigo-300 hover:text-indigo-600 px-2.5 py-1.5 rounded-lg">
@@ -221,6 +224,7 @@ export default function V3Layout() {
                         )}
                     </TopBar>
                     <main className="flex-1 min-w-0 p-3 md:p-5">{outlet}</main>
+                    <StageApprovalCenter me={me} />
                 </div>
             </V3AccessContext.Provider>
         );
@@ -252,6 +256,7 @@ export default function V3Layout() {
                         <Trail />
                         {outlet}
                     </main>
+                    <StageApprovalCenter me={me} />
                 </div>
             </div>
         </V3AccessContext.Provider>

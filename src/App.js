@@ -269,6 +269,7 @@ const V3NewCutBatchPage = lazyPage(() => import('./v3/cutting/NewCutBatchPage'))
 const V3CutBatchPage = lazyPage(() => import('./v3/cutting/CutBatchPage'));
 const V3StageCheckPage = lazyPage(() => import('./v3/production/StageCheckPage'));
 const V3RecutsPage = lazyPage(() => import('./v3/production/RecutsPage'));
+const V3CompletionsPage = lazyPage(() => import('./v3/production/stageApproval'));
 const V3LineLoadingPage = lazyPage(() => import('./v3/production/LineLoadingPage'));
 const V3TrimKitsPage = lazyPage(() => import('./v3/production/TrimKitsPage'));
 const V3TrimKitPage = lazyPage(() => import('./v3/production/TrimKitPage'));
@@ -286,6 +287,8 @@ const V3OrderTrackPage = lazyPage(() => import('./v3/tracker/OrderTrackPage'));
 const V3InsightsPage = lazyPage(() => import('./v3/insights/InsightsPage'));
 const V3OrderCostPage = lazyPage(() => import('./v3/insights/OrderCostPage'));
 const V3PackingPage = lazyPage(() => import('./v3/packing/PackingPage'));
+const V3ProblemsPage = lazyPage(() => import('./v3/problems/ProblemsPage'));
+const V3ProblemPage = lazyPage(() => import('./v3/problems/ProblemPage'));
 const V3PackOrderPage = lazyPage(() => import('./v3/packing/PackOrderPage'));
 const V3DispatchPage = lazyPage(() => import('./v3/packing/DispatchPage'));
 const V3StoreItemsPage = lazyPage(() => import('./v3/store/StoreItemsPage'));
@@ -371,6 +374,7 @@ const appRoutes = (
           <Route path="cutting/batches/:id" element={<V3CutBatchPage />} />
           <Route path="production/check" element={<V3StageCheckPage />} />
           <Route path="production/recuts" element={<V3RecutsPage />} />
+          <Route path="production/completions" element={<V3CompletionsPage />} />
           <Route path="production/loading" element={<V3LineLoadingPage />} />
           <Route path="trim-kits" element={<V3TrimKitsPage />} />
           <Route path="trim-kits/:id" element={<V3TrimKitPage />} />
@@ -387,6 +391,8 @@ const appRoutes = (
           <Route path="insights" element={<V3InsightsPage />} />
           <Route path="insights/cost/:orderId" element={<V3OrderCostPage />} />
           <Route path="packing" element={<V3PackingPage />} />
+          <Route path="problems" element={<V3ProblemsPage />} />
+          <Route path="problems/:id" element={<V3ProblemPage />} />
           <Route path="packing/orders/:orderId" element={<V3PackOrderPage />} />
           <Route path="packing/dispatches/:id" element={<V3DispatchPage />} />
           <Route path="store/items" element={<V3StoreItemsPage />} />

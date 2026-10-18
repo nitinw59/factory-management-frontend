@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { API_BASE_URL } from '../utils/api';
 
 const subs = new Set();          // (reason) => void
+const msgSubs = new Set();       // (message) => void — typed messages (stage approvals, 18 Oct 2026)
 const listeners = new Set();     // connection status listeners
 let ws = null;
 let retryTimer = null;
@@ -30,7 +31,7 @@ function schedule(reason) {
 }
 
 function connect() {
-    if (ws || !subs.size) return;
+    if (ws || (!subs.size && !msgSubs.size)) return;
     const token = localStorage.getItem('factory_token');
     if (!token) return;
     let wasDown = !connected;
@@ -39,13 +40,17 @@ function connect() {
     } catch { ws = null; retryTimer = setTimeout(connect, 10000); return; }
     ws.onopen = () => { setConnected(true); if (wasDown && lastFire < Date.now() - 3000) schedule('reconnect'); wasDown = false; };
     ws.onmessage = (e) => {
-        try { const m = JSON.parse(e.data); if (m.type === 'V3_CHANGED') schedule('change'); } catch { /* not ours */ }
+        try {
+            const m = JSON.parse(e.data);
+            if (m.type === 'V3_CHANGED') schedule('change');
+            else msgSubs.forEach(f => { try { f(m); } catch { /* one listener failing doesn't stop the others */ } });
+        } catch { /* not ours */ }
     };
     ws.onclose = (e) => {
         ws = null;
         setConnected(false);
         if (e.code === 4001) return;   // token refused: the app's own session handling logs out
-        if (subs.size) retryTimer = setTimeout(connect, 5000);
+        if (subs.size || msgSubs.size) retryTimer = setTimeout(connect, 5000);
     };
     ws.onerror = () => { try { ws?.close(); } catch { /* closing anyway */ } };
 }
@@ -76,8 +81,25 @@ export function useV3Live(onChange, enabled = true) {
         return () => {
             subs.delete(f);
             listeners.delete(setUp);
-            if (!subs.size) disconnect();
+            if (!subs.size && !msgSubs.size) disconnect();
         };
     }, [enabled]);
     return up;
+}
+
+// Receive typed websocket messages (e.g. V3_STAGE_APPROVAL for QA / floor in-charge, V3_STAGE_APPROVAL_DECIDED for the
+// person who asked) — shares the one socket with useV3Live.
+export function useV3Message(onMessage, enabled = true) {
+    const cb = useRef(onMessage);
+    cb.current = onMessage;
+    useEffect(() => {
+        if (!enabled) return undefined;
+        const f = (m) => cb.current?.(m);
+        msgSubs.add(f);
+        connect();
+        return () => {
+            msgSubs.delete(f);
+            if (!subs.size && !msgSubs.size) disconnect();
+        };
+    }, [enabled]);
 }

@@ -51,4 +51,5 @@ export const ROLE_LABELS = {
     garment_checker: 'Garment Checker', quality_manager: 'Quality Manager', numbering_user: 'Numbering User', validation_user: 'Validation User',
     store_manager: 'Store Manager', supplier: 'Supplier', dispatch_officer: 'Dispatch Officer', purchase_manager: 'Purchase Manager',
     fabric_store_manager: 'Fabric Store Manager', merchandiser: 'Merchandiser', sales_manager: 'Sales Manager', mechanic: 'Mechanic',
+    floor_incharge: 'Floor In-charge',   // 3.0 role (18 Oct 2026): approves stage completion over rejected pieces
 };

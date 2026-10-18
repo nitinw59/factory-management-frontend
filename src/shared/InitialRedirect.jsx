@@ -108,6 +108,10 @@ const InitialRedirect = () => {
             // Fabric Store Managers are sent to their fabric rolls dashboard.
             return <Navigate to="/fabric-store-portal/rolls" replace />;
 
+        case 'floor_incharge':
+            // 3.0-only role (18 Oct 2026): approves stage completion over rejected pieces.
+            return <Navigate to="/v3" replace />;
+
         default:
             // If a user has a valid login but their role is not recognized
             // by the application's portals, they are sent to an unauthorized page.
