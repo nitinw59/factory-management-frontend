@@ -54,7 +54,7 @@ function SizePills({ sizes }) {
     );
 }
 
-function UnitRow({ u, item }) {
+function UnitRow({ u, item, action }) {
     const pct = u.items ? Math.round((u.done / u.items) * 100) : 0;
     const edge = u.rejected ? 'border-l-rose-400' : u.rework ? 'border-l-amber-400' : 'border-l-transparent';
     return (
@@ -72,6 +72,7 @@ function UnitRow({ u, item }) {
                 {u.state === 'DONE' && !u.rework && !u.rejected && <CheckCircle2 size={16} className="text-emerald-500" />}
             </span>
             <span className="ml-auto text-[11px] font-bold text-slate-400">{u.items} {item}</span>
+            {action}
         </div>
     );
 }
@@ -184,7 +185,8 @@ function AssignModal({ b, st, onClose, onDone }) {
     const L = lines?.find(l => l.id === String(line));
     const onThis = st.line && String(st.line.id) === String(line);
     const blocked = L && L.wip_limit != null && L.open_batches >= L.wip_limit && !onThis;
-    const lockedLine = Boolean(st.line && st.units.some(u => u.load_status === 'OPEN'));   // one line per batch × stage
+    const lockedLine = Boolean(st.line);   // the batch stays on its first line for the stage (19 Oct 2026)
+    const noChecker = L && L.checkers === 0;
     const save = async () => {
         setBusy(true); setError('');
         const picked = ready.filter(u => sel.has(u.key));
@@ -193,7 +195,7 @@ function AssignModal({ b, st, onClose, onDone }) {
             const r = await productionApi.load({ batch_id: b.id, stage_type_id: st.stage_type_id, production_line_id: line, sibling_lines,
                 ...(b.mode === 'MODE_2' ? { size_ids: picked.map(u => u.size_id) } : { roll_ids: picked.map(u => u.batch_roll_id) }) });
             const co = (r.data.co_activated || []).map(x => `${x.stage} on ${x.line}`).join(', ');
-            onDone(`${picked.length} ${unitWord(b, picked.length)} of batch #${b.floor_no} loaded onto ${L?.name || 'the line'} for ${st.name}${co ? ` — also switched on: ${co}` : ''}.`);
+            onDone(`${picked.length} ${unitWord(b, picked.length)} of batch #${b.floor_no} loaded onto ${L?.name || 'the line'} for ${st.name}${co ? ` — also switched on: ${co}` : ''}.${r.data.warning ? ` Warning: ${r.data.warning}` : ''}`);
         } catch (err) { setError(apiError(err, 'Failed.')); } finally { setBusy(false); }
     };
     return (
@@ -211,10 +213,11 @@ function AssignModal({ b, st, onClose, onDone }) {
                             <select value={line} onChange={e => setLine(e.target.value)} disabled={lockedLine}
                                 className={`w-full p-3 border-2 rounded-xl bg-white font-bold text-slate-700 text-base ${blocked ? 'border-rose-400' : 'border-slate-300'}`}>
                                 <option value="">— Select line —</option>
-                                {lines.map(l => <option key={l.id} value={l.id}>{l.name}  (WIP: {l.open_batches}/{l.wip_limit ?? '∞'})</option>)}
+                                {lines.map(l => <option key={l.id} value={l.id}>{l.name}  (WIP: {l.open_batches}/{l.wip_limit ?? '∞'}){l.checkers === 0 ? ' — no checker' : ''}</option>)}
                             </select>
                         )}
-                        {lockedLine && <p className="mt-2 text-xs font-bold text-slate-600">This batch is already running on {st.line.name} for {st.name} — one line per batch and stage (a manager can change the line).</p>}
+                        {lockedLine && <p className="mt-2 text-xs font-bold text-slate-600">This batch is on {st.line.name} for {st.name} — it stays on that line for every roll (a manager can change the line).</p>}
+                        {noChecker && <p className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-md border bg-amber-50 text-amber-800 border-amber-300"><AlertTriangle size={12} /> No checker workstation on {L.name} — nobody can check this work until one is set up. You can still assign.</p>}
                         {L && <p className={`mt-2 inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-md border ${blocked ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
                             {blocked ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />} Line load: {L.open_batches} / {L.wip_limit ?? '∞'} batches{blocked ? ' — at limit' : onThis ? ' (this batch is already on it)' : ''}</p>}
                     </div>
@@ -272,6 +275,32 @@ function AssignModal({ b, st, onClose, onDone }) {
     );
 }
 
+function UnloadModal({ b, st, u, onClose, onDone }) {
+    const [reason, setReason] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+    const save = async () => {
+        setBusy(true); setError('');
+        try {
+            const r = await productionApi.unload({ batch_id: b.id, stage_type_id: st.stage_type_id, reason: reason.trim(), ...(b.mode === 'MODE_2' ? { size_ids: [u.size_id] } : { roll_ids: [u.batch_roll_id] }) });
+            onDone(`${u.label} of batch #${b.floor_no} taken off the line for ${r.data.removed.map(x => x.stage).join(', ')}.`);
+        } catch (err) { setError(apiError(err, 'Failed.')); } finally { setBusy(false); }
+    };
+    return (
+        <Modal title={`Unload ${u.label} — ${st.name}, batch #${b.floor_no}`} onClose={onClose}>
+            <div className="w-[min(520px,92vw)] space-y-3 p-1">
+                <p className="text-sm text-slate-600">Takes {u.label} off <b>{st.line?.name}</b> — only while nothing of it is checked here. {st.scope === 'ASSEMBLY' ? 'It also comes off the assembly stages switched on with it, where nothing is checked.' : ''}</p>
+                <input className={`${inputCls} !py-3`} value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason (e.g. loaded the wrong roll)" maxLength={500} />
+                <ErrorBox text={error} />
+                <div className="flex justify-end gap-2">
+                    <button type="button" onClick={onClose} className="px-5 py-3 bg-white border-2 border-slate-200 rounded-xl font-bold">Cancel</button>
+                    <button type="button" onClick={save} disabled={busy || !reason.trim()} className="px-6 py-3 bg-rose-600 text-white rounded-xl font-black disabled:opacity-40">Unload</button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
 function ChangeLineModal({ b, st, onClose, onDone }) {
     const [lines, setLines] = useState(null);
     const [line, setLine] = useState('');
@@ -287,7 +316,7 @@ function ChangeLineModal({ b, st, onClose, onDone }) {
     return (
         <Modal title={`Change line — ${st.name}, batch #${b.floor_no}`} onClose={onClose}>
             <div className="w-[min(520px,92vw)] space-y-3 p-1">
-                <p className="text-sm text-slate-600">Now on <b>{st.line?.name}</b>. Everything of this batch still open at {st.name} moves to the new line.</p>
+                <p className="text-sm text-slate-600">Now on <b>{st.line?.name}</b>. Everything of this batch still open at {st.name} moves to the new line, and its later {unitWord(b)} load there.</p>
                 {!lines ? <Loading /> : <select className={`${inputCls} !py-3 !text-base`} value={line} onChange={e => setLine(e.target.value)}><option value="">— New line —</option>{lines.map(l => <option key={l.id} value={l.id}>{l.name}  (WIP: {l.open_batches}/{l.wip_limit ?? '∞'})</option>)}</select>}
                 <input className={`${inputCls} !py-3`} value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason (e.g. line down, machines short)" maxLength={500} />
                 <ErrorBox text={error} />
@@ -343,7 +372,7 @@ function ProblemsPanel({ b, st, perms, onChanged }) {
                             className={`text-left text-xs font-bold px-2.5 py-1.5 rounded-lg border-2 ${on ? 'bg-violet-600 border-violet-600 text-white' : CAT[p.category][1]} ${pick ? 'cursor-pointer' : 'cursor-default'}`}>
                             <span className="font-black">Roll #{p.roll_no ?? '—'} · {p.part_name} {p.size} #{p.no}</span>
                             <span className="block text-[11px] font-semibold opacity-80">{CAT[p.category][0]}{p.rejected_at ? ` at ${p.rejected_at}` : ''}{p.defect?.code ? ` · ${p.defect.code} ${p.defect.description || ''}` : ''}
-                                {p.replacement && ['REQUESTED', 'ACCEPTED'].includes(p.replacement.status) ? ` · ${p.replacement.status.toLowerCase()}` : ''}{p.recut ? ` · re-cut ${p.recut.toLowerCase()}` : ''}</span>
+                                {p.replacement && ['REQUESTED', 'PICKED_UP', 'ACCEPTED'].includes(p.replacement.status) ? ` · ${p.replacement.status.toLowerCase()}` : ''}{p.recut ? ` · re-cut ${p.recut.toLowerCase()}` : ''}</span>
                         </button>
                     );
                 })}</div>
@@ -351,7 +380,7 @@ function ProblemsPanel({ b, st, perms, onChanged }) {
                     <div className="flex flex-wrap items-center gap-2 pt-1">
                         <input className={`${inputCls} !w-72`} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Note for cutting (e.g. torn, wrong shade)" maxLength={500} />
                         <button type="button" onClick={send} disabled={busy || !sel.size} className="px-4 py-2.5 rounded-xl bg-violet-700 text-white text-xs font-black uppercase tracking-widest disabled:opacity-40">Request material replacement ({sel.size})</button>
-                        <span className="text-[11px] text-slate-500">Tap pieces in rework. Rejected pieces are replaced by a re-cut (Re-cuts page).</span>
+                        <span className="text-[11px] text-slate-500">Tap pieces in rework.</span>
                     </div>
                 )}
             </div>
@@ -359,8 +388,11 @@ function ProblemsPanel({ b, st, perms, onChanged }) {
     );
 }
 
-function StageDetail({ b, st, prev, perms, onClose, onAssign, onChangeLine, onRefresh }) {
+function StageDetail({ b, st, prev, perms, onClose, onAssign, onChangeLine, onRefresh, onUnload }) {
     const [tab, setTab] = useState(null);
+    // A roll (size) loaded by mistake comes off the line while nothing of it is checked here (19 Oct 2026).
+    const unloadBtn = (u) => (perms.load && !st.first && u.load_status === 'OPEN' && !u.checked
+        ? <button type="button" onClick={() => onUnload(u)} className="shrink-0 px-3 py-1.5 rounded-lg border-2 border-rose-200 text-rose-700 text-[11px] font-black uppercase tracking-widest hover:bg-rose-50">Unload</button> : null);
     const ready = st.units.filter(u => u.state === 'READY');
     const sections = [
         { key: 'ON_LINE', label: 'In progress', on: 'bg-amber-100 border-amber-400 text-amber-900', box: 'border-amber-300', list: st.units.filter(u => u.state === 'ON_LINE') },
@@ -380,7 +412,7 @@ function StageDetail({ b, st, prev, perms, onClose, onAssign, onChangeLine, onRe
                     <Wip line={st.line} />
                     <span className="ml-auto flex gap-2">
                         <button type="button" onClick={onRefresh} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-600 text-white text-xs font-black uppercase tracking-widest"><RefreshCw size={14} /> Refresh</button>
-                        {perms.changeLine && st.line && !st.first && st.units.some(u => u.load_status === 'OPEN') && <button type="button" onClick={onChangeLine} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-600 text-white text-xs font-black uppercase tracking-widest"><RefreshCw size={14} /> Change line</button>}
+                        {perms.changeLine && st.line && !st.first && st.status !== 'COMPLETED' && <button type="button" onClick={onChangeLine} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-600 text-white text-xs font-black uppercase tracking-widest"><RefreshCw size={14} /> Change line</button>}
                         <button type="button" onClick={onClose} className="p-2.5 rounded-xl bg-white/10 text-white" aria-label="Close"><X size={18} /></button>
                     </span>
                 </div>
@@ -416,7 +448,7 @@ function StageDetail({ b, st, prev, perms, onClose, onAssign, onChangeLine, onRe
                 </div>
                 <div className={`bg-white rounded-xl border-2 ${cur.box}`}>
                     {cur.list.length === 0 ? <p className="py-8 text-center text-sm font-bold text-slate-400">No {unitWord(b)} {cur.label.toLowerCase()}.</p>
-                        : cur.list.map(u => <UnitRow key={u.key} u={u} item={item} />)}
+                        : cur.list.map(u => <UnitRow key={u.key} u={u} item={item} action={unloadBtn(u)} />)}
                 </div>
             </div>
             {waiting.length > 0 && (
@@ -433,7 +465,7 @@ function HistoryModal({ onClose }) {
     const [rows, setRows] = useState(null);
     const [error, setError] = useState('');
     useEffect(() => { productionApi.loadHistory().then(r => setRows(r.data)).catch(err => setError(apiError(err, 'Failed.'))); }, []);
-    const ACT = { LOADED: ['Loaded', 'text-blue-700'], COMPLETED: ['Done', 'text-emerald-700'], LINE_CHANGED: ['Line changed', 'text-amber-700'] };
+    const ACT = { LOADED: ['Loaded', 'text-blue-700'], COMPLETED: ['Done', 'text-emerald-700'], LINE_CHANGED: ['Line changed', 'text-amber-700'], UNLOADED: ['Taken off', 'text-rose-700'] };
     return (
         <Modal title="Batch history" onClose={onClose}>
             <div className="w-[min(760px,92vw)] max-h-[70vh] overflow-y-auto">
@@ -456,6 +488,68 @@ function HistoryModal({ onClose }) {
     );
 }
 
+// Pieces marked for material replacement, for the line loader to collect (19 Oct 2026, phase 4): pick up → the cutting
+// manager accepts or rejects (reason shown here) → fulfils; the piece goes back to its station to check.
+const REP_STATE = { REQUESTED: ['To collect', 'bg-violet-100 text-violet-800'], PICKED_UP: ['Picked up', 'bg-sky-100 text-sky-800'], ACCEPTED: ['At cutting', 'bg-indigo-100 text-indigo-800'], REJECTED: ['Rejected — check again', 'bg-rose-100 text-rose-800'] };
+function PickupPanel({ canPickup, tick }) {
+    const [rows, setRows] = useState(null);
+    const [busy, setBusy] = useState(null);
+    const [err, setErr] = useState('');
+    const load = useCallback(() => Promise.all([productionApi.replacements({ status: 'open' }), productionApi.replacements({ status: 'REJECTED' })])
+        .then(([o, rj]) => setRows([...o.data, ...rj.data.filter(r => r.resolved_at && Date.now() - new Date(r.resolved_at).getTime() < 86400000)]))
+        .catch(() => setRows(null)), []);
+    useEffect(() => { load(); }, [load, tick]);
+    if (!rows || rows.length === 0) return null;
+    const pick = async (r) => {
+        setBusy(r.id); setErr('');
+        try { await productionApi.pickupReplacement(r.id); load(); } catch (e) { setErr(apiError(e, 'Failed.')); } finally { setBusy(null); }
+    };
+    const toCollect = rows.filter(r => r.status === 'REQUESTED').length;
+    return (
+        <div className="rounded-xl border-2 border-violet-200 bg-white">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-violet-100 bg-violet-50 rounded-t-xl">
+                <Package size={18} className="text-violet-700" /><span className="font-black text-slate-800">Material replacement — {toCollect} piece{toCollect === 1 ? '' : 's'} to collect</span>
+                <span className="text-xs text-slate-500 hidden sm:inline">Take the piece from the station to cutting, then tap Picked up.</span>
+            </div>
+            {err && <p className="px-4 pt-2 text-sm font-bold text-rose-700">{err}</p>}
+            <div className="divide-y divide-slate-100">{rows.map(r => (
+                <div key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+                    <span className="text-lg font-black text-slate-900">#{r.floor_no}</span>
+                    <span className="text-sm"><b>{r.part_name} · {r.size} #{r.no}</b> <span className="text-slate-500">roll #{r.roll_no ?? '—'} · {r.colour}</span>
+                        <span className="block text-xs text-slate-500">{r.stage}{r.line ? ` · ${r.line}` : ''} · since {new Date(r.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{r.rejected_reason ? ` · “${r.rejected_reason}”` : ''}</span></span>
+                    <span className={`ml-auto text-[11px] font-black px-2 py-1 rounded-lg ${REP_STATE[r.status]?.[1] || 'bg-slate-100'}`}>{REP_STATE[r.status]?.[0] || r.status}</span>
+                    {canPickup && r.status === 'REQUESTED' && <button type="button" disabled={busy === r.id} onClick={() => pick(r)} className="px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-black disabled:opacity-50">Picked up</button>}
+                </div>
+            ))}</div>
+        </div>
+    );
+}
+
+// Line accountability (20 Oct 2026): the lines this line loader is responsible for, and what others did on them in the
+// last 7 days (loads, unloads, line changes, replacement pickups, trim kit signatures) — anyone may cover a line.
+const MY_WHAT = { LOADED: 'Loaded', UNLOADED: 'Unloaded', LINE_CHANGED: 'Line changed', COMPLETED: 'Completed', PICKED_UP: 'Replacement picked up', SIGNED: 'Trim kit signed' };
+function MyLinesPanel({ tick }) {
+    const [d, setD] = useState(null);
+    const [open, setOpen] = useState(false);
+    useEffect(() => { productionApi.floorMyLines().then(r => setD(r.data)).catch(() => setD(null)); }, [tick]);
+    if (!d || d.lines.length === 0) return null;
+    const others = d.activity.filter(a => a.covering);
+    return (
+        <div className="rounded-xl border border-slate-200 bg-white">
+            <button type="button" onClick={() => setOpen(!open)} className="w-full flex flex-wrap items-center gap-2 px-4 py-2.5 text-left">
+                <span className="font-black text-slate-800">My lines: {d.lines.map(l => l.name).join(', ')}</span>
+                <span className={`text-xs font-bold ${others.length ? 'text-amber-700' : 'text-slate-500'}`}>{others.length ? `${others.length} thing(s) done by others covering in the last 7 days` : 'nothing done by others in the last 7 days'}</span>
+                <span className="ml-auto text-xs font-bold text-indigo-700">{open ? 'Hide' : 'Show'}</span>
+            </button>
+            {open && <div className="divide-y divide-slate-100 border-t border-slate-100 max-h-72 overflow-y-auto">{d.activity.length === 0 ? <p className="px-4 py-2 text-sm text-slate-400">Nothing in the last 7 days.</p> : d.activity.map((a, i) => (
+                <p key={i} className="px-4 py-1.5 text-sm"><span className="text-xs text-slate-400 mr-2">{new Date(a.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                    <b>{MY_WHAT[a.what] || a.what}</b>{a.floor_no ? ` · #${a.floor_no}` : ''}{a.stage ? ` · ${a.stage}` : ''} · {a.line}{a.note ? <span className="text-slate-500"> — {a.note}</span> : null}
+                    {a.covering ? <span className="ml-1 text-[11px] font-black px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300">by {a.by_name || 'someone'} — covering</span> : <span className="text-slate-500"> · by you</span>}</p>
+            ))}</div>}
+        </div>
+    );
+}
+
 export default function LineLoadingPage() {
     const [params] = useSearchParams();
     const focusBatch = params.get('batch');   // from the order tracker
@@ -465,6 +559,7 @@ export default function LineLoadingPage() {
     const [open, setOpen] = useState(null);       // { batchId, stageId }
     const [assign, setAssign] = useState(false);
     const [move, setMove] = useState(false);
+    const [unload, setUnload] = useState(null);   // unit to take off the line
     const [history, setHistory] = useState(false);
     const [kits, setKits] = useState(null);       // trim kits ready for pickup (13 Oct 2026)
     const [busyId, setBusyId] = useState(null);
@@ -476,7 +571,8 @@ export default function LineLoadingPage() {
     }, [showDone]);
     useEffect(() => { productionApi.permissions().then(r => setPerms(r.data)).catch(() => {}); }, []);
     useEffect(() => { load(); }, [load]);
-    const live = useV3Live(load);
+    const [tick, setTick] = useState(0);
+    const live = useV3Live(useCallback(() => { load(); setTick(t => t + 1); }, [load]));
     const done = (text) => { setAssign(false); setMove(false); setMsg(text); load(); };
     // Check & complete (as 2.0): recalculate the batch; the stage closes once every piece / garment is OK (no Reject
     // since 18 Oct 2026 — rework and material replacement hold it open), else say what is holding it.
@@ -499,17 +595,15 @@ export default function LineLoadingPage() {
     const list = rows && (focusBatch ? [...rows].sort((a, b) => (b.id === focusBatch) - (a.id === focusBatch)) : rows);
 
     return (
-        <div className="space-y-5">
-            <div className="flex flex-wrap items-end gap-3">
-                <div>
-                    <h1 className="text-3xl font-black text-slate-900 tracking-tight">Line Loader</h1>
-                    <p className="text-sm text-slate-500">Track each batch through its production pipeline and assign lines per stage — roll by roll (size by size for size-mode batches).</p>
-                </div>
+        <div className="space-y-3">
+            {/* Compact header (20 Oct 2026): one row — title, live, show finished, history, refresh. */}
+            <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-xl font-black text-slate-900 tracking-tight" title="Track each batch through its production pipeline and assign lines per stage — roll by roll (size by size for size-mode batches).">Line Loader</h1>
+                <span className={`inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest ${live ? 'text-emerald-600' : 'text-slate-400'}`}><span className={`h-2 w-2 rounded-full ${live ? 'bg-emerald-500' : 'bg-slate-300'}`} />{live ? 'Live' : 'Offline'}</span>
                 <span className="ml-auto flex flex-wrap items-center gap-2">
-                    <span className={`inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest ${live ? 'text-emerald-600' : 'text-slate-400'}`}><span className={`h-2.5 w-2.5 rounded-full ${live ? 'bg-emerald-500' : 'bg-slate-300'}`} />{live ? 'Live' : 'Offline'}</span>
-                    <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 px-3 py-2"><input type="checkbox" className="w-4 h-4" checked={showDone} onChange={e => setShowDone(e.target.checked)} /> Show finished</label>
-                    <button type="button" onClick={() => setHistory(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border-2 border-indigo-200 bg-indigo-50 text-indigo-700 text-sm font-bold"><History size={15} /> History</button>
-                    <button type="button" onClick={load} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-slate-700 text-sm font-bold"><RefreshCw size={15} /> Refresh</button>
+                    <label className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-600 px-2 py-1.5"><input type="checkbox" className="w-4 h-4" checked={showDone} onChange={e => setShowDone(e.target.checked)} /> Show finished</label>
+                    <button type="button" onClick={() => setHistory(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm font-bold"><History size={14} /> History</button>
+                    <button type="button" onClick={load} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-sm font-bold"><RefreshCw size={14} /> Refresh</button>
                 </span>
             </div>
             {kits?.length > 0 && (
@@ -520,6 +614,8 @@ export default function LineLoadingPage() {
                     <ArrowRight size={16} className="ml-auto text-emerald-600" />
                 </Link>
             )}
+            <MyLinesPanel tick={tick} />
+            <PickupPanel canPickup={perms.replacePickup} tick={tick} />
             <ErrorBox text={error} />
             {msg && <p className="text-sm font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5">{msg}</p>}
             {!list ? (!error && <Loading />) : list.length === 0 ? (
@@ -532,12 +628,13 @@ export default function LineLoadingPage() {
 
             {ost && (
                 <Modal title="" fullScreen hideCloseButton onClose={() => setOpen(null)}>
-                    <StageDetail b={ob} st={ost} prev={oi > 0 ? ob.stages[oi - 1] : null} perms={perms} onClose={() => setOpen(null)} onRefresh={load}
+                    <StageDetail b={ob} st={ost} prev={oi > 0 ? ob.stages[oi - 1] : null} perms={perms} onClose={() => setOpen(null)} onRefresh={load} onUnload={(u) => setUnload(u)}
                         onAssign={() => setAssign(true)} onChangeLine={() => setMove(true)} />
                 </Modal>
             )}
             {assign && ost && <AssignModal b={ob} st={ost} onClose={() => setAssign(false)} onDone={done} />}
             {move && ost && <ChangeLineModal b={ob} st={ost} onClose={() => setMove(false)} onDone={done} />}
+            {unload && ost && <UnloadModal b={ob} st={ost} u={unload} onClose={() => setUnload(null)} onDone={(t) => { setUnload(null); done(t); }} />}
             {history && <HistoryModal onClose={() => setHistory(false)} />}
             <p className="text-[11px] text-slate-400 flex items-center gap-3"><Ruler size={12} /> Size mode = continuous numbering (loaded by size) <Shirt size={12} /> garment stages count garments</p>
         </div>

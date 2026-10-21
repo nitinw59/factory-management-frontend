@@ -28,7 +28,38 @@ const sizeGarments = (b, r) => Object.fromEntries(b.ratios.map(x => [x.size, r.l
 const usedOf = (b, r) => (r.lays && LEN_PER_IN[r.uom] ? r.lays * Number(b.layer_length_in) * LEN_PER_IN[r.uom] : null);
 const unaccountedOf = (b, r) => { const u = usedOf(b, r); return u == null ? null : Math.round((r.metres - u - (r.end_bit_m || 0) - (r.short_m || 0)) * 100) / 100; };
 
-function letterhead(doc, { company, assets, title, x0, width, y = 10 }) {
+// Batch number on every lay / cut sheet (20 Oct 2026, asked: "show and highlight batch id mandatorily"): the number
+// printed on the pieces (#floor_no; the batch code if it has none) in a black box — big on page 1 by the title, small
+// at the top of every later page — and bold in the footer of every page.
+const batchNo = (b) => (b.floor_no != null && b.floor_no !== '' ? `#${b.floor_no}` : b.batch_code);
+function batchBadge(doc, b, xRight, y, big) {
+    const no = batchNo(b);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(big ? 18 : 11);
+    const w = Math.max(big ? 30 : 22, doc.getTextWidth(no) + 8); const h = big ? 13 : 8;
+    doc.setFillColor(0, 0, 0); doc.roundedRect(xRight - w, y, w, h, 1.2, 1.2, 'F');
+    doc.setTextColor(255);
+    if (big) { doc.setFontSize(6); doc.text('BATCH', xRight - w / 2, y + 3.4, { align: 'center' }); doc.setFontSize(18); doc.text(no, xRight - w / 2, y + 10.6, { align: 'center' }); }
+    else { doc.setFontSize(5.5); doc.text('BATCH', xRight - w + 2.5, y + 5.1); doc.setFontSize(11); doc.text(no, xRight - 2.5, y + 5.8, { align: 'right' }); }
+    doc.setTextColor(0);
+    return w;
+}
+// Small badge on pages 2+ and the footer (batch bold, then page / printed) on every page.
+function stampBatch(doc, b, { W, H, M }) {
+    const pages = doc.getNumberOfPages();
+    for (let p = 1; p <= pages; p += 1) {
+        doc.setPage(p);
+        if (p > 1) batchBadge(doc, b, W - M, 3, false);
+        const rest = ` ${b.batch_code} · page ${p} of ${pages} · printed ${dmy(new Date())}`;
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(110);
+        doc.text(rest, W - M, H - 4, { align: 'right' });
+        const restW = doc.getTextWidth(rest);
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(0);
+        doc.text(`BATCH ${batchNo(b)}`, W - M - restW, H - 4, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+    }
+}
+
+function letterhead(doc, { company, assets, title, x0, width, y = 10, batch = null }) {
     let x = x0;
     const logo = assets?.logo;
     if (logo?.dataUrl) {
@@ -39,7 +70,8 @@ function letterhead(doc, { company, assets, title, x0, width, y = 10 }) {
     }
     doc.setTextColor(0); doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
     doc.text(companyName(company) || ' ', x, y + 3);
-    doc.setFontSize(13); doc.text(title, x0 + width, y + 3, { align: 'right' });
+    const badgeW = batch ? batchBadge(doc, batch, x0 + width, y - 3, true) + 3 : 0;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.text(title, x0 + width - badgeW, y + 3, { align: 'right' });
     doc.setLineWidth(0.3); doc.line(x0, y + 11, x0 + width, y + 11);
     return y + 15;
 }
@@ -52,11 +84,11 @@ export function exportLaySheet(b, company = null, assets = {}) {
     const W = doc.internal.pageSize.width; const H = doc.internal.pageSize.height; const M = 8; const CW = W - 2 * M;
     const u = unitOf(b);
     const cut = b.rolls.some(r => r.lays);
-    let y = letterhead(doc, { company, assets, title: 'LAY SHEET', x0: M, width: CW });
+    let y = letterhead(doc, { company, assets, title: 'LAY SHEET', x0: M, width: CW, batch: b });
     autoTable(doc, {
         ...GRID, startY: y, margin: { left: M, right: M },
         body: [
-            ['Batch no.', `${b.floor_no}   (${b.batch_code})`, 'Date', dmy(b.finalized_at || b.created_at)],
+            ['Batch no.', { content: `${batchNo(b)}   ${b.batch_code}`, styles: { fontStyle: 'bold', fontSize: 9, fillColor: [255, 236, 153] } }, 'Date', dmy(b.finalized_at || b.created_at)],
             ['Order', `${b.line.order_no} · line ${b.line.line_no}`, 'Ship', dmy(b.line.ship_date)],
             ['Customer', b.line.customer_name, 'Style', `${b.line.style_code} ${b.line.style_name || ''}`],
             ['Layer length', layerLine(b), 'Numbering', b.numbering_mode === 'MODE_2' ? 'Continuous (mode 2)' : 'Per roll (mode 1)'],
@@ -110,6 +142,7 @@ export function exportLaySheet(b, company = null, assets = {}) {
     if (y > H - 8) { doc.addPage(); y = 30; }
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
     [['Prepared by', M], ['Cutter', M + CW / 3], ['Authorised by', M + (2 * CW) / 3]].forEach(([t, x]) => { doc.line(x, y, x + CW / 3 - 6, y); doc.text(t, x, y + 4); });
+    stampBatch(doc, b, { W, H, M });
     doc.save(`LaySheet-${b.batch_code.replace(/[^\w-]+/g, '-')}.pdf`);
 }
 
@@ -119,7 +152,7 @@ export function exportCutSheet(b, company = null, assets = {}) {
     const W = doc.internal.pageSize.width; const H = doc.internal.pageSize.height; const M = 10; const CW = W - 2 * M;
     const u = unitOf(b);
     const sizes = b.ratios.map(r => r.size);
-    let y = letterhead(doc, { company, assets, title: `CUT SHEET  #${b.floor_no}  ${b.batch_code}`, x0: M, width: CW });
+    let y = letterhead(doc, { company, assets, title: `CUT SHEET  ${b.batch_code}`, x0: M, width: CW, batch: b });
     // Batch facts as a label / value grid (17 Oct 2026: the three run-on "·" lines were hard to read).
     const who = (when, name) => [dmy(when), name ? `by ${name}` : ''].filter(Boolean).join(' ');
     const L = (t) => ({ content: t, styles: { fontStyle: 'bold', textColor: [90, 90, 90], fillColor: [245, 246, 248] } });
@@ -149,7 +182,8 @@ export function exportCutSheet(b, company = null, assets = {}) {
     const body = rows.map(({ r, g, used, un, cons }) => [
         r.floor_roll_no ?? r.roll_sequence, r.roll_no, r.dye_lot || '', r.fabric_label, r.colour, num(r.metres), r.lays ?? '',
         ...sizes.map(s => (g[s] || '')), r.garments || '', r.pieces || '',
-        used != null ? num(used) : '', num(r.end_bit_m), r.short_m ? num(r.short_m) : '', un != null ? num(un) : '',
+        used != null ? num(used) : '', [num(r.end_bit_m), ...(r.end_bits || []).map(e => `${e.tag} ${num(e.metres)}${e.status === 'WRITTEN_OFF' ? ' w/o' : ''}`)].filter(Boolean).join('\n'),   // end-bit tags under the roll (19 Oct 2026)
+        r.short_m ? num(r.short_m) : '', un != null ? num(un) : '',
         cons != null ? fixed(cons, 3) : '', r.bom_per_garment != null ? fixed(r.bom_per_garment, 3) : '',
     ]);
     const totGarmentsBySize = Object.fromEntries(sizes.map(s => [s, rows.reduce((t, x) => t + (x.g[s] || 0), 0)]));
@@ -180,7 +214,7 @@ export function exportCutSheet(b, company = null, assets = {}) {
     autoTable(doc, {
         ...GRID, startY: y, margin: { left: M }, tableWidth: leftW,
         head: [['Fabric', `${u}`]],
-        body: [['Taken from the store (issued rolls)', num(T.taken)], ['Used by the lays', num(T.used)], ['End bits back to the roll', num(T.eb)], ['Short (roll had less than its label)', num(T.sh)],
+        body: [['Taken (issued rolls + lay pieces)', num(T.taken)], ['Used by the lays', num(T.used)], ['End bits kept at cutting (reserve + lay)', num(T.eb)], ['Short (roll had less than its label)', num(T.sh)],
             ['Not accounted for', num(T.un)], ['Garments cut', String(T.garments)], [`Consumption per garment`, T.garments ? fixed((T.taken - T.eb) / T.garments, 3) : '']],
         styles: { ...GRID.styles, fontSize: 7.5, cellPadding: 1.3 }, columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' } },
         didParseCell: (d) => { if (d.section === 'body' && d.row.index === 4 && T.un > Math.max(0.5, T.taken * 0.03)) { d.cell.styles.textColor = [180, 20, 20]; d.cell.styles.fontStyle = 'bold'; } },
@@ -233,7 +267,6 @@ export function exportCutSheet(b, company = null, assets = {}) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
     const sig = ['Cutting manager', 'Cutter', 'Fabric store', 'Checked by'];
     sig.forEach((t, i) => { const x = M + (i * CW) / sig.length; doc.line(x, y, x + CW / sig.length - 10, y); doc.text(t, x, y + 4); });
-    const pages = doc.getNumberOfPages();
-    for (let p = 1; p <= pages; p += 1) { doc.setPage(p); doc.setFontSize(7); doc.setTextColor(110); doc.text(`#${b.floor_no} ${b.batch_code} · page ${p} of ${pages} · printed ${dmy(new Date())}`, W - M, H - 4, { align: 'right' }); doc.setTextColor(0); }
+    stampBatch(doc, b, { W, H, M });
     doc.save(`CutSheet-${b.batch_code.replace(/[^\w-]+/g, '-')}.pdf`);
 }

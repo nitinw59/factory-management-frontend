@@ -72,7 +72,11 @@ function TopBar({ me, user, logout, navigate, onMenu, children }) {
     return (
         <header className="h-14 shrink-0 bg-white border-b border-slate-200 flex items-center gap-3 px-3 md:px-4 sticky top-0 z-20">
             {onMenu && <button type="button" onClick={onMenu} className="md:hidden p-1.5 rounded-lg border border-slate-200 text-slate-600" aria-label="Open the menu"><Menu size={18} /></button>}
-            <span className="text-xs font-black uppercase tracking-widest bg-indigo-600 text-white px-2.5 py-1 rounded-md shrink-0">3.0</span>
+            {/* Matrix logo (20 Oct 2026, was a "3.0" badge) — the same logo as the 2.0 portals; back to My work. */}
+            <NavLink to="/v3" className="flex items-center gap-2 shrink-0" title="MATRIX — My work">
+                <img src="/matrix_logo.png" alt="MATRIX" className="h-8 w-auto" />
+                <span className="hidden sm:inline text-sm font-black tracking-[0.2em] text-slate-800">MATRIX</span>
+            </NavLink>
             {children}
             <div className="ml-auto flex items-center gap-2 shrink-0">
                 <ReportProblemButton />

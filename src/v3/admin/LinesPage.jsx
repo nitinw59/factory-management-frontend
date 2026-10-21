@@ -62,7 +62,7 @@ export default function LinesPage() {
 
     return (
         <div>
-            <PageHeader title="Lines & line types" subtitle="Shared with 2.0 — the same lines run 2.0 and 3.0 production. Changes go through 2.0's own rules and are logged in 3.0."
+            <PageHeader title="Lines & line types" subtitle="Shared with 2.0 — the same lines run 2.0 and 3.0 production. Changes go through 2.0's own rules and are logged in 3.0. Responsible supervisor and line loader, and workstations on a tablet: Production → Floor layout."
                 actions={tab === 'lines' ? <PrimaryButton onClick={() => openLine(null)}><Plus size={14} /> Add line</PrimaryButton>
                     : <PrimaryButton onClick={() => { setFormError(''); setEditType({ type_name: '', tracking_table_name: 'SKIP', processing_mode: 'PIECE', processing_scope: 'ALL_PARTS' }); }}><Plus size={14} /> Add line type</PrimaryButton>} />
             <div className="flex gap-2 mb-3">{[['lines', 'Lines'], ['types', 'Line types']].map(([k, l]) => (
@@ -73,11 +73,12 @@ export default function LinesPage() {
             {!lines ? <Loading /> : tab === 'lines' ? (
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
                     <table className="w-full text-sm min-w-[640px]">
-                        <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2">Line</th><th className="px-3 py-2">Type</th><th className="px-3 py-2 text-right">WIP limit</th><th className="px-3 py-2">Job work</th><th className="px-3 py-2"></th></tr></thead>
+                        <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2">Line</th><th className="px-3 py-2">Type</th><th className="px-3 py-2" title="Set on Production → Floor layout">Responsible supervisor</th><th className="px-3 py-2 text-right">WIP limit</th><th className="px-3 py-2">Job work</th><th className="px-3 py-2"></th></tr></thead>
                         <tbody>{lines.map(l => (
                             <tr key={l.id} className="border-t border-slate-100">
                                 <td className="px-3 py-2 font-semibold">{l.name}{l.is_active === false ? <span className="ml-1 text-xs text-slate-400">(inactive)</span> : null}</td>
                                 <td className="px-3 py-2">{l.type_name}</td>
+                                <td className={`px-3 py-2 text-xs ${l.line_manager_name ? '' : 'text-rose-700 font-semibold'}`}>{l.line_manager_name || 'none'}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{l.wip_limit ?? '—'}</td>
                                 <td className="px-3 py-2 text-xs">{l.is_job_work ? 'yes' : ''}</td>
                                 <td className="px-3 py-2 whitespace-nowrap text-right">

@@ -1,23 +1,27 @@
 // One goods receipt: PO and challan, each line (label code typed vs the item,
 // accepted / rejected, rolls), the orders it was bought for (allocate next),
 // approve / reject / reverse for the purchase manager, scans, history.
+// 20 Oct 2026: while it waits for approval its receiver (or the purchase manager) can withdraw it to correct a
+// data-entry mistake — the entries go back to the receive screen as a draft; a withdrawn GRN can be entered again.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, XCircle, Undo2, Upload, AlertTriangle, PackageX } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, Undo2, Upload, AlertTriangle, PackageX, Pencil } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { purchasingApi } from '../api/purchasingApi';
 import { apiError } from '../api/mastersApi';
 import { API_BASE_URL } from '../../utils/api';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
-import { GRN_STATUS } from './grnShared';
+import { GRN_STATUS, grnToDraft, writeDraft } from './grnShared';
+import { useAuth } from '../../context/AuthContext';
 
 const fmt = (v) => Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
-const ACTION = { RECEIVED: 'Received', PENDING_APPROVAL: 'Sent for approval', APPROVED: 'Approved', REJECTED: 'Rejected', REVERSED: 'Reversed', DOCUMENT: 'Document', RETURNED: 'Returned to supplier' };
+const ACTION = { RECEIVED: 'Received', PENDING_APPROVAL: 'Sent for approval', APPROVED: 'Approved', REJECTED: 'Rejected', REVERSED: 'Reversed', DOCUMENT: 'Document', RETURNED: 'Returned to supplier', WITHDRAWN: 'Withdrawn to correct' };
 
 export default function GrnPage() {
     const { id } = useParams();
     const navigate = useNavigate();
+    const { user } = useAuth();
     const [g, setG] = useState(null);
     const [perms, setPerms] = useState({ manage: false, receive: false });
     const [error, setError] = useState('');
@@ -36,6 +40,15 @@ export default function GrnPage() {
         try { setG((await fn()).data); if (close) close(); } catch (err) { (close ? setFormError : setError)(apiError(err, 'Failed.')); } finally { setBusy(false); }
     };
     const orders = [...new Map(g.lines.flatMap(l => l.bought_for).map(o => [o.order_id, o])).values()];
+    // Withdraw: its receiver or the purchase manager (the server checks the same).
+    const canWithdraw = g.status === 'PENDING_APPROVAL' && (perms.manage || (perms.receive && String(g.received_by_user_id) === String(user?.id)));
+    // The GRN's entries as a receive draft in this browser, then the receive screen for its PO.
+    const correctAgain = (grn) => { writeDraft(user?.id, grn.po_id, grnToDraft(grn)); navigate(`/v3/purchasing/receive/${grn.po_id}`); };
+    const withdraw = async () => {
+        setBusy(true); setFormError('');
+        try { const res = await purchasingApi.grnAction(id, 'withdraw', askText.trim()); setAsk(null); correctAgain(res.data); }
+        catch (err) { setFormError(apiError(err, 'Failed to withdraw.')); setBusy(false); }
+    };
 
     return (
         <div>
@@ -52,6 +65,7 @@ export default function GrnPage() {
                 </div>
             )}
             {g.status === 'REJECTED' && <div className="mb-3 text-sm bg-rose-50 border border-rose-200 text-rose-800 rounded-lg px-3 py-2"><b>Rejected:</b> {g.rejected_reason}</div>}
+            {g.status === 'WITHDRAWN' && <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Withdrawn to correct</b>{g.withdrawn_by_name ? ` by ${g.withdrawn_by_name}` : ''}{g.withdrawn_at ? ` on ${new Date(g.withdrawn_at).toLocaleString()}` : ''}: {g.withdrawn_reason}<span className="block text-xs text-slate-500">Nothing went into stock. The corrected receipt is a new GRN; this one stays as the record.</span></div>}
             {g.status === 'REVERSED' && <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Reversed</b>{g.reversed_by_name ? ` by ${g.reversed_by_name}` : ''}: {g.reversed_reason}</div>}
 
             <div className="flex flex-wrap gap-2 mb-3">
@@ -59,6 +73,8 @@ export default function GrnPage() {
                     <PrimaryButton onClick={() => { if (window.confirm(`Approve ${g.grn_no} and put it into stock?`)) run(() => purchasingApi.grnAction(id, 'approve')); }} busy={busy} disabled={busy}><CheckCircle2 size={14} /> Approve into stock</PrimaryButton>
                     <SecondaryButton onClick={() => { setAskText(''); setFormError(''); setAsk({ title: `Reject ${g.grn_no}`, action: 'reject', confirm: 'Reject' }); }}><XCircle size={14} /> Reject</SecondaryButton>
                 </>}
+                {canWithdraw && <SecondaryButton onClick={() => { setAskText(''); setFormError(''); setAsk({ title: `Withdraw ${g.grn_no} to correct it`, action: 'withdraw', confirm: 'Withdraw and correct', label: 'What needs correcting? *', hint: 'Nothing is in stock yet, so nothing is undone. This GRN is kept as withdrawn and its entries open on the receive screen to correct and save again (the same challan can be used).' }); }}><Pencil size={14} /> Withdraw to correct</SecondaryButton>}
+                {(perms.manage || perms.receive) && g.status === 'WITHDRAWN' && ['ISSUED', 'PARTLY_RECEIVED'].includes(g.po_status) && <SecondaryButton onClick={() => correctAgain(g)}><Pencil size={14} /> Enter again (corrected)</SecondaryButton>}
                 {(perms.manage || perms.receive) && g.status === 'APPROVED' && <SecondaryButton onClick={() => navigate(`/v3/purchasing/return-notes/new?grn=${id}`)}><PackageX size={14} /> Return to supplier</SecondaryButton>}
                 {perms.manage && g.status === 'APPROVED' && <SecondaryButton onClick={() => { setAskText(''); setFormError(''); setAsk({ title: `Reverse ${g.grn_no}`, action: 'reverse', confirm: 'Reverse receipt', hint: 'Takes the goods back out of stock and off the PO. Only possible while the stock is untouched.' }); }}><Undo2 size={14} /> Reverse</SecondaryButton>}
             </div>
@@ -146,11 +162,11 @@ export default function GrnPage() {
                 <Modal title={ask.title} onClose={() => setAsk(null)}>
                     <div className="space-y-3 w-[min(440px,85vw)]">
                         {ask.hint && <p className="text-sm text-slate-600">{ask.hint}</p>}
-                        <Field label="Reason *"><textarea className={`${inputCls} min-h-[80px]`} value={askText} onChange={e => setAskText(e.target.value)} autoFocus /></Field>
+                        <Field label={ask.label || 'Reason *'}><textarea className={`${inputCls} min-h-[80px]`} value={askText} onChange={e => setAskText(e.target.value)} autoFocus /></Field>
                         <ErrorBox text={formError} />
                         <div className="flex justify-end gap-2">
                             <SecondaryButton onClick={() => setAsk(null)}>Back</SecondaryButton>
-                            <PrimaryButton onClick={() => run(() => purchasingApi.grnAction(id, ask.action, askText.trim()), () => setAsk(null))} busy={busy} disabled={busy || !askText.trim()}>{ask.confirm}</PrimaryButton>
+                            <PrimaryButton onClick={() => (ask.action === 'withdraw' ? withdraw() : run(() => purchasingApi.grnAction(id, ask.action, askText.trim()), () => setAsk(null)))} busy={busy} disabled={busy || !askText.trim()}>{ask.confirm}</PrimaryButton>
                         </div>
                     </div>
                 </Modal>

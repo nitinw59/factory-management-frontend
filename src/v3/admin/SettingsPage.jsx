@@ -340,6 +340,9 @@ function ProductionSection({ data, save, busy }) {
                 {n('dhu_target_pct', 'DHU target %', 'Defects per hundred units; for the quality reports.')}
                 <Field label="AQL level (final inspection)"><select className={inputCls} value={f.aql_level || ''} onChange={e => set({ aql_level: e.target.value })}><option value="">—</option>{['0.65', '1.0', '1.5', '2.5', '4.0', '6.5'].map(a => <option key={a} value={a}>{a}</option>)}</select></Field>
                 {n('ship_tolerance_pct', 'Ship tolerance %', 'Dispatch: shipping more than ordered + this % per colour × size needs a reason. An order can have its own.', { max: 50 })}
+                {n('writeoff_accounts_threshold', 'Write-off needing accounts\' approval (₹)', 'Fabric reconciliation: when an order\'s written-off fabric is worth more than this, accounts must approve it too (not only acknowledge). Empty = off.')}
+                {n('over_cut_free_pct', 'Over-cut allowed without approval %', 'Cutting: garments cut above the order up to this % of the ordered quantity per colour × size (rounded down) need no approval; above it the merchandiser approves their trims (from free stock) or they are written off.', { max: 100 })}
+                {n('pocket_end_allowance_in', 'Pocketing / lining end allowance per ply (in)', 'New pocketing / lining lay: waste is filled in as plies × this at each end of the lay (the cutting master can change it on the lay).', { max: 50 })}
             </div>
             <div className="mt-3 flex justify-end"><PrimaryButton busy={busy} disabled={busy} onClick={() => save(() => settingsApi.saveProduction(f), 'Production settings saved.')}>Save</PrimaryButton></div>
         </Card>

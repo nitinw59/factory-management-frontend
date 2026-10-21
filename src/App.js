@@ -267,6 +267,18 @@ const V3MaterialIssueSlipPage = lazyPage(() => import('./v3/issue/MaterialIssueS
 const V3CuttingHomePage = lazyPage(() => import('./v3/cutting/CuttingHomePage'));
 const V3NewCutBatchPage = lazyPage(() => import('./v3/cutting/NewCutBatchPage'));
 const V3CutBatchPage = lazyPage(() => import('./v3/cutting/CutBatchPage'));
+const V3EndBitsPage = lazyPage(() => import('./v3/cutting/EndBitsPage'));
+const V3OverCutsPage = lazyPage(() => import('./v3/cutting/OverCutsPage'));
+const V3PocketingPage = lazyPage(() => import('./v3/cutting/PocketingPage'));   // pocketing / lining (20 Oct 2026)
+const V3FloorLayoutPage = lazyPage(() => import('./v3/production/FloorLayoutPage'));   // floor layout board (20 Oct 2026)
+const V3FloorPage = lazyPage(() => import('./v3/floor/FloorPage'));                   // floor in-charge portal (19 Oct 2026, phase 4)
+const V3ReworkStatusPage = lazyPage(() => import('./v3/floor/ReworkStatusPage'));
+const V3SupervisorPage = lazyPage(() => import('./v3/floor/SupervisorPage'));
+const V3ReconciliationsPage = lazyPage(() => import('./v3/reconciliations/ReconciliationsPage'));   // phase 6 (20 Oct 2026)
+const V3ReconciliationPage = lazyPage(() => import('./v3/reconciliations/ReconciliationPage'));   // fabric end bits (19 Oct 2026, phase 3)
+const V3MaterialReturnsPage = lazyPage(() => import('./v3/returns/MaterialReturnsPage'));   // return slips — cutting room back to the store (21 Oct 2026)
+const V3MaterialReturnPage = lazyPage(() => import('./v3/returns/MaterialReturnPage'));
+const V3ReplacementFabricPage = lazyPage(() => import('./v3/returns/ReplacementFabricPage'));   // fabric for material replacements (21 Oct 2026)
 const V3StageCheckPage = lazyPage(() => import('./v3/production/StageCheckPage'));
 const V3RecutsPage = lazyPage(() => import('./v3/production/RecutsPage'));
 const V3LineLoadingPage = lazyPage(() => import('./v3/production/LineLoadingPage'));
@@ -290,6 +302,7 @@ const V3ProblemsPage = lazyPage(() => import('./v3/problems/ProblemsPage'));
 const V3ProblemPage = lazyPage(() => import('./v3/problems/ProblemPage'));
 const V3PackOrderPage = lazyPage(() => import('./v3/packing/PackOrderPage'));
 const V3DispatchPage = lazyPage(() => import('./v3/packing/DispatchPage'));
+const V3OrderClosePage = lazyPage(() => import('./v3/orders/OrderClosePage'));   // Ship & close (20 Oct 2026, phase 7)
 const V3StoreItemsPage = lazyPage(() => import('./v3/store/StoreItemsPage'));
 const V3StoreItemPage = lazyPage(() => import('./v3/store/StoreItemPage'));
 const V3StoreOpeningStockPage = lazyPage(() => import('./v3/store/StoreOpeningStockPage'));
@@ -371,6 +384,18 @@ const appRoutes = (
           <Route path="cutting" element={<V3CuttingHomePage />} />
           <Route path="cutting/lines/:lineId/new" element={<V3NewCutBatchPage />} />
           <Route path="cutting/batches/:id" element={<V3CutBatchPage />} />
+          <Route path="cutting/end-bits" element={<V3EndBitsPage />} />
+          <Route path="cutting/over-cuts" element={<V3OverCutsPage />} />
+          <Route path="cutting/pocketing" element={<V3PocketingPage />} />
+          <Route path="floor" element={<V3FloorPage />} />
+          <Route path="production/floor-layout" element={<V3FloorLayoutPage />} />
+          <Route path="floor/rework" element={<V3ReworkStatusPage />} />
+          <Route path="supervisor" element={<V3SupervisorPage />} />
+          <Route path="reconciliations" element={<V3ReconciliationsPage />} />
+          <Route path="reconciliations/:id" element={<V3ReconciliationPage />} />
+          <Route path="material-returns" element={<V3MaterialReturnsPage />} />
+          <Route path="material-returns/:id" element={<V3MaterialReturnPage />} />
+          <Route path="replacement-fabric" element={<V3ReplacementFabricPage />} />
           <Route path="production/check" element={<V3StageCheckPage />} />
           <Route path="production/recuts" element={<V3RecutsPage />} />
           <Route path="production/loading" element={<V3LineLoadingPage />} />
@@ -393,6 +418,7 @@ const appRoutes = (
           <Route path="problems/:id" element={<V3ProblemPage />} />
           <Route path="packing/orders/:orderId" element={<V3PackOrderPage />} />
           <Route path="packing/dispatches/:id" element={<V3DispatchPage />} />
+          <Route path="orders/:orderId/close" element={<V3OrderClosePage />} />
           <Route path="store/items" element={<V3StoreItemsPage />} />
           <Route path="store/items/:id" element={<V3StoreItemPage />} />
           <Route path="store/opening-stock" element={<V3StoreOpeningStockPage />} />

@@ -4,6 +4,8 @@ export const SO_STATUS = {
     APPROVED:  { label: 'Approved',  cls: 'bg-emerald-50 text-emerald-700 border-emerald-300' },
     REJECTED:  { label: 'Rejected',  cls: 'bg-rose-50 text-rose-700 border-rose-300' },
     CANCELLED: { label: 'Cancelled', cls: 'bg-slate-50 text-slate-400 border-slate-200 line-through' },
+    SHIPPED:   { label: 'Shipped',   cls: 'bg-sky-50 text-sky-800 border-sky-300' },          // 20 Oct 2026, phase 7
+    CLOSED:    { label: 'Closed',    cls: 'bg-slate-800 text-white border-slate-800' },
 };
 
 export default function SalesOrderStatusBadge({ status }) {

@@ -5,6 +5,11 @@
 // bundle stage — with a progress bar, INSPECT and FIX REWORK (bundles: QUICK APPROVE). INSPECT opens the full-screen
 // tile grid (InspectOverlay). The checker's 2.0 workstation decides the line and stage; managers pick them. Pieces not
 // cleared at an earlier stage can't be checked (gate). Garment stages (assembly onwards) — GarmentPanel, with a scan box.
+// 20 Oct 2026: inside an open batch a roll picker (sizes when grouped by size), like the batch picker — shows one roll;
+// the stage status / route line and the "Loaded: …" line are gone (asked: "remove these 2"). "Inspect whole roll / size"
+// only for a workstation with 2.0's "approve whole roll" right (as 2.0); others inspect part by part — and at a bundle
+// stage bundle by bundle (no part-level Bulk inspect / Fix rework, as 2.0); Quick approve only with "whole bundle"; one
+// tile at a time (no SELECT ALL) without "many pieces"; at a bundle stage APPROVE takes whole bundles only (2.0's rule).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Shirt, Layers, Ruler, Package, ScanLine, AlertTriangle, Component, Hammer, Check, CheckCircle2 } from 'lucide-react';
@@ -24,7 +29,7 @@ const PART_KEY = 'v3.partFilter';
 const store = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* per-browser convenience */ } } };
 
 const toItem = (p, group) => ({
-    id: p.id, label: p.no, group, status: p.status, gate_ok: p.gate_ok, waiting_replacement: p.replacement_status || null, blocked: (p.blocked_by || []).join(', '), flag: p.rejected_at, replacement: p.replacement,
+    id: p.id, label: p.no, group, bundle: p.bundle_id || null, status: p.status, gate_ok: p.gate_ok, waiting_replacement: p.replacement_status || null, blocked: (p.blocked_by || []).join(', '), flag: p.rejected_at, replacement: p.replacement,
     title: `${p.uid || ''}${p.rejected_at ? ` — rejected at ${p.rejected_at}` : ''}${!p.gate_ok && !p.status ? ` — waiting for ${(p.blocked_by || []).join(', ')}` : ''}`,
 });
 const recount = (ps) => ({
@@ -81,10 +86,12 @@ function PartAccordion({ name, pieces, open, onToggle, onBulk, onFix, children }
                     {c.waiting > 0 && <span className="ml-2 text-[11px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 rounded-md px-1.5 py-0.5">{c.waiting} waiting</span>}
                 </div>
                 <div className="flex items-center gap-3 md:ml-0 ml-9" onClick={e => e.stopPropagation()}>
-                    {fix > 0 && <button type="button" onClick={onFix} className="px-4 py-3 text-sm bg-amber-100 text-amber-900 border-2 border-amber-200 rounded-xl hover:bg-amber-200 font-black flex items-center active:scale-95"><Hammer className="w-4 h-4 mr-2" /> FIX REWORK ({fix})</button>}
+                    {fix > 0 && onFix && <button type="button" onClick={onFix} className="px-4 py-3 text-sm bg-amber-100 text-amber-900 border-2 border-amber-200 rounded-xl hover:bg-amber-200 font-black flex items-center active:scale-95"><Hammer className="w-4 h-4 mr-2" /> FIX REWORK ({fix})</button>}
                     {complete
-                        ? <button type="button" onClick={onBulk} className="px-4 py-3 text-sm bg-emerald-50 text-emerald-700 border-2 border-emerald-200 rounded-xl font-black flex items-center active:scale-95"><Check className="w-4 h-4 mr-2" /> VALIDATED</button>
-                        : <button type="button" onClick={onBulk} className="px-6 py-3 text-sm bg-slate-800 text-white rounded-xl hover:bg-black font-black shadow-md active:scale-95 flex items-center">BULK INSPECT <ChevronRight className="w-4 h-4 ml-1" /></button>}
+                        ? <button type="button" onClick={onBulk || onToggle} className="px-4 py-3 text-sm bg-emerald-50 text-emerald-700 border-2 border-emerald-200 rounded-xl font-black flex items-center active:scale-95"><Check className="w-4 h-4 mr-2" /> VALIDATED</button>
+                        : onBulk ? <button type="button" onClick={onBulk} className="px-6 py-3 text-sm bg-slate-800 text-white rounded-xl hover:bg-black font-black shadow-md active:scale-95 flex items-center">BULK INSPECT <ChevronRight className="w-4 h-4 ml-1" /></button>
+                            // no whole-roll right at a bundle stage: bundle by bundle, as 2.0 (no part-level bulk)
+                            : <button type="button" onClick={onToggle} className="px-5 py-3 text-sm bg-white text-slate-800 border-2 border-slate-300 rounded-xl hover:bg-slate-50 font-black flex items-center active:scale-95">{open ? 'HIDE BUNDLES' : 'SHOW BUNDLES'} <ChevronRight className={`w-4 h-4 ml-1 ${open ? 'rotate-90' : ''}`} /></button>}
                 </div>
             </div>
             {open && <div className="p-4 md:p-5 bg-white border-t-2 border-slate-100 space-y-3">{children}</div>}
@@ -103,6 +110,7 @@ export default function StageCheckPage() {
     const [queue, setQueue] = useState(null);
     const [openId, setOpenId] = useState(null);
     const [batchPick, setBatchPick] = useState('ALL');
+    const [secPickRaw, setSecPickRaw] = useState({ at: null, key: 'ALL' });   // roll (or size) shown inside the open batch — for that batch, stage and grouping only
     const [view, setView] = useState(null);
     const [codes, setCodes] = useState([]);
     const [groupBy, setGroupBy] = useState(() => store.get('v3.stageGroupBy', 'roll'));
@@ -191,10 +199,15 @@ export default function StageCheckPage() {
         } catch (err) { flash(apiError(err, 'Not found.'), 'bad'); }
     };
     const setGrouping = (v) => { setGroupBy(v); setOpenParts(new Set()); store.set('v3.stageGroupBy', v); };
+    const secAt = `${openId}|${stageId}|${groupBy}`;
+    const secPick = secPickRaw.at === secAt ? secPickRaw.key : 'ALL';
+    const setSecPick = (key) => setSecPickRaw({ at: secAt, key });
 
     // Sections (roll or size) → parts → rows (size / roll, or bundle). Rebuilt from the latest view on every render,
     // so live changes show in the rows and on the inspection tiles.
     const isBundle = view?.stage.unit === 'BUNDLE';
+    // Part-level bulk inspect: at a bundle stage only with 2.0's "approve whole roll" right (else bundle by bundle, as 2.0).
+    const partBulk = !(isBundle && st.station?.whole_roll === false);
     const tree = [];
     const nodes = new Map();   // key → { pieces, head, grouped(p) }
     if (view) {
@@ -241,7 +254,7 @@ export default function StageCheckPage() {
         const items = node.pieces.map(p => toItem(p, node.grouped(p)));
         const ids = (x) => ({ piece_ids: x });
         overlay = (
-            <InspectOverlay key={inspect.key} head={[['Batch', `#${view.batch.floor_no}`], ...node.head]} items={items} codes={codes} unit="piece" startFix={inspect.fix} highlightId={inspect.highlightId}
+            <InspectOverlay key={inspect.key} head={[['Batch', `#${view.batch.floor_no}`], ...node.head]} items={items} codes={codes} unit="piece" multi={st.station?.multi !== false} wholeBundle={isBundle} startFix={inspect.fix} highlightId={inspect.highlightId}
                 onClose={() => setInspect(null)}
                 onApprove={(x) => act((e) => productionApi.check({ ...base(), status: 'APPROVED', ...ids(x), ...e }), 'Approved')}
                 onRepairNow={(x, code) => act((e) => productionApi.check({ ...base(), status: 'REPAIRED', defect_code_id: code, ...ids(x), ...e }), 'Repaired now')}
@@ -324,18 +337,26 @@ export default function StageCheckPage() {
                                     </div>
                                 </div>
                                 {open && (isGarment ? (
-                                    <GarmentPanel key={`${q.id}-${stageId}`} batchId={q.id} stageId={stageId} lineId={st.station ? undefined : lineId || undefined} codes={codes} act={act} askUndo={askUndo} tick={tick} focus={garmentFocus} blockedMsg={blockedMsg} />
+                                    <GarmentPanel key={`${q.id}-${stageId}`} batchId={q.id} stageId={stageId} multi={st.station?.multi !== false} lineId={st.station ? undefined : lineId || undefined} codes={codes} act={act} askUndo={askUndo} tick={tick} focus={garmentFocus} blockedMsg={blockedMsg} />
                                 ) : !view || String(view.batch.id) !== String(q.id) ? <div className="p-6"><Loading /></div> : (
                                     <div className="p-4 md:p-6 bg-slate-100 space-y-4">
                                         <div className="flex flex-wrap items-center gap-3">
-                                            <span className="text-sm font-bold text-slate-600">Stage <b className="uppercase">{label(view.progress.status)}</b> · route {view.route.map(r => r.name).join(' → ')}</span>
+                                            {tree.length > 1 && (() => {
+                                                const unit = groupBy === 'size' ? 'sizes' : 'rolls';
+                                                return (
+                                                    <select value={tree.some(x => x.key === secPick) ? secPick : 'ALL'} onChange={e => setSecPick(e.target.value)} aria-label={groupBy === 'size' ? 'Size' : 'Roll'}
+                                                        className="bg-slate-900 text-white font-black text-sm px-3 py-2.5 rounded-xl border border-slate-700 focus:outline-none uppercase tracking-widest max-w-[300px]">
+                                                        <option value="ALL">All {unit} ({tree.length})</option>
+                                                        {tree.map(x => { const left = recount(nodes.get(x.key).pieces).pending; return <option key={x.key} value={x.key}>{x.name}{left ? ` · ${left} to check` : ' · done'}</option>; })}
+                                                    </select>
+                                                );
+                                            })()}
                                             <span className="ml-auto"><WhyPanel floorNo={q.floor_no} batchId={q.id} stageId={stageId} complete={view.progress.status === 'COMPLETED'} tick={tick} onFixed={() => { loadBatch(); loadQueue(); }} /></span>
                                         </div>
-                                        {!view.first && <p className="text-sm font-semibold text-slate-600">Loaded: {view.loads.length ? view.loads.map(l => `${l.size} → ${l.line}${l.status === 'COMPLETED' ? ' (done)' : ''}`).join(' · ') : 'nothing yet — the line loader loads sizes onto your line'}</p>}
                                         {parts.size > 0 && !partNames.some(partVisible) && (
                                             <p className="text-base font-bold text-amber-800 bg-amber-50 border-2 border-amber-300 rounded-xl px-4 py-3">None of this batch's parts are in your part filter. <button type="button" className="underline" onClick={() => setPartFilter(new Set())}>Show all parts</button></p>
                                         )}
-                                        {tree.map(s => {
+                                        {tree.filter(s => secPick === 'ALL' || !tree.some(x => x.key === secPick) || s.key === secPick).map(s => {
                                             const vis = s.parts.filter(p => partVisible(p.name));
                                             if (!vis.length) return null;
                                             const sc = recount(nodes.get(s.key).pieces);
@@ -344,17 +365,17 @@ export default function StageCheckPage() {
                                                     <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b-2 border-slate-200">
                                                         <h3 className="font-black text-black flex items-center text-base uppercase tracking-widest bg-slate-100 px-3 py-1.5 rounded-lg w-max border border-slate-300">
                                                             {groupBy === 'size' ? <Ruler className="w-4 h-4 mr-2 text-violet-600" /> : <Layers className="w-4 h-4 mr-2 text-indigo-600" />}{s.name}{s.meta ? <span className="ml-2 text-slate-500 normal-case tracking-normal font-bold">· {s.meta}</span> : null}</h3>
-                                                        {(sc.pending > 0 || sc.rework + sc.earlier > 0) && <button type="button" onClick={() => setInspect({ key: s.key })} className="px-5 py-3 bg-black hover:bg-slate-800 text-white text-sm font-black rounded-xl shadow-lg active:scale-95 uppercase tracking-widest flex items-center"><CheckCircle2 className="w-4 h-4 mr-2 text-amber-400" /> Inspect whole {groupBy === 'size' ? 'size' : 'roll'}</button>}
+                                                        {st.station?.whole_roll !== false && (sc.pending > 0 || sc.rework + sc.earlier > 0) && <button type="button" onClick={() => setInspect({ key: s.key })} className="px-5 py-3 bg-black hover:bg-slate-800 text-white text-sm font-black rounded-xl shadow-lg active:scale-95 uppercase tracking-widest flex items-center"><CheckCircle2 className="w-4 h-4 mr-2 text-amber-400" /> Inspect whole {groupBy === 'size' ? 'size' : 'roll'}</button>}
                                                     </div>
                                                     {vis.map(p => (
                                                         <PartAccordion key={p.key} name={p.name} pieces={nodes.get(p.key).pieces} open={openParts.has(p.key)} onToggle={() => togglePart(p.key)}
-                                                            onBulk={() => setInspect({ key: p.key })} onFix={() => setInspect({ key: p.key, fix: true })}>
+                                                            onBulk={partBulk ? () => setInspect({ key: p.key }) : undefined} onFix={partBulk ? () => setInspect({ key: p.key, fix: true }) : undefined}>
                                                             {p.rows.map(r => {
                                                                 const c = recount(r.pieces);
                                                                 return <ProgressRow key={r.key} icon={r.bundle ? Package : Layers} label={r.label} sub={r.sub} notes={notesOf(c)}
                                                                     total={c.total} ok={c.approved} rework={c.rework} rejected={c.rejected} earlier={c.earlier} waiting={c.waiting} left={c.pending} fixCount={c.rework + c.earlier}
                                                                     onInspect={() => setInspect({ key: r.key })} onFix={() => setInspect({ key: r.key, fix: true })} busy={busy}
-                                                                    onQuick={r.bundle && c.waiting === 0 && r.bundle.pending > 0 ? () => quick((e) => productionApi.bundleCheck({ ...base(), bundle_ids: [r.bundle.id], status: 'APPROVED', ...e }), `Bundle ${r.bundle.bundle_code} approved`) : undefined}
+                                                                    onQuick={st.station?.whole_bundle !== false && r.bundle && c.waiting === 0 && r.bundle.pending > 0 ? () => quick((e) => productionApi.bundleCheck({ ...base(), bundle_ids: [r.bundle.id], status: 'APPROVED', ...e }), `Bundle ${r.bundle.bundle_code} approved`) : undefined}
                                                                     quickBlocked={blockedMsg} />;
                                                             })}
                                                         </PartAccordion>

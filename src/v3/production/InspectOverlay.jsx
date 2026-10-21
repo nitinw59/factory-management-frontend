@@ -38,7 +38,10 @@ const PICK = {
     REPLACE: { title: 'New material needed', confirm: 'Send to cutting', bar: 'bg-violet-600', dark: 'bg-violet-700', on: 'bg-violet-600 border-violet-300', code: 'text-violet-300', hover: 'hover:border-violet-400', btn: 'bg-violet-600' },
 };
 
-export default function InspectOverlay({ head, items, codes, unit = 'piece', startFix = false, highlightId, onClose, onApprove, onRepairNow, onRework, onReplace, onRepair, onReplaceRework, onUndo }) {
+// multi = 2.0's "approve many pieces" workstation right (20 Oct 2026): without it one tile at a time, no SELECT ALL (as 2.0).
+// wholeBundle (bundle stages, 20 Oct 2026 — 2.0's rule): APPROVE only when every fresh piece of each bundle picked is
+// selected; part of a bundle → repair now / rework / material only. Items carry `bundle` (none for re-cut singles).
+export default function InspectOverlay({ head, items, codes, unit = 'piece', startFix = false, highlightId, multi = true, wholeBundle = false, onClose, onApprove, onRepairNow, onRework, onReplace, onRepair, onReplaceRework, onUndo }) {
     const byId = useMemo(() => new Map(items.map(i => [i.id, i])), [items]);
     const [sel, setSel] = useState(() => { const h = highlightId && byId.get(highlightId); return new Set(h && ['fresh', 'fix'].includes(kindOf(h)) ? [h.id] : []); });
     const [picker, setPicker] = useState(null);   // REPAIRED | NEEDS_REWORK | REPLACE
@@ -53,6 +56,9 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
     useEffect(() => { setSel(s => { const k = new Set([...s].filter(id => byId.has(id) && ['fresh', 'fix'].includes(kindOf(byId.get(id))))); return k.size === s.size ? s : k; }); }, [byId]);
 
     const selKind = sel.size ? kindOf(byId.get([...sel][0])) : null;
+    // Bundles picked only in part (fresh pieces) — approve is held back for them.
+    const partBundles = !wholeBundle || selKind !== 'fresh' ? [] : [...new Set([...sel].map(id => byId.get(id)?.bundle).filter(Boolean))]
+        .filter(b => items.some(i => i.bundle === b && kindOf(i) === 'fresh' && !sel.has(i.id)));
     const mode = selKind || (startFix ? 'fix' : 'fresh');
     const of = (k) => items.filter(i => kindOf(i) === k);
     const fresh = of('fresh'), fix = of('fix');
@@ -66,6 +72,7 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
         setError('');
         setSel(s => {
             if (s.size && selKind !== k) return new Set([it.id]);   // one kind at a time
+            if (!multi) return s.has(it.id) ? new Set() : new Set([it.id]);   // one at a time
             const x = new Set(s); if (x.has(it.id)) x.delete(it.id); else x.add(it.id); return x;
         });
     };
@@ -102,6 +109,7 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
                 <button type="button" onClick={onClose} className="p-3 bg-slate-900 hover:bg-rose-600 rounded-full border border-slate-700 shrink-0" aria-label="Close"><X className="w-6 h-6 text-white" /></button>
             </div>
             {error && <div className="bg-rose-600 text-white font-bold px-5 py-3 text-base shrink-0">{error}</div>}
+            {partBundles.length > 0 && <div className="bg-amber-400 text-black font-black px-5 py-2.5 text-sm shrink-0 uppercase tracking-wide">Part of a bundle selected — approve takes the whole bundle{multi ? ' (select all its pieces)' : ' (use Quick approve)'}. A part can be repaired now, sent to rework or for material.</div>}
 
             {picker ? (
                 !category ? (
@@ -161,9 +169,10 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
                             {fresh.length} to check · {fix.length} to fix · {n('APPROVED') + n('REPAIRED')} OK{n('QC_REJECTED') ? ` · ${n('QC_REJECTED')} rejected earlier` : ''}{items.some(i => i.waiting_replacement) ? ` · ${items.filter(i => i.waiting_replacement).length} new material` : ''}{items.some(i => kindOf(i) === 'locked' && !i.status) ? ` · ${items.filter(i => kindOf(i) === 'locked' && !i.status).length} waiting` : ''}
                         </span>
                         <span className="flex gap-2">
-                            {fresh.length > 0 && <button type="button" onClick={() => selectAll('fresh')} className="px-4 py-2.5 bg-white text-black font-black rounded-xl active:scale-95 flex items-center tracking-widest text-sm">
+                            {!multi && <span className="px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-300 border border-slate-600 rounded-xl">One {unit} at a time</span>}
+                            {multi && fresh.length > 0 && <button type="button" onClick={() => selectAll('fresh')} className="px-4 py-2.5 bg-white text-black font-black rounded-xl active:scale-95 flex items-center tracking-widest text-sm">
                                 {selKind === 'fresh' && sel.size === fresh.length ? <Square className="w-4 h-4 mr-2" /> : <CheckSquare className="w-4 h-4 mr-2" />}{selKind === 'fresh' && sel.size === fresh.length ? 'DESELECT ALL' : `SELECT ALL (${fresh.length})`}</button>}
-                            {fix.length > 0 && <button type="button" onClick={() => selectAll('fix')} className="px-4 py-2.5 bg-amber-400 text-black font-black rounded-xl active:scale-95 flex items-center tracking-widest text-sm">
+                            {multi && fix.length > 0 && <button type="button" onClick={() => selectAll('fix')} className="px-4 py-2.5 bg-amber-400 text-black font-black rounded-xl active:scale-95 flex items-center tracking-widest text-sm">
                                 <Hammer className="w-4 h-4 mr-2" />{selKind === 'fix' && sel.size === fix.length ? 'DESELECT' : `ALL TO FIX (${fix.length})`}</button>}
                         </span>
                     </div>
@@ -209,7 +218,7 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
                                 </div>
                             ) : (
                                 <div className={`flex-grow grid ${onReplace ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-3'} gap-3 md:gap-4 ${onReplace ? 'h-[140px] md:h-[64px]' : 'h-[64px]'}`}>
-                                    <BigBtn tone="emerald" disabled={!sel.size || busy} onClick={() => run(onApprove)}>{busy ? <Loader2 className="w-6 h-6 mr-2 animate-spin" /> : <CheckCircle2 className="w-6 h-6 mr-2" />} APPROVE</BigBtn>
+                                    <BigBtn tone="emerald" disabled={!sel.size || busy || partBundles.length > 0} onClick={() => run(onApprove)}>{busy ? <Loader2 className="w-6 h-6 mr-2 animate-spin" /> : <CheckCircle2 className="w-6 h-6 mr-2" />} APPROVE</BigBtn>
                                     <BigBtn tone="teal" disabled={!sel.size || busy} onClick={() => ask('REPAIRED')}><Wrench className="w-6 h-6 mr-2" /> REPAIR NOW</BigBtn>
                                     <BigBtn tone="amber" disabled={!sel.size || busy} onClick={() => ask('NEEDS_REWORK')}><Hammer className="w-6 h-6 mr-2" /> REWORK</BigBtn>
                                     {onReplace && <BigBtn tone="violet" disabled={!sel.size || busy} onClick={() => ask('REPLACE')}><Scissors className="w-6 h-6 mr-2" /> MATERIAL</BigBtn>}

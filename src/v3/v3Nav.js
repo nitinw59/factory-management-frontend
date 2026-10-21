@@ -2,7 +2,7 @@
 // answers for (controllers/v3/access.js pageRoles). The layout shows only the
 // pages the user may open; the home page shows them as tiles; the page guard
 // maps any /v3 address (detail pages too) to its key by the longest prefix.
-import { Home, Radar, Building2, Ruler, Network, MonitorSmartphone, Bug, Landmark, Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, Shirt, Route, ClipboardCheck, FileText, Calculator, Settings2, Boxes, ShoppingCart, FileCheck, Gauge, Warehouse, CalendarDays, Truck, ShoppingBag, PackageCheck, PackageOpen, BadgeCheck, Wrench, PackageMinus, ListRestart, ClipboardPlus, PackageX, Receipt, BarChart3, Forklift, Scissors, ScanLine, RotateCcw, Container, UserCog, Inbox, Activity, LifeBuoy } from 'lucide-react';
+import { Home, Radar, Building2, Ruler, Network, MonitorSmartphone, Bug, Landmark, Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, Shirt, Route, ClipboardCheck, FileText, Calculator, Settings2, Boxes, ShoppingCart, FileCheck, Gauge, Warehouse, CalendarDays, Truck, ShoppingBag, PackageCheck, PackageOpen, BadgeCheck, Wrench, PackageMinus, ListRestart, ClipboardPlus, PackageX, Receipt, BarChart3, Forklift, Scissors, ScanLine, RotateCcw, Container, UserCog, Inbox, Activity, LifeBuoy, LayoutDashboard, Ban, KeyRound, Scale, Undo2, Map as MapIcon } from 'lucide-react';
 
 export const NAV = [
     { section: 'Home' },
@@ -37,6 +37,8 @@ export const NAV = [
     { to: '/v3/purchasing/grns?status=PENDING_APPROVAL', label: 'GRN approvals', icon: BadgeCheck, key: 'purchasing.grnApprovals', hidden: true },
     { to: '/v3/material-issue', label: 'Issue to production', icon: Forklift, key: 'issue.materialIssue', text: 'Fabric and trims to cutting and lines' },
     { to: '/v3/trim-kits', label: 'Trim kits', icon: Package, key: 'store.trimKits', text: 'Kits prepared for the lines; the line loader counts and signs' },
+    { to: '/v3/material-returns', label: 'Material returns', icon: Undo2, key: 'store.materialReturns', text: 'Return slips from the cutting room — count and receive (partial allowed)' },
+    { to: '/v3/replacement-fabric', label: 'Fabric for replacements', icon: PackageMinus, key: 'store.replacementFabric', text: 'Issue a whole roll when the cutting room has nothing for a replacement panel' },
     { to: '/v3/masters/fabric-stock', label: 'Fabric rolls', icon: Warehouse, key: 'masters.fabricStock', text: 'Rolls in stock with dye lot and width' },
     { to: '/v3/masters/opening-stock', label: 'Trim opening stock', icon: ClipboardList, key: 'masters.openingStock', text: 'Physical count of trims, once per item' },
     { to: '/v3/store/items', label: 'Spares & general items', icon: Wrench, key: 'store.items', text: 'Store items and stock' },
@@ -45,11 +47,20 @@ export const NAV = [
     { to: '/v3/store/requisitions', label: 'Store requisitions', icon: ClipboardPlus, key: 'store.requisitions', text: 'Spares and general items to buy' },
     { to: '/v3/store/opening-stock', label: 'Store opening stock', icon: ClipboardList, key: 'store.openingStock', text: 'Physical count of store items, once per item' },
     { section: 'Production' },
+    { to: '/v3/floor', label: 'Floor', icon: LayoutDashboard, key: 'production.floor', text: 'WIP per line, waiting to load, rework, replacements, priorities' },
+    { to: '/v3/production/floor-layout', label: 'Floor layout', icon: MapIcon, key: 'production.floorLayout', text: 'Lines, workstations in order, responsible supervisor and line loader' },
+    { to: '/v3/floor/rework', label: 'Rework & replacement', icon: Ban, key: 'production.reworkStatus', text: 'Pieces and garments in rework or waiting for new material; floor in-charge reject' },
+    { to: '/v3/reconciliations', label: 'Reconciliations', icon: Scale, key: 'production.reconciliations', text: 'Fabric per order, each stage per batch, trims per batch — approve and acknowledge' },
+    { to: '/v3/supervisor', label: 'Override password', icon: KeyRound, key: 'production.supervisor', text: 'Your supervisor password for checkers\' screens' },
     { to: '/v3/cutting', label: 'Cutting', icon: Scissors, key: 'production.cutting', text: 'Cut batches, lays and pieces' },
+    { to: '/v3/cutting/end-bits', label: 'End bits', icon: Scissors, key: 'production.endBits', text: 'Reserve and lay pieces left at the end of rolls, per order' },
+    { to: '/v3/material-returns?status=DRAFT', label: 'Return slips', icon: Undo2, key: 'production.materialReturns', text: 'Left-out fabric back to the fabric store — draft, submit, the store receives' },
+    { to: '/v3/cutting/pocketing', label: 'Pocketing & lining', icon: Scissors, key: 'production.pocketing', text: 'Pocketing / lining lays per order, pocket stock per size, handed with each batch' },
+    { to: '/v3/cutting/over-cuts', label: 'Over-cut', icon: Scissors, key: 'production.overCuts', text: 'Garments cut above the order — approve their trims or write them off' },
     { to: '/v3/production/loading', label: 'Line loading', icon: Container, key: 'production.loading', text: 'Load sizes onto lines' },
     { to: '/v3/production/check', label: 'Stage check', icon: ScanLine, key: 'production.check', text: 'Check pieces, bundles and garments' },
     { to: '/v3/production/recuts', label: 'Re-cuts', icon: RotateCcw, key: 'production.recuts', text: 'Replacements for rejected pieces' },
-    { to: '/v3/packing', label: 'Packing & dispatch', icon: PackageCheck, key: 'production.packing', text: 'Pack finished garments into cartons, dispatch notes' },
+    { to: '/v3/packing', label: 'Dispatch', icon: PackageCheck, key: 'production.packing', text: 'Dispatch finished garments by quantity, dispatch notes' },
     { to: '/v3/packing/dispatches', label: 'Dispatch notes', icon: PackageCheck, key: 'production.dispatch', hidden: true },
     { to: '/v3/insights', label: 'Production insights', icon: Activity, key: 'production.insights', text: 'WIP ageing, quality by stage and line, material cost per order' },
     { to: '/v3/insights/cost', label: 'Order material cost', icon: Activity, key: 'production.insightsCost', hidden: true },

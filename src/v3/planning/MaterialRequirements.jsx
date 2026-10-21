@@ -59,13 +59,17 @@ function StatusBar({ it }) {
     );
 }
 
-function Actions({ it, orderId, can, onAllocate, onRelease }) {
-    if (!can) return null;
+// Raise: the planner of the kind. Allocate: the store of the kind (19 Oct 2026) — fabric in whole rolls (Assign opens
+// the roll list; Rolls shows what the order holds and gives rolls back), trims by quantity.
+function Actions({ it, orderId, canRaise, canAlloc, onAllocate, onRelease, onRolls }) {
+    const fabric = it.kind === 'FABRIC' && !it.by_metres;   // pocketing / lining (20 Oct 2026): by metres, like trims
     return (
         <span className="whitespace-nowrap">
-            {it.to_raise > 0 && <Link to={`/v3/planning/buy-list?order=${orderId}&kind=${it.kind}`} className="text-xs font-bold text-amber-700 hover:underline mr-3">Raise</Link>}
-            {it.shortfall > 0 && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline mr-3" onClick={() => onAllocate(it)}>Allocate</button>}
-            {it.allocated > 0 && <button type="button" className="text-xs font-bold text-slate-600 hover:underline" onClick={() => onRelease(it)}>Release</button>}
+            {canRaise && it.to_raise > 0 && <Link to={`/v3/planning/buy-list?order=${orderId}&kind=${it.kind}`} className="text-xs font-bold text-amber-700 hover:underline mr-3">Raise</Link>}
+            {fabric && canAlloc && it.shortfall > 0 && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline mr-3" onClick={() => onRolls(it)}>Assign rolls</button>}
+            {fabric && it.allocated > 0 && !(canAlloc && it.shortfall > 0) && <button type="button" className="text-xs font-bold text-slate-600 hover:underline" onClick={() => onRolls(it)}>Rolls</button>}
+            {!fabric && canAlloc && it.shortfall > 0 && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline mr-3" onClick={() => onAllocate(it)}>Allocate</button>}
+            {!fabric && canAlloc && it.allocated > 0 && <button type="button" className="text-xs font-bold text-slate-600 hover:underline" onClick={() => onRelease(it)}>Release</button>}
         </span>
     );
 }
@@ -91,7 +95,7 @@ const subOf = (it, groupTitle) => {
     return [it.info?.description, places.join(', '), it.issue_stages?.length ? `issued at ${it.issue_stages.join(', ')}` : ''].filter(Boolean).join(' · ');
 };
 
-export default function MaterialRequirements({ data, kind, approved, showActions, canAct, filter, view, onCell, onAllocate, onRelease, onAllocateFree, busy }) {
+export default function MaterialRequirements({ data, kind, approved, showActions, canRaise, canAlloc, filter, view, onCell, onAllocate, onRelease, onRolls, onAllocateFree, busy }) {
     const items = data.items.filter(i => i.kind === kind);
     const colours = data.colours;
     // Filters (16 Oct 2026): the tab bar's All / Short / Covered, plus a clicked count chip (covered / part / none),
@@ -159,10 +163,10 @@ export default function MaterialRequirements({ data, kind, approved, showActions
                     <span key={u} className="text-slate-600"><b className="text-slate-800">{fmt(t.req, u)} {u}</b> · {fmt(t.alloc, u)} allocated · {fmt(t.pr, u)} on req. · <b className={t.raise > 0 ? 'text-rose-700' : 'text-emerald-700'}>{fmt(t.raise, u)} {u} to raise</b></span>
                 ))}
                 {late.length > 0 && <span className="font-bold text-rose-700">{late.length} item{late.length === 1 ? '' : 's'} on a PO due after needed-by</span>}
-                {showActions && canAct(kind) && (
+                {showActions && (canRaise(kind) || canAlloc(kind)) && (
                     <span className="ml-auto flex items-center gap-3">
-                        {freeToTake.length > 0 && <button type="button" disabled={busy} onClick={onAllocateFree} className="font-bold text-emerald-700 hover:underline disabled:opacity-50">Allocate free stock ({freeToTake.length})</button>}
-                        {toRaise.length > 0 && <Link to={`/v3/planning/buy-list?order=${data.order.id}&kind=${kind}`} className="font-bold text-amber-700 hover:underline">Raise all short ({toRaise.length})</Link>}
+                        {canAlloc(kind) && freeToTake.length > 0 && <button type="button" disabled={busy} onClick={onAllocateFree} className="font-bold text-emerald-700 hover:underline disabled:opacity-50">Allocate free stock ({freeToTake.length})</button>}
+                        {canRaise(kind) && toRaise.length > 0 && <Link to={`/v3/planning/buy-list?order=${data.order.id}&kind=${kind}`} className="font-bold text-amber-700 hover:underline">Raise all short ({toRaise.length})</Link>}
                     </span>
                 )}
             </div>
@@ -209,7 +213,7 @@ export default function MaterialRequirements({ data, kind, approved, showActions
                                             <td className="px-3 py-2 text-xs text-slate-700">{colourLinks(it)}</td>
                                             {reqCell(it)}
                                             <td className="px-3 py-2"><StatusBar it={it} /></td>
-                                            {showActions && <td className="px-3 py-2 text-right"><Actions it={it} orderId={data.order.id} can={canAct(it.kind)} onAllocate={onAllocate} onRelease={onRelease} /></td>}
+                                            {showActions && <td className="px-3 py-2 text-right"><Actions it={it} orderId={data.order.id} canRaise={canRaise(it.kind)} canAlloc={canAlloc(it.kind)} onAllocate={onAllocate} onRelease={onRelease} onRolls={onRolls} /></td>}
                                         </tr>
                                     )),
                                 ];
@@ -240,7 +244,7 @@ export default function MaterialRequirements({ data, kind, approved, showActions
                                     ))}
                                     {reqCell(it)}
                                     <td className="px-3 py-2"><StatusBar it={it} /></td>
-                                    {showActions && <td className="px-3 py-2 text-right"><Actions it={it} orderId={data.order.id} can={canAct(it.kind)} onAllocate={onAllocate} onRelease={onRelease} /></td>}
+                                    {showActions && <td className="px-3 py-2 text-right"><Actions it={it} orderId={data.order.id} canRaise={canRaise(it.kind)} canAlloc={canAlloc(it.kind)} onAllocate={onAllocate} onRelease={onRelease} onRolls={onRolls} /></td>}
                                 </tr>
                             ))}
                         </tbody>

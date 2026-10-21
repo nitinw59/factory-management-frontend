@@ -67,13 +67,23 @@ export function exportDispatchNote(d, company = null, assets = {}) {
         ],
         styles: { ...GRID.styles, fontSize: 8.5, cellPadding: 1.5 }, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 26 }, 2: { fontStyle: 'bold', cellWidth: 24 } },
     });
-    // Cartons with their assortment.
+    // 20 Oct 2026 (phase 7): quantity notes list colour × size lines and the boxes typed for the paperwork.
+    if (d.lines?.length) {
+        autoTable(doc, {
+            ...GRID, startY: doc.lastAutoTable.finalY + 5, margin: { left: M, right: M },
+            head: [['Line', 'Style', 'Colour', 'Size', 'Pcs']],
+            body: [...d.lines.map(l => [`L${l.line_no}`, l.style_code, l.colour, l.size, l.qty]),
+                [{ content: `Total${d.boxes != null ? ` · ${d.boxes} box(es)` : ''}`, colSpan: 4, styles: { fontStyle: 'bold' } }, { content: String(d.lines.reduce((s2, l) => s2 + l.qty, 0)), styles: { fontStyle: 'bold' } }]],
+            styles: { ...GRID.styles, fontSize: 8, cellPadding: 1.3 }, columnStyles: { 4: { halign: 'right' } },
+        });
+    }
+    // Cartons with their assortment (3.1 packing).
     const body = [];
     for (const c of d.cartons) {
         c.assortment.forEach((a, i) => body.push([i === 0 ? c.carton_no : '', i === 0 ? c.style_code : '', a.colour, a.size, a.qty, i === 0 ? (c.weight_kg ? `${c.weight_kg}` : '') : '']));
     }
     body.push([{ content: `${d.cartons.length} carton(s)`, colSpan: 4, styles: { fontStyle: 'bold' } }, { content: String(d.qty), styles: { fontStyle: 'bold' } }, { content: String(Math.round(d.cartons.reduce((s, c) => s + (c.weight_kg || 0), 0) * 100) / 100 || ''), styles: { fontStyle: 'bold' } }]);
-    autoTable(doc, {
+    if (d.cartons.length) autoTable(doc, {
         ...GRID, startY: doc.lastAutoTable.finalY + 5, margin: { left: M, right: M },
         head: [['Carton', 'Style', 'Colour', 'Size', 'Pcs', 'Kg']], body,
         styles: { ...GRID.styles, fontSize: 8, cellPadding: 1.3 }, columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' } },

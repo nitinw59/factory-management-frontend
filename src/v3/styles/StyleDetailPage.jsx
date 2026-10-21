@@ -25,7 +25,9 @@ const move = (arr, i, d) => {
 };
 
 // Parts a stage handles, by its part scope.
-const inScope = (part, scope) => scope === 'ALL' || (scope === 'MAIN_ONLY' ? part.part_type === 'MAIN' : part.part_type === 'SUPPORTING');
+const inScope = (part, scope) => scope === 'ALL' || (scope === 'MAIN_ONLY' ? part.part_type === 'MAIN' : part.part_type !== 'MAIN');   // Pocket / Lining behave as supporting
+// Pocket / Lining parts (20 Oct 2026): counted — cut in their own lay from pocketing / lining fabric, handed with the batch.
+const COUNTED = ['POCKET', 'LINING'];
 
 export default function StyleDetailPage() {
     const { id } = useParams();
@@ -66,7 +68,7 @@ export default function StyleDetailPage() {
     const dirty = style && {
         details: JSON.stringify(details) !== JSON.stringify({ style_code: style.style_code, name: style.name, buyer: style.buyer || '', product_type: style.product_type || '', brand: style.brand || '', fit: style.fit || '', sam: style.sam != null ? String(Number(style.sam)) : '', is_active: style.is_active }),
         sizes: JSON.stringify(sizeIds) !== JSON.stringify(style.sizes.map(x => String(x.size_id))),
-        parts: JSON.stringify(parts.map(p => [p.id || null, p.part_name, p.part_type, p.is_active])) !== JSON.stringify(style.parts.map(p => [String(p.id), p.part_name, p.part_type, p.is_active])),
+        parts: JSON.stringify(parts.map(p => [p.id || null, p.part_name, p.part_type, p.is_active, Number(p.per_garment || 1)])) !== JSON.stringify(style.parts.map(p => [String(p.id), p.part_name, p.part_type, p.is_active, Number(p.per_garment || 1)])),
         route: JSON.stringify(route) !== JSON.stringify(style.route.map(r => ({ stage_type_id: String(r.stage_type_id), skipped_part_ids: r.skipped_part_ids.map(String) }))),
     };
 
@@ -76,7 +78,7 @@ export default function StyleDetailPage() {
             let res;
             if (which === 'details') res = await stylesApi.updateStyle(id, details);
             if (which === 'sizes') res = await stylesApi.setSizes(id, sizeIds);
-            if (which === 'parts') res = await stylesApi.setParts(id, parts.map(p => ({ id: p.id || undefined, part_name: p.part_name, part_type: p.part_type, is_active: p.is_active })));
+            if (which === 'parts') res = await stylesApi.setParts(id, parts.map(p => ({ id: p.id || undefined, part_name: p.part_name, part_type: p.part_type, per_garment: COUNTED.includes(p.part_type) ? Number(p.per_garment || 1) : 1, is_active: p.is_active })));
             if (which === 'route') res = await stylesApi.setRoute(id, route);
             apply(res.data);
             setMsg({ ok: true, text: 'Saved.' });
@@ -157,6 +159,7 @@ export default function StyleDetailPage() {
                 {tab === 'parts' && (
                     <div>
                         <p className="text-sm text-slate-500 mb-3">Pattern parts cut for this style. Main parts are the body (FRONT, BACK …); supporting parts are pocketing, facings and similar.</p>
+                        <p className="text-xs text-slate-500 mb-2 max-w-2xl">Main parts make the garment; Supporting parts go with it. <b>Pocket</b> and <b>Lining</b> parts are cut in their own lay from pocketing / lining fabric, counted per size and handed over with the batch — set how many pieces one garment takes.</p>
                         <div className="space-y-2 max-w-2xl">
                             {parts.length === 0 && <p className="text-sm text-slate-400">No parts yet.</p>}
                             {parts.map((p, i) => (
@@ -165,8 +168,23 @@ export default function StyleDetailPage() {
                                         onChange={e => setParts(ps => ps.map((x, j) => j === i ? { ...x, part_name: e.target.value } : x))} />
                                     <select className={`${inputCls} w-40`} disabled={!canEdit} value={p.part_type}
                                         onChange={e => setParts(ps => ps.map((x, j) => j === i ? { ...x, part_type: e.target.value } : x))}>
-                                        <option value="MAIN">Main</option><option value="SUPPORTING">Supporting</option>
+                                        <option value="MAIN">Main</option><option value="SUPPORTING">Supporting</option><option value="POCKET">Pocket</option><option value="LINING">Lining</option>
                                     </select>
+                                    {COUNTED.includes(p.part_type) && (() => {
+                                        // pieces per garment: − / + (1–20), tablet-friendly (20 Oct 2026)
+                                        const n = Math.min(20, Math.max(1, Number(p.per_garment) || 1));
+                                        const set = (v) => setParts(ps => ps.map((x, j) => j === i ? { ...x, per_garment: Math.min(20, Math.max(1, v)) } : x));
+                                        return (
+                                            <span className="flex items-center gap-1.5 whitespace-nowrap" title="Pieces of this part in one garment (e.g. 2 front pocket bags)">
+                                                <span className="flex items-center rounded-lg border border-slate-300 overflow-hidden">
+                                                    <button type="button" disabled={!canEdit || n <= 1} onClick={() => set(n - 1)} aria-label={`Fewer ${p.part_name || 'pieces'} per garment`} className="w-9 h-9 text-lg font-black text-slate-700 hover:bg-slate-100 disabled:opacity-30">−</button>
+                                                    <span className="w-9 text-center font-black text-slate-900 tabular-nums" aria-live="polite">{n}</span>
+                                                    <button type="button" disabled={!canEdit || n >= 20} onClick={() => set(n + 1)} aria-label={`More ${p.part_name || 'pieces'} per garment`} className="w-9 h-9 text-lg font-black text-slate-700 hover:bg-slate-100 disabled:opacity-30">+</button>
+                                                </span>
+                                                <span className="text-xs text-slate-600">per garment</span>
+                                            </span>
+                                        );
+                                    })()}
                                     <label className="flex items-center gap-1 text-xs text-slate-600 whitespace-nowrap"><input type="checkbox" disabled={!canEdit} checked={p.is_active} onChange={e => setParts(ps => ps.map((x, j) => j === i ? { ...x, is_active: e.target.checked } : x))} /> active</label>
                                     {canEdit && <>
                                         <button type="button" onClick={() => setParts(ps => move(ps, i, -1))} className="p-1.5 rounded text-slate-500 hover:bg-slate-100" aria-label="Move up"><ArrowUp size={15} /></button>

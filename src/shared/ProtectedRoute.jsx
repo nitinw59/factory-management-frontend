@@ -46,7 +46,8 @@ const ProtectedRoute = () => {
                 'purchase_manager',
                 'sales_manager',
                 'job_work_receiver',
-                'fabric_store_manager'
+                'fabric_store_manager',
+                'floor_incharge'   // 3.0-only role (18 Oct 2026); its portal came with phase 4 (19 Oct 2026)
   ];
 
   if (!user.role || !allowedRoles.includes(user.role)) {

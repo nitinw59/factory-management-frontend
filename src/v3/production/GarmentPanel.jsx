@@ -16,7 +16,7 @@ const label = (s) => String(s || '').toLowerCase().replace('_', ' ');
 const tileNo = (no) => Number(String(no).split('-').pop()) || no;
 const rollOf = (no) => String(no).split('-').slice(-3, -2)[0] || '';
 
-export default function GarmentPanel({ batchId, stageId, lineId, codes, act, askUndo, tick = 0, focus, blockedMsg }) {
+export default function GarmentPanel({ batchId, stageId, lineId, codes, act, askUndo, tick = 0, focus, blockedMsg, multi = true }) {
     const [view, setView] = useState(null);
     const [error, setError] = useState('');
     const [inspect, setInspect] = useState(null);   // { key, fix, highlightId }
@@ -48,7 +48,7 @@ export default function GarmentPanel({ batchId, stageId, lineId, codes, act, ask
             title: `${g.garment_no}${g.flagged.length ? ` — ${g.flagged.map(f => `${f.part_name} rejected at ${f.rejected_at}`).join(', ')}` : ''}${!g.gate_ok ? ` — waiting: ${g.blocked_by.join(', ')}` : ''}`,
         }));
         overlay = (
-            <InspectOverlay key={inspect.key} head={[['Batch', `#${view.batch.floor_no}`], ['Size', grp ? grp.size : ''], ['Colour', grp ? grp.colour : '']]} items={items} codes={codes} unit="garment"
+            <InspectOverlay key={inspect.key} multi={multi} head={[['Batch', `#${view.batch.floor_no}`], ['Size', grp ? grp.size : ''], ['Colour', grp ? grp.colour : '']]} items={items} codes={codes} unit="garment"
                 startFix={inspect.fix} highlightId={inspect.highlightId} onClose={() => setInspect(null)}
                 onApprove={(x) => act((e) => productionApi.garmentCheck({ ...base(x), status: 'APPROVED', ...e }), 'Approved', 'garment')}
                 onRepairNow={(x, code) => act((e) => productionApi.garmentCheck({ ...base(x), status: 'REPAIRED', defect_code_id: code, ...e }), 'Repaired now', 'garment')}

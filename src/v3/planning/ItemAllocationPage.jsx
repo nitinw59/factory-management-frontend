@@ -8,6 +8,7 @@ import { apiError } from '../api/mastersApi';
 import { SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import AllocateModal from './AllocateModal';
+import RollAssignModal from './RollAssignModal';
 
 const fmt = (n, uom) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 3 });
 const ACTION = { ALLOCATE: 'Allocated', RELEASE: 'Released', AUTO_RELEASE: 'Released automatically', ISSUE: 'Issued to production', ISSUE_RETURN: 'Returned from production' };
@@ -17,18 +18,22 @@ export default function ItemAllocationPage() {
     const [data, setData] = useState(null);
     const [canPlan, setCanPlan] = useState(false);
     const [target, setTarget] = useState(null);
+    const [rolls, setRolls] = useState(null);   // fabric: whole rolls (19 Oct 2026)
     const [error, setError] = useState('');
 
     const load = useCallback(() => planningApi.positionItem(kind, itemId).then(res => setData(res.data))
         .catch(err => setError(apiError(err, 'Failed to load.'))), [kind, itemId]);
     useEffect(() => {
         load();
-        planningApi.permissions().then(res => setCanPlan(Boolean(res.data.plan || (res.data.plan_kinds || []).includes(String(kind).toUpperCase())))).catch(() => {});
+        // Allocating is the store's (19 Oct 2026): the trim store for trims, the fabric store for fabric.
+        planningApi.permissions().then(res => setCanPlan((res.data.alloc_kinds || []).includes(String(kind).toUpperCase()))).catch(() => {});
     }, [load, kind]);
 
     if (!data) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
     const { item, stock } = data;
-    const open = (mode, o) => setTarget({ mode, orderId: o.id, orderNo: o.order_no, kind: item.kind, itemId: item.id, label: item.label, uom: item.uom, open: o.open, allocated: o.allocated, free: stock.free });
+    const open = (mode, o) => (item.kind === 'FABRIC'
+        ? setRolls({ orderId: o.id, orderNo: o.order_no, itemId: item.id, label: item.label })
+        : setTarget({ mode, orderId: o.id, orderNo: o.order_no, kind: item.kind, itemId: item.id, label: item.label, uom: item.uom, open: o.open, allocated: o.allocated, free: stock.free }));
 
     return (
         <div>
@@ -75,8 +80,12 @@ export default function ItemAllocationPage() {
                                 </td>
                                 <td className="px-4 py-2">
                                     {canPlan && o.status === 'APPROVED' && <span className="flex justify-end gap-2">
-                                        {o.open > 0 && <SecondaryButton onClick={() => open('allocate', o)}>Allocate</SecondaryButton>}
-                                        {o.allocated > 0 && <SecondaryButton onClick={() => open('release', o)}>Release</SecondaryButton>}
+                                        {item.kind === 'FABRIC'
+                                            ? (o.open > 0 || o.allocated > 0) && <SecondaryButton onClick={() => open('rolls', o)}>{o.open > 0 ? 'Assign rolls' : 'Rolls'}</SecondaryButton>
+                                            : <>
+                                                {o.open > 0 && <SecondaryButton onClick={() => open('allocate', o)}>Allocate</SecondaryButton>}
+                                                {o.allocated > 0 && <SecondaryButton onClick={() => open('release', o)}>Release</SecondaryButton>}
+                                            </>}
                                     </span>}
                                 </td>
                             </tr>
@@ -98,6 +107,7 @@ export default function ItemAllocationPage() {
                 )}
             </div>
 
+            {rolls && <RollAssignModal target={rolls} canAssign={canPlan} onClose={() => setRolls(null)} onDone={(msg) => { setRolls(null); load(); window.alert(msg); }} />}
             {target && <AllocateModal target={target} onClose={() => setTarget(null)} onDone={() => { setTarget(null); load(); }} />}
         </div>
     );

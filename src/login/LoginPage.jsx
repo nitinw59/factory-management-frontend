@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { API_BASE_URL } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import DevLoginPanel from './DevLoginPanel';   // local test mode only (renders nothing elsewhere)
 
 const LoginPage = () => {
     const { user } = useAuth();
@@ -51,6 +52,8 @@ const LoginPage = () => {
                         Sign in with Google
                     </button>
                 </div>
+
+                {process.env.NODE_ENV === 'development' && <DevLoginPanel />}
 
                 <p className="text-[10px] text-slate-400 mt-6 uppercase tracking-widest">Authorized personnel only</p>
             </div>

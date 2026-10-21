@@ -14,6 +14,8 @@ import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import AllocateModal from './AllocateModal';
+import RollAssignModal from './RollAssignModal';
+import ReleaseForCuttingModal from './ReleaseForCuttingModal';
 import OrderMilestonesPanel from './OrderMilestonesPanel';
 import MaterialRequirements from './MaterialRequirements';
 import { exportTrimReservationPdf } from './trimReservationPdf';
@@ -79,10 +81,12 @@ export default function OrderRequirementsPage() {
     const { orderId } = useParams();
     const [data, setData] = useState(null);
     const [perms, setPerms] = useState({ plan: false, settings: false, release: false });
-    // Allocate / release / raise: the merchandiser for all material, each store for its own kind.
+    // Raise: the merchandiser for all material, each store for its own kind. Allocate / release (19 Oct 2026, "not
+    // merchandiser but store manager allocate trim and fabric store manager allocate fabric"): the store only.
     const myKinds = perms.plan_kinds || (perms.plan ? ['FABRIC', 'TRIM'] : []);
-    const anyKind = myKinds.length > 0;
-    const canKind = (k) => myKinds.includes(k);
+    const allocKinds = perms.alloc_kinds || [];
+    const canRaise = (k) => myKinds.includes(k);
+    const canAlloc = (k) => allocKinds.includes(k);
     const [params] = useSearchParams();
     const [tab, setTab] = useState(['MILESTONES', 'TRIM'].includes(params.get('tab')) ? params.get('tab') : 'FABRIC');
     const [error, setError] = useState('');
@@ -92,16 +96,20 @@ export default function OrderRequirementsPage() {
     const [linesOpen, setLinesOpen] = useState(false); // more than 3 order lines: folded
     const [allowance, setAllowance] = useState(null); // { line, pct, reason }
     const [target, setTarget] = useState(null);       // allocate / release
-    const [ov, setOv] = useState(null);               // readiness override / revoke { mode, reason }
+    const [rolls, setRolls] = useState(null);         // fabric: assign / un-assign whole rolls
+    const [ov, setOv] = useState(null);               // revoke the release { mode, reason }
+    const [releasing, setReleasing] = useState(false); // release for cutting (PPM per line + undertaking)
+    const [check, setCheck] = useState(null);         // release check: items on no requisition and no PO
     const [busy, setBusy] = useState(false);
     const [formError, setFormError] = useState('');
 
     const load = useCallback(() => planningApi.requirements(orderId).then(res => setData(res.data))
         .catch(err => setError(apiError(err, 'Failed to load requirements.'))), [orderId]);
+    const loadCheck = useCallback(() => planningApi.releaseCheck(orderId).then(res => setCheck(res.data)).catch(() => {}), [orderId]);
     useEffect(() => {
-        load();
+        load(); loadCheck();
         planningApi.permissions().then(res => setPerms(res.data)).catch(() => {});
-    }, [load]);
+    }, [load, loadCheck]);
 
     if (!data) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
     const { order } = data;
@@ -117,7 +125,7 @@ export default function OrderRequirementsPage() {
     const saveOverride = async () => {
         setBusy(true); setFormError('');
         try {
-            const res = ov.mode === 'override' ? await planningApi.overrideReadiness(orderId, ov.reason) : await planningApi.revokeOverride(orderId, ov.reason);
+            const res = await planningApi.revokeOverride(orderId, ov.reason);
             setData(res.data); setOv(null);
         } catch (err) { setFormError(apiError(err, 'Failed.')); } finally { setBusy(false); }
     };
@@ -160,7 +168,7 @@ export default function OrderRequirementsPage() {
                                 title={r.override ? `Released by ${r.override.by_name || '—'} on ${new Date(r.override.at).toLocaleString()}: ${r.override.reason}${r.override.stale ? ' (given before the latest revision)' : ''}` : undefined}>
                                 {r.override ? <><ShieldCheck size={11} className="inline -mt-0.5" /> cutting released{r.override.stale ? ' (old)' : ''}</> : r.status === 'READY' ? 'cutting cleared' : 'cutting blocked'}
                             </span>
-                            {perms.release && !r.override && r.status !== 'READY' && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline" onClick={() => { setFormError(''); setOv({ mode: 'override', reason: '' }); }}>Release for cutting…</button>}
+                            {perms.release && !r.override && r.status !== 'READY' && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline" onClick={() => setReleasing(true)}>Release for cutting…</button>}
                             {perms.release && r.override && <button type="button" className="text-xs font-bold text-slate-600 hover:underline" onClick={() => { setFormError(''); setOv({ mode: 'revoke', reason: '' }); }}>Revoke release</button>}
                         </>;
                     })()}
@@ -193,6 +201,13 @@ export default function OrderRequirementsPage() {
                 </div>
             </div>
 
+            {approved && check?.unplanned?.length > 0 && data.readiness?.status !== 'READY' && (
+                <div className="mb-3 rounded-xl border-2 border-rose-300 bg-rose-50 px-4 py-2 text-sm text-rose-800">
+                    <p className="font-black flex items-center gap-1.5"><AlertTriangle size={15} />{check.unplanned.length} item{check.unplanned.length === 1 ? ' is' : 's are'} on no requisition and no purchase order</p>
+                    <p className="text-xs mt-0.5">{check.unplanned.slice(0, 6).map(u => `${u.label} (${fmt(u.to_raise, u.uom)} ${u.uom})`).join(' · ')}{check.unplanned.length > 6 ? ` · and ${check.unplanned.length - 6} more` : ''} — raise them before cutting needs them.</p>
+                </div>
+            )}
+
             {/* Sticky tab bar; the Fabric / Trims tabs carry their filter and view on the right */}
             <div className="sticky top-14 z-20 -mx-1 px-1 bg-slate-50 flex flex-wrap items-end gap-1 border-b border-slate-200 mb-3">
                 {[['FABRIC', `Fabric (${data.totals.fabric_items}${data.items.some(i => i.kind === 'FABRIC' && i.shortfall > 0) ? ` · ${data.items.filter(i => i.kind === 'FABRIC' && i.shortfall > 0).length} short` : ''})`],
@@ -218,10 +233,11 @@ export default function OrderRequirementsPage() {
             </div>
 
             {(tab === 'FABRIC' || tab === 'TRIM') && (
-                <MaterialRequirements key={tab} data={data} kind={tab} approved={approved} showActions={anyKind && approved} canAct={canKind} busy={busy}
+                <MaterialRequirements key={tab} data={data} kind={tab} approved={approved} showActions={(myKinds.length > 0 || allocKinds.length > 0) && approved} canRaise={canRaise} canAlloc={canAlloc} busy={busy}
                     filter={fabFilter} view={fabView}
                     onCell={(item, colour) => setCell({ item, colour })}
                     onAllocateFree={allocateFree}
+                    onRolls={(it) => setRolls({ orderId: order.id, orderNo: order.order_no, itemId: it.item_id, label: it.label })}
                     onAllocate={(it) => setTarget({ mode: 'allocate', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })}
                     onRelease={(it) => setTarget({ mode: 'release', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })} />
             )}
@@ -271,19 +287,20 @@ export default function OrderRequirementsPage() {
             )}
 
             {ov && (
-                <Modal title={ov.mode === 'override' ? `Release ${order.order_no} for cutting` : 'Revoke the release'} onClose={() => setOv(null)}>
+                <Modal title="Revoke the release" onClose={() => setOv(null)}>
                     <div className="space-y-3 w-[min(460px,85vw)]">
-                        {ov.mode === 'override' && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{data.readiness.items_total - data.readiness.items_allocated} of {data.readiness.items_total} items are not allocated from stock. Releasing lets cutting start anyway; it is logged with your name and reason.</p>}
                         <Field label="Reason *"><textarea className={`${inputCls} min-h-[80px]`} value={ov.reason} onChange={e => setOv({ ...ov, reason: e.target.value })} autoFocus /></Field>
                         <ErrorBox text={formError} />
                         <div className="flex justify-end gap-2">
                             <SecondaryButton onClick={() => setOv(null)}>Cancel</SecondaryButton>
-                            <PrimaryButton onClick={saveOverride} busy={busy} disabled={busy || !ov.reason.trim()}>{ov.mode === 'override' ? 'Release for cutting' : 'Revoke'}</PrimaryButton>
+                            <PrimaryButton onClick={saveOverride} busy={busy} disabled={busy || !ov.reason.trim()}>Revoke</PrimaryButton>
                         </div>
                     </div>
                 </Modal>
             )}
 
+            {releasing && <ReleaseForCuttingModal order={order} readiness={data.readiness} onClose={() => { setReleasing(false); loadCheck(); }} onDone={(d) => { setData(d); setReleasing(false); loadCheck(); }} />}
+            {rolls && <RollAssignModal target={rolls} canAssign={canAlloc('FABRIC')} onClose={() => setRolls(null)} onDone={(msg) => { setRolls(null); load(); loadCheck(); window.alert(msg); }} />}
             {target && <AllocateModal target={target} onClose={() => setTarget(null)} onDone={() => { setTarget(null); load(); }} />}
 
             {cell && (

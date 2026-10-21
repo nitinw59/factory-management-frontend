@@ -17,8 +17,10 @@ const TABS = [
     { key: 'materials', label: 'Order BOM', page: 'planning.requirements', to: (id) => `/v3/planning/orders/${id}` },
     { key: 'milestones', label: 'Milestones', page: 'planning.milestones', approved: true, to: (id) => `/v3/planning/orders/${id}?tab=MILESTONES` },
     { key: 'issue', label: 'Material issue', page: 'issue.materialIssue', approved: true, to: (id) => `/v3/material-issue/orders/${id}` },
+    { key: 'close', label: 'Ship & close', page: 'production.closeOrders', approved: true, to: (id) => `/v3/orders/${id}/close` },   // phase 7 (20 Oct 2026)
 ];
-const tabsFor = (me, o) => TABS.filter(t => me.menu[t.page] && (!t.approved || o.status === 'APPROVED'));
+// "approved" tabs: from approval on — shipped and closed orders keep them (20 Oct 2026).
+const tabsFor = (me, o) => TABS.filter(t => me.menu[t.page] && (!t.approved || ['APPROVED', 'SHIPPED', 'CLOSED'].includes(o.status)));
 
 const cache = new Map();   // order summaries, so moving between tabs doesn't flash
 function useOrderSummary(id) {

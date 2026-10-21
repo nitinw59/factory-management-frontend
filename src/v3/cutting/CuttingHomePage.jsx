@@ -1,4 +1,6 @@
 // Cutting: order lines to cut (planned vs cut, fabric issued to cutting) and the cut batches.
+// 20 Oct 2026: the cutting manager answers for the cutting line — their own override password (accepted on checkers'
+// screens like any supervisor's) on a third tab.
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { cuttingApi } from '../api/cuttingApi';
@@ -6,11 +8,15 @@ import { apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { CUT_STATUS, useCuttingPermissions, PriorityBadge } from './cutShared';
+import { productionApi } from '../api/productionApi';
+import SupervisorPinCard from '../floor/SupervisorPinCard';
 
 export default function CuttingHomePage() {
     const perms = useCuttingPermissions();
     const [params, setParams] = useSearchParams();
-    const tab = params.get('tab') === 'batches' ? 'batches' : 'orders';
+    const tab = ['batches', 'password'].includes(params.get('tab')) ? params.get('tab') : 'orders';
+    const [pinAllowed, setPinAllowed] = useState(false);
+    useEffect(() => { productionApi.permissions().then(r => setPinAllowed(Boolean(r.data.supervisorPin))).catch(() => {}); }, []);
     const [lines, setLines] = useState(null);
     const [batches, setBatches] = useState(null);
     const [status, setStatus] = useState('');
@@ -26,9 +32,10 @@ export default function CuttingHomePage() {
         <div>
             <PageHeader title="Cutting" subtitle="Cut batches per order line: the cutting manager sets the size ratio and layer length, picks rolls issued to cutting; the cutter enters lays per roll." />
             <div className="flex gap-1 mb-3 border-b border-slate-200">
-                {[['orders', 'Orders to cut'], ['batches', 'Cut batches']].map(([k, v]) => <button key={k} type="button" onClick={() => setParams(k === 'orders' ? {} : { tab: k })} className={`px-3 py-2 text-sm font-semibold border-b-2 -mb-px ${tab === k ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}>{v}</button>)}
+                {[['orders', 'Orders to cut'], ['batches', 'Cut batches'], ...(pinAllowed ? [['password', 'My override password']] : [])].map(([k, v]) => <button key={k} type="button" onClick={() => setParams(k === 'orders' ? {} : { tab: k })} className={`px-3 py-2 text-sm font-semibold border-b-2 -mb-px ${tab === k ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}>{v}</button>)}
             </div>
             <ErrorBox text={error} />
+            {tab === 'password' && <div className="max-w-3xl"><SupervisorPinCard /></div>}
             {tab === 'orders' && (!lines ? <Loading /> : (
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
                     <table className="w-full text-sm min-w-[820px]">

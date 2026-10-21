@@ -19,15 +19,16 @@ export default function OrderTrackerPage() {
     const navigate = useNavigate();
     const [rows, setRows] = useState(null);
     const [rag, setRag] = useState('');
-    const [params] = useSearchParams();
+    const [params, setParams] = useSearchParams();
+    const state = params.get('state') || 'active';   // active / shipped / closed (20 Oct 2026, phase 7)
     const [mine, setMine] = useState(params.get('mine') === '1');   // My work → "all in the order tracker"
     const [filter, setFilter] = useState('');
     const [q, setQ] = useState('');
     const [hits, setHits] = useState(null);
     const [error, setError] = useState('');
     const load = useCallback(() => {
-        trackerApi.orders({ rag: rag || undefined, q: filter || undefined, mine: mine ? 1 : undefined }).then(res => setRows(res.data.orders)).catch(err => setError(apiError(err, 'Failed to load orders.')));
-    }, [rag, filter, mine]);
+        trackerApi.orders({ rag: rag || undefined, q: filter || undefined, mine: mine ? 1 : undefined, state }).then(res => setRows(res.data.orders)).catch(err => setError(apiError(err, 'Failed to load orders.')));
+    }, [rag, filter, mine, state]);
     useEffect(() => { setRows(null); load(); }, [load]);
 
     const search = async (e) => {
@@ -65,6 +66,11 @@ export default function OrderTrackerPage() {
                 </div>
             )}
             <div className="flex flex-wrap gap-2 items-center mb-3">
+                <span className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs font-bold">
+                    {[['active', 'Active'], ['shipped', 'Shipped'], ['closed', 'Closed']].map(([k, l]) => (
+                        <button key={k} type="button" onClick={() => { const p = new URLSearchParams(params); p.set('state', k); setParams(p); }} className={`px-3 py-1 ${state === k ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{l}</button>
+                    ))}
+                </span>
                 {['', 'RED', 'AMBER', 'GREEN'].map(x => (
                     <button key={x || 'all'} type="button" onClick={() => setRag(x)} className={`px-3 py-1 rounded-lg text-xs font-bold border ${rag === x ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-200 text-slate-600'}`}>
                         {x ? `${x.charAt(0)}${x.slice(1).toLowerCase()}${counts && !rag ? ` (${counts[x]})` : ''}` : 'All'}

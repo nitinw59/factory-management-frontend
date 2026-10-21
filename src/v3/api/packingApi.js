@@ -20,3 +20,13 @@ export const packingApi = {
     confirmDispatch: (id, overReason) => api.post(`/v3/packing/dispatches/${id}/dispatch`, { over_reason: overReason }),
     cancelDispatch: (id, reason) => api.post(`/v3/packing/dispatches/${id}/cancel`, { reason }),
 };
+
+// Shipped → Closed (20 Oct 2026, phase 7) — backend routes/v3/orderCloseRoutes.js (/api/v3/order-close).
+export const orderCloseApi = {
+    get: (orderId) => api.get(`/v3/order-close/${orderId}`),
+    shortClose: (orderId, lines, reason) => api.post(`/v3/order-close/${orderId}/short-close`, { lines, reason }),
+    close: (orderId, body) => api.post(`/v3/order-close/${orderId}/close`, body),          // { note, confirm_warnings, outlet: { handed_by, note, lines } }
+    forceClose: (orderId, body) => api.post(`/v3/order-close/${orderId}/force-close`, body), // { reason, note, outlet }
+    acknowledge: (orderId, note) => api.post(`/v3/order-close/${orderId}/acknowledge`, { note }),
+    reopen: (orderId, reason) => api.post(`/v3/order-close/${orderId}/reopen`, { reason }),
+};
