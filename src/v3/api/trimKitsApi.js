@@ -10,9 +10,16 @@ export const trimKitsApi = {
     get: (id) => api.get(`/v3/trim-kits/${id}`),
     create: (data) => api.post('/v3/trim-kits', data),
     update: (id, data) => api.put(`/v3/trim-kits/${id}`, data),
-    ready: (id) => api.post(`/v3/trim-kits/${id}/ready`),
+    ready: (id, lines) => api.post(`/v3/trim-kits/${id}/ready`, { lines }),   // what the store put in the kit (21 Oct 2026): [{ kit_line_id, qty | units, reason?, note? }]
     unready: (id) => api.post(`/v3/trim-kits/${id}/unready`),
     sendBack: (id, reason) => api.post(`/v3/trim-kits/${id}/send-back`, { reason }),
     sign: (id, data) => api.post(`/v3/trim-kits/${id}/sign`, data),
     close: (id, reason) => api.post(`/v3/trim-kits/${id}/close`, { reason }),
+    // 21 Oct 2026: Pending to fulfil; extra lines from free stock (the merchandiser approves)
+    pending: () => api.get('/v3/trim-kits/pending'),
+    requestExtra: (id, data) => api.post(`/v3/trim-kits/${id}/extra`, data),   // { replaces_line_id, trim_item_id, qty, reason }
+    extraRequests: (status) => api.get('/v3/trim-kits/extra-requests', { params: { status } }),
+    approveExtra: (rid, note) => api.post(`/v3/trim-kits/extra-requests/${rid}/approve`, { note }),
+    refuseExtra: (rid, reason) => api.post(`/v3/trim-kits/extra-requests/${rid}/refuse`, { reason }),
+    withdrawExtra: (rid) => api.post(`/v3/trim-kits/extra-requests/${rid}/withdraw`),
 };

@@ -42,7 +42,7 @@ export default function TrimTypesPage() {
             <PageHeader
                 title="Trim types"
                 subtitle="Each type lists the specification fields its items fill in (e.g. button: ligne, holes)."
-                actions={perms.trims && <PrimaryButton onClick={() => { setFormError(''); setEditing({ name: '', default_usage_uom: 'pcs', spec_fields: [], is_active: true }); }}><Plus size={15} /> Add trim type</PrimaryButton>}
+                actions={perms.trimsAdd && <PrimaryButton onClick={() => { setFormError(''); setEditing({ name: '', default_usage_uom: 'pcs', spec_fields: [], is_active: true }); }}><Plus size={15} /> Add trim type</PrimaryButton>}
             />
             <ErrorBox text={error} />
             {!rows ? <Loading /> : (

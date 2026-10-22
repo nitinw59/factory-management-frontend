@@ -240,13 +240,16 @@ function OrderView({ orderId }) {
                             </table>
                         </div>
                         <p className="text-xs font-black uppercase tracking-wider text-slate-500 mb-1">Lays</p>
+                        {d.lay_lock && f.lays.some(l => l.status === 'CUT') && <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1 mb-1">🔒 {d.lay_lock.reason} A new lay (make-up) is still allowed.</p>}
                         {f.lays.length === 0 ? <p className="text-sm text-slate-400">None yet.</p> : f.lays.map(l => (
                             <div key={l.id} className={`flex flex-wrap items-center gap-2 py-1.5 border-t border-slate-100 text-sm ${l.status === 'CANCELLED' ? 'opacity-50 line-through' : ''}`}>
                                 <b>Lay {l.lay_no}</b><span className="text-slate-600">{l.plies} plies × {fmt(l.layer_length_in)} in = {fmt(l.laid)} {f.uom}{l.waste ? ` + ${fmt(l.waste)} waste` : ''}</span>
                                 {l.stacked_with && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-800">stacked with {l.stacked_with}</span>}
                                 <span className="text-xs text-slate-500">{l.cells.map(c => `${c.part_name} ${c.size} ${c.pieces}`).join(' · ')}</span>
                                 <span className="text-xs text-slate-400">{l.created_by_name} · {new Date(l.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{l.notes ? ` · ${l.notes}` : ''}{l.cancel_reason ? ` · cancelled: ${l.cancel_reason}` : ''}</span>
-                                {perms.manage && l.status === 'CUT' && <button type="button" className="ml-auto text-xs font-bold text-rose-700 hover:underline" onClick={() => { setFormError(''); setVals({ reason: '' }); setAsk({ title: `Cancel lay ${l.lay_no}`, hint: `Only while none of its pieces is handed over with a batch.${l.stacked_with ? ` The whole lay is cancelled — ${l.stacked_with} too.` : ''}`, fields: [['reason', 'Reason', 'text']], run: (v) => cuttingApi.cancelLay(l.id, v.reason) }); }}><Ban size={12} className="inline" /> Cancel</button>}
+                                {perms.manage && l.status === 'CUT' && (l.cancel_blocked
+                                    ? <span className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-slate-400 cursor-not-allowed" title={l.cancel_blocked}><Ban size={12} /> Cancel — locked</span>
+                                    : <button type="button" className="ml-auto text-xs font-bold text-rose-700 hover:underline" onClick={() => { setFormError(''); setVals({ reason: '' }); setAsk({ title: `Cancel lay ${l.lay_no}`, hint: `Only while none of its pieces is handed over and no batch of the order is finalised.${l.stacked_with ? ` The whole lay is cancelled — ${l.stacked_with} too.` : ''}`, fields: [['reason', 'Reason', 'text']], run: (v) => cuttingApi.cancelLay(l.id, v.reason) }); }}><Ban size={12} className="inline" /> Cancel</button>)}
                             </div>
                         ))}
                         {f.writeoffs.length > 0 && <p className="text-xs text-slate-500 mt-2">Written off: {f.writeoffs.map(w => `${fmt(w.metres)} ${f.uom} (${w.reason})`).join(' · ')}</p>}
@@ -263,7 +266,7 @@ function OrderView({ orderId }) {
                     ))}
                 </section>
             )}
-            {lay && <LayDialog order={d.order} fabrics={d.fabrics} startId={lay.item_id} sizes={sizes} suggest={d.suggest} onClose={() => setLay(null)} onSaved={(r) => { setLay(null); setD(r); setMsg(r.warning || ''); }} />}
+            {lay && <LayDialog order={d.order} fabrics={d.fabrics} startId={lay.item_id} sizes={sizes} suggest={d.suggest} onClose={() => setLay(null)} onSaved={(r) => { setLay(null); setD(r); setMsg([r.warning, r.outdated?.length ? `The order's fabric report (run ${r.outdated.join(', ')}) is now outdated — generate it again.` : ''].filter(Boolean).join(' ')); }} />}
             {ask && (
                 <Modal title={ask.title} onClose={() => setAsk(null)}>
                     <div className="space-y-3 w-[min(460px,92vw)]">

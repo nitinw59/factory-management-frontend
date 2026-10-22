@@ -5,10 +5,10 @@ import api from '../../utils/api';
 export const materialReturnsApi = {
     permissions: () => api.get('/v3/material-returns/permissions'),
     list: (params) => api.get('/v3/material-returns', { params }),
-    orders: () => api.get('/v3/material-returns/orders'),
-    candidates: (orderId) => api.get(`/v3/material-returns/orders/${orderId}/candidates`),
+    orders: (material) => api.get('/v3/material-returns/orders', { params: { material } }),   // material: FABRIC (default) | TRIM
+    candidates: (orderId, material) => api.get(`/v3/material-returns/orders/${orderId}/candidates`, { params: { material } }),
     get: (id) => api.get(`/v3/material-returns/${id}`),
-    draft: (orderId, lines) => api.post('/v3/material-returns/draft', { order_id: orderId, lines }),   // the order's draft (made if none) + lines
+    draft: (orderId, lines, material) => api.post('/v3/material-returns/draft', { order_id: orderId, lines, material }),   // the order's draft (made if none) + lines
     update: (id, notes) => api.put(`/v3/material-returns/${id}`, { notes }),
     addLines: (id, lines) => api.post(`/v3/material-returns/${id}/lines`, { lines }),
     removeLine: (id, lineId) => api.delete(`/v3/material-returns/${id}/lines/${lineId}`),

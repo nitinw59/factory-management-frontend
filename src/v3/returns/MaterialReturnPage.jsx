@@ -2,6 +2,8 @@
 // adds the order's end bits, pocketing / lining left at cutting and issued rolls not cut, then submits. Submitted: the
 // fabric store manager counts each line — received (its length) or not received (reason), partial allowed — or sends it
 // back; the cutting manager can recall it. Both can download the material return slip (PDF).
+// Trims (21 Oct 2026): the line loader puts the order's trims still with the line on a trim slip (by issue line, any
+// quantity up to what is out); the trim store receives them — back on the order's allocation (over-cut: free stock).
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, FileDown, Send, RotateCcw, Ban, Trash2, Plus, CheckCircle2, PackageCheck } from 'lucide-react';
@@ -17,6 +19,33 @@ const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString('en-IN', { maxi
 const when = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
 const ACTION = { CREATED: 'Draft made', LINES_ADDED: 'Added', LINE_REMOVED: 'Removed', EDITED: 'Edited', SUBMITTED: 'Submitted', RECALLED: 'Recalled', SENT_BACK: 'Sent back by the store', RECEIVED: 'Received', CANCELLED: 'Cancelled' };
 const age = (d) => { const days = Math.floor((Date.now() - new Date(d).getTime()) / 86400000); return days <= 0 ? 'today' : `${days} day${days === 1 ? '' : 's'}`; };
+
+// Trims still out with the line (from the order's MI3 slips / kits): how much of each comes back.
+function TrimAddPanel({ cand, busy, onAdd }) {
+    const [q, setQ] = useState({});
+    const lines = Object.entries(q).filter(([, v]) => Number(v) > 0).map(([id, v]) => ({ kind: 'TRIM', issue_line_id: id, qty: Number(v) }));
+    const bad = cand.trims.some(t => Number(q[t.issue_line_id] || 0) > t.out_qty + 1e-9 || (t.uom === 'pcs' && !Number.isInteger(Number(q[t.issue_line_id] || 0))));
+    return (
+        <div className="bg-white border border-indigo-200 rounded-xl p-4 mb-4">
+            <p className="font-black text-slate-800 mb-1">Add trims not used</p>
+            {!cand.trims.length ? <p className="text-sm text-slate-500">Nothing of this order is out with the line (or it is all on a slip already).</p> : (<>
+                <div className="overflow-x-auto"><table className="w-full text-sm min-w-[640px] mb-2">
+                    <thead className="text-xs font-bold text-slate-500 uppercase"><tr><th className="px-2 py-1 text-left">Trim</th><th className="px-2 py-1 text-left">Issued on</th><th className="px-2 py-1 text-right">Out with the line</th><th className="px-2 py-1 text-right">Coming back</th></tr></thead>
+                    <tbody>{cand.trims.map(t => (
+                        <tr key={t.issue_line_id} className="border-t border-slate-100">
+                            <td className="px-2 py-1 font-semibold">{t.label}{t.over_cut && <span className="ml-1 text-[11px] font-normal text-sky-700">over-cut · free stock</span>}</td>
+                            <td className="px-2 py-1 text-xs text-slate-600">{t.issue_no}{t.kit_no ? ` · kit ${t.kit_no}` : ''}</td>
+                            <td className="px-2 py-1 text-right tabular-nums">{fmt(t.out_qty)} {t.uom}</td>
+                            <td className="px-2 py-1 text-right whitespace-nowrap"><input type="number" min="0" step={t.uom === 'pcs' ? 1 : 'any'} className="w-24 px-2 py-1 border border-slate-300 rounded text-right" value={q[t.issue_line_id] ?? ''} onChange={e => setQ({ ...q, [t.issue_line_id]: e.target.value })} aria-label={`${t.label} coming back`} />
+                                <button type="button" className="ml-1 text-xs font-bold text-indigo-700 hover:underline" onClick={() => setQ({ ...q, [t.issue_line_id]: String(t.out_qty) })}>all</button></td>
+                        </tr>))}</tbody>
+                </table></div>
+                {bad && <p className="text-xs text-rose-700 mb-2">More than is out, or part of a piece.</p>}
+                <PrimaryButton busy={busy} disabled={busy || !lines.length || bad} onClick={() => onAdd(lines, () => setQ({}))}><Plus size={14} /> Add {lines.length || ''} to the slip</PrimaryButton>
+            </>)}
+        </div>
+    );
+}
 
 // What the order can put on the draft: end bits by fabric × colour, pocketing left at cutting, rolls not cut.
 function AddPanel({ cand, busy, onAdd }) {
@@ -105,6 +134,9 @@ export default function MaterialReturnPage() {
         } catch (err) { setFormError(apiError(err, 'Failed.')); } finally { setBusy(false); }
     };
     const draft = mr.status === 'DRAFT';
+    const trim = mr.material === 'TRIM';
+    const mayPrepare = mr.may_prepare ?? perm.prepare;
+    const mayReceive = mr.may_receive ?? perm.receive;
     const receiving = Boolean(rcv);
     const rcvReady = receiving && mr.lines.every(l => { const v = rcv[l.id]; return v.received ? Number(v.qty) > 0 && Number(v.qty) <= l.listed_qty + 1e-9 : v.reason.trim(); });
     const th = 'px-2 py-2';
@@ -119,22 +151,24 @@ export default function MaterialReturnPage() {
             <p className="text-sm text-slate-600">{mr.order_no} · {mr.customer_name}{mr.styles ? ` · ${mr.styles}` : ''}</p>
             <p className="text-xs text-slate-500 mb-3">Prepared by {mr.created_by_name || '—'} {when(mr.created_at)}{mr.submitted_at ? ` · submitted by ${mr.submitted_by_name} ${when(mr.submitted_at)}` : ''}{mr.received_at ? ` · received by ${mr.received_by_name} ${when(mr.received_at)}` : ''}{mr.cancelled_reason ? ` · cancelled: ${mr.cancelled_reason}` : ''}</p>
             <div className="flex flex-wrap gap-2 mb-3">
-                {draft && perm.prepare && <PrimaryButton busy={busy} disabled={busy || !mr.lines.length} onClick={() => run(() => materialReturnsApi.submit(id))}><Send size={14} /> Submit to the fabric store</PrimaryButton>}
-                {draft && perm.prepare && <SecondaryButton onClick={() => open({ title: 'Note on the slip', label: 'Note', run: (t) => materialReturnsApi.update(id, t || null) })}>Note</SecondaryButton>}
-                {draft && perm.prepare && <SecondaryButton onClick={() => open({ title: `Cancel ${mr.return_no}`, label: 'Reason *', required: true, run: (t) => materialReturnsApi.cancel(id, t) })}><Ban size={14} /> Cancel draft</SecondaryButton>}
-                {mr.status === 'SUBMITTED' && perm.receive && !receiving && <PrimaryButton onClick={startReceive}><PackageCheck size={14} /> Receive</PrimaryButton>}
-                {mr.status === 'SUBMITTED' && perm.receive && !receiving && <SecondaryButton onClick={() => open({ title: 'Send back to the cutting room', label: 'Why *', required: true, run: (t) => materialReturnsApi.sendBack(id, t) })}><RotateCcw size={14} /> Send back</SecondaryButton>}
-                {mr.status === 'SUBMITTED' && perm.prepare && !receiving && <SecondaryButton onClick={() => open({ title: `Recall ${mr.return_no}`, label: 'Reason (optional)', run: (t) => materialReturnsApi.recall(id, t || undefined) })}><RotateCcw size={14} /> Recall</SecondaryButton>}
+                {draft && mayPrepare && <PrimaryButton busy={busy} disabled={busy || !mr.lines.length} onClick={() => run(() => materialReturnsApi.submit(id))}><Send size={14} /> Submit to the {trim ? 'trim' : 'fabric'} store</PrimaryButton>}
+                {draft && mayPrepare && <SecondaryButton onClick={() => open({ title: 'Note on the slip', label: 'Note', run: (t) => materialReturnsApi.update(id, t || null) })}>Note</SecondaryButton>}
+                {draft && mayPrepare && <SecondaryButton onClick={() => open({ title: `Cancel ${mr.return_no}`, label: 'Reason *', required: true, run: (t) => materialReturnsApi.cancel(id, t) })}><Ban size={14} /> Cancel draft</SecondaryButton>}
+                {mr.status === 'SUBMITTED' && mayReceive && !receiving && <PrimaryButton onClick={startReceive}><PackageCheck size={14} /> Receive</PrimaryButton>}
+                {mr.status === 'SUBMITTED' && mayReceive && !receiving && <SecondaryButton onClick={() => open({ title: trim ? 'Send back to the line loader' : 'Send back to the cutting room', label: 'Why *', required: true, run: (t) => materialReturnsApi.sendBack(id, t) })}><RotateCcw size={14} /> Send back</SecondaryButton>}
+                {mr.status === 'SUBMITTED' && mayPrepare && !receiving && <SecondaryButton onClick={() => open({ title: `Recall ${mr.return_no}`, label: 'Reason (optional)', run: (t) => materialReturnsApi.recall(id, t || undefined) })}><RotateCcw size={14} /> Recall</SecondaryButton>}
                 <span className="ml-auto"><SecondaryButton onClick={async () => exportReturnSlip(mr, await loadLetterhead())}><FileDown size={14} /> Material return slip (PDF)</SecondaryButton></span>
             </div>
             <ErrorBox text={error} />
             {mr.notes && <p className="text-sm text-slate-700 mb-3"><b>Note:</b> {mr.notes}</p>}
-            {draft && perm.prepare && mr.candidates && <AddPanel cand={mr.candidates} busy={busy} onAdd={async (lines, reset) => { if (await run(() => materialReturnsApi.addLines(id, lines))) reset(); }} />}
-            {receiving && <p className="mb-2 text-sm rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">Count each line. Received: enter the length you got (up to what was sent; a roll comes back whole). Not received: give the reason — it goes back to the cutting room. Stock moves only when you approve.</p>}
+            {draft && mayPrepare && mr.candidates && (trim
+                ? <TrimAddPanel cand={mr.candidates} busy={busy} onAdd={async (lines, reset) => { if (await run(() => materialReturnsApi.addLines(id, lines))) reset(); }} />
+                : <AddPanel cand={mr.candidates} busy={busy} onAdd={async (lines, reset) => { if (await run(() => materialReturnsApi.addLines(id, lines))) reset(); }} />)}
+            {receiving && <p className="mb-2 text-sm rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">Count each line. Received: enter the length you got (up to what was sent; a roll comes back whole). Not received: give the reason — it goes back to the {trim ? 'line' : 'cutting room'}. Stock moves only when you approve.</p>}
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
                 <table className="w-full text-sm min-w-[900px]">
                     <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr>
-                        <th className={th}>#</th><th className={th}>Item</th><th className={th}>Fabric · colour</th><th className={th}>From</th><th className={`${th} text-right`}>Sent</th>
+                        <th className={th}>#</th><th className={th}>Item</th><th className={th}>{trim ? 'Trim' : 'Fabric · colour'}</th><th className={th}>From</th><th className={`${th} text-right`}>Sent</th>
                         <th className={`${th} text-right`}>Received</th><th className={th}>Status</th><th className={th} /></tr></thead>
                     <tbody>
                         {mr.lines.length === 0 && <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-400">Nothing on the slip yet — add from above.</td></tr>}
@@ -168,7 +202,7 @@ export default function MaterialReturnPage() {
                                                 {l.receive_note && <span className="block text-slate-500">{l.receive_note}</span>}</span>
                                         )}
                                     </td>
-                                    <td className={`${td} text-right`}>{draft && perm.prepare && <button type="button" className="p-1 text-rose-500" title="Take off the slip" aria-label={`Remove ${itemOf(l)}`} disabled={busy} onClick={() => run(() => materialReturnsApi.removeLine(id, l.id))}><Trash2 size={14} /></button>}</td>
+                                    <td className={`${td} text-right`}>{draft && mayPrepare && <button type="button" className="p-1 text-rose-500" title="Take off the slip" aria-label={`Remove ${itemOf(l)}`} disabled={busy} onClick={() => run(() => materialReturnsApi.removeLine(id, l.id))}><Trash2 size={14} /></button>}</td>
                                 </tr>
                             );
                         })}

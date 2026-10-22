@@ -1,13 +1,16 @@
 // Trim items (v3.trim_items): one record per vendor item (brand + code), with
 // usage unit, purchase unit and conversion, plus on-hand stock, the movement
 // ledger and stock adjustments. Listed in one card per trim type (16 Oct 2026), each with its own search.
+// Export (21 Oct 2026): Excel (.xlsx) of the items shown (filters applied) or all items — an Items sheet and a By type summary.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Pencil, History, Copy, Search, X } from 'lucide-react';
+import { Plus, Pencil, History, Copy, Search, X, FileSpreadsheet, ChevronDown } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { DtmChip } from '../boms/dtmShared';
 import Modal from '../../shared/Modal';
 import { mastersApi, apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, ActiveBadge, Loading, fmtQty, useMastersPermissions } from '../components/ui';
+import { todayLocal } from '../salesOrders/SalesOrderStatusBadge';
 
 const PURCHASE_UNITS = ['pcs', 'cone', 'gross', 'box', 'roll', 'packet', 'dozen'];
 const UOM_LABEL = { pcs: 'pcs', m: 'm' };
@@ -21,6 +24,47 @@ const inPurchaseUnits = (it) => {
     const n = Number(it.on_hand) / Number(it.usage_per_purchase_uom);
     return `${fmtQty(Math.round(n * 100) / 100)} ${it.purchase_uom}`;
 };
+
+const r2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+const specsText = (it) => (it.spec_fields || []).filter(f => it.specs?.[f.key] !== undefined).map(f => `${f.label}: ${it.specs[f.key]}${f.unit ? ` ${f.unit}` : ''}`).join(' · ');
+
+// Items sheet (one row per item, a Total row) and a By type summary (items, active, with stock, no opening stock; Total row).
+function exportExcel(list, scope) {
+    const sorted = [...list].sort((a, b) => (a.trim_type_name || '').localeCompare(b.trim_type_name || '') || a.brand.localeCompare(b.brand) || a.code.localeCompare(b.code));
+    const rows = sorted.map(it => ({
+        'Trim type': it.trim_type_name || '', Brand: it.brand, Code: it.code, Description: it.description || '', Specs: specsText(it),
+        'DTM reference': it.dtm_reference || '', 'DTM base item': it.dtm_base_label || '',
+        'Usage unit': it.usage_uom, 'Purchase unit': it.purchase_uom, 'Usage per purchase unit': Number(it.usage_per_purchase_uom),
+        'On hand (usage unit)': Number(it.on_hand || 0), 'On hand (purchase units)': r2(Number(it.on_hand || 0) / Number(it.usage_per_purchase_uom || 1)),
+        'Opening stock entered': it.has_opening ? 'yes' : 'no', 'HSN code': it.hsn_code || '', 'GST %': it.gst_pct != null && it.gst_pct !== '' ? Number(it.gst_pct) : '',
+        Status: it.is_active ? 'Active' : 'Inactive',
+    }));
+    // On hand totals only add up within one unit — one Total row per usage unit.
+    const units = [...new Set(sorted.map(it => it.usage_uom))].sort();
+    const totals = units.map(u => ({ 'Trim type': `Total (${u})`, Brand: `${sorted.filter(it => it.usage_uom === u).length} item(s)`, 'Usage unit': u,
+        'On hand (usage unit)': r2(sorted.filter(it => it.usage_uom === u).reduce((a, it) => a + Number(it.on_hand || 0), 0)) }));
+    const wsItems = XLSX.utils.json_to_sheet([...rows, ...totals]);
+    wsItems['!cols'] = [18, 14, 14, 28, 30, 16, 22, 10, 12, 12, 14, 14, 12, 12, 8, 10].map(w => ({ wch: w }));
+    const byType = new Map();
+    for (const it of sorted) {
+        const k = it.trim_type_name || 'No type';
+        if (!byType.has(k)) byType.set(k, { 'Trim type': k, Items: 0, Active: 0, Inactive: 0, 'With stock': 0, 'No opening stock': 0, 'DTM items': 0 });
+        const t = byType.get(k);
+        t.Items += 1; t[it.is_active ? 'Active' : 'Inactive'] += 1;
+        if (Number(it.on_hand) > 0) t['With stock'] += 1;
+        if (!it.has_opening) t['No opening stock'] += 1;
+        if (it.dtm_base_item_id) t['DTM items'] += 1;
+    }
+    const typeRows = [...byType.values()];
+    const sum = (key) => typeRows.reduce((a, t) => a + t[key], 0);
+    typeRows.push({ 'Trim type': 'Total', Items: sum('Items'), Active: sum('Active'), Inactive: sum('Inactive'), 'With stock': sum('With stock'), 'No opening stock': sum('No opening stock'), 'DTM items': sum('DTM items') });
+    const wsTypes = XLSX.utils.json_to_sheet(typeRows);
+    wsTypes['!cols'] = [22, 8, 8, 9, 11, 16, 10].map(w => ({ wch: w }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsItems, 'Items');
+    XLSX.utils.book_append_sheet(wb, wsTypes, 'By type');
+    XLSX.writeFile(wb, `TrimItems-${scope === 'all' ? 'all' : 'filtered'}-${todayLocal()}.xlsx`);
+}
 
 export default function TrimItemsPage() {
     const perms = useMastersPermissions();
@@ -36,6 +80,7 @@ export default function TrimItemsPage() {
     const [formError, setFormError] = useState('');
     const [ledgerItem, setLedgerItem] = useState(null);
     const [groupSearch, setGroupSearch] = useState({});   // trim type id → text, when that group's search is open
+    const [exportOpen, setExportOpen] = useState(false);
 
     const load = useCallback(() => {
         Promise.all([mastersApi.trimItems(), mastersApi.trimTypes()])
@@ -110,10 +155,24 @@ export default function TrimItemsPage() {
                         {DTM_FILTERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                     <SearchInput value={search} onChange={setSearch} placeholder="Search brand, code, description, DTM reference" />
-                    {perms.trims && <PrimaryButton onClick={startNew} disabled={types.length === 0}><Plus size={15} /> Add item</PrimaryButton>}
+                    <div className="relative">
+                        <SecondaryButton onClick={() => setExportOpen(o => !o)} disabled={!items || items.length === 0} aria-haspopup="menu" aria-expanded={exportOpen}><FileSpreadsheet size={15} /> Export <ChevronDown size={14} /></SecondaryButton>
+                        {exportOpen && (<>
+                            <div className="fixed inset-0 z-20" onClick={() => setExportOpen(false)} />
+                            <div role="menu" className="absolute right-0 z-30 mt-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-sm">
+                                <button type="button" role="menuitem" className="w-full text-left px-3 py-2 hover:bg-slate-50 disabled:opacity-40" disabled={shown.length === 0}
+                                    onClick={() => { exportExcel(shown, 'filtered'); setExportOpen(false); }}>
+                                    <b className="block text-slate-800">Items shown — {shown.length}</b><span className="text-xs text-slate-500">With the type, DTM and search filters applied (.xlsx)</span></button>
+                                <button type="button" role="menuitem" className="w-full text-left px-3 py-2 hover:bg-slate-50"
+                                    onClick={() => { exportExcel(items || [], 'all'); setExportOpen(false); }}>
+                                    <b className="block text-slate-800">All trim items — {(items || []).length}</b><span className="text-xs text-slate-500">Every item, active and inactive (.xlsx)</span></button>
+                            </div>
+                        </>)}
+                    </div>
+                    {perms.trimsAdd && <PrimaryButton onClick={startNew} disabled={types.length === 0}><Plus size={15} /> Add item</PrimaryButton>}
                 </>}
             />
-            {perms.trims && types.length === 0 && items && <p className="text-sm text-amber-700 mb-3">Add a trim type first.</p>}
+            {perms.trimsAdd && types.length === 0 && items && <p className="text-sm text-amber-700 mb-3">Add a trim type first.</p>}
             <ErrorBox text={error} />
             {!items ? <Loading /> : groups.length === 0 ? (
                 <p className="bg-white border border-slate-200 rounded-xl px-4 py-8 text-center text-sm text-slate-400">No trim items.</p>
@@ -170,7 +229,7 @@ export default function TrimItemsPage() {
                                                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
                                                         <button type="button" onClick={() => setLedgerItem(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Stock history of ${it.brand} ${it.code}`}><History size={15} /></button>
                                                         {perms.trims && <button type="button" onClick={() => { setFormError(''); setEditing({ ...it, trim_type_id: String(it.trim_type_id), description: it.description || '' }); }} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Edit ${it.brand} ${it.code}`}><Pencil size={15} /></button>}
-                                                        {perms.trims && <button type="button" onClick={() => startCopy(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Copy ${it.brand} ${it.code} into a new item`} title="Copy into a new item"><Copy size={15} /></button>}
+                                                        {perms.trimsAdd && <button type="button" onClick={() => startCopy(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Copy ${it.brand} ${it.code} into a new item`} title="Copy into a new item"><Copy size={15} /></button>}
                                                     </td>
                                                 </tr>
                                             ))}

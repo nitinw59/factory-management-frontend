@@ -100,7 +100,7 @@ export default function NewCutBatchPage() {
             <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 space-y-3">
                 <div className="grid sm:grid-cols-3 gap-3">
                     <Field label="Piece numbering">
-                        <select className={inputCls} value={mode} onChange={e => setMode(e.target.value)}><option value="MODE_1">Mode 1 — numbered per roll</option><option value="MODE_2">Mode 2 — continuous across rolls</option></select>
+                        <select className={inputCls} value={mode} onChange={e => setMode(e.target.value)}><option value="MODE_1">Mode 1 — per roll, running on through the sizes</option><option value="MODE_2">Mode 2 — per size, continuous across rolls</option></select>
                     </Field>
                     <Field label="Layer length (inches) *" hint={hasLength ? `= ${layerText(Number(length))} per lay` : ' '}><input className={inputCls} type="number" min="1" step="0.01" value={length} onChange={e => setLength(e.target.value)} /></Field>
                     <Field label="Notes"><input className={inputCls} value={notes} onChange={e => setNotes(e.target.value)} /></Field>

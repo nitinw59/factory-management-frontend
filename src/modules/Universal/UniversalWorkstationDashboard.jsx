@@ -736,8 +736,9 @@ const DEFECT_PICKER = {
 const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidationSubmit, onRepairSubmit, onReplaceRework, onRevertToPending, isApproveBlocked, highlightPieceId }) => {
     const pieces = itemInfo.pieces || [];
 
-    // Bundles with any piece not cleared upstream (cutting) — shown as a WARNING
-    // only (the floor works ahead of earlier scans); they stay approvable.
+    // Bundles with any piece not cleared upstream (cutting) — LOCKED for approval
+    // since 21 Oct 2026 (the server refuses it: "Locked: N piece(s) not cleared at
+    // cutting"); flagging rework on them stays allowed.
     const blockedBundleIds = new Set(pieces.filter(p => p.upstream_status === 'BLOCKING').map(p => p.bundle_id ?? itemInfo.bundle_id));
     const upstreamBlockedCount = pieces.filter(p => p.upstream_status === 'BLOCKING').length;
     const upstreamRejectedPieces = pieces.filter(p => p.upstream_status === 'REJECTED');
@@ -746,8 +747,9 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     // tile tooltips carrying that detail never show on the tablets this runs on.
     const earlierDefectPieces = pieces.filter(p => p.is_upstream_defect && (p.qc_status === 'QC_REJECTED' || p.qc_status === 'NEEDS_REWORK'));
     const upstreamStage = itemInfo.upstream_stage || pieces.find(p => p.upstream_stage)?.upstream_stage || 'previous stage';
-    // Previous-stage status is a WARNING only (the floor works ahead of
-    // earlier scans) — those pieces stay actionable.
+    // Pieces of a locked bundle stay selectable (to flag rework), but are never approved.
+    const isLockedPiece = (p) => itemInfo.isBundle && blockedBundleIds.has(p.bundle_id ?? itemInfo.bundle_id);
+    const isUpstreamLocked = itemInfo.isBundle && !!itemInfo.bundle_id && upstreamBlockedCount > 0;   // the one bundle open here is locked
     const actionablePieces = pieces.filter(p => p.qc_status === 'PENDING' || !p.qc_status);
     const reworkPieces = pieces.filter(isOwnRework);
     // Only rework raised at THIS stage locks a bundle (its own QC isn't
@@ -797,8 +799,10 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     };
 
     const displayBatch = itemInfo.batchId;
-    const displayRoll = itemInfo.rollId ? `ROLL #${itemInfo.rollId}` : '';
-    const displayPartSize = `${itemInfo.partName} | SIZE ${itemInfo.size || 'MIXED'}`;
+    // A single bundle's Inspect passes the bundle row (roll_id / part_name), not rollId / partName — showed "UNDEFINED".
+    const rollNo = itemInfo.rollId ?? itemInfo.roll_id;
+    const displayRoll = rollNo ? `ROLL #${rollNo}` : '';
+    const displayPartSize = `${itemInfo.partName || itemInfo.part_name || pieces[0]?.part_name || 'PART'} | SIZE ${itemInfo.size || 'MIXED'}`;
 
     // True when selected pieces are NEEDS_REWORK — drives action bar switching
     const isRepairMode = selectedIds.size > 0 && pieces.some(p => selectedIds.has(p.id) && isOwnRework(p));
@@ -917,7 +921,9 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     };
 
     const submitValidation = async (qcStatus, defectCodeIds = [], extra = {}) => {
-        const selectedPiecesList = pieces.filter(p => selectedIds.has(p.id));
+        // Approving skips locked bundles (pieces not cleared at the previous stage) — the server would refuse them.
+        const selectedPiecesList = pieces.filter(p => selectedIds.has(p.id) && !(qcStatus === 'APPROVED' && isLockedPiece(p)));
+        if (selectedPiecesList.length === 0) return;
         let payloads = [];
 
         // BUNDLE-mode lines (e.g. Preparation) upsert per bundle_id — any view
@@ -944,7 +950,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
         } else {
             payloads = [{
                 batchId: itemInfo.batchId, rollId: itemInfo.rollId, partId: itemInfo.partId,
-                size: itemInfo.size, pieceIds: Array.from(selectedIds), qcStatus, defectCodeIds, bundleId: itemInfo.bundle_id || null, ...extra
+                size: itemInfo.size, pieceIds: selectedPiecesList.map(p => p.id), qcStatus, defectCodeIds, bundleId: itemInfo.bundle_id || null, ...extra
             }];
         }
 
@@ -1220,11 +1226,12 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                     </div>
                                 )}
                                 {upstreamBlockedCount > 0 && (
-                                    <div className="flex items-start gap-3 px-4 py-3 rounded-xl border-2 border-amber-300 bg-amber-50 text-amber-900">
+                                    <div className="flex items-start gap-3 px-4 py-3 rounded-xl border-2 border-red-300 bg-red-50 text-red-900">
                                         <Lock className="w-5 h-5 shrink-0 mt-0.5" />
                                         <p className="text-sm font-bold">
-                                            <span className="font-black uppercase tracking-widest">Warning — not cleared at {upstreamStage}:</span>{' '}
-                                            {upstreamBlockedCount} piece(s) {blockedBundleIds.size > 1 ? `in ${blockedBundleIds.size} bundles ` : ''}are still pending or in rework at {upstreamStage}. You can still approve — check them first.
+                                            <span className="font-black uppercase tracking-widest">Locked: {upstreamBlockedCount} piece(s) not cleared at {upstreamStage}</span>{' — '}
+                                            {blockedBundleIds.size > 1 ? `${blockedBundleIds.size} bundles` : 'this bundle'} can't be approved until {upstreamStage} passes {upstreamBlockedCount === 1 ? 'it' : 'them'} (pending or in rework there).
+                                            {itemInfo.isBundle && !itemInfo.bundle_id ? ' Approving here skips the locked bundles.' : ''} You can still flag rework.
                                         </p>
                                     </div>
                                 )}
@@ -1339,9 +1346,10 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                 <div className="flex-grow grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 md:h-[60px] auto-rows-[60px]">
                                     <div className="relative h-full">
                                         {isBundleLocked && selectedIds.size > 0 && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Bundle Locked: Active Reworks</span></div>}
-                                        {itemInfo.isBundle && !isBundleLocked && selectedIds.size > 0 && selectedIds.size !== actionablePieces.length && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Partial Selection: Repair / Rework Only</span></div>}
+                                        {!isBundleLocked && isUpstreamLocked && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="whitespace-nowrap bg-red-600 text-white text-[11px] font-black uppercase tracking-wider px-2.5 py-1 rounded-md shadow-lg">Locked: {upstreamBlockedCount} not cleared at {upstreamStage}</span></div>}
+                                        {itemInfo.isBundle && !isBundleLocked && !isUpstreamLocked && selectedIds.size > 0 && selectedIds.size !== actionablePieces.length && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-amber-400 text-black text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Partial Selection: Repair / Rework Only</span></div>}
                                         {isApproveBlocked && <div className="absolute -top-8 left-0 w-full text-center pointer-events-none"><span className="bg-red-700 text-white text-xs font-black uppercase tracking-widest px-3 py-1 rounded-md shadow-lg">Rework Backlog: Approve Disabled</span></div>}
-                                        <button onClick={() => handleActionInitiation('APPROVED')} disabled={selectedIds.size === 0 || isBundleLocked || isApproveBlocked || (itemInfo.isBundle && selectedIds.size !== actionablePieces.length)} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it (Passed, or material replacement) before approving new pieces.' : undefined} className="w-full h-full bg-black text-white rounded-xl font-black text-lg shadow-xl hover:bg-slate-800 active:scale-95 disabled:opacity-20 disabled:bg-slate-400 flex items-center justify-center border-b-4 border-slate-800">
+                                        <button onClick={() => handleActionInitiation('APPROVED')} disabled={selectedIds.size === 0 || isBundleLocked || isUpstreamLocked || isApproveBlocked || (itemInfo.isBundle && selectedIds.size !== actionablePieces.length) || pieces.every(p => !selectedIds.has(p.id) || isLockedPiece(p))} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it (Passed, or material replacement) before approving new pieces.' : isUpstreamLocked ? `Locked: ${upstreamBlockedCount} piece(s) not cleared at ${upstreamStage}` : undefined} className="w-full h-full bg-black text-white rounded-xl font-black text-lg shadow-xl hover:bg-slate-800 active:scale-95 disabled:opacity-20 disabled:bg-slate-400 flex items-center justify-center border-b-4 border-slate-800">
                                             <CheckCircle2 className="w-5 h-5 mr-2" /> APPROVE
                                         </button>
                                     </div>
@@ -1559,8 +1567,8 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
                         <div className="flex flex-wrap gap-1.5 mt-1.5">
                             {upstreamRejected.length === 0 && <RejectedEarlierBadge status={rowStatus} />}
                             {upstreamBlocked > 0 && (
-                                <span title={`${upstreamBlocked} piece(s) pending or in rework at ${upstreamStage} — warning only`} className="inline-flex items-center text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 rounded-md px-1.5 py-0.5">
-                                    <AlertTriangle className="w-3 h-3 mr-1" /> Not cleared at {upstreamStage} ({upstreamBlocked})
+                                <span title={`${upstreamBlocked} piece(s) pending or in rework at ${upstreamStage} — the bundle can't be approved until they are cleared there`} className="inline-flex items-center text-[10px] font-black uppercase tracking-wider bg-red-100 text-red-800 border border-red-300 rounded-md px-1.5 py-0.5">
+                                    <Lock className="w-3 h-3 mr-1" /> {isComplete ? `${upstreamBlocked} not cleared at ${upstreamStage}` : `Locked: ${upstreamBlocked} not cleared at ${upstreamStage}`}
                                 </span>
                             )}
                             {upstream_rework > 0 && (
@@ -1600,7 +1608,7 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
                     <>
                         <button onClick={() => onInspect(entity)} className="px-6 py-2 text-sm bg-white text-slate-800 border-2 border-slate-300 rounded-xl hover:border-indigo-500 hover:text-indigo-700 font-black shadow-sm active:scale-95 flex items-center transition-all">INSPECT</button>
                         {canApproveBundle && (
-                            <button onClick={() => onQuickApprove(entity)} disabled={isApproveBlocked || pending_alter > 0} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it (Passed, or material replacement) before approving new pieces.' : pending_alter > 0 ? 'Fix or reject the rework pieces first' : undefined} className="px-4 py-2 text-sm bg-emerald-100 text-emerald-800 border-2 border-emerald-200 rounded-xl hover:bg-emerald-200 font-black shadow-sm active:scale-95 flex items-center transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100">
+                            <button onClick={() => onQuickApprove(entity)} disabled={isApproveBlocked || pending_alter > 0 || upstreamBlocked > 0} title={isApproveBlocked ? 'Rework backlog is over the limit — clear it (Passed, or material replacement) before approving new pieces.' : pending_alter > 0 ? 'Fix or reject the rework pieces first' : upstreamBlocked > 0 ? `Locked: ${upstreamBlocked} piece(s) not cleared at ${upstreamStage}` : undefined} className="px-4 py-2 text-sm bg-emerald-100 text-emerald-800 border-2 border-emerald-200 rounded-xl hover:bg-emerald-200 font-black shadow-sm active:scale-95 flex items-center transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100">
                                 <CheckCircle2 className="w-4 h-4 mr-2" /> QUICK APPROVE
                             </button>
                         )}

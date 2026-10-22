@@ -234,7 +234,7 @@ export default function CutBatchPage() {
                 {perms.priority && b.status !== 'CANCELLED' && <button type="button" className="text-xs font-semibold text-indigo-700 hover:underline" onClick={() => { setFormError(''); setPrio({ priority: String(b.priority), note: b.priority_note || '' }); }}>Set priority</button>}
                 {b.priority_note && <span className="text-xs text-slate-500">— {b.priority_note}</span>}
             </div>
-            <p className="text-sm text-slate-500 mb-1">{b.line.customer_name} · {b.line.style_code} {b.line.style_name} · {b.numbering_mode === 'MODE_2' ? 'numbering continuous across rolls (mode 2)' : 'numbering per roll (mode 1)'} · layer {b.layer_length_in} in ({layerText(b.layer_length_in)}) · ratio {b.ratios.map(r => `${r.size}:${r.ratio}`).join('  ')} ({b.ratio_sum}/lay)</p>
+            <p className="text-sm text-slate-500 mb-1">{b.line.customer_name} · {b.line.style_code} {b.line.style_name} · {b.numbering_mode === 'MODE_2' ? 'numbering continuous across rolls (mode 2)' : 'numbering per roll, running on through the sizes (mode 1)'} · layer {b.layer_length_in} in ({layerText(b.layer_length_in)}) · ratio {b.ratios.map(r => `${r.size}:${r.ratio}`).join('  ')} ({b.ratio_sum}/lay)</p>
             {b.gate_override && <p className="text-sm text-rose-700 mb-1">Created under a release for cutting (order not fully allocated).</p>}
             {b.fabric_warnings?.length > 0 && (
                 <div className="my-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -402,7 +402,7 @@ export default function CutBatchPage() {
                     <div className="space-y-3 w-[min(480px,88vw)]">
                         <div className="grid grid-cols-2 gap-3">
                             <Field label="Layer length (in)"><input className={inputCls} type="number" min="1" step="0.01" value={edit.layer_length_in} onChange={e => setEdit({ ...edit, layer_length_in: e.target.value })} /></Field>
-                            <Field label="Numbering"><select className={inputCls} value={edit.numbering_mode} onChange={e => setEdit({ ...edit, numbering_mode: e.target.value })}><option value="MODE_1">Mode 1 — per roll</option><option value="MODE_2">Mode 2 — continuous</option></select></Field>
+                            <Field label="Numbering"><select className={inputCls} value={edit.numbering_mode} onChange={e => setEdit({ ...edit, numbering_mode: e.target.value })}><option value="MODE_1">Mode 1 — per roll, through the sizes</option><option value="MODE_2">Mode 2 — per size, across rolls</option></select></Field>
                         </div>
                         <div className="flex flex-wrap gap-2">{b.grid.sizes.map(s => <label key={s.id} className="text-center text-sm"><span className="block text-xs font-bold">{s.name}</span><input className={`${inputCls} !w-16 text-center`} type="number" min="0" value={edit.ratio[s.id] || ''} onChange={e => setEdit({ ...edit, ratio: { ...edit.ratio, [s.id]: e.target.value } })} aria-label={`Ratio ${s.name}`} /></label>)}</div>
                         <ErrorBox text={formError} />
