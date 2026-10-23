@@ -4,6 +4,7 @@
 // narrows the batch list to the batches active on it (the page does that) and shows the line's WIP panel — WIP /
 // limit, room left, and the batches it counts. "All lines" clears it. The choice is remembered on this device.
 // The button sits in the page header next to History ("add filter next to history button"); the panel goes below it.
+// WIP is one count for the physical line across 2.0 and 3.0 (23 Oct 2026, migration 63); each batch is tagged 2.0 / 3.0.
 import { useEffect, useRef, useState } from 'react';
 import { Filter, ChevronDown, X, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 
@@ -65,7 +66,7 @@ export function LineFilterButton({ lines, value, onChange, compact = false }) {
 
 /**
  * The selected line's WIP panel (below the header).
- * panel: null | { loading, error, line: { name, type, current, limit }, batches: [{ key, code, sub, stage, status, since, inProgress, done, unitLabel }] }
+ * panel: null | { loading, error, line: { name, type, current, limit, v2, v3 }, batches: [{ key, version, code, sub, stage, status, since, inProgress, done, unitLabel }] }
  */
 export function LineWipPanel({ panel }) {
     const P = panel;
@@ -84,6 +85,7 @@ export function LineWipPanel({ panel }) {
                                     {P.line.limit != null && (P.line.current >= P.line.limit
                                         ? <span className="flex items-center gap-1 text-sm font-bold text-rose-700"><AlertTriangle size={14} /> At its limit — no new batch until one finishes here</span>
                                         : <span className="flex items-center gap-1 text-sm font-bold text-emerald-700"><CheckCircle2 size={14} /> Room for {room} more batch{room === 1 ? '' : 'es'}</span>)}
+                                    {(P.line.v2 > 0 && P.line.v3 > 0) || P.line.other ? <span className="text-xs font-bold text-slate-600">{[P.line.v2 ? `${P.line.v2} from 2.0` : '', P.line.v3 ? `${P.line.v3} from 3.0` : ''].filter(Boolean).join(' · ')}</span> : null}
                                     {P.loading && <Loader2 size={14} className="animate-spin text-slate-400" />}
                                 </div>
                                 {P.batches.length === 0 ? <p className="px-4 py-4 text-sm text-slate-500">Nothing on this line right now.</p> : (
@@ -95,7 +97,7 @@ export function LineWipPanel({ panel }) {
                                             <tbody>
                                                 {P.batches.map(b => (
                                                     <tr key={b.key} className="border-t border-slate-100">
-                                                        <td className="px-4 py-2"><b className="text-slate-900">{b.code}</b>{b.sub && <span className="block text-xs text-slate-500">{b.sub}</span>}</td>
+                                                        <td className="px-4 py-2">{b.version && <span className={`mr-1.5 text-[10px] font-black px-1.5 py-0.5 rounded border ${b.version === '3.0' ? 'bg-violet-50 text-violet-700 border-violet-200' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>{b.version}</span>}<b className="text-slate-900">{b.code}</b>{b.sub && <span className="block text-xs text-slate-500">{b.sub}</span>}</td>
                                                         <td className="px-4 py-2 text-xs font-bold text-slate-600">{b.stage}{b.status && b.status !== 'IN_PROGRESS' ? <span className="ml-1 font-normal text-slate-400">({b.status.toLowerCase().replace('_', ' ')})</span> : null}</td>
                                                         <td className="px-4 py-2 text-right tabular-nums font-semibold text-amber-700">{b.inProgress} <span className="text-[11px] font-normal text-slate-400">{b.unitLabel}</span></td>
                                                         <td className="px-4 py-2 text-right tabular-nums font-semibold text-emerald-700">{b.done} <span className="text-[11px] font-normal text-slate-400">{b.unitLabel}</span></td>
@@ -103,9 +105,8 @@ export function LineWipPanel({ panel }) {
                                                     </tr>
                                                 ))}
                                                 <tr className="border-t-2 border-slate-200 bg-slate-50 font-black text-slate-700">
-                                                    <td className="px-4 py-2" colSpan={2}>{new Set(P.batches.map(b => b.code)).size} batch(es) on the line</td>
-                                                    <td className="px-4 py-2 text-right tabular-nums text-amber-700">{P.batches.reduce((a, b) => a + b.inProgress, 0)}</td>
-                                                    <td className="px-4 py-2 text-right tabular-nums text-emerald-700">{P.batches.reduce((a, b) => a + b.done, 0)}</td>
+                                                    <td className="px-4 py-2" colSpan={2}>{new Set(P.batches.map(b => `${b.version}:${b.code}`)).size} batch(es) on the line</td>
+                                                    <td className="px-4 py-2 text-right text-xs font-bold text-slate-500" colSpan={2}>{P.batches.some(b => b.version === '2.0') && P.batches.some(b => b.version === '3.0') ? 'units differ by version' : `${P.batches.reduce((a, b) => a + b.inProgress, 0)} in progress · ${P.batches.reduce((a, b) => a + b.done, 0)} done`}</td>
                                                     <td className="px-4 py-2" />
                                                 </tr>
                                             </tbody>
@@ -118,3 +119,10 @@ export function LineWipPanel({ panel }) {
         </div>
     );
 }
+
+// The line WIP API (2.0 /line-loader/line-wip/:id and 3.0 /production/line-wip/:id share utils/lineWip.js) → panel data.
+export const toLinePanel = (d) => ({
+    line: { name: d.line.name, type: d.line.line_type, current: d.line.wip, limit: d.line.wip_limit, v2: d.line.wip_v2, v3: d.line.wip_v3 },
+    batches: d.batches.map(b => ({ key: `${b.version}-${b.batch_id}-${b.stage}`, version: b.version, code: b.label, sub: [b.order_no, b.customer_name, b.product_name].filter(Boolean).join(' · '),
+        stage: b.stage, status: b.status, since: b.since, inProgress: b.in_progress, done: b.done, unitLabel: b.unit })),
+});

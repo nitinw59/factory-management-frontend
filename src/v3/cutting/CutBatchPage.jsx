@@ -14,13 +14,14 @@
 // → can't finalise (cut a lay first); otherwise ticked as put with the batch and handed over with the finalise.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Scissors, CheckCircle2, Ban, Plus, Trash2, FileDown, Pencil, AlertTriangle, Undo2 } from 'lucide-react';
+import { ArrowLeft, Scissors, CheckCircle2, Ban, Plus, Trash2, FileDown, Pencil, AlertTriangle, Undo2, Barcode } from 'lucide-react';
+import BundleLabelsPanel from './BundleLabelsPanel';
 import Modal from '../../shared/Modal';
 import { cuttingApi } from '../api/cuttingApi';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { CUT_STATUS, OrderGrid, perLay, layerText, fmt, useCuttingPermissions, PriorityBadge, PRIORITY, Section, TONE } from './cutShared';
-import { exportCutSheet, exportLaySheet } from './cutPrint';
+import { exportCutSheet, exportLaySheet, endBitText } from './cutPrint';
 import { loadLetterhead } from '../components/letterhead';
 import { OverCutPanel, OverCutCells } from './overCutShared';
 
@@ -112,7 +113,7 @@ function PocketsPanel({ b, canManage, onChanged }) {
 const EB_TONE = { RESERVE: 'bg-violet-50 text-violet-800 border-violet-300', LAY: 'bg-amber-50 text-amber-800 border-amber-300', OFF: 'bg-slate-50 text-slate-500 border-slate-200 line-through' };
 const ebChip = (e, uom) => (
     <span key={e.id} title={e.status === 'WRITTEN_OFF' ? 'Written off (under 0.3 m)' : e.kind === 'RESERVE' ? 'Replacement reserve — tag and keep aside' : 'Lay piece — for the next batch'}
-        className={`inline-block whitespace-nowrap mr-1 mt-0.5 text-[10px] font-black px-1.5 py-0.5 rounded border ${e.status === 'WRITTEN_OFF' ? EB_TONE.OFF : EB_TONE[e.kind]}`}>{e.tag} {fmt(e.metres)} {uom}</span>
+        className={`inline-block whitespace-nowrap mr-1 mt-0.5 text-[10px] font-black px-1.5 py-0.5 rounded border ${e.status === 'WRITTEN_OFF' ? EB_TONE.OFF : EB_TONE[e.kind]} ${e.status === 'USED' || e.status === 'RETURNED' ? 'opacity-60' : ''}`}>{endBitText(e)}{e.status === 'AVAILABLE' ? ` ${uom}` : ''}</span>
 );
 // This batch's garments per `colour|size` (lays × size ratio of each cut roll) — the "this batch" share in the order grid.
 const batchGarments = (b) => {
@@ -208,6 +209,7 @@ export default function CutBatchPage() {
     const [prio, setPrio] = useState(null);     // { priority, note }
     const [fin, setFin] = useState(null);       // finalise dialog: { reason, pockets (lines | null while loading), put }
     const [undo, setUndo] = useState(null);     // undo finalise: { plan, reason }
+    const [bundleLabels, setBundleLabels] = useState(false);   // bundle barcode labels (24 Oct 2026)
     const [formError, setFormError] = useState('');
     const [busy, setBusy] = useState(false);
     const load = useCallback(() => cuttingApi.batch(id).then(res => setB(res.data)).catch(err => setError(apiError(err, 'Failed to load the batch.'))), [id]);
@@ -259,6 +261,7 @@ export default function CutBatchPage() {
                     {/* Lay sheet (A5, 2.0's): for the cutting table — blank boxes before cutting, filled after */}
                     <SecondaryButton onClick={() => printDoc(exportLaySheet)}><FileDown size={14} /> Lay sheet</SecondaryButton>
                     {b.rolls.some(r => r.lays) && <SecondaryButton onClick={() => printDoc(exportCutSheet)}><FileDown size={14} /> Cut sheet</SecondaryButton>}
+                    {b.status === 'CUT' && <SecondaryButton onClick={() => setBundleLabels(true)}><Barcode size={14} /> Bundle labels</SecondaryButton>}
                 </span>
             </div>
             <ErrorBox text={error} />
@@ -556,6 +559,11 @@ export default function CutBatchPage() {
                         <ErrorBox text={formError} />
                         <div className="flex justify-end gap-2"><SecondaryButton onClick={() => setCancel(null)}>Back</SecondaryButton><PrimaryButton onClick={() => run(() => cuttingApi.cancel(id, cancel.trim()), () => setCancel(null))} busy={busy} disabled={busy || !cancel.trim()}>Cancel batch</PrimaryButton></div>
                     </div>
+                </Modal>
+            )}
+            {bundleLabels && (
+                <Modal title={`Bundle labels — batch #${b.floor_no}`} onClose={() => setBundleLabels(false)}>
+                    <BundleLabelsPanel batchId={b.id} onClose={() => setBundleLabels(false)} />
                 </Modal>
             )}
         </div>

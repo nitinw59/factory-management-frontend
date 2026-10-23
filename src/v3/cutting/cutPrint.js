@@ -147,6 +147,18 @@ export function exportLaySheet(b, company = null, assets = {}) {
 }
 
 // ── Cut sheet ────────────────────────────────────────────────────────
+// One end bit piece in words (24 Oct 2026, "EB-41-L 0" read as missing fabric): its length when cut and what became of it —
+// "EB-41-L 2.9, used on #507", "EB-41-R 1.1", "EB-41-R 1.1 (0.6 left)", "… w/o", "…, returned to store". Plain ASCII: the
+// PDF's built-in font has no arrow.
+export function endBitText(e) {
+    const orig = e.original_m ?? e.metres;
+    if (e.status === 'WRITTEN_OFF') return `${e.tag} ${num(orig)} w/o`;
+    if (e.status === 'RETURNED') return `${e.tag} ${num(orig)}, returned to store`;
+    if (e.status === 'ON_BATCH') return `${e.tag} ${num(orig)}, on #${e.used_on_floor_no ?? '?'}`;
+    if (e.status === 'USED') return `${e.tag} ${num(orig)}, ${e.used_on_floor_no ? `used on #${e.used_on_floor_no}` : 'used'}`;
+    return Number(e.metres) < Number(orig) - 1e-9 ? `${e.tag} ${num(orig)} (${num(e.metres)} left)` : `${e.tag} ${num(e.metres)}`;
+}
+
 export function exportCutSheet(b, company = null, assets = {}) {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const W = doc.internal.pageSize.width; const H = doc.internal.pageSize.height; const M = 10; const CW = W - 2 * M;
@@ -179,25 +191,33 @@ export function exportCutSheet(b, company = null, assets = {}) {
     });
     const T = rows.reduce((s, x) => ({ taken: s.taken + Number(x.r.metres || 0), lays: s.lays + (x.r.lays || 0), garments: s.garments + (x.r.garments || 0), pieces: s.pieces + (x.r.pieces || 0),
         used: s.used + (x.used || 0), eb: s.eb + Number(x.r.end_bit_m || 0), sh: s.sh + Number(x.r.short_m || 0), un: s.un + (x.un || 0) }), { taken: 0, lays: 0, garments: 0, pieces: 0, used: 0, eb: 0, sh: 0, un: 0 });
+    // Pocketing / lining per garment colour (24 Oct 2026: "add column for pocketing color, example BLACK, and on header cell
+    // the pocketing name highlighted") — one column per pocketing / lining fabric, right after Colour.
+    const sup = b.support_columns || [];
+    const nS = sup.length;
     const body = rows.map(({ r, g, used, un, cons }) => [
-        r.floor_roll_no ?? r.roll_sequence, r.roll_no, r.dye_lot || '', r.fabric_label, r.colour, num(r.metres), r.lays ?? '',
+        r.floor_roll_no ?? r.roll_sequence, r.roll_no, r.dye_lot || '', r.fabric_label, r.colour, ...sup.map(c => c.cells[r.garment_colour_id] || '—'), num(r.metres), r.lays ?? '',
         ...sizes.map(s => (g[s] || '')), r.garments || '', r.pieces || '',
-        used != null ? num(used) : '', [num(r.end_bit_m), ...(r.end_bits || []).map(e => `${e.tag} ${num(e.metres)}${e.status === 'WRITTEN_OFF' ? ' w/o' : ''}`)].filter(Boolean).join('\n'),   // end-bit tags under the roll (19 Oct 2026)
+        used != null ? num(used) : '', [num(r.end_bit_m), ...(r.end_bits || []).map(endBitText)].filter(Boolean).join('\n'),   // end-bit tags under the roll (19 Oct 2026)
         r.short_m ? num(r.short_m) : '', un != null ? num(un) : '',
         cons != null ? fixed(cons, 3) : '', r.bom_per_garment != null ? fixed(r.bom_per_garment, 3) : '',
     ]);
     const totGarmentsBySize = Object.fromEntries(sizes.map(s => [s, rows.reduce((t, x) => t + (x.g[s] || 0), 0)]));
-    body.push(['', 'TOTAL', '', '', '', num(T.taken), T.lays, ...sizes.map(s => totGarmentsBySize[s] || ''), T.garments, T.pieces, num(T.used), num(T.eb), num(T.sh), num(T.un),
+    body.push(['', 'TOTAL', '', '', '', ...sup.map(() => ''), num(T.taken), T.lays, ...sizes.map(s => totGarmentsBySize[s] || ''), T.garments, T.pieces, num(T.used), num(T.eb), num(T.sh), num(T.un),
         T.garments ? fixed((T.taken - T.eb) / T.garments, 3) : '', '']);
-    const head = [['Roll no.', 'Store tag', 'Lot', 'Fabric', 'Colour', `Taken ${u}`, 'Lays', ...sizes, 'Garm.', 'Pieces', `Used ${u}`, `End bit`, `Short`, `Unacc.`, `Cons/pc`, `BOM/pc`]];
-    const unIdx = 7 + sizes.length + 5; const consIdx = unIdx + 1;
+    const head = [['Roll no.', 'Store tag', 'Lot', 'Fabric', 'Colour', ...sup.map(c => c.title), `Taken ${u}`, 'Lays', ...sizes, 'Garm.', 'Pieces', `Used ${u}`, `End bit`, `Short`, `Unacc.`, `Cons/pc`, `BOM/pc`]];
+    const unIdx = 7 + nS + sizes.length + 5; const consIdx = unIdx + 1;
+    const isSup = (i) => i >= 5 && i < 5 + nS;
     autoTable(doc, {
         ...GRID, startY: y, margin: { left: M, right: M }, head, body,
         styles: { ...GRID.styles, fontSize: 7, cellPadding: 1.2, halign: 'center', valign: 'middle' },
         headStyles: { ...GRID.headStyles, fontSize: 6.8 },
         columnStyles: { 1: { fontStyle: 'bold' }, 3: { halign: 'left', cellWidth: 46 }, 4: { halign: 'left' } },
         didParseCell: (d) => {
+            // the pocketing / lining header highlighted, its cells bold
+            if (d.section === 'head' && isSup(d.column.index)) { d.cell.styles.fillColor = [253, 224, 71]; d.cell.styles.textColor = [20, 20, 20]; d.cell.styles.fontStyle = 'bold'; }
             if (d.section !== 'body') return;
+            if (isSup(d.column.index)) { d.cell.styles.fontStyle = 'bold'; d.cell.styles.fillColor = [254, 249, 195]; }
             if (d.row.index === body.length - 1) d.cell.styles.fontStyle = 'bold';
             const x = rows[d.row.index];
             if (x && d.column.index === unIdx && x.un != null && x.un > Math.max(0.5, x.r.metres * 0.03)) { d.cell.styles.textColor = [180, 20, 20]; d.cell.styles.fontStyle = 'bold'; }

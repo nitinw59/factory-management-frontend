@@ -19,7 +19,7 @@ import { apiError } from '../api/mastersApi';
 import { inputCls, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { PriorityBadge } from '../cutting/cutShared';
-import { LineFilterButton, LineWipPanel, readLineFilter, saveLineFilter } from '../../shared/LineFilterBar';
+import { LineFilterButton, LineWipPanel, readLineFilter, saveLineFilter, toLinePanel } from '../../shared/LineFilterBar';
 
 const LINE_FILTER_KEY = 'lineLoader3.lineFilter';
 
@@ -579,11 +579,8 @@ export default function LineLoadingPage() {
         trimKitsApi.list({ status: 'READY' }).then(res => setKits(res.data)).catch(() => setKits(null));
         productionApi.lineWipAll().then(r => setLineList(r.data.map(l => ({ id: l.id, name: l.name, type: l.stage, current: l.open_batches, limit: l.wip_limit })))).catch(() => {});
         if (lineFilter) {
-            productionApi.lineWip(lineFilter).then(r => setLinePanel({
-                line: { name: r.data.line.name, type: r.data.line.line_type, current: r.data.line.open_batches, limit: r.data.line.wip_limit },
-                batches: r.data.batches.map(b => ({ key: `${b.batch_id}-${b.stage}`, code: `#${b.floor_no} ${b.batch_code}`, sub: [b.order_no, b.customer_name, b.style_code].filter(Boolean).join(' · '),
-                    stage: b.stage, since: b.since, inProgress: b.open_units, done: b.done_units, unitLabel: b.numbering_mode === 'MODE_2' ? 'size' : 'roll' })),
-            })).catch(err => setLinePanel({ error: apiError(err, 'Could not load the line.'), batches: [] }));
+            productionApi.lineWip(lineFilter).then(r => setLinePanel(toLinePanel(r.data))   // 2.0 + 3.0 batches on the line
+            ).catch(err => setLinePanel({ error: apiError(err, 'Could not load the line.'), batches: [] }));
         }
     }, [showDone, lineFilter]);
     // A remembered line that is no longer active: back to all lines.

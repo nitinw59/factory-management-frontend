@@ -5,7 +5,7 @@ import { productionManagerApi } from '../../api/productionManagerApi';
 import { Link } from 'react-router-dom';
 import Modal from '../../shared/Modal';
 import PriorityChip from '../../shared/PriorityChip';
-import { LineFilterButton, LineWipPanel, readLineFilter, saveLineFilter } from '../../shared/LineFilterBar';
+import { LineFilterButton, LineWipPanel, readLineFilter, saveLineFilter, toLinePanel } from '../../shared/LineFilterBar';
 import StageRejectionsList from '../../shared/StageRejectionsList';
 import { useSupervisorPinPrompt, withSupervisorPin } from '../../shared/SupervisorPinPrompt';
 import {
@@ -2436,11 +2436,7 @@ const LineLoaderDashboardPage = () => {
                 line ? lineLoaderApi.getLineWip(line).then(r => r.data).catch(err => ({ error: err.response?.data?.error || 'Could not load the line.' })) : Promise.resolve(null),
             ]);
             if (line && lineRes) {
-                setLinePanel(lineRes.error ? { error: lineRes.error, batches: [] } : {
-                    line: { name: lineRes.line.name, type: lineRes.line.line_type, current: lineRes.line.current_wip, limit: lineRes.line.wip_limit },
-                    batches: lineRes.batches.map(b => ({ key: `${b.batch_id}-${b.stage}`, code: b.batch_code, sub: [b.order_number, b.customer_name, b.product_name].filter(Boolean).join(' · '),
-                        stage: b.stage, status: b.status, since: b.started_at, inProgress: b.in_progress, done: b.completed, unitLabel: 'roll × size' })),
-                });
+                setLinePanel(lineRes.error ? { error: lineRes.error, batches: [] } : toLinePanel(lineRes));   // 2.0 + 3.0 batches on the line
             }
 
             setAllBatches(dashRes.data || []);

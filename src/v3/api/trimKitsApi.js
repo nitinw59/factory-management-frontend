@@ -22,4 +22,12 @@ export const trimKitsApi = {
     approveExtra: (rid, note) => api.post(`/v3/trim-kits/extra-requests/${rid}/approve`, { note }),
     refuseExtra: (rid, reason) => api.post(`/v3/trim-kits/extra-requests/${rid}/refuse`, { reason }),
     withdrawExtra: (rid) => api.post(`/v3/trim-kits/extra-requests/${rid}/withdraw`),
+    // 23 Oct 2026: garment barcode labels on the kit (printed through 2.0's print agent; the store manager prints)
+    labels: (id) => api.get(`/v3/trim-kits/${id}/labels`),
+    printLabels: (id, data) => api.post(`/v3/trim-kits/${id}/labels/print`, data),     // { printer_id, batch_roll_id?, reprint?, reason? }
+    singleLabel: (id, data) => api.post(`/v3/trim-kits/${id}/labels/single`, data),    // { printer_id, garment_no, reason }
+    voidLabels: (id, data) => api.post(`/v3/trim-kits/${id}/labels/void`, data),       // { batch_roll_id, reason }
+    cancelLabelJob: (id, jobId, reason) => api.post(`/v3/trim-kits/${id}/labels/jobs/${jobId}/cancel`, { reason }),
+    retryLabelJob: (id, jobId, data) => api.post(`/v3/trim-kits/${id}/labels/jobs/${jobId}/retry`, data || {}),
+    labelsCsv: (id) => api.get(`/v3/trim-kits/${id}/labels/csv`, { responseType: 'blob' }),
 };

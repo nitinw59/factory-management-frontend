@@ -11,7 +11,7 @@
 //   (an MI3 issue slip and a valuation bill TB3/…), the bad ones go back to the store. Or send the whole kit back.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, PackageCheck, Undo2, Ban, PenLine, RotateCcw, FileDown, Replace } from 'lucide-react';
+import { ArrowLeft, PackageCheck, Undo2, Ban, PenLine, RotateCcw, FileDown, Replace, Tag } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { trimKitsApi } from '../api/trimKitsApi';
 import { apiError, mastersApi } from '../api/mastersApi';
@@ -21,6 +21,7 @@ import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } fr
 import { loadLetterhead } from '../components/letterhead';
 import { KIT_STATUS, ACTION, SHORT_REASON, COUNT_ISSUE, qty, handout } from './trimKitShared';
 import { exportPickList, exportKitBill } from './kitPrint';
+import KitLabelsPanel from './KitLabelsPanel';
 
 const money = (n) => (n == null ? '—' : `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const unitsOwed = (l) => Math.ceil(l.remaining / l.factor - 1e-9);
@@ -44,9 +45,10 @@ function KitView({ id }) {
     const [ask, setAsk] = useState(null);         // { title, confirm, hint, label, optional, run(reason) }
     const [askText, setAskText] = useState('');
     const [formError, setFormError] = useState('');
+    const [labelsOpen, setLabelsOpen] = useState(false);   // garment barcode labels (23 Oct 2026)
     const load = useCallback(() => trimKitsApi.get(id).then(res => setK(res.data)).catch(err => setError(apiError(err, 'Failed to load the kit.'))), [id]);
     useEffect(() => { load(); trimKitsApi.permissions().then(res => setPerm(res.data)).catch(() => {}); }, [load]);
-    useV3Live(() => { if (!count && !pick && !extra) load(); });
+    useV3Live(() => { if (!count && !pick && !extra && !labelsOpen) load(); });
     const run = async (fn, close) => {
         setBusy(true); setFormError(''); setError('');
         try { setK((await fn()).data); if (close) close(); } catch (err) { (close ? setFormError : setError)(apiError(err, 'Failed.')); } finally { setBusy(false); }
@@ -55,7 +57,8 @@ function KitView({ id }) {
     const S = k.status;
     const open = k.lines.filter(l => l.remaining > 0 && !l.held);
     const picked = k.lines.filter(l => l.picked > 0);
-    const legacy = S === 'READY' && picked.length === 0;   // made ready before picking existed: counted against what it owes
+    const LB = k.labels;   // garment labels line (23 Oct 2026): qty, issued, picked, remaining, printed, available — no stock
+    const legacy = S === 'READY' && picked.length === 0 && !(LB && LB.picked > 0);   // made ready before picking existed: counted against what it owes
     const toCount = legacy ? open : picked;
     const pendingExtra = (k.extra_requests || []).filter(r => r.status === 'PENDING');
 
@@ -65,7 +68,8 @@ function KitView({ id }) {
     const openPick = () => { setFormError(''); setPick({ rows: new Map(open.map(l => [l.id, { v: String(Math.max(0, canGive(l))), reason: canGive(l) <= 0 ? 'NOT_IN_STOCK' : '', note: '' }])) }); };
     const pickShort = (l, r) => (l.in_units ? Number(r.v || 0) < unitsOwed(l) : Number(r.v || 0) + 1e-9 < l.remaining);
     const pickReady = pick && open.every(l => { const r = pick.rows.get(l.id); return !pickShort(l, r) || (r.reason && (r.reason !== 'OTHER' || r.note.trim())); });
-    const pickAny = pick && open.some(l => Number(pick.rows.get(l.id).v || 0) > 0);
+    const pickAny = pick && (open.some(l => Number(pick.rows.get(l.id).v || 0) > 0) || (LB && LB.available > 0));
+    const canPick = open.length > 0 || Boolean(LB && LB.remaining > 0);
     // ── count (loader)
     const openCount = () => {
         setFormError('');
@@ -73,6 +77,7 @@ function KitView({ id }) {
         trimKitsApi.lines().then(res => setCount({
             lines: [...res.data.filter(l => mine.has(l.id)), ...res.data.filter(l => !mine.has(l.id))], line_id: k.batch_lines?.length === 1 ? k.batch_lines[0].id : '', note: '', legacy,
             rows: new Map(toCount.map(l => [l.id, { v: String(legacy ? (l.in_units ? unitsOwed(l) : l.remaining) : (l.in_units ? l.picked_units : l.picked)), issue: '', damaged: '', note: '' }])),
+            labels: LB && LB.picked > 0 ? { v: String(LB.picked), note: '' } : null,
         })).catch(err => setError(apiError(err, 'Failed to load lines.')));
     };
     const pickedOf = (l) => (l.in_units ? (legacy ? unitsOwed(l) : l.picked_units) : (legacy ? l.remaining : l.picked));
@@ -84,7 +89,8 @@ function KitView({ id }) {
         if (v < p) return { kind: 'SHORT', signed: v };
         return { kind: 'OK', signed: p };
     };
-    const countReady = count && count.line_id && toCount.every(l => { const r = count.rows.get(l.id); return r.v !== '' && (r.issue !== 'WRONG_ITEM' || r.note.trim()) && (r.issue !== 'DAMAGED' || Number(r.damaged) > 0); });
+    const countReady = count && count.line_id && toCount.every(l => { const r = count.rows.get(l.id); return r.v !== '' && (r.issue !== 'WRONG_ITEM' || r.note.trim()) && (r.issue !== 'DAMAGED' || Number(r.damaged) > 0); })
+        && (!count.labels || (count.labels.v !== '' && Number.isInteger(Number(count.labels.v)) && Number(count.labels.v) >= 0));
     const askReason = (cfg) => { setAskText(''); setFormError(''); setAsk(cfg); };
     const searchItems = async (q) => {
         try { const r = await mastersApi.trimItems({ search: q || undefined, active: 'true' }); setExtra(x => x && { ...x, items: r.data.filter(i => String(i.id) !== x.line.item_id) }); } catch (err) { setFormError(apiError(err, 'Failed.')); }
@@ -109,7 +115,8 @@ function KitView({ id }) {
                 {perm.sign && S === 'READY' && <PrimaryButton onClick={openCount}><PenLine size={14} /> Count &amp; sign</PrimaryButton>}
                 {perm.sign && S === 'READY' && <SecondaryButton onClick={() => askReason({ title: `Send ${k.kit_no} back to the store`, confirm: 'Send back', hint: 'The whole kit goes back (for a wrong or damaged line, count and mark that line instead — the good lines are signed).', run: (r) => trimKitsApi.sendBack(id, r) })}><RotateCcw size={14} /> Send the whole kit back</SecondaryButton>}
                 {perm.prepare && ['DRAFT', 'PARTLY_ISSUED'].includes(S) && open.length > 0 && <SecondaryButton onClick={async () => exportPickList(k, await loadLetterhead())}><FileDown size={14} /> Pick list</SecondaryButton>}
-                {perm.prepare && ['DRAFT', 'PARTLY_ISSUED'].includes(S) && open.length > 0 && <PrimaryButton onClick={openPick}><PackageCheck size={14} /> {S === 'PARTLY_ISSUED' ? 'Put the rest in the kit…' : 'Put in the kit…'}</PrimaryButton>}
+                {LB && <SecondaryButton onClick={() => setLabelsOpen(true)}><Tag size={14} /> Garment labels {LB.printed}/{LB.qty}</SecondaryButton>}
+                {perm.prepare && ['DRAFT', 'PARTLY_ISSUED'].includes(S) && canPick && <PrimaryButton onClick={openPick}><PackageCheck size={14} /> {S === 'PARTLY_ISSUED' ? 'Put the rest in the kit…' : 'Put in the kit…'}</PrimaryButton>}
                 {perm.prepare && S === 'READY' && <SecondaryButton onClick={() => run(() => trimKitsApi.unready(id))}><Undo2 size={14} /> Pull back</SecondaryButton>}
                 {perm.prepare && ['DRAFT', 'PARTLY_ISSUED'].includes(S) && <SecondaryButton onClick={() => askReason({ title: S === 'DRAFT' ? `Cancel ${k.kit_no}` : `Close ${k.kit_no}`, confirm: S === 'DRAFT' ? 'Cancel kit' : 'Close kit', hint: S === 'DRAFT' ? 'Nothing was handed over. Say why the batch\'s kit is not needed.' : 'What was handed stays issued; the rest will not be handed. Say why (it shows in the trim reconciliation).', run: (r) => trimKitsApi.close(id, r) })}><Ban size={14} /> {S === 'DRAFT' ? 'Cancel' : 'Close'}</SecondaryButton>}
             </div>
@@ -146,10 +153,24 @@ function KitView({ id }) {
                                 </tr>
                             );
                         })}
+                        {LB && (
+                            <tr className="border-t border-slate-100 text-right tabular-nums align-top bg-indigo-50/30">
+                                <td className="px-3 py-2 text-left">L</td>
+                                <td className="px-3 py-2 text-left"><span className="font-semibold text-slate-800">Garment barcode labels</span>
+                                    <span className="ml-1 text-[10px] font-black px-1.5 py-0.5 rounded border bg-indigo-50 text-indigo-700 border-indigo-200">printed by the store · no stock</span>
+                                    <span className="block text-xs text-slate-500">One per garment · <button type="button" className="text-indigo-700 hover:underline" onClick={() => setLabelsOpen(true)}>{perm.prepare ? 'print / reprint…' : 'see the labels'}</button></span></td>
+                                <td className="px-3 py-2 font-semibold">{LB.qty} pcs</td>
+                                <td className="px-3 py-2">{LB.issued ? `${LB.issued} pcs` : '—'}</td>
+                                <td className={`px-3 py-2 ${LB.remaining > 0 ? 'text-amber-800 font-semibold' : 'text-slate-400'}`}>{LB.remaining > 0 ? `${LB.remaining} pcs` : '—'}{LB.picked > 0 && <span className="block text-[11px] font-bold text-emerald-700">in the kit now: {LB.picked}</span>}</td>
+                                <td className="px-3 py-2 text-xs">{LB.printed} printed</td>
+                                <td className="px-3 py-2 text-left text-xs">{LB.remaining > 0 && LB.available < LB.remaining ? <span className="text-amber-800">{LB.remaining - LB.available} not printed yet</span> : null}</td>
+                                <td className="px-3 py-2" />
+                            </tr>
+                        )}
                         <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-700">
-                            <td className="px-3 py-2" colSpan={2}>{k.lines.length} line(s)</td>
+                            <td className="px-3 py-2" colSpan={2}>{k.lines.length + (LB ? 1 : 0)} line(s)</td>
                             <td className="px-3 py-2 text-right" colSpan={2}>{k.lines.filter(l => l.issued > 0).length} handed (fully or in part)</td>
-                            <td className="px-3 py-2 text-right text-amber-800">{open.length} still owed{picked.length ? ` · ${picked.length} in the kit now` : ''}</td>
+                            <td className="px-3 py-2 text-right text-amber-800">{open.length + (LB && LB.remaining > 0 ? 1 : 0)} still owed{picked.length + (LB && LB.picked > 0 ? 1 : 0) ? ` · ${picked.length + (LB && LB.picked > 0 ? 1 : 0)} in the kit now` : ''}</td>
                             <td className="px-3 py-2" colSpan={3}>{k.held_total ? `${k.held_total} waiting for the merchandiser` : ''}</td>
                         </tr>
                     </tbody>
@@ -181,10 +202,11 @@ function KitView({ id }) {
                         const bill = (k.bills || []).find(b => b.handover_id === h.id);
                         return (
                             <div key={h.id} className="py-2 border-t border-slate-100 first:border-0 text-sm">
-                                {me?.menu['issue.materialIssue'] ? <Link to={`/v3/material-issue/issues/${h.issue_id}`} className="font-bold text-indigo-700 hover:underline">{h.issue_no}</Link> : <b className="text-slate-800">{h.issue_no}</b>}
+                                {!h.issue_id ? <b className="text-slate-800">Garment labels</b> : me?.menu['issue.materialIssue'] ? <Link to={`/v3/material-issue/issues/${h.issue_id}`} className="font-bold text-indigo-700 hover:underline">{h.issue_no}</Link> : <b className="text-slate-800">{h.issue_no}</b>}
                                 <span className="text-slate-600"> · {h.production_line_name} · {h.signed_by_name || '—'} · {new Date(h.signed_at).toLocaleString('en-IN')}{h.partial ? ' · part of the kit' : ''}</span>
                                 {h.note && <span className="block text-xs text-slate-500">{h.note}</span>}
-                                <ul className="ml-5 list-disc text-xs text-slate-600">{h.lines.map(x => <li key={x.kit_line_id}>{x.label}: {x.units ? `${x.units} ${k.lines.find(l => l.id === x.kit_line_id)?.purchase_uom} = ` : ''}{qty(x.qty, x.uom)} {x.uom}</li>)}</ul>
+                                <ul className="ml-5 list-disc text-xs text-slate-600">{h.lines.map(x => <li key={x.kit_line_id}>{x.label}: {x.units ? `${x.units} ${k.lines.find(l => l.id === x.kit_line_id)?.purchase_uom} = ` : ''}{qty(x.qty, x.uom)} {x.uom}</li>)}
+                                    {h.labels_qty > 0 && <li>Garment labels: {h.labels_qty} pcs{h.labels_counted != null && h.labels_counted !== h.labels_qty ? ` (counted ${h.labels_counted})` : ''}{h.labels_note ? ` — ${h.labels_note}` : ''}</li>}</ul>
                                 {bill && <p className="mt-1 text-xs"><b>Valuation bill {bill.bill_no}</b> · {money(bill.total)}{bill.unpriced ? <span className="text-amber-700"> · some items without a rate (valued at 0)</span> : ''} · <button type="button" className="font-bold text-indigo-700 hover:underline" onClick={async () => exportKitBill(k, bill, await loadLetterhead())}>PDF</button></p>}
                             </div>
                         );
@@ -229,7 +251,16 @@ function KitView({ id }) {
                                         </tr>
                                     );
                                 })}
-                                <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold"><td className="px-2 py-1.5" colSpan={3}>{open.length} line(s)</td>
+                                {LB && LB.remaining > 0 && (
+                                    <tr className="border-t border-slate-100 align-top bg-indigo-50/40">
+                                        <td className="px-2 py-1.5"><span className="font-semibold text-slate-800">Garment barcode labels</span><span className="block text-[11px] text-indigo-700">what is printed goes in — print the rest on the kit</span></td>
+                                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{LB.remaining} pcs</td>
+                                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-600">{LB.printed} printed</td>
+                                        <td className="px-2 py-1.5 text-right font-bold tabular-nums">{LB.available} <span className="text-xs font-normal text-slate-500">pcs</span></td>
+                                        <td className="px-2 py-1.5 text-xs">{LB.available < LB.remaining ? <span className="text-amber-800">{LB.remaining - LB.available} not printed yet — they follow</span> : ''}</td>
+                                    </tr>
+                                )}
+                                <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold"><td className="px-2 py-1.5" colSpan={3}>{open.length + (LB && LB.remaining > 0 ? 1 : 0)} line(s)</td>
                                     <td className="px-2 py-1.5 text-right">{open.filter(l => Number(pick.rows.get(l.id).v || 0) > 0).length} going in</td>
                                     <td className="px-2 py-1.5 text-amber-800">{open.filter(l => pickShort(l, pick.rows.get(l.id))).length} short → pending to fulfil</td></tr>
                                 </tbody>
@@ -275,7 +306,16 @@ function KitView({ id }) {
                                         </tr>
                                     );
                                 })}
-                                <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold"><td className="px-2 py-1.5" colSpan={4}>{toCount.length} line(s)</td>
+                                {count.labels && (
+                                    <tr className="border-t border-slate-100 align-top bg-indigo-50/40">
+                                        <td className="px-2 py-1.5 font-semibold text-slate-800">Garment barcode labels</td>
+                                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{LB.picked} pcs</td>
+                                        <td className="px-2 py-1.5 text-right"><input className="w-24 px-2 py-1 text-right border border-slate-300 rounded" type="number" min="0" step="1" value={count.labels.v} onChange={e => setCount({ ...count, labels: { ...count.labels, v: e.target.value } })} aria-label="Counted garment labels" /></td>
+                                        <td className="px-2 py-1.5"><input className={inputCls} placeholder="Note (e.g. torn)" value={count.labels.note} onChange={e => setCount({ ...count, labels: { ...count.labels, note: e.target.value } })} /></td>
+                                        <td className="px-2 py-1.5 text-xs">{Number(count.labels.v || 0) < LB.picked ? <><b className="text-amber-800">Short</b> — sign {Number(count.labels.v || 0)} (rest back to the store)</> : <><b className="text-emerald-700">As picked</b> — sign {LB.picked}</>}</td>
+                                    </tr>
+                                )}
+                                <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold"><td className="px-2 py-1.5" colSpan={4}>{toCount.length + (count.labels ? 1 : 0)} line(s)</td>
                                     <td className="px-2 py-1.5">{count.legacy ? '' : `${toCount.filter(l => outcome(l, count.rows.get(l.id)).signed > 0).length} signed · ${toCount.filter(l => outcome(l, count.rows.get(l.id)).kind !== 'OK').length} with a problem`}</td></tr>
                                 </tbody>
                             </table>
@@ -288,6 +328,7 @@ function KitView({ id }) {
                                 onClick={() => run(() => trimKitsApi.sign(id, {
                                     production_line_id: count.line_id, note: count.note || null,
                                     lines: toCount.map(l => { const r = count.rows.get(l.id); return { kit_line_id: l.id, [l.in_units ? 'units' : 'qty']: Number(r.v || 0), ...(r.issue ? { issue: r.issue, damaged: r.issue === 'DAMAGED' ? Number(r.damaged) : undefined, note: r.note || undefined } : {}) }; }),
+                                    ...(count.labels ? { labels: { counted: Number(count.labels.v || 0), note: count.labels.note || undefined } } : {}),
                                 }), () => setCount(null))}><PenLine size={14} /> Sign — I received the good lines</PrimaryButton>
                         </div>
                     </div>
@@ -315,6 +356,12 @@ function KitView({ id }) {
                         <div className="flex justify-end gap-2"><SecondaryButton onClick={() => setExtra(null)}>Back</SecondaryButton>
                             <PrimaryButton busy={busy} disabled={busy || !extra.item_id || !(Number(extra.qty) > 0) || !extra.reason.trim()} onClick={() => run(() => trimKitsApi.requestExtra(id, { replaces_line_id: extra.line.id, trim_item_id: extra.item_id, qty: Number(extra.qty), reason: extra.reason.trim() }), () => setExtra(null))}>Ask the merchandiser</PrimaryButton></div>
                     </div>
+                </Modal>
+            )}
+
+            {labelsOpen && (
+                <Modal title={`Garment labels — ${k.kit_no}`} onClose={() => { setLabelsOpen(false); load(); }}>
+                    <KitLabelsPanel kitId={id} onClose={() => { setLabelsOpen(false); load(); }} onChanged={load} />
                 </Modal>
             )}
 

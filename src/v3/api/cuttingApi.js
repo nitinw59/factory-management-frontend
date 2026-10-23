@@ -15,6 +15,12 @@ export const cuttingApi = {
     finalize: (id, data) => api.post(`/v3/cutting/batches/${id}/finalize`, data || {}),
     unfinalizePreview: (id) => api.get(`/v3/cutting/batches/${id}/unfinalize`),
     unfinalize: (id, reason) => api.post(`/v3/cutting/batches/${id}/unfinalize`, { reason }),
+    // 24 Oct 2026: bundle barcode labels (BarTender print agent) — cutting manager / store manager print
+    bundleLabels: (id) => api.get(`/v3/cutting/batches/${id}/bundle-labels`),
+    printBundleLabels: (id, data) => api.post(`/v3/cutting/batches/${id}/bundle-labels/print`, data),   // { part_ids, printer_id, reprint?, reason? }
+    cancelBundleLabelJob: (id, jobId, reason) => api.post(`/v3/cutting/batches/${id}/bundle-labels/jobs/${jobId}/cancel`, { reason }),
+    retryBundleLabelJob: (id, jobId, data) => api.post(`/v3/cutting/batches/${id}/bundle-labels/jobs/${jobId}/retry`, data || {}),
+    bundleLabelsCsv: (id, partIds) => api.get(`/v3/cutting/batches/${id}/bundle-labels/csv`, { params: { parts: (partIds || []).join(',') }, responseType: 'blob' }),
     setPriority: (id, priority, note) => api.put(`/v3/cutting/batches/${id}/priority`, { priority, note }),
     cancel: (id, reason) => api.post(`/v3/cutting/batches/${id}/cancel`, { reason }),
     // fabric end bits (19 Oct 2026, phase 3)
