@@ -19,6 +19,9 @@ import { apiError } from '../api/mastersApi';
 import { inputCls, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { PriorityBadge } from '../cutting/cutShared';
+import { LineFilterButton, LineWipPanel, readLineFilter, saveLineFilter } from '../../shared/LineFilterBar';
+
+const LINE_FILTER_KEY = 'lineLoader3.lineFilter';
 
 const unitWord = (b, n = 2) => (b.mode === 'MODE_2' ? (n === 1 ? 'size' : 'sizes') : (n === 1 ? 'roll' : 'rolls'));
 const stageState = (st) => {
@@ -565,10 +568,26 @@ export default function LineLoadingPage() {
     const [busyId, setBusyId] = useState(null);
     const [error, setError] = useState('');
     const [msg, setMsg] = useState('');
+    // Line filter (23 Oct 2026, as 2.0): '' = all lines (the default — the loader sees every line); else only batches
+    // with an open load on that line, and the line's WIP panel. Remembered on this device.
+    const [lineFilter, setLineFilterState] = useState(() => readLineFilter(LINE_FILTER_KEY));
+    const [lineList, setLineList] = useState([]);
+    const [linePanel, setLinePanel] = useState(null);
+    const setLineFilter = (v) => { saveLineFilter(LINE_FILTER_KEY, v); setRows(null); setLinePanel(v ? { loading: true, batches: [] } : null); setLineFilterState(v); };
     const load = useCallback(() => {
-        productionApi.pipeline(showDone ? { all: true } : {}).then(r => { setRows(r.data); setError(''); }).catch(err => setError(apiError(err, 'Failed to load the batches.')));
+        productionApi.pipeline({ ...(showDone ? { all: true } : {}), ...(lineFilter ? { line_id: lineFilter } : {}) }).then(r => { setRows(r.data); setError(''); }).catch(err => setError(apiError(err, 'Failed to load the batches.')));
         trimKitsApi.list({ status: 'READY' }).then(res => setKits(res.data)).catch(() => setKits(null));
-    }, [showDone]);
+        productionApi.lineWipAll().then(r => setLineList(r.data.map(l => ({ id: l.id, name: l.name, type: l.stage, current: l.open_batches, limit: l.wip_limit })))).catch(() => {});
+        if (lineFilter) {
+            productionApi.lineWip(lineFilter).then(r => setLinePanel({
+                line: { name: r.data.line.name, type: r.data.line.line_type, current: r.data.line.open_batches, limit: r.data.line.wip_limit },
+                batches: r.data.batches.map(b => ({ key: `${b.batch_id}-${b.stage}`, code: `#${b.floor_no} ${b.batch_code}`, sub: [b.order_no, b.customer_name, b.style_code].filter(Boolean).join(' · '),
+                    stage: b.stage, since: b.since, inProgress: b.open_units, done: b.done_units, unitLabel: b.numbering_mode === 'MODE_2' ? 'size' : 'roll' })),
+            })).catch(err => setLinePanel({ error: apiError(err, 'Could not load the line.'), batches: [] }));
+        }
+    }, [showDone, lineFilter]);
+    // A remembered line that is no longer active: back to all lines.
+    useEffect(() => { if (lineFilter && lineList.length && !lineList.some(l => l.id === lineFilter)) setLineFilter(''); }, [lineList]); // eslint-disable-line react-hooks/exhaustive-deps
     useEffect(() => { productionApi.permissions().then(r => setPerms(r.data)).catch(() => {}); }, []);
     useEffect(() => { load(); }, [load]);
     const [tick, setTick] = useState(0);
@@ -602,6 +621,7 @@ export default function LineLoadingPage() {
                 <span className={`inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest ${live ? 'text-emerald-600' : 'text-slate-400'}`}><span className={`h-2 w-2 rounded-full ${live ? 'bg-emerald-500' : 'bg-slate-300'}`} />{live ? 'Live' : 'Offline'}</span>
                 <span className="ml-auto flex flex-wrap items-center gap-2">
                     <label className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-600 px-2 py-1.5"><input type="checkbox" className="w-4 h-4" checked={showDone} onChange={e => setShowDone(e.target.checked)} /> Show finished</label>
+                    <LineFilterButton compact lines={lineList} value={lineFilter} onChange={setLineFilter} />
                     <button type="button" onClick={() => setHistory(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm font-bold"><History size={14} /> History</button>
                     <button type="button" onClick={load} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-sm font-bold"><RefreshCw size={14} /> Refresh</button>
                 </span>
@@ -614,6 +634,7 @@ export default function LineLoadingPage() {
                     <ArrowRight size={16} className="ml-auto text-emerald-600" />
                 </Link>
             )}
+            <LineWipPanel panel={lineFilter ? linePanel : null} />
             <MyLinesPanel tick={tick} />
             <PickupPanel canPickup={perms.replacePickup} tick={tick} />
             <ErrorBox text={error} />
@@ -621,8 +642,8 @@ export default function LineLoadingPage() {
             {!list ? (!error && <Loading />) : list.length === 0 ? (
                 <div className="text-center py-20 bg-white rounded-[2rem] border-4 border-dashed border-slate-300">
                     <Layers className="mx-auto text-slate-300" size={40} />
-                    <h3 className="text-lg font-black text-slate-700 mt-2">No active batches</h3>
-                    <p className="text-sm text-slate-500">Batches appear here once they are finalised at cutting.</p>
+                    <h3 className="text-lg font-black text-slate-700 mt-2">{lineFilter ? 'Nothing on this line' : 'No active batches'}</h3>
+                    <p className="text-sm text-slate-500">{lineFilter ? 'No batch has an open load on the chosen line — pick another line or show all lines.' : 'Batches appear here once they are finalised at cutting.'}</p>
                 </div>
             ) : list.map(b => <BatchCard key={b.id} b={b} focus={b.id === focusBatch} busyId={busyId} onComplete={complete} onOpen={(bt, st) => setOpen({ batchId: bt.id, stageId: st.stage_type_id })} />)}
 

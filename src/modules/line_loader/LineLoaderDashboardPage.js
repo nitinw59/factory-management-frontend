@@ -5,6 +5,7 @@ import { productionManagerApi } from '../../api/productionManagerApi';
 import { Link } from 'react-router-dom';
 import Modal from '../../shared/Modal';
 import PriorityChip from '../../shared/PriorityChip';
+import { LineFilterButton, LineWipPanel, readLineFilter, saveLineFilter } from '../../shared/LineFilterBar';
 import StageRejectionsList from '../../shared/StageRejectionsList';
 import { useSupervisorPinPrompt, withSupervisorPin } from '../../shared/SupervisorPinPrompt';
 import {
@@ -2392,6 +2393,8 @@ const HistoryPanel = ({ onClose }) => {
 // used on the merchandiser planning page.
 const PAGE_SIZE = 25;
 
+const LINE_FILTER_KEY = 'lineLoader2.lineFilter';
+
 const LineLoaderDashboardPage = () => {
     const [allBatches, setAllBatches] = useState([]);
     const [wipMap, setWipMap] = useState({}); // { lineId: { currentWip, wipLimit, isAtCapacity } }
@@ -2401,6 +2404,12 @@ const LineLoaderDashboardPage = () => {
     const [hasMore, setHasMore] = useState(false);
     const [error, setError] = useState(null);
     const [showHistory, setShowHistory] = useState(false);
+    // Line filter (23 Oct 2026): '' = all lines (the default — the loader sees every line); else only batches active on
+    // that line (server-side, so batches not yet scrolled in aren't missed) and the line's WIP panel.
+    const [lineFilter, setLineFilterState] = useState(() => readLineFilter(LINE_FILTER_KEY));
+    const [linePanel, setLinePanel] = useState(null);
+    const lineFilterRef = useRef(lineFilter);
+    const setLineFilter = (v) => { saveLineFilter(LINE_FILTER_KEY, v); lineFilterRef.current = v; loadedCountRef.current = 0; setAllBatches([]); setLinePanel(v ? { loading: true, batches: [] } : null); setLineFilterState(v); };
 
     // Mirrors allBatches.length without needing it in fetchData's/loadMore's
     // own dependency arrays (both would otherwise have to be recreated, and
@@ -2420,10 +2429,19 @@ const LineLoaderDashboardPage = () => {
         setError(null);
         try {
             const limit = Math.max(loadedCountRef.current, PAGE_SIZE);
-            const [dashRes, wipRes] = await Promise.all([
-                lineLoaderApi.getDashboardData({ limit, offset: 0 }),
-                lineLoaderApi.getAllActiveLineWip().catch(() => ({ data: {} })) // non-fatal
+            const line = lineFilterRef.current;
+            const [dashRes, wipRes, lineRes] = await Promise.all([
+                lineLoaderApi.getDashboardData({ limit, offset: 0, ...(line ? { line_id: line } : {}) }),
+                lineLoaderApi.getAllActiveLineWip().catch(() => ({ data: {} })), // non-fatal
+                line ? lineLoaderApi.getLineWip(line).then(r => r.data).catch(err => ({ error: err.response?.data?.error || 'Could not load the line.' })) : Promise.resolve(null),
             ]);
+            if (line && lineRes) {
+                setLinePanel(lineRes.error ? { error: lineRes.error, batches: [] } : {
+                    line: { name: lineRes.line.name, type: lineRes.line.line_type, current: lineRes.line.current_wip, limit: lineRes.line.wip_limit },
+                    batches: lineRes.batches.map(b => ({ key: `${b.batch_id}-${b.stage}`, code: b.batch_code, sub: [b.order_number, b.customer_name, b.product_name].filter(Boolean).join(' · '),
+                        stage: b.stage, status: b.status, since: b.started_at, inProgress: b.in_progress, done: b.completed, unitLabel: 'roll × size' })),
+                });
+            }
 
             setAllBatches(dashRes.data || []);
             setHasMore(dashRes.headers?.['x-has-more'] === 'true');
@@ -2436,7 +2454,7 @@ const LineLoaderDashboardPage = () => {
             setIsLoading(false);
             setRefreshing(false);
         }
-    }, []);
+    }, [lineFilter]); // eslint-disable-line react-hooks/exhaustive-deps -- refetch when the line filter changes
 
     // Re-pull ONE batch (?batch_id=) and swap it into the list in place — the
     // Stage Detail modal's Refresh. No full-page spinner, no other batches
@@ -2455,12 +2473,15 @@ const LineLoaderDashboardPage = () => {
     }, []);
 
     useEffect(() => { fetchData(); }, [fetchData]);
+    // A remembered line that is no longer active: back to all lines.
+    useEffect(() => { if (lineFilter && Object.keys(wipMap).length && !wipMap[lineFilter]) setLineFilter(''); }, [wipMap]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const loadMore = useCallback(async () => {
         if (loadingMore || !hasMore) return;
         setLoadingMore(true);
         try {
-            const res = await lineLoaderApi.getDashboardData({ limit: PAGE_SIZE, offset: loadedCountRef.current });
+            const line = lineFilterRef.current;
+            const res = await lineLoaderApi.getDashboardData({ limit: PAGE_SIZE, offset: loadedCountRef.current, ...(line ? { line_id: line } : {}) });
             setAllBatches(prev => [...prev, ...(res.data || [])]);
             setHasMore(res.headers?.['x-has-more'] === 'true');
         } catch (err) {
@@ -2512,6 +2533,8 @@ const LineLoaderDashboardPage = () => {
                     <p className="text-slate-500 mt-1 font-medium text-sm">Track each batch through its production pipeline and assign lines per stage.</p>
                 </div>
                 <div className="flex items-center gap-2">
+                    <LineFilterButton value={lineFilter} onChange={setLineFilter}
+                        lines={Object.entries(wipMap).map(([id, w]) => ({ id, name: w.lineName, type: w.lineType, current: w.currentWip, limit: w.wipLimit }))} />
                     <button onClick={() => setShowHistory(true)} className="flex items-center gap-2 text-sm font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-4 py-2.5 rounded-xl hover:bg-indigo-100 shadow-sm active:scale-95 transition-all">
                         <History size={14} /> History
                     </button>
@@ -2521,6 +2544,8 @@ const LineLoaderDashboardPage = () => {
                 </div>
             </header>
 
+            <LineWipPanel panel={lineFilter ? linePanel : null} />
+
             {isLoading ? <Spinner /> : error ? (
                 <div className="p-4 bg-rose-50 text-rose-700 font-bold rounded-xl border border-rose-200 flex items-center gap-3">
                     <AlertTriangle size={18} /> {error}
@@ -2528,8 +2553,8 @@ const LineLoaderDashboardPage = () => {
             ) : allBatches.length === 0 ? (
                 <div className="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200">
                     <Package className="mx-auto h-12 w-12 text-slate-300 mb-4" />
-                    <h3 className="text-lg font-black text-slate-700">No Active Batches</h3>
-                    <p className="mt-1 text-sm font-medium text-slate-400">No batches are currently awaiting line assignment.</p>
+                    <h3 className="text-lg font-black text-slate-700">{lineFilter ? 'Nothing on this line' : 'No Active Batches'}</h3>
+                    <p className="mt-1 text-sm font-medium text-slate-400">{lineFilter ? 'No batch is active on the chosen line — pick another line or show all lines.' : 'No batches are currently awaiting line assignment.'}</p>
                 </div>
             ) : (
                 <div className="space-y-6">

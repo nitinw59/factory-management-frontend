@@ -14,6 +14,8 @@ export const productionApi = {
     lines: (stageTypeId) => api.get('/v3/production/lines', { params: { stage_type_id: stageTypeId } }),
     loading: (stageTypeId) => api.get('/v3/production/loading', { params: { stage_type_id: stageTypeId } }),
     pipeline: (params) => api.get('/v3/production/pipeline', { params }),           // line loader board (2.0's pipeline)
+    lineWipAll: () => api.get('/v3/production/line-wip'),                      // the board's line filter (23 Oct 2026)
+    lineWip: (lineId) => api.get(`/v3/production/line-wip/${lineId}`),
     loadHistory: (params) => api.get('/v3/production/load-history', { params }),
     // material replacement, as 2.0 (18 Oct 2026)
     problems: (batchId, stageTypeId) => api.get(`/v3/production/batches/${batchId}/stages/${stageTypeId}/problems`),

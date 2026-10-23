@@ -37,6 +37,7 @@ export const lineLoaderApi = {
   getSizesForBatch: (batchId, cycleFlowId) => api.get(`/line-loader/batch/${batchId}/sizes`, { params: { cycle_flow_id: cycleFlowId } }),
   checkLineWip: (lineId) => api.get(`/line-loader/check-wip/${lineId}`),
   getAllActiveLineWip: () => api.get('/line-loader/active-lines-wip'),
+  getLineWip: (lineId) => api.get(`/line-loader/line-wip/${lineId}`),   // the dashboard's line filter (23 Oct 2026)
   // supervisorPin: QA manager override for a stage held open only by rejected pieces (reason REJECTED_PIECES)
   checkAndCompleteStage: (batchId, productionLineId, supervisorPin) =>
     api.post(`/line-loader/batch/${batchId}/stage/${productionLineId}/check-complete`, supervisorPin ? { supervisorPin } : {}),
