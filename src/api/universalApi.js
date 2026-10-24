@@ -2,7 +2,8 @@ import api from '../utils/api'; // Your centralized axios/api instance
 
 export const universalApi = {
     // 1. Core Production Flow
-    getWorkstationData: () => api.get('/workstation-universal/queue'),
+    // params.include_completed = 0 leaves out rolls / sizes already completed on the line (listed, view only, by default).
+    getWorkstationData: (params) => api.get('/workstation-universal/queue', { params }),
     logPieceCheck: (validationData) => api.post('/workstation-universal/log-check', validationData),
     approveAlteredPieces: (data) => api.post('/workstation-universal/approve-repair', data),
     // Supervisor-gated undo: flips an APPROVED piece/bundle back to PENDING.

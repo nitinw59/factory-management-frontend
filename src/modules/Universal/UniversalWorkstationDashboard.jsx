@@ -23,6 +23,7 @@ import {
 
 const PART_FILTER_LS_KEY = 'ws-part-filter';
 const BATCH_FILTER_LS_KEY = 'ws-selected-batch';
+const SHOW_DONE_LS_KEY = 'ws-show-completed';
 const STATS_REFRESH_MS   = 60_000;
 
 // ── Work Log helpers ──────────────────────────────────────────────────────────
@@ -582,8 +583,34 @@ const checkEntityStatus = (entity) => {
     const rejected_earlier_lines = [...new Set(earlier.map(p => p.defect_origin_line).filter(Boolean))];
     const rejected_earlier_seqs = earlier.map(p => p.piece_sequence).sort((a, b) => a - b);
 
-    return { total_cut, total_processed, pending_alter, upstream_rework, isComplete, total_validated, total_rejected, total_repaired, previously_rejected, rejected_earlier, rejected_earlier_lines, rejected_earlier_seqs };
+    // Roll × size already COMPLETED on this line (server: fabric_production_log) — view only.
+    const line_completed = total_cut > 0 && pieces.every(p => p.line_completed);
+    const line_completed_at = line_completed ? pieces.reduce((m, p) => (p.line_completed_at && (!m || p.line_completed_at > m) ? p.line_completed_at : m), null) : null;
+
+    return { total_cut, total_processed, pending_alter, upstream_rework, isComplete, total_validated, total_rejected, total_repaired, previously_rejected, rejected_earlier, rejected_earlier_lines, rejected_earlier_seqs, line_completed, line_completed_at };
 };
+
+// ── Completed rolls / sizes (24 Oct 2026) ─────────────────────────────────────
+// The queue also lists rolls and sizes already COMPLETED on this line, in their
+// own colour, after the open ones, view only (the server refuses changes:
+// ROLL_SIZE_COMPLETED). "Show completed" in the toolbar hides them.
+const allLineDone = (pieces = []) => pieces.length > 0 && pieces.every(p => p.line_completed);
+// Stable sort: open first, completed last, order otherwise kept.
+const doneLast = (items, piecesOf) => items
+    .map((item, i) => ({ item, i, done: allLineDone(piecesOf(item)) }))
+    .sort((a, b) => (a.done - b.done) || (a.i - b.i))
+    .map(x => x.item);
+const fmtDoneAt = (iso) => {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }); }
+    catch { return ''; }
+};
+const DONE_CARD = 'border-emerald-500 bg-emerald-50 border-y border-r border-emerald-200';
+const CompletedTag = ({ at, label = 'Completed', className = '' }) => (
+    <span className={`inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider bg-emerald-600 text-white rounded-md px-2 py-0.5 ${className}`}>
+        <CheckCircle2 className="w-3 h-3" /> {label}{at ? <span className="normal-case tracking-normal font-bold">· {fmtDoneAt(at)}</span> : null}
+    </span>
+);
 
 // "⚑ 2 rejected at PREPRATION · #28, #29" — pieces rejected at an earlier
 // stage, shown on roll / part / size rows. Everything is visible text: the
@@ -750,8 +777,12 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     // Pieces of a locked bundle stay selectable (to flag rework), but are never approved.
     const isLockedPiece = (p) => itemInfo.isBundle && blockedBundleIds.has(p.bundle_id ?? itemInfo.bundle_id);
     const isUpstreamLocked = itemInfo.isBundle && !!itemInfo.bundle_id && upstreamBlockedCount > 0;   // the one bundle open here is locked
-    const actionablePieces = pieces.filter(p => p.qc_status === 'PENDING' || !p.qc_status);
-    const reworkPieces = pieces.filter(isOwnRework);
+    // Pieces of a roll × size already completed on this line are view only.
+    const donePieces = pieces.filter(p => p.line_completed);
+    const allDone = pieces.length > 0 && donePieces.length === pieces.length;
+    const doneAt = allDone ? checkEntityStatus({ pieces }).line_completed_at : null;
+    const actionablePieces = pieces.filter(p => (p.qc_status === 'PENDING' || !p.qc_status) && !p.line_completed);
+    const reworkPieces = pieces.filter(p => isOwnRework(p) && !p.line_completed);
     // Only rework raised at THIS stage locks a bundle (its own QC isn't
     // finished); rework at an earlier stage is shown as a warning.
     const hasActiveReworks = reworkPieces.length > 0;
@@ -808,6 +839,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
     const isRepairMode = selectedIds.size > 0 && pieces.some(p => selectedIds.has(p.id) && isOwnRework(p));
 
     const togglePiece = (piece) => {
+        if (piece.line_completed) return;
         const isReworkPiece = isOwnRework(piece);
         const isPendingPiece = (piece.qc_status === 'PENDING' || !piece.qc_status) && actionablePieces.some(p => p.id === piece.id);
         if (!isReworkPiece && !isPendingPiece) return;
@@ -1203,6 +1235,17 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
 
                     <div className="flex-grow p-8 overflow-y-auto">
                         {pinDialog}
+                        {donePieces.length > 0 && (
+                            <div className="mb-6 flex items-start gap-3 bg-emerald-50 border-2 border-emerald-300 text-emerald-900 rounded-2xl px-4 py-3">
+                                <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5 text-emerald-600" />
+                                <p className="text-sm font-bold">
+                                    <span className="font-black uppercase tracking-widest">View only:</span>{' '}
+                                    {allDone
+                                        ? `this ${itemInfo.isRollInspect ? 'roll' : 'roll / size'} is already completed on this line${doneAt ? ` (${fmtDoneAt(doneAt)})` : ''} — nothing here can be changed.`
+                                        : `${donePieces.length} of ${pieces.length} piece(s) are in sizes already completed on this line — those can't be changed.`}
+                                </p>
+                            </div>
+                        )}
                         {(upstreamBlockedCount > 0 || upstreamRejectedPieces.length > 0 || earlierDefectPieces.length > 0) && (
                             <div className="mb-6 space-y-2">
                                 {earlierDefectPieces.length > 0 && (
@@ -1257,8 +1300,9 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                             const isUpRework = isUpstreamRework(piece);
                                             const isUpBlocked = piece.upstream_status === 'BLOCKING';
                                             const isUpRejected = piece.upstream_status === 'REJECTED' || (piece.qc_status === 'QC_REJECTED' && !!piece.is_upstream_defect);
-                                            const isRejected = piece.qc_status === 'QC_REJECTED';
-                                            const isApproved = piece.qc_status === 'APPROVED';
+                                            const isDone = !!piece.line_completed;
+                                            const isRejected = !isDone && piece.qc_status === 'QC_REJECTED';
+                                            const isApproved = !isDone && piece.qc_status === 'APPROVED';
                                             const isHighlighted = highlightPieceId != null && String(piece.id) === String(highlightPieceId);
                                             const selClass = isRework
                                                 ? 'bg-amber-500 border-amber-600 text-white shadow-[0_0_20px_rgba(245,158,11,0.8)] transform scale-105 z-10'
@@ -1269,9 +1313,9 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                             return (
                                                 <button key={piece.id}
                                                     ref={isHighlighted ? highlightRef : undefined}
-                                                    disabled={isUpRework || (!isRejected && !isApproved && piece.qc_status !== 'PENDING' && piece.qc_status && piece.qc_status !== 'NEEDS_REWORK')}
+                                                    disabled={isDone || isUpRework || (!isRejected && !isApproved && piece.qc_status !== 'PENDING' && piece.qc_status && piece.qc_status !== 'NEEDS_REWORK')}
                                                     onClick={() => isRejected ? handleUnlockRejectedPiece(piece) : isApproved ? handleRevertApprovedPiece(piece) : togglePiece(piece)}
-                                                    title={isUpRework ? `Needs rework at ${piece.defect_origin_line || upstreamStage}${piece.defect_reason ? ` — ${piece.defect_reason}` : ''}` : isUpBlocked ? `Not cleared at ${upstreamStage} — warning only` : isUpRejected ? `Rejected at ${piece.defect_origin_line || upstreamStage}${piece.defect_reason ? ` — ${piece.defect_reason}` : ''}` : isRejected ? 'Rejected — click to unlock with supervisor password' : isApproved ? 'Approved — click to revert to pending with supervisor password' : undefined}
+                                                    title={isDone ? 'Completed on this line — view only' : isUpRework ? `Needs rework at ${piece.defect_origin_line || upstreamStage}${piece.defect_reason ? ` — ${piece.defect_reason}` : ''}` : isUpBlocked ? `Not cleared at ${upstreamStage} — warning only` : isUpRejected ? `Rejected at ${piece.defect_origin_line || upstreamStage}${piece.defect_reason ? ` — ${piece.defect_reason}` : ''}` : isRejected ? 'Rejected — click to unlock with supervisor password' : isApproved ? 'Approved — click to revert to pending with supervisor password' : undefined}
                                                     className={`relative aspect-square rounded-2xl border-4 font-mono font-black text-3xl flex items-center justify-center transition-all active:scale-95 ${isRejected ? 'cursor-pointer hover:border-rose-600' : ''} ${isApproved ? 'cursor-pointer hover:border-emerald-500' : ''} ${isSelected ? selClass : unselClass} ${isHighlighted ? 'animate-pulse ring-4 ring-offset-2 ring-blue-500 z-20' : ''}`}>
                                                     {piece.piece_sequence}
                                                     {isSelected && <Check className={`absolute top-2 right-2 w-8 h-8 rounded-full p-1 shadow-md ${isRework ? 'bg-amber-700 text-white' : 'bg-indigo-500 text-white'}`} strokeWidth={4} />}
@@ -1282,6 +1326,7 @@ const UniversalValidationModal = ({ itemInfo, defectCodes, onClose, onValidation
                                                     {isUpRework && <span className="absolute bottom-1 left-1 right-1 text-[9px] leading-tight font-sans font-black uppercase tracking-wide text-amber-900 bg-amber-200 rounded px-1 truncate">Rework @ {piece.defect_origin_line || upstreamStage}</span>}
                                                     {!isUpRework && isUpBlocked && <span className="absolute bottom-1 left-1 right-1 text-[9px] leading-tight font-sans font-black uppercase tracking-wide text-amber-900 bg-amber-200 rounded px-1 truncate">Not cleared @ {upstreamStage}</span>}
                                                     {isUpRejected && <span className="absolute bottom-1 left-1 right-1 text-[9px] leading-tight font-sans font-black uppercase tracking-wide text-white bg-rose-600 rounded px-1 truncate">Rejected @ {piece.defect_origin_line || upstreamStage}</span>}
+                                                    {isDone && <CheckCircle2 className="absolute top-1.5 left-1.5 w-5 h-5 text-white bg-emerald-600 rounded-full p-0.5" />}
                                                 </button>
                                             );
                                         })}
@@ -1439,17 +1484,18 @@ const PartAccordion = ({ batch, roll, part, setModalState, allowMultiple, onRequ
     };
 
     return (
-        <div className="bg-white border-2 border-slate-200 rounded-2xl mb-4 shadow-sm overflow-hidden transition-all">
-            <div className="p-5 flex flex-col md:flex-row md:justify-between md:items-center bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => setIsOpen(!isOpen)}>
+        <div className={`border-2 rounded-2xl mb-4 shadow-sm overflow-hidden transition-all ${status.line_completed ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'}`}>
+            <div className={`p-5 flex flex-col md:flex-row md:justify-between md:items-center cursor-pointer transition-colors ${status.line_completed ? 'bg-emerald-50 hover:bg-emerald-100' : 'bg-slate-50 hover:bg-slate-100'}`} onClick={() => setIsOpen(!isOpen)}>
                 <div className="flex items-center mb-3 md:mb-0">
                     {isOpen ? <ChevronDown className="w-6 h-6 mr-4 text-slate-500" /> : <ChevronRight className="w-6 h-6 mr-4 text-slate-500" />}
                     <Component className="w-6 h-6 mr-3 text-indigo-500" />
                     <h4 className="font-black text-slate-800 text-xl tracking-tight uppercase">{part.part_name}</h4>
                     <span className="ml-5 text-xs font-bold text-slate-500 bg-slate-200 px-3 py-1.5 rounded-lg uppercase tracking-widest">{status.total_processed} / {status.total_cut} Processed</span>
                     <RejectedEarlierBadge status={status} className="ml-3" />
+                    {status.line_completed && <CompletedTag at={status.line_completed_at} className="ml-3" />}
                 </div>
                 <div className="flex items-center space-x-3 ml-12 md:ml-0">
-                    {status.pending_alter > 0 && (
+                    {status.pending_alter > 0 && !status.line_completed && (
                         <button onClick={handleBulkRepair} className="px-4 py-2 text-sm bg-amber-100 text-amber-900 border border-amber-200 rounded-xl hover:bg-amber-200 font-black shadow-sm flex items-center active:scale-95"><Hammer className="w-4 h-4 mr-2"/> Fix Rework ({status.pending_alter})</button>
                     )}
                     {!status.isComplete ? (
@@ -1461,7 +1507,7 @@ const PartAccordion = ({ batch, roll, part, setModalState, allowMultiple, onRequ
             </div>
             {isOpen && (
                 <div className="p-5 bg-white border-t-2 border-slate-100 space-y-4">
-                    {part.size_details.map(size => {
+                    {doneLast(part.size_details, sz => sz.pieces).map(size => {
                         const sizePieces = size.pieces.map(p => ({ ...p, _displayGroup: `Size ${size.size}` }));
                         return (
                             <ValidationProgressRow
@@ -1501,17 +1547,18 @@ const PartAccordionBySize = ({ batch, size, part, setModalState, allowMultiple, 
     };
 
     return (
-        <div className="bg-white border-2 border-slate-200 rounded-2xl mb-4 shadow-sm overflow-hidden transition-all">
-            <div className="p-5 flex flex-col md:flex-row md:justify-between md:items-center bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => setIsOpen(!isOpen)}>
+        <div className={`border-2 rounded-2xl mb-4 shadow-sm overflow-hidden transition-all ${status.line_completed ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'}`}>
+            <div className={`p-5 flex flex-col md:flex-row md:justify-between md:items-center cursor-pointer transition-colors ${status.line_completed ? 'bg-emerald-50 hover:bg-emerald-100' : 'bg-slate-50 hover:bg-slate-100'}`} onClick={() => setIsOpen(!isOpen)}>
                 <div className="flex items-center mb-3 md:mb-0">
                     {isOpen ? <ChevronDown className="w-6 h-6 mr-4 text-slate-500" /> : <ChevronRight className="w-6 h-6 mr-4 text-slate-500" />}
                     <Component className="w-6 h-6 mr-3 text-indigo-500" />
                     <h4 className="font-black text-slate-800 text-xl tracking-tight uppercase">{part.part_name}</h4>
                     <span className="ml-5 text-xs font-bold text-slate-500 bg-slate-200 px-3 py-1.5 rounded-lg uppercase tracking-widest">{status.total_processed} / {status.total_cut} Processed</span>
                     <RejectedEarlierBadge status={status} className="ml-3" />
+                    {status.line_completed && <CompletedTag at={status.line_completed_at} className="ml-3" />}
                 </div>
                 <div className="flex items-center space-x-3 ml-12 md:ml-0">
-                    {status.pending_alter > 0 && (
+                    {status.pending_alter > 0 && !status.line_completed && (
                         <button onClick={handleBulkRepair} className="px-4 py-2 text-sm bg-amber-100 text-amber-900 border border-amber-200 rounded-xl hover:bg-amber-200 font-black shadow-sm flex items-center active:scale-95"><Hammer className="w-4 h-4 mr-2"/> Fix Rework ({status.pending_alter})</button>
                     )}
                     {!status.isComplete ? (
@@ -1523,7 +1570,7 @@ const PartAccordionBySize = ({ batch, size, part, setModalState, allowMultiple, 
             </div>
             {isOpen && (
                 <div className="p-5 bg-white border-t-2 border-slate-100 space-y-4">
-                    {part.roll_details.map(r => {
+                    {doneLast(part.roll_details, r => r.pieces).map(r => {
                         const rollPieces = r.pieces.map(p => ({ ...p, _displayGroup: `Roll #${r.roll_id}` }));
                         return (
                             <ValidationProgressRow
@@ -1545,7 +1592,7 @@ const PartAccordionBySize = ({ batch, size, part, setModalState, allowMultiple, 
 // ============================================================================
 const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect, onRepair, canApproveBundle, onQuickApprove, isApproveBlocked, onRequestReplacement }) => {
     const rowStatus = checkEntityStatus(entity);
-    const { total_cut, total_processed, pending_alter, upstream_rework, isComplete, total_validated, total_rejected, total_repaired, rejected_earlier } = rowStatus;
+    const { total_cut, total_processed, pending_alter, upstream_rework, isComplete, total_validated, total_rejected, total_repaired, rejected_earlier, line_completed, line_completed_at } = rowStatus;
     if (total_cut === 0) return null;
     const upstreamStage = entity.upstream_stage || 'previous stage';
     const upstreamBlocked = entity.upstream_blocked || 0;
@@ -1556,11 +1603,12 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
     const hasReplacementActivity = (entity.pieces || []).some(p => p.qc_status === 'FOR_REPLACEMENT');
 
     return (
-        <div className={`p-4 bg-white border-2 border-slate-200 rounded-2xl shadow-sm flex flex-col md:flex-row md:items-center md:justify-between hover:border-indigo-300 transition-colors ${rejected_earlier > 0 ? 'border-l-8 border-l-rose-400' : ''}`}>
+        <div className={`p-4 border-2 rounded-2xl shadow-sm flex flex-col md:flex-row md:items-center md:justify-between transition-colors ${line_completed ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-400' : 'bg-white border-slate-200 hover:border-indigo-300'} ${rejected_earlier > 0 ? 'border-l-8 border-l-rose-400' : ''}`}>
             <div className="flex items-center w-full md:w-1/3 mb-3 md:mb-0">
-                <div className="p-3 bg-slate-100 text-indigo-600 rounded-xl mr-4"><Icon size={24}/></div>
+                <div className={`p-3 rounded-xl mr-4 ${line_completed ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-indigo-600'}`}><Icon size={24}/></div>
                 <div>
                     <span className="font-black text-slate-800 tracking-tight block text-lg">{label}</span>
+                    {line_completed && <CompletedTag at={line_completed_at} className="mb-1" />}
                     {subLabel && <span className="text-xs text-indigo-500 font-black uppercase tracking-widest">{subLabel}</span>}
                     <span className="text-xs text-slate-500 font-bold uppercase tracking-widest">{total_processed} / {total_cut} pieces</span>
                     {(upstreamBlocked > 0 || upstream_rework > 0 || upstreamRejected.length > 0 || rejected_earlier > 0) && (
@@ -1598,6 +1646,9 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
             </div>
 
             <div className="w-full md:w-1/3 flex justify-start md:justify-end items-center space-x-3">
+                {line_completed ? (
+                    <button onClick={() => onInspect(entity)} className="px-5 py-2 text-sm text-emerald-700 bg-white border-2 border-emerald-300 rounded-xl font-black flex items-center w-max hover:bg-emerald-100 hover:border-emerald-500 active:scale-95 transition-all"><Check className="w-4 h-4 mr-2"/> VIEW</button>
+                ) : <>
                 {pending_alter > 0 && (
                      <button onClick={() => onRepair(entity)} className="px-4 py-2 text-sm bg-amber-100 text-amber-900 border-2 border-amber-200 rounded-xl hover:bg-amber-200 font-black flex items-center shadow-sm active:scale-95 transition-all"><Hammer className="w-4 h-4 mr-2"/> Fix Rework ({pending_alter})</button>
                 )}
@@ -1616,6 +1667,7 @@ const ValidationProgressRow = ({ label, subLabel, icon: Icon, entity, onInspect,
                 ) : (
                     <button onClick={() => onInspect(entity)} className="px-5 py-2 text-sm text-emerald-600 bg-emerald-50 border-2 border-emerald-200 rounded-xl font-black flex items-center w-max hover:bg-emerald-100 hover:border-emerald-400 active:scale-95 transition-all"><Check className="w-4 h-4 mr-2"/> DONE</button>
                 )}
+                </>}
             </div>
         </div>
     );
@@ -2051,6 +2103,15 @@ const UniversalWorkstationDashboard = () => {
     });
     const [showPartFilter, setShowPartFilter] = useState(false);
     const partFilterRef = useRef(null);
+    // Rolls / sizes already completed on this line — listed (own colour, view only) unless switched off; remembered per tablet.
+    const [showCompleted, setShowCompleted] = useState(() => {
+        try { return localStorage.getItem(SHOW_DONE_LS_KEY) !== '0'; }
+        catch { return true; }
+    });
+    const toggleShowCompleted = () => setShowCompleted(prev => {
+        try { localStorage.setItem(SHOW_DONE_LS_KEY, prev ? '0' : '1'); } catch {}
+        return !prev;
+    });
 
     const allowMultiple = headerInfo.can_approve_multiple_piece || false;
     const allowBundle = headerInfo.can_approve_whole_bundle || false;
@@ -2068,7 +2129,7 @@ const UniversalWorkstationDashboard = () => {
     const fetchQueue = useCallback(async () => {
         setIsLoading(true);
         try {
-            const res = await universalApi.getWorkstationData();
+            const res = await universalApi.getWorkstationData({ include_completed: showCompleted ? 1 : 0 });
             if (res.data.error) throw new Error(res.data.error);
             const newBatches = res.data.batches || [];
             setBatches(newBatches);
@@ -2077,12 +2138,12 @@ const UniversalWorkstationDashboard = () => {
             return newBatches; // 🚨 BUG FIX: Return fresh data to update the modal
         } catch (err) { setError(err.message || "Failed to load workstation data."); return []; } 
         finally { setIsLoading(false); }
-    }, []);
+    }, [showCompleted]);
 
+    useEffect(() => { fetchQueue(); }, [fetchQueue]);
     useEffect(() => {
-        fetchQueue();
         universalApi.getDefectCodes().then(res => setDefectCodes(res.data)).catch(console.error);
-    }, [fetchQueue]);
+    }, []);
 
     // ── Part filter helpers ───────────────────────────────────────────────────
     const uniquePartNames = useMemo(() => {
@@ -2603,6 +2664,13 @@ const UniversalWorkstationDashboard = () => {
                     </div>
                     <div className="flex items-center gap-2">
                         <button
+                            onClick={toggleShowCompleted}
+                            title={showCompleted ? 'Completed rolls / sizes are listed (green, view only) — tap to hide them' : 'Completed rolls / sizes are hidden — tap to show them'}
+                            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition border shadow-sm ${showCompleted ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:border-emerald-500' : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-300 hover:text-emerald-600'}`}
+                        >
+                            {showCompleted ? <CheckSquare size={12} /> : <Square size={12} />} Show completed
+                        </button>
+                        <button
                             onClick={() => setShowReplacementStatusModal(true)}
                             className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 hover:text-violet-600 border border-gray-200 hover:border-violet-300 px-3 py-1.5 rounded-lg transition bg-white shadow-sm"
                         >
@@ -2732,19 +2800,20 @@ const UniversalWorkstationDashboard = () => {
                                             return (
                                             <div className="p-6 md:p-10 bg-slate-100">
                                                 {isBundleMode && viewMode === 'size' && batch.bundles && batch.bundles.length > 0 ? (
-                                                    groupBundlesBySize(batch.bundles).map(sizeGroup => {
+                                                    doneLast(groupBundlesBySize(batch.bundles), g => Object.values(g.parts).flat().flatMap(b => b.pieces)).map(sizeGroup => {
                                                         const allSizePieces = Object.values(sizeGroup.parts).flatMap(bundles =>
                                                             bundles.flatMap(b => b.pieces.map(p => ({ ...p, bundle_id: b.bundle_id, part_id: b.part_id, size: b.size, _displayGroup: `${b.part_name || 'Mixed'} | Roll #${b.roll_id}` })))
                                                         );
                                                         const sizeStatus = checkEntityStatus({ pieces: allSizePieces });
                                                         return (
-                                                            <div key={sizeGroup.size} className="mb-3 last:mb-0 border-l-[6px] border-violet-500 bg-white rounded-r-xl p-3 md:p-4 shadow-sm border-y border-r border-slate-200">
+                                                            <div key={sizeGroup.size} className={`mb-3 last:mb-0 border-l-[6px] rounded-r-xl p-3 md:p-4 shadow-sm ${sizeStatus.line_completed ? DONE_CARD : 'border-violet-500 bg-white border-y border-r border-slate-200'}`}>
                                                                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 pb-2 border-b-2 border-slate-200 gap-3">
                                                                     <h3 className="font-black text-black flex items-center text-base uppercase tracking-widest bg-slate-100 px-3 py-1.5 rounded-lg w-max border border-slate-300">
                                                                         <Ruler className="w-4 h-4 mr-2 text-violet-600" /> SIZE {sizeGroup.size}
                                                                     </h3>
+                                                                    {sizeStatus.line_completed && <CompletedTag label="Size completed" at={sizeStatus.line_completed_at} />}
                                                                     <RejectedEarlierBadge status={sizeStatus} />
-                                                                    {allowRoll && !sizeStatus.isComplete && (
+                                                                    {allowRoll && !sizeStatus.isComplete && !sizeStatus.line_completed && (
                                                                         <button onClick={() => setModalState({ type: 'validate', isBundle: true, isRollInspect: false, batchId: batch.batch_id, batchCode: batch.batch_code, size: sizeGroup.size, partName: 'ALL PARTS', pieces: allSizePieces, titleOverride: `Bulk Inspect: Size ${sizeGroup.size}`, allowMultiple })} className="px-4 py-2 bg-black hover:bg-slate-800 text-white text-sm font-black rounded-lg shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
                                                                             <CheckCircle2 className="w-4 h-4 mr-2 text-amber-400" /> INSPECT WHOLE SIZE
                                                                         </button>
@@ -2772,11 +2841,12 @@ const UniversalWorkstationDashboard = () => {
                                                                                     {ps.total_rejected > 0 && <span className="text-red-600">{ps.total_rejected} rejected{ps.rejected_earlier > 0 ? ` (${ps.rejected_earlier} earlier)` : ''}</span>}
                                                                                     <span className="text-slate-400 font-normal">{ps.total_processed}/{ps.total_cut}</span>
                                                                                     {ps.isComplete && <Check className="w-3.5 h-3.5 text-emerald-500" />}
+                                                                                    {ps.line_completed && <CompletedTag />}
                                                                                 </div>
                                                                             </button>
                                                                             {isPartOpen && (
                                                                                 <div className="p-2 space-y-1 bg-white border-t border-slate-100">
-                                                                                    {bundles.map(bundle => (
+                                                                                    {doneLast(bundles, b => b.pieces).map(bundle => (
                                                                                         <ValidationProgressRow key={bundle.bundle_id} label={`Roll #${bundle.roll_id}`} subLabel={`Bundle ${bundle.bundle_code}`} icon={Layers} entity={bundle}
                                                                                             canApproveBundle={allowBundle}
                                                                                             isApproveBlocked={isApproveBlocked}
@@ -2804,26 +2874,27 @@ const UniversalWorkstationDashboard = () => {
                                                         acc[rId][pName].push(bundle);
                                                         return acc;
                                                     }, {});
-                                                    return Object.entries(groupedBundles).map(([rollId, parts]) => {
+                                                    return doneLast(Object.entries(groupedBundles), ([, parts]) => Object.values(parts).flat().flatMap(b => b.pieces)).map(([rollId, parts]) => {
                                                         const allRollPieces = Object.entries(parts).flatMap(([partName, bundles]) =>
                                                             bundles.flatMap(b => b.pieces.map(p => ({ ...p, bundle_id: b.bundle_id, part_id: b.part_id, size: b.size, _displayGroup: `${partName} | Size ${b.size}` })))
                                                         );
                                                         const rollStatus = checkEntityStatus({ pieces: allRollPieces });
                                                         return (
-                                                            <div key={rollId} className="mb-3 last:mb-0 border-l-[6px] border-indigo-500 bg-white rounded-r-xl p-3 md:p-4 shadow-sm border-y border-r border-slate-200">
+                                                            <div key={rollId} className={`mb-3 last:mb-0 border-l-[6px] rounded-r-xl p-3 md:p-4 shadow-sm ${rollStatus.line_completed ? DONE_CARD : 'border-indigo-500 bg-white border-y border-r border-slate-200'}`}>
                                                                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 pb-2 border-b-2 border-slate-200 gap-3">
                                                                     <h3 className="font-black text-black flex items-center text-base uppercase tracking-widest bg-slate-100 px-3 py-1.5 rounded-lg w-max border border-slate-300">
                                                                         <Layers className="w-4 h-4 mr-2 text-indigo-600" /> ROLL #{rollId}
                                                                     </h3>
+                                                                    {rollStatus.line_completed && <CompletedTag label="Roll completed" at={rollStatus.line_completed_at} />}
                                                                     <RejectedEarlierBadge status={rollStatus} />
-                                                                    <div className="flex items-center gap-2">
+                                                                    {!rollStatus.line_completed && <div className="flex items-center gap-2">
                                                                         {allowRoll && !rollStatus.isComplete && (
                                                                             <button onClick={() => setModalState({ type: 'validate', isBundle: true, isRollInspect: true, batchId: batch.batch_id, batchCode: batch.batch_code, rollId, partName: 'ALL PARTS', pieces: allRollPieces, titleOverride: `Bulk Inspect: Roll #${rollId}`, allowMultiple })} className="px-4 py-2 bg-black hover:bg-slate-800 text-white text-sm font-black rounded-lg shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
                                                                                 <CheckCircle2 className="w-4 h-4 mr-2 text-amber-400" /> INSPECT WHOLE ROLL
                                                                             </button>
                                                                         )}
                                                                         <RollHandoffButton batchId={batch.batch_id} lineId={headerInfo.line_id} rollId={rollId} onComplete={() => fetchQueue()} />
-                                                                    </div>
+                                                                    </div>}
                                                                 </div>
                                                                 {Object.entries(parts).filter(([partName]) => isPartVisible(partName)).map(([partName, bundles]) => {
                                                                     const partKey   = `${rollId}::${partName}`;
@@ -2847,11 +2918,12 @@ const UniversalWorkstationDashboard = () => {
                                                                                     {ps.total_rejected > 0 && <span className="text-red-600">{ps.total_rejected} rejected{ps.rejected_earlier > 0 ? ` (${ps.rejected_earlier} earlier)` : ''}</span>}
                                                                                     <span className="text-slate-400 font-normal">{ps.total_processed}/{ps.total_cut}</span>
                                                                                     {ps.isComplete && <Check className="w-3.5 h-3.5 text-emerald-500" />}
+                                                                                    {ps.line_completed && <CompletedTag />}
                                                                                 </div>
                                                                             </button>
                                                                             {isPartOpen && (
                                                                                 <div className="p-2 space-y-1 bg-white border-t border-slate-100">
-                                                                                    {bundles.map(bundle => (
+                                                                                    {doneLast(bundles, b => b.pieces).map(bundle => (
                                                                                         <ValidationProgressRow key={bundle.bundle_id} label={`Size ${bundle.size}`} subLabel={`Bundle ${bundle.bundle_code}`} icon={Package} entity={bundle}
                                                                                             canApproveBundle={allowBundle}
                                                                                             isApproveBlocked={isApproveBlocked}
@@ -2871,17 +2943,18 @@ const UniversalWorkstationDashboard = () => {
                                                 })() : null}
 
                                                 {!isBundleMode && viewMode === 'size' && batch.rolls && batch.rolls.length > 0 ? (
-                                                    groupPiecesBySize(batch.rolls).map(sizeGroup => {
+                                                    doneLast(groupPiecesBySize(batch.rolls), g => g.parts_details.flatMap(pt => pt.roll_details.flatMap(r => r.pieces))).map(sizeGroup => {
                                                         const allSizePieces = sizeGroup.parts_details.flatMap(pt => pt.roll_details.flatMap(r => r.pieces.map(p => ({ ...p, part_id: pt.part_id, _displayGroup: `${pt.part_name} | Roll #${r.roll_id}` }))));
                                                         const sizeStatus = checkEntityStatus({ pieces: allSizePieces });
                                                         return (
-                                                            <div key={sizeGroup.size} className="mb-3 last:mb-0 border-l-[6px] border-violet-500 bg-white rounded-r-xl p-3 md:p-4 shadow-sm border-y border-r border-slate-200">
+                                                            <div key={sizeGroup.size} className={`mb-3 last:mb-0 border-l-[6px] rounded-r-xl p-3 md:p-4 shadow-sm ${sizeStatus.line_completed ? DONE_CARD : 'border-violet-500 bg-white border-y border-r border-slate-200'}`}>
                                                                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 pb-2 border-b-2 border-slate-200 gap-3">
                                                                     <h3 className="font-black text-black flex items-center text-base uppercase tracking-widest bg-slate-100 px-3 py-1.5 rounded-lg w-max border border-slate-300">
                                                                         <Ruler className="w-4 h-4 mr-2 text-violet-600" /> SIZE {sizeGroup.size}
                                                                     </h3>
+                                                                    {sizeStatus.line_completed && <CompletedTag label="Size completed" at={sizeStatus.line_completed_at} />}
                                                                     <RejectedEarlierBadge status={sizeStatus} />
-                                                                    {allowRoll && !sizeStatus.isComplete && (
+                                                                    {allowRoll && !sizeStatus.isComplete && !sizeStatus.line_completed && (
                                                                         <button onClick={() => {
                                                                             setModalState({ type: 'validate', isBundle: false, isRollInspect: false, batchId: batch.batch_id, batchCode: batch.batch_code, size: sizeGroup.size, partName: 'ALL PARTS', pieces: allSizePieces, titleOverride: `Bulk Inspect: Size ${sizeGroup.size}`, allowMultiple });
                                                                         }} className="px-4 py-2 bg-black hover:bg-slate-800 text-white text-sm font-black rounded-lg shadow-xl active:scale-95 transition-all flex items-center uppercase tracking-widest">
@@ -2898,14 +2971,17 @@ const UniversalWorkstationDashboard = () => {
                                                 ) : null}
 
                                                 {!isBundleMode && viewMode === 'roll' && batch.rolls && batch.rolls.length > 0 ? (
-                                                    batch.rolls.map(roll => (
-                                                        <div key={roll.roll_id} className="mb-3 last:mb-0 border-l-[6px] border-indigo-500 bg-white rounded-r-xl p-3 md:p-4 shadow-sm border-y border-r border-slate-200">
+                                                    doneLast(batch.rolls, r => r.parts_details.flatMap(pt => pt.size_details.flatMap(sz => sz.pieces))).map(roll => {
+                                                        const rollStatus = checkEntityStatus({ pieces: roll.parts_details.flatMap(pt => pt.size_details.flatMap(sz => sz.pieces)) });
+                                                        return (
+                                                        <div key={roll.roll_id} className={`mb-3 last:mb-0 border-l-[6px] rounded-r-xl p-3 md:p-4 shadow-sm ${rollStatus.line_completed ? DONE_CARD : 'border-indigo-500 bg-white border-y border-r border-slate-200'}`}>
                                                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 pb-2 border-b-2 border-slate-200 gap-3">
                                                                 <h3 className="font-black text-black flex items-center text-base uppercase tracking-widest bg-slate-100 px-3 py-1.5 rounded-lg w-max border border-slate-300">
                                                                     <Layers className="w-4 h-4 mr-2 text-indigo-600" /> ROLL #{roll.roll_id}
                                                                 </h3>
-                                                                <RejectedEarlierBadge status={checkEntityStatus({ pieces: roll.parts_details.flatMap(pt => pt.size_details.flatMap(sz => sz.pieces)) })} />
-                                                                <div className="flex items-center gap-2">
+                                                                {rollStatus.line_completed && <CompletedTag label="Roll completed" at={rollStatus.line_completed_at} />}
+                                                                <RejectedEarlierBadge status={rollStatus} />
+                                                                {!rollStatus.line_completed && <div className="flex items-center gap-2">
                                                                     {allowRoll && (
                                                                         <button onClick={() => {
                                                                             const allRollPieces = roll.parts_details.flatMap(pt => pt.size_details.flatMap(sz => sz.pieces.map(p => ({ ...p, part_id: pt.part_id, size: sz.size, _displayGroup: `${pt.part_name} | Size ${sz.size}` }))));
@@ -2915,13 +2991,14 @@ const UniversalWorkstationDashboard = () => {
                                                                         </button>
                                                                     )}
                                                                     <RollHandoffButton batchId={batch.batch_id} lineId={headerInfo.line_id} rollId={roll.roll_id} onComplete={() => fetchQueue()} />
-                                                                </div>
+                                                                </div>}
                                                             </div>
                                                             {roll.parts_details.filter(p => isPartVisible(p.part_name)).map(part => (
                                                                 <PartAccordion key={part.part_id} batch={batch} roll={roll} part={part} setModalState={setModalState} allowMultiple={allowMultiple} onRequestReplacement={openReplacementRequest} />
                                                             ))}
                                                         </div>
-                                                    ))
+                                                        );
+                                                    })
                                                 ) : null}
                                             </div>
                                             );

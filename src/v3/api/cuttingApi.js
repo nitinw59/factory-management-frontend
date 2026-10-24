@@ -11,6 +11,8 @@ export const cuttingApi = {
     update: (id, data) => api.put(`/v3/cutting/batches/${id}`, data),
     addRolls: (id, rolls) => api.post(`/v3/cutting/batches/${id}/rolls`, { rolls }),
     removeRoll: (id, rollRowId) => api.delete(`/v3/cutting/batches/${id}/rolls/${rollRowId}`),
+    // Every roll of the batch in the new order; reason when a cut roll's number / place changes (24 Oct 2026).
+    reorderRolls: (id, rollIds, reason) => api.put(`/v3/cutting/batches/${id}/roll-order`, { roll_ids: rollIds, reason }),
     cutRoll: (id, rollRowId, data) => api.post(`/v3/cutting/batches/${id}/rolls/${rollRowId}/cut`, data),
     finalize: (id, data) => api.post(`/v3/cutting/batches/${id}/finalize`, data || {}),
     unfinalizePreview: (id) => api.get(`/v3/cutting/batches/${id}/unfinalize`),

@@ -12,9 +12,12 @@
 // 21 Oct 2026 (owner: "on finalise … force user to allot pockets mandatorily"): Finalise opens a dialog — fabric
 // warnings, over-cut (reason above the free limit) and the batch's pockets / lining from the order's pocket stock: short
 // → can't finalise (cut a lay first); otherwise ticked as put with the batch and handed over with the finalise.
-import { useCallback, useEffect, useState } from 'react';
+// 24 Oct 2026: numbering mode can change while cutting (pieces already cut are renumbered, reason asked); the rolls are
+// put in cutting order by dragging ⋮⋮ (or ↑ ↓) in "Rolls on this batch" until finalise — Roll no. follows the order,
+// and moving a cut roll renumbers its pieces (reason asked).
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Scissors, CheckCircle2, Ban, Plus, Trash2, FileDown, Pencil, AlertTriangle, Undo2, Barcode } from 'lucide-react';
+import { ArrowLeft, Scissors, CheckCircle2, Ban, Plus, Trash2, FileDown, Pencil, AlertTriangle, Undo2, Barcode, GripVertical, ChevronUp, ChevronDown, ListOrdered } from 'lucide-react';
 import BundleLabelsPanel from './BundleLabelsPanel';
 import Modal from '../../shared/Modal';
 import { cuttingApi } from '../api/cuttingApi';
@@ -195,6 +198,15 @@ function BatchPieces({ rows, sizeOrder }) {
     );
 }
 
+// The element that scrolls the page around `el` (the app's main pane), or the window.
+const scrollParent = (el) => {
+    for (let n = el?.parentElement; n; n = n.parentElement) {
+        const o = getComputedStyle(n).overflowY;
+        if ((o === 'auto' || o === 'scroll') && n.scrollHeight > n.clientHeight) return n;
+    }
+    return window;
+};
+
 const ACTION = { PRIORITY: 'Priority', CREATED: 'Created', EDITED: 'Edited', ROLL_ADDED: 'Roll added', ROLL_REMOVED: 'Roll removed', ROLL_CUT: 'Roll cut', ROLL_RECUT: 'Roll re-cut', END_BIT: 'End bit', FINALIZED: 'Finalised', CANCELLED: 'Cancelled', OVER_CUT: 'Over-cut', POCKETS: 'Pockets & lining', UNFINALIZED: 'Back to cutting' };
 
 export default function CutBatchPage() {
@@ -210,6 +222,11 @@ export default function CutBatchPage() {
     const [fin, setFin] = useState(null);       // finalise dialog: { reason, pockets (lines | null while loading), put }
     const [undo, setUndo] = useState(null);     // undo finalise: { plan, reason }
     const [bundleLabels, setBundleLabels] = useState(false);   // bundle barcode labels (24 Oct 2026)
+    const [mode, setMode] = useState(null);     // numbering change while cutting: { numbering_mode, reason }
+    const [drag, setDrag] = useState(null);     // roll being dragged: { ids (order on screen), id }
+    const dragRef = useRef(null);               // the live drag the window listeners read (state would be stale there)
+    useEffect(() => () => dragRef.current?.stop?.(), []);   // leaving the page mid-drag
+    const [reorder, setReorder] = useState(null);   // new order that renumbers cut rolls: { ids, touched, reason }
     const [formError, setFormError] = useState('');
     const [busy, setBusy] = useState(false);
     const load = useCallback(() => cuttingApi.batch(id).then(res => setB(res.data)).catch(err => setError(apiError(err, 'Failed to load the batch.'))), [id]);
@@ -222,6 +239,63 @@ export default function CutBatchPage() {
     };
     // Company letterhead (name + logo) on the cutting documents.
     const printDoc = async (fn) => { const lh = await loadLetterhead(); fn(b, lh.company, { logo: lh.logo }); };
+    // Roll order (24 Oct 2026). Roll nos are handed out again top to bottom; a cut roll whose number or place changes
+    // gets its pieces renumbered, so that asks for a reason first.
+    const canOrder = perms.manage && open && b.rolls.length > 1;
+    const nosSorted = b.rolls.map(r => r.floor_roll_no).sort((x, y) => x - y);
+    const touchedBy = (ids) => ids.map((rid, i) => ({ r: b.rolls.find(x => x.id === rid), i }))
+        .filter(({ r, i }) => r.lays && (b.rolls[i].id !== r.id || nosSorted[i] !== r.floor_roll_no)).map(({ r, i }) => ({ ...r, new_no: nosSorted[i] }));
+    const commitOrder = (ids) => {
+        if (ids.every((rid, i) => rid === b.rolls[i].id)) return;
+        const touched = touchedBy(ids);
+        if (touched.length) { setFormError(''); setReorder({ ids, touched, reason: '' }); }
+        else run(() => cuttingApi.reorderRolls(id, ids));
+    };
+    const moveRoll = (rid, dir) => {
+        const ids = b.rolls.map(r => r.id); const i = ids.indexOf(rid); const j = i + dir;
+        if (j < 0 || j >= ids.length) return;
+        [ids[i], ids[j]] = [ids[j], ids[i]]; commitOrder(ids);
+    };
+    // Pointer drag on the ⋮⋮ handle (mouse and touch — the cutting tablets have no HTML5 drag and drop). Listens on the
+    // window, not the handle: the table reorders under the finger, and the handle can lose the pointer when its row
+    // moves. A row swaps only once the pointer passes the middle of the next row — rows differ in height (tags, end-bit
+    // chips) and swapping on entry made a short row and a tall one swap back and forth on every move (the "hang").
+    // Near the top / bottom edge the page scrolls by itself.
+    const startDrag = (e, rid) => {
+        e.preventDefault();
+        if (dragRef.current) return;
+        const scroller = scrollParent(e.currentTarget);
+        let frame = 0;
+        const hover = (x, y) => {
+            const cur = dragRef.current; if (!cur) return;
+            const el = document.elementFromPoint(x, y)?.closest('tr[data-roll-id]');
+            const over = el?.dataset.rollId;
+            if (!over || over === cur.id) return;
+            const from = cur.ids.indexOf(cur.id); const to = cur.ids.indexOf(over);
+            const box = el.getBoundingClientRect(); const mid = box.top + box.height / 2;
+            if ((to > from && y < mid) || (to < from && y > mid)) return;
+            const ids = cur.ids.filter(x2 => x2 !== cur.id); ids.splice(to, 0, cur.id);
+            cur.ids = ids; setDrag({ ids, id: cur.id });
+        };
+        const tick = () => {   // auto-scroll while the pointer rests near an edge
+            const cur = dragRef.current; if (!cur) return;
+            const box = scroller === window ? { top: 0, bottom: window.innerHeight } : scroller.getBoundingClientRect();
+            const dy = cur.y < box.top + 70 ? -14 : cur.y > box.bottom - 70 ? 14 : 0;
+            if (dy) { scroller.scrollBy(0, dy); hover(cur.x, cur.y); }
+            frame = requestAnimationFrame(tick);
+        };
+        const onMove = (ev) => { const cur = dragRef.current; if (!cur) return; cur.x = ev.clientX; cur.y = ev.clientY; hover(ev.clientX, ev.clientY); };
+        const stop = () => {
+            window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); window.removeEventListener('pointercancel', onUp);
+            cancelAnimationFrame(frame);
+        };
+        const onUp = () => { const cur = dragRef.current; stop(); dragRef.current = null; setDrag(null); if (cur) commitOrder(cur.ids); };
+        dragRef.current = { ids: b.rolls.map(r => r.id), id: rid, x: e.clientX, y: e.clientY, stop };
+        setDrag({ ids: dragRef.current.ids, id: rid });
+        window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp); window.addEventListener('pointercancel', onUp);
+        frame = requestAnimationFrame(tick);
+    };
+    const rollRows = drag ? drag.ids.map(rid => b.rolls.find(r => r.id === rid)) : b.rolls;
     const openAdd = async () => {
         setFormError('');
         try { const res = await cuttingApi.orderLine(b.order_line_id); setAdd({ rolls: res.data.rolls.filter(r => r.available > 0), ends: res.data.end_bits || [], picks: {}, ebPicks: [] }); } catch (err) { setError(apiError(err, 'Failed.')); }
@@ -247,6 +321,7 @@ export default function CutBatchPage() {
             {b.status === 'CANCELLED' && <p className="text-sm text-slate-600 mb-1"><b>Cancelled:</b> {b.cancelled_reason}</p>}
             <div className="flex flex-wrap gap-2 my-3">
                 {perms.manage && b.status === 'DRAFT' && <SecondaryButton onClick={() => { setFormError(''); setEdit({ layer_length_in: String(b.layer_length_in), numbering_mode: b.numbering_mode, ratio: Object.fromEntries(b.ratios.map(r => [r.size_id, String(r.ratio)])) }); }}><Pencil size={14} /> Ratio / length</SecondaryButton>}
+                {perms.manage && b.status === 'CUTTING' && <SecondaryButton onClick={() => { setFormError(''); setMode({ numbering_mode: b.numbering_mode === 'MODE_2' ? 'MODE_1' : 'MODE_2', reason: '' }); }}><ListOrdered size={14} /> Numbering</SecondaryButton>}
                 {perms.manage && open && <SecondaryButton onClick={openAdd}><Plus size={14} /> Add rolls</SecondaryButton>}
                 {perms.manage && b.status === 'CUTTING' && <PrimaryButton onClick={async () => {
                     setFormError(''); setFin({ reason: '', pockets: null, put: false });
@@ -279,11 +354,24 @@ export default function CutBatchPage() {
             <Section tone="indigo" title="Rolls on this batch" subtitle={`${b.totals.rolls_cut} of ${b.totals.rolls} cut · ${fmt(b.totals.metres)} ${b.totals.uom || ''} taken`}>
             <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[980px]">
-                    <thead className={`${TONE.indigo.head} text-left text-xs font-bold uppercase tracking-wider`}><tr><th className="px-3 py-2">Roll no.</th><th className="px-3 py-2">Store tag</th><th className="px-3 py-2">Colour → parts</th><th className="px-3 py-2 text-right">Taken</th><th className="px-3 py-2 text-right">Lays</th><th className="px-3 py-2 text-right" title="Garments cut from the roll: lays × the size ratio (— for a roll that cuts no main part)">Garments</th><th className="px-3 py-2 text-right">Expected</th><th className="px-3 py-2 text-right">Used</th><th className="px-3 py-2 text-right">End bit</th><th className="px-3 py-2 text-right">Short</th><th className="px-3 py-2 text-right" title="Taken − lays × layer − end bit − short">Unaccounted</th><th className="px-3 py-2" /></tr></thead>
+                    <thead className={`${TONE.indigo.head} text-left text-xs font-bold uppercase tracking-wider`}><tr><th className="pl-2 pr-0 py-2 w-8" aria-label="Order" /><th className="px-3 py-2">Roll no.</th><th className="px-3 py-2">Store tag</th><th className="px-3 py-2">Colour → parts</th><th className="px-3 py-2 text-right">Taken</th><th className="px-3 py-2 text-right">Lays</th><th className="px-3 py-2 text-right" title="Garments cut from the roll: lays × the size ratio (— for a roll that cuts no main part)">Garments</th><th className="px-3 py-2 text-right">Expected</th><th className="px-3 py-2 text-right">Used</th><th className="px-3 py-2 text-right">End bit</th><th className="px-3 py-2 text-right">Short</th><th className="px-3 py-2 text-right" title="Taken − lays × layer − end bit − short">Unaccounted</th><th className="px-3 py-2" /></tr></thead>
                     <tbody>
-                        {b.rolls.map(r => (
-                            <tr key={r.id} className="border-t border-slate-100">
-                                <td className="px-3 py-2 text-lg font-black" title="Number on the pieces">{r.floor_roll_no}</td>
+                        {rollRows.map((r, i) => (
+                            <tr key={r.id} data-roll-id={r.id} className={`border-t border-slate-100 ${drag?.id === r.id ? 'bg-indigo-50 shadow-inner' : ''}`}>
+                                <td className="pl-2 pr-0 py-2 align-middle">
+                                    {canOrder && (
+                                        <div className="flex items-center gap-0.5">
+                                            <button type="button" aria-label={`Drag roll ${r.roll_no}`} title="Drag to change the cutting order"
+                                                className="p-1 rounded text-slate-400 hover:text-indigo-700 hover:bg-indigo-50 cursor-grab active:cursor-grabbing touch-none"
+                                                onPointerDown={e => startDrag(e, r.id)}><GripVertical size={18} /></button>
+                                            <span className={`flex flex-col ${drag ? 'invisible' : ''}`}>
+                                                <button type="button" aria-label={`Move roll ${r.roll_no} up`} disabled={busy || i === 0} className="text-slate-400 hover:text-indigo-700 disabled:opacity-20" onClick={() => moveRoll(r.id, -1)}><ChevronUp size={14} /></button>
+                                                <button type="button" aria-label={`Move roll ${r.roll_no} down`} disabled={busy || i === rollRows.length - 1} className="text-slate-400 hover:text-indigo-700 disabled:opacity-20" onClick={() => moveRoll(r.id, 1)}><ChevronDown size={14} /></button>
+                                            </span>
+                                        </div>
+                                    )}
+                                </td>
+                                <td className="px-3 py-2 text-lg font-black" title="Number on the pieces">{drag && nosSorted[i] !== r.floor_roll_no ? <span className="text-indigo-700">{nosSorted[i]}<span className="block text-[10px] font-semibold text-slate-400 line-through">{r.floor_roll_no}</span></span> : r.floor_roll_no}</td>
                                 <td className="px-3 py-2 font-semibold">{r.roll_no}{r.end_bit_id && <span className="ml-1 text-[10px] font-black px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300">lay piece of roll {r.parent_roll_no}</span>}<span className="block text-xs font-normal text-slate-500">{r.dye_lot ? `lot ${r.dye_lot} · ` : ''}{r.fabric_label}</span></td>
                                 <td className="px-3 py-2 text-xs">{r.colour}<span className="block text-slate-500">{r.parts.map(p => p.part_name).join(', ')}</span></td>
                                 <td className="px-3 py-2 text-right tabular-nums">{fmt(r.metres)} {r.uom}</td>
@@ -307,7 +395,7 @@ export default function CutBatchPage() {
                         return (
                             <tfoot className={`${TONE.indigo.foot} border-t-2 font-bold`}>
                                 <tr>
-                                    <td className="px-3 py-2" colSpan={3}>Total · {b.totals.rolls_cut} of {b.totals.rolls} rolls cut</td>
+                                    <td className="px-3 py-2" colSpan={4}>Total · {b.totals.rolls_cut} of {b.totals.rolls} rolls cut</td>
                                     <td className="px-3 py-2 text-right tabular-nums">{fmt(b.totals.metres)} {u}</td>
                                     <td className="px-3 py-2 text-right tabular-nums">{lays || '—'}</td>
                                     <td className="px-3 py-2 text-right tabular-nums">{b.totals.garments || '—'}</td>
@@ -323,6 +411,7 @@ export default function CutBatchPage() {
                     })()}
                 </table>
             </div>
+            {canOrder && <p className="px-3 py-1.5 text-[11px] text-slate-500 border-t border-slate-100">Cutting order: drag ⋮⋮ (or ↑ ↓). Roll no. follows the order, top to bottom. Moving a cut roll renumbers its pieces — you'll be asked for the reason.</p>}
             </Section>
             <OverCutPanel oc={b.over_cut} batchId={b.id} canDecide={perms.over_cut} onDecided={() => load()} />
             <PocketsPanel b={b} canManage={perms.manage} onChanged={() => load()} />
@@ -411,6 +500,38 @@ export default function CutBatchPage() {
                         <ErrorBox text={formError} />
                         <div className="flex justify-end gap-2"><SecondaryButton onClick={() => setEdit(null)}>Back</SecondaryButton>
                             <PrimaryButton onClick={() => run(() => cuttingApi.update(id, { layer_length_in: Number(edit.layer_length_in), numbering_mode: edit.numbering_mode, ratios: Object.entries(edit.ratio).filter(([, v]) => Number(v) > 0).map(([size_id, v]) => ({ size_id, ratio: Number(v) })) }), () => setEdit(null))} busy={busy} disabled={busy}>Save</PrimaryButton></div>
+                    </div>
+                </Modal>
+            )}
+            {mode && (
+                <Modal title="Change numbering while cutting" onClose={() => setMode(null)}>
+                    <div className="space-y-3 w-[min(480px,88vw)]">
+                        <Field label="Numbering"><select className={inputCls} value={mode.numbering_mode} onChange={e => setMode({ ...mode, numbering_mode: e.target.value })}><option value="MODE_1">Mode 1 — per roll, through the sizes</option><option value="MODE_2">Mode 2 — per size, across rolls</option></select></Field>
+                        {mode.numbering_mode !== b.numbering_mode && b.totals.pieces > 0 && (
+                            <p className="text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 flex gap-1.5"><AlertTriangle size={15} className="shrink-0 mt-0.5" />
+                                <span>The <b>{fmt(b.totals.pieces)} piece(s)</b> already cut on {b.totals.rolls_cut} roll(s) get new numbers. Numbers already written on them change — re-mark them before they leave cutting (print the cut sheet again).</span></p>
+                        )}
+                        <Field label="Reason *"><input className={inputCls} value={mode.reason} onChange={e => setMode({ ...mode, reason: e.target.value })} placeholder="wrong mode chosen…" /></Field>
+                        <ErrorBox text={formError} />
+                        <div className="flex justify-end gap-2"><SecondaryButton onClick={() => setMode(null)}>Back</SecondaryButton>
+                            <PrimaryButton onClick={() => run(() => cuttingApi.update(id, { numbering_mode: mode.numbering_mode, reason: mode.reason.trim() }), () => setMode(null))} busy={busy} disabled={busy || mode.numbering_mode === b.numbering_mode || !mode.reason.trim()}>Change numbering</PrimaryButton></div>
+                    </div>
+                </Modal>
+            )}
+            {reorder && (
+                <Modal title="Move cut rolls" onClose={() => setReorder(null)}>
+                    <div className="space-y-3 w-[min(480px,88vw)]">
+                        <p className="text-sm text-slate-700">New order: {reorder.ids.map((rid, i) => { const r = b.rolls.find(x => x.id === rid); return `#${nosSorted[i]} ${r.roll_no}`; }).join(', ')}</p>
+                        <p className="text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 flex gap-1.5"><AlertTriangle size={15} className="shrink-0 mt-0.5" />
+                            <span>Already cut: {reorder.touched.map(r => `roll ${r.roll_no} (#${r.floor_roll_no} → #${r.new_no})`).join(', ')}. Their pieces get new numbers{b.numbering_mode === 'MODE_2' ? ' (mode 2 also carries the count on in the new roll order)' : ''} — re-mark them and print the cut sheet again.</span></p>
+                        {(() => {   // their end bits are tagged by the roll no. — the tags follow (refused if one was already used)
+                            const tags = reorder.touched.flatMap(r => (r.end_bits || []).filter(e => e.tag.startsWith(`EB-${r.floor_roll_no}-`)).map(e => `${e.tag} → EB-${r.new_no}-${e.tag.slice(`EB-${r.floor_roll_no}-`.length)}`));
+                            return tags.length > 0 && <p className="text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">End bits get new tags: <b>{tags.join(', ')}</b> — re-mark them.</p>;
+                        })()}
+                        <Field label="Reason *"><input className={inputCls} value={reorder.reason} onChange={e => setReorder({ ...reorder, reason: e.target.value })} placeholder="cut in a different order on the table…" /></Field>
+                        <ErrorBox text={formError} />
+                        <div className="flex justify-end gap-2"><SecondaryButton onClick={() => setReorder(null)}>Back</SecondaryButton>
+                            <PrimaryButton onClick={() => run(() => cuttingApi.reorderRolls(id, reorder.ids, reorder.reason.trim()), () => setReorder(null))} busy={busy} disabled={busy || !reorder.reason.trim()}>Save order</PrimaryButton></div>
                     </div>
                 </Modal>
             )}
