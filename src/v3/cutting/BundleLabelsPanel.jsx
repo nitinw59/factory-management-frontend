@@ -39,7 +39,14 @@ export default function BundleLabelsPanel({ batchId, onClose }) {
     const toggle = (p) => { const n = new Set(picked); const k = p.name.toUpperCase(); if (n.has(k)) n.delete(k); else n.add(k); setPicked(n); save(PARTS_KEY, [...n]); };
     const chosen = parts.filter(on);
     const rows = useMemo(() => (d ? d.bundles.filter(b => picked.has(b.part.toUpperCase())) : []), [d, picked]);
-    const byRoll = useMemo(() => { const m = new Map(); for (const b of rows) { if (!m.has(b.roll)) m.set(b.roll, []); m.get(b.roll).push(b); } return [...m.entries()]; }, [rows]);
+    // Groups in the server's print order: mode 1 roll by roll; mode 2 part × size across the rolls (numbers run on).
+    const mode2 = d?.batch?.numbering_mode === 'MODE_2';
+    const groups = useMemo(() => {
+        const out = [];
+        for (const b of rows) { const k = mode2 ? `${b.part}|${b.size}` : b.roll; if (out.length && out[out.length - 1][0] === k) out[out.length - 1][1].push(b); else out.push([k, [b]]); }
+        return out;
+    }, [rows, mode2]);
+    const rollCount = new Set(rows.map(b => b.roll)).size;
     const unprinted = rows.filter(b => !b.printed_at).length;
     const run = async (fn, close) => {
         setBusy(true); setError('');
@@ -90,12 +97,12 @@ export default function BundleLabelsPanel({ batchId, onClose }) {
                     </thead>
                     <tbody>
                         {rows.length === 0 && <tr><td colSpan={10} className="px-3 py-6 text-center text-slate-400">Choose the parts to print.</td></tr>}
-                        {byRoll.map(([roll, list]) => list.map((b, i) => (
+                        {groups.map(([, list]) => list.map((b, i) => (
                             <tr key={b.id} className={`border-t ${i === 0 ? 'border-slate-300' : 'border-slate-100'}`}>
                                 <td className="px-3 py-1.5 font-mono font-black text-slate-900">{b.bundle_code}{b.source === 'LABEL' ? <span className="ml-1 text-[10px] font-sans font-bold text-slate-400">label only</span> : null}</td>
                                 <td className="px-3 py-1.5 text-xs text-slate-600">{b.style}</td>
                                 <td className="px-3 py-1.5 font-bold">#{b.batch}</td>
-                                <td className="px-3 py-1.5 font-bold">{roll}</td>
+                                <td className="px-3 py-1.5 font-bold">{b.roll}</td>
                                 <td className="px-3 py-1.5 font-bold">{b.size}</td>
                                 <td className="px-3 py-1.5">{b.colour || '—'}</td>
                                 <td className="px-3 py-1.5 font-semibold">{b.part}</td>
@@ -104,7 +111,7 @@ export default function BundleLabelsPanel({ batchId, onClose }) {
                                 <td className="px-3 py-1.5 text-xs">{b.printed_at ? <span className="text-emerald-700 font-bold">{when(b.printed_at)}</span> : <span className="text-slate-400">—</span>}</td>
                             </tr>
                         )))}
-                        {rows.length > 0 && <tr className="border-t-2 border-slate-300 bg-slate-50 font-black text-slate-700"><td className="px-3 py-2" colSpan={7}>{rows.length} bundle(s) · {byRoll.length} roll(s) · {chosen.length} part(s)</td><td className="px-3 py-2" /><td className="px-3 py-2 text-right tabular-nums">{rows.reduce((a, b) => a + b.pieces, 0)}</td><td className="px-3 py-2 text-xs">{rows.length - unprinted} printed</td></tr>}
+                        {rows.length > 0 && <tr className="border-t-2 border-slate-300 bg-slate-50 font-black text-slate-700"><td className="px-3 py-2" colSpan={7}>{rows.length} bundle(s) · {rollCount} roll(s) · {chosen.length} part(s){mode2 ? ' · mode 2: per part and size across the rolls' : ''}</td><td className="px-3 py-2" /><td className="px-3 py-2 text-right tabular-nums">{rows.reduce((a, b) => a + b.pieces, 0)}</td><td className="px-3 py-2 text-xs">{rows.length - unprinted} printed</td></tr>}
                     </tbody>
                 </table>
             </div>
