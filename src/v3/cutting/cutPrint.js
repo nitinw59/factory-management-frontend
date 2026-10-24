@@ -7,7 +7,7 @@
 //
 // Cut sheet (A4 landscape, 2.0's "Cutting Report" + 3.0's checks): per roll — taken, lays, garments by size, pieces,
 // fabric used by the lays, end bit, unaccounted fabric, consumption per garment against the BOM — with totals; the
-// planned vs cut grid per colour × size; piece numbers per roll (mode 1) or per colour (mode 2) as a size matrix;
+// planned vs cut grid per colour × size; piece numbers per roll (mode 1: rolls × sizes) or per size across rolls (mode 2: sizes × rolls);
 // fabric reconciliation; signatures. Both carry the company letterhead.
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -260,20 +260,53 @@ export function exportCutSheet(b, company = null, assets = {}) {
     y = Math.max(afterLeft, doc.lastAutoTable.finalY) + 4;
 
     // Piece numbers: per roll (mode 1) — rows roll × part, columns sizes, "first–last".
+    // Mode 2 (24 Oct 2026, owner: "we must show rows sequentialy for mode 2 as per size accross rolls"): rows are sizes,
+    // columns the rolls in cutting order, so a row reads on 1–18, 19–36, 37–54 …; parts numbered alike share a row.
     const nums = b.roll_numbers || [];
-    if (nums.length) {
+    const rollOf = (seq) => b.rolls.find(r => r.roll_sequence === seq);
+    if (nums.length && b.numbering_mode === 'MODE_2') {
+        const seqs = [...new Set(nums.map(n => n.roll_sequence))].sort((a, c) => a - c);
+        const sizeList = [...sizes.filter(s => nums.some(n => n.size === s)), ...new Set(nums.map(n => n.size).filter(s => !sizes.includes(s)))];
+        const range = (part, size, seq) => { const x = nums.find(z => z.part_name === part && z.size === size && z.roll_sequence === seq); return x ? `${x.first_no}–${x.last_no}` : ''; };
+        const rows = [];   // { size, parts, cells (per roll sequence) }
+        for (const size of sizeList) {
+            const groups = new Map();
+            for (const part of [...new Set(nums.filter(n => n.size === size).map(n => n.part_name))]) {
+                const cells = seqs.map(q => range(part, size, q));
+                const key = cells.join('|');
+                if (!groups.has(key)) groups.set(key, { size, parts: [], cells });
+                groups.get(key).parts.push(part);
+            }
+            rows.push(...[...groups.values()].sort((a, c) => c.parts.length - a.parts.length));
+        }
+        // Up to 12 rolls per table (landscape); more are split evenly (14 → 7 + 7, never 12 + 2). Fixed roll column
+        // width, so a short table doesn't stretch one roll across the page.
+        const PER = Math.ceil(seqs.length / Math.ceil(seqs.length / 12));
+        const rollW = (CW - 55) / Math.min(12, seqs.length);
+        for (let i = 0; i < seqs.length; i += PER) {
+            const chunk = seqs.slice(i, i + PER);
+            if (y > H - 40) { doc.addPage(); y = 14; }
+            autoTable(doc, {
+                ...GRID, startY: y, margin: { left: M, right: M },
+                head: [[`Piece numbers — per size across rolls (mode 2)${seqs.length > PER ? ` · rolls ${i + 1}–${i + chunk.length} of ${seqs.length}` : ''}`,
+                    ...chunk.map(q => { const rl = rollOf(q); return `#${rl?.floor_roll_no ?? q}\n${rl?.roll_no || ''}`; })]],
+                body: rows.filter(r => chunk.some(q => r.cells[seqs.indexOf(q)])).map(r => [`${r.size} · ${r.parts.join(', ')}`, ...chunk.map(q => r.cells[seqs.indexOf(q)])]),
+                styles: { ...GRID.styles, fontSize: 7, cellPadding: 1.1, halign: 'center' }, tableWidth: 55 + rollW * chunk.length,
+                columnStyles: { 0: { halign: 'left', cellWidth: 55 }, ...Object.fromEntries(chunk.map((q, k) => [k + 1, { cellWidth: rollW }])) },
+            });
+            y = doc.lastAutoTable.finalY + 4;
+        }
+    } else if (nums.length) {
         if (y > H - 40) { doc.addPage(); y = 14; }
         const keyRows = [...new Map(nums.map(n => [`${n.roll_sequence}|${n.part_name}`, n])).values()];
-        const rollOf = (seq) => b.rolls.find(r => r.roll_sequence === seq);
-        const sameAcrossParts = b.numbering_mode !== 'MODE_2';
         // Mode 1: every part of a roll has the same numbers — one row per roll.
-        const list = sameAcrossParts ? [...new Map(keyRows.map(n => [n.roll_sequence, n])).values()] : keyRows;
+        const list = [...new Map(keyRows.map(n => [n.roll_sequence, n])).values()];
         autoTable(doc, {
             ...GRID, startY: y, margin: { left: M, right: M },
-            head: [[sameAcrossParts ? 'Piece numbers per roll (all parts)' : 'Piece numbers (roll · part)', ...sizes]],
+            head: [['Piece numbers per roll (all parts)', ...sizes]],
             body: list.map(n => {
                 const rl = rollOf(n.roll_sequence);
-                return [`Roll ${rl?.floor_roll_no ?? n.roll_sequence} (tag ${rl?.roll_no || ''}) · ${rl?.colour || ''}${sameAcrossParts ? '' : ` · ${n.part_name}`}`,
+                return [`Roll ${rl?.floor_roll_no ?? n.roll_sequence} (tag ${rl?.roll_no || ''}) · ${rl?.colour || ''}`,
                     ...sizes.map(s => { const x = nums.find(z => z.roll_sequence === n.roll_sequence && z.size === s && z.part_name === n.part_name); return x ? `${x.first_no}–${x.last_no}` : ''; })];
             }),
             styles: { ...GRID.styles, fontSize: 7, cellPadding: 1.1, halign: 'center' }, columnStyles: { 0: { halign: 'left', cellWidth: 70 } },
