@@ -8,7 +8,8 @@ export const KIT_STATUS = {
     CANCELLED: { label: 'Cancelled', cls: 'bg-slate-50 text-slate-400 border-slate-200 line-through' },
 };
 export const ACTION = { CREATED: 'Created', EDITED: 'Changed', READY: 'Put in the kit — ready', UNREADY: 'Pulled back', SENT_BACK: 'Sent back by the line', SIGNED: 'Signed for', CLOSED: 'Closed', CANCELLED: 'Cancelled',
-    OVER_CUT: 'Over-cut', PICKED: 'Picked (nothing went in)', COUNTED: 'Counted', LINE_BACK: 'Back to the store', EXTRA_REQUESTED: 'Extra line asked', EXTRA_APPROVED: 'Extra line approved', EXTRA_REFUSED: 'Extra line refused' };
+    OVER_CUT: 'Over-cut', PICKED: 'Picked (nothing went in)', COUNTED: 'Counted', LINE_BACK: 'Back to the store', EXTRA_REQUESTED: 'Extra line asked', EXTRA_APPROVED: 'Extra line approved', EXTRA_REFUSED: 'Extra line refused',
+    REMADE: 'Remade from the order\'s BOM', BOM_CHANGED: 'Order BOM changed', BOM_CHANGE_SEEN: 'BOM change dealt with' };   // 25 Oct 2026 (kits follow the BOM)
 // Picking (21 Oct 2026): why less than owed went in the kit; the loader's count.
 export const SHORT_REASON = { NOT_IN_STOCK: 'Not in stock', DAMAGED: 'Damaged', COUNT_SHORT: 'Count short (shelf has less)', OTHER: 'Other' };
 export const COUNT_ISSUE = { OK: 'As picked', SHORT: 'Short', EXCESS: 'Excess', WRONG_ITEM: 'Wrong item', DAMAGED: 'Damaged' };

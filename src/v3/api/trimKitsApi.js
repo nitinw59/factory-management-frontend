@@ -15,6 +15,7 @@ export const trimKitsApi = {
     sendBack: (id, reason) => api.post(`/v3/trim-kits/${id}/send-back`, { reason }),
     sign: (id, data) => api.post(`/v3/trim-kits/${id}/sign`, data),
     close: (id, reason) => api.post(`/v3/trim-kits/${id}/close`, { reason }),
+    bomChangeSeen: (id, note) => api.post(`/v3/trim-kits/${id}/bom-change/seen`, { note }),   // BOM changed after the kit was started (25 Oct 2026)
     // 21 Oct 2026: Pending to fulfil; extra lines from free stock (the merchandiser approves)
     pending: () => api.get('/v3/trim-kits/pending'),
     requestExtra: (id, data) => api.post(`/v3/trim-kits/${id}/extra`, data),   // { replaces_line_id, trim_item_id, qty, reason }

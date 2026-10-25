@@ -9,6 +9,9 @@
 //   line (another item, free stock) — the merchandiser approves; the original line is closed as replaced.
 //   Line loader: count each picked line — as picked, short, excess, wrong item or damaged; the good lines are signed
 //   (an MI3 issue slip and a valuation bill TB3/…), the bad ones go back to the store. Or send the whole kit back.
+// 25 Oct 2026 (kits follow the order's BOM, kitRefresh.js): an untouched kit is remade when the order's BOM changes (history
+// "Remade"); a kit the store has started keeps its lines and shows a "BOM changed" notice with each difference — the store
+// deals with it (an extra line for what is missing) and marks it dealt with (note optional).
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, PackageCheck, Undo2, Ban, PenLine, RotateCcw, FileDown, Replace, Tag } from 'lucide-react';
@@ -61,6 +64,8 @@ function KitView({ id }) {
     const legacy = S === 'READY' && picked.length === 0 && !(LB && LB.picked > 0);   // made ready before picking existed: counted against what it owes
     const toCount = legacy ? open : picked;
     const pendingExtra = (k.extra_requests || []).filter(r => r.status === 'PENDING');
+    const BC = k.bom_change;   // the order's BOM changed after the store started on the kit (25 Oct 2026)
+    const remadeAt = k.history.find(h => h.action === 'REMADE')?.created_at;
 
     // ── picking (store)
     // Starts at what the stock can give (owed, or less when the stock is short) — the keeper corrects it to what physically went in.
@@ -103,11 +108,33 @@ function KitView({ id }) {
                 <h1 className="text-2xl font-black text-slate-900">{k.kit_no}</h1>
                 <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${KIT_STATUS[S].cls}`}>{KIT_STATUS[S].label}</span>
                 {pendingExtra.length > 0 && <span className="text-[11px] font-black px-2 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300">extra line waiting for the merchandiser</span>}
+                {BC && !BC.seen_at && <span className="text-[11px] font-black px-2 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300">BOM changed</span>}
             </div>
             <p className="text-sm text-slate-600 mb-1"><Link to={`/v3/orders/${k.order_id}`} className="font-semibold text-indigo-700 hover:underline">{k.order_no}</Link> · {k.customer_name}{k.batch_code ? <> · batch <b>#{k.floor_no}</b> {k.batch_code}</> : ''}</p>
             {k.auto && <p className="text-xs text-slate-500 mb-1">Made when the batch was finalised: Order BOM (wastage included) × the garments cut, per colour × size. The quantities can't be changed — put in what is there; the rest follows on the same kit.</p>}
             <p className="text-sm mb-3">{k.batch_lines?.length ? <>Goes to: {k.batch_lines.map(l => <b key={l.id} className="mr-2 text-slate-800">{l.name} <span className="font-normal text-slate-500">({l.stage})</span></b>)}</> : <span className="text-slate-500">The batch is not on a sewing line yet — any line loader may sign for it.</span>}</p>
             {k.history[0]?.action === 'SENT_BACK' && S !== 'READY' && <div className="mb-3 text-sm bg-rose-50 border border-rose-200 text-rose-900 rounded-lg px-3 py-2"><b>Sent back by the line{k.history[0].user_name ? ` (${k.history[0].user_name})` : ''}:</b> {k.history[0].reason} — correct the kit and put it in again.</div>}
+            {remadeAt && !BC && <p className="mb-2 text-xs text-sky-800">Remade from the order's BOM on {new Date(remadeAt).toLocaleString('en-IN')} — the BOM changed before anything was picked (see History).</p>}
+            {BC && (BC.seen_at ? (
+                <p className="mb-3 text-xs text-slate-600"><b>Order BOM changed</b> on {new Date(BC.at).toLocaleString('en-IN')} after this kit was started — dealt with{k.bom_change_seen_by_name ? ` by ${k.bom_change_seen_by_name}` : ''} on {new Date(BC.seen_at).toLocaleString('en-IN')}{BC.seen_note ? `: ${BC.seen_note}` : ''}.</p>
+            ) : (
+                <div className="mb-3 text-sm bg-amber-50 border border-amber-300 text-amber-950 rounded-lg px-3 py-2">
+                    <p className="font-bold">The order's BOM changed on {new Date(BC.at).toLocaleString('en-IN')}{BC.reason ? ` (${BC.reason})` : ''} after this kit was started — nothing on the kit was changed.</p>
+                    <p className="text-xs mb-1.5">For what is now missing, ask for an extra line (the merchandiser approves); tell the line about items no longer on the BOM. Then mark it dealt with.</p>
+                    <table className="w-full text-xs bg-white/60 rounded">
+                        <thead className="text-left font-bold text-amber-900/70 uppercase tracking-wider"><tr><th className="px-2 py-1">Item</th><th className="px-2 py-1 text-right">In the kit</th><th className="px-2 py-1 text-right">BOM now</th><th className="px-2 py-1 text-right">Change</th></tr></thead>
+                        <tbody>{BC.diffs.map((d, i) => (
+                            <tr key={i} className="border-t border-amber-200">
+                                <td className="px-2 py-1">{d.label}{d.part !== 'ORDER' ? <span className="text-amber-800"> · over-cut</span> : null}{d.kind === 'NEW' ? <b className="ml-1 text-emerald-700">new</b> : d.kind === 'GONE' ? <b className="ml-1 text-rose-700">no longer on the BOM</b> : null}</td>
+                                <td className="px-2 py-1 text-right tabular-nums">{qty(d.kit_qty, d.uom)} {d.uom}</td>
+                                <td className="px-2 py-1 text-right tabular-nums">{qty(d.bom_qty, d.uom)} {d.uom}</td>
+                                <td className={`px-2 py-1 text-right tabular-nums font-bold ${d.change > 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{d.change > 0 ? '+' : ''}{qty(d.change, d.uom)} {d.uom}</td>
+                            </tr>
+                        ))}</tbody>
+                    </table>
+                    {perm.prepare && <div className="mt-2"><SecondaryButton onClick={() => askReason({ title: 'BOM change dealt with', confirm: 'Mark as dealt with', label: 'Note', optional: true, hint: 'Say what was done (extra line asked, nothing needed …). The notice stays on the kit as a record.', run: (t) => trimKitsApi.bomChangeSeen(id, t || undefined) })}>Mark as dealt with</SecondaryButton></div>}
+                </div>
+            ))}
             {S === 'READY' && <p className="mb-3 text-sm text-emerald-800">Ready for pickup{k.ready_by_name ? ` — put in by ${k.ready_by_name}` : ''}{k.ready_at ? ` on ${new Date(k.ready_at).toLocaleString('en-IN')}` : ''}. {perm.sign ? 'Count each line, then sign.' : 'Waiting for the line loader.'}</p>}
             {(S === 'CLOSED' || S === 'CANCELLED') && <p className="mb-3 text-sm text-slate-600"><b>{KIT_STATUS[S].label}</b>{k.closed_by_name ? ` by ${k.closed_by_name}` : ''}: {k.close_reason}</p>}
 
@@ -381,11 +408,11 @@ function KitView({ id }) {
                 <Modal title={ask.title} onClose={() => setAsk(null)}>
                     <div className="space-y-3 w-[min(440px,85vw)]">
                         {ask.hint && <p className="text-sm text-slate-600">{ask.hint}</p>}
-                        <Field label="Reason *"><textarea className={`${inputCls} min-h-[80px]`} value={askText} onChange={e => setAskText(e.target.value)} autoFocus /></Field>
+                        <Field label={ask.label ? `${ask.label}${ask.optional ? '' : ' *'}` : 'Reason *'}><textarea className={`${inputCls} min-h-[80px]`} value={askText} onChange={e => setAskText(e.target.value)} autoFocus /></Field>
                         <ErrorBox text={formError} />
                         <div className="flex justify-end gap-2">
                             <SecondaryButton onClick={() => setAsk(null)}>Back</SecondaryButton>
-                            <PrimaryButton onClick={() => run(() => ask.run(askText.trim()), () => setAsk(null))} busy={busy} disabled={busy || !askText.trim()}>{ask.confirm}</PrimaryButton>
+                            <PrimaryButton onClick={() => run(() => ask.run(askText.trim()), () => setAsk(null))} busy={busy} disabled={busy || (!ask.optional && !askText.trim())}>{ask.confirm}</PrimaryButton>
                         </div>
                     </div>
                 </Modal>

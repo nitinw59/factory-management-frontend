@@ -65,7 +65,7 @@ export default function TrimKitsPage() {
                 <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
                     {rows.map(k => (
                         <Link key={k.id} to={`/v3/trim-kits/${k.id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 hover:bg-slate-50">
-                            <b className="text-slate-900">{k.kit_no}</b>
+                            <b className="text-slate-900">{k.kit_no}</b>{k.bom_changed && <span className="ml-1.5 align-middle text-[10px] font-black px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300" title="The order's BOM changed after this kit was started">BOM changed</span>}
                             <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${KIT_STATUS[k.status].cls}`}>{KIT_STATUS[k.status].label}</span>
                             <span className="text-sm text-slate-700">{k.floor_no ? <b className="mr-1">#{k.floor_no}</b> : null}{k.order_no}{k.batch_code ? ` · ${k.batch_code}` : ''}</span>
                             <span className="text-xs text-slate-500">{k.customer_name} · {k.line_count} item(s){k.status === 'PARTLY_ISSUED' ? ` · ${k.open_lines} still to hand` : ''}</span>
