@@ -32,19 +32,20 @@ function useOrderSummary(id) {
     return [o, error];
 }
 
-export default function OrderTabs({ orderId, active }) {
+// hideSummary: the screen shows the order's facts itself (Order BOM, 25 Oct 2026: "remove repeated") — tabs only.
+export default function OrderTabs({ orderId, active, hideSummary = false }) {
     const { me } = useV3Access();
     const [o] = useOrderSummary(orderId);
-    if (!o) return <div className="h-[74px] mb-4" />;
+    if (!o) return <div className={`${hideSummary ? 'h-[42px]' : 'h-[74px]'} mb-4`} />;
     const tabs = tabsFor(me, o);
     return (
         <div className="mb-4">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2">
+            {!hideSummary && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2">
                 <span className="text-xs font-black uppercase tracking-widest text-slate-400">Order</span>
                 <span className="text-lg font-black text-slate-900">{o.order_no}</span>
                 <SalesOrderStatusBadge status={o.status} />
                 <span className="text-sm text-slate-500">{o.customer_name}{o.buyer_po_no ? ` · buyer PO ${o.buyer_po_no}` : ''}{o.revision_no ? ` · rev ${o.revision_no}` : ''}</span>
-            </div>
+            </div>}
             {tabs.length > 1 && (
                 <nav className="flex gap-1 border-b border-slate-200 overflow-x-auto" aria-label="Order screens">
                     {tabs.map(t => (

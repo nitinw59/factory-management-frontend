@@ -150,9 +150,11 @@ export default function PurchaseOrderPage() {
                 <h1 className="text-2xl font-black text-slate-900">{po.po_no}</h1>
                 <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${PO_STATUS[po.status].cls}`}>{PO_STATUS[po.status].label}</span>
                 {po.revision_no > 0 && <span className="text-xs font-bold text-slate-500">revision {po.revision_no}</span>}
+                {po.source === 'DIRECT' && <span className="text-[11px] font-black px-2 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300">DIRECT PURCHASE</span>}
                 <span className="text-sm text-slate-500">{fmtDate(po.po_date)} · {intra ? 'CGST + SGST' : 'IGST'}</span>
             </div>
             {po.status === 'CANCELLED' && <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Cancelled</b>{po.cancelled_by_name ? ` by ${po.cancelled_by_name}` : ''}: {po.cancelled_reason}</div>}
+            {po.source === 'DIRECT' && <div className="mb-3 text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-3 py-2"><b>Direct purchase</b> — made by the store from {po.supplier_reference ? <b>{po.supplier_reference.replace(/^Bill /, 'bill ')}</b> : 'the bill'}{po.shop_name ? <> at <b>{po.shop_name}</b></> : ''}{po.created_by_name ? ` (${po.created_by_name})` : ''}; received on the same goods receipt. Spares / general items only.</div>}
             {po.status === 'SHORT_CLOSED' && <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Short-closed</b> — the rest of this PO is no longer expected.</div>}
             {pending && (
                 <div className="mb-3 text-sm bg-rose-50 border border-rose-200 text-rose-900 rounded-lg px-3 py-2">

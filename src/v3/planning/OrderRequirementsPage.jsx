@@ -6,13 +6,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import OrderTabs from '../orders/OrderTabs';
-import { Pencil, FileDown, AlertTriangle, ShieldCheck, MoreHorizontal, ChevronDown } from 'lucide-react';
+import { Pencil, FileDown, AlertTriangle, ShieldCheck, MoreHorizontal, ChevronDown, ExternalLink } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Modal from '../../shared/Modal';
+import RaiseDialog from './RaiseDialog';
 import { planningApi } from '../api/planningApi';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
-import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
+import SalesOrderStatusBadge, { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import AllocateModal from './AllocateModal';
 import RollAssignModal from './RollAssignModal';
 import ReleaseForCuttingModal from './ReleaseForCuttingModal';
@@ -24,6 +25,8 @@ import { loadLetterhead, sheetWithLetterhead } from '../components/letterhead';
 import { useV3Access } from '../V3Access';
 import { ReadinessChip, READY_STATUS, daysText } from './readinessShared';
 
+// "16 Oct" this year, "16 Oct 2027" otherwise (header chips).
+const shortDate = (d) => { const t = fmtDate(d); return d && String(d).slice(0, 4) === String(new Date().getFullYear()) ? t.replace(/ \d{4}$/, '') : t; };
 const fmt = (n, uom) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 2 });
 const SOURCE = { EXACT: 'exact colour', TONE: 'by tone', ALL: 'all colours' };
 const ALLOC_ACTION = { ALLOCATE: 'Allocated', RELEASE: 'Released', AUTO_RELEASE: 'Released automatically', ISSUE: 'Issued to production', ISSUE_RETURN: 'Returned from production' };
@@ -88,18 +91,30 @@ export default function OrderRequirementsPage() {
     const canRaise = (k) => myKinds.includes(k);
     const canAlloc = (k) => allocKinds.includes(k);
     const [params] = useSearchParams();
-    const [tab, setTab] = useState(['MILESTONES', 'TRIM'].includes(params.get('tab')) ? params.get('tab') : 'FABRIC');
+    // Material tabs by role (25 Oct 2026, owner: "only show trims to store manager and fabric to fabric store manager"):
+    // a user whose only 3.0 roles are store roles sees their store's tab(s); everyone else both.
+    const myRoles = [me?.role, ...(me?.granted_roles || []).map(g => g.role)].filter(Boolean);
+    const storeOnly = myRoles.length > 0 && myRoles.every(r => r === 'store_manager' || r === 'fabric_store_manager');
+    const matTabs = storeOnly ? ['FABRIC', 'TRIM'].filter(k => myRoles.includes(k === 'FABRIC' ? 'fabric_store_manager' : 'store_manager')) : ['FABRIC', 'TRIM'];
+    const [tab, setTab] = useState(() => {
+        const want = params.get('tab');
+        return want === 'MILESTONES' || (['FABRIC', 'TRIM'].includes(want) && matTabs.includes(want)) ? want : matTabs[0];
+    });
+    useEffect(() => { if ((tab === 'FABRIC' || tab === 'TRIM') && !matTabs.includes(tab)) setTab(matTabs[0]); }, [tab, matTabs.join()]); // eslint-disable-line react-hooks/exhaustive-deps
     const [error, setError] = useState('');
     const [cell, setCell] = useState(null);           // drill-down { item, colour }
     const [fabFilter, setFabFilter] = useState('all'); // Fabric / Trims tab: all / short / covered
     const [fabView, setFabView] = useState('list');    // Fabric / Trims tab: list / colour (matrix)
     const [linesOpen, setLinesOpen] = useState(false); // more than 3 order lines: folded
+    const [unplannedOpen, setUnplannedOpen] = useState(false);   // "on no requisition" list: collapsed to one line until clicked (25 Oct 2026)
     const [allowance, setAllowance] = useState(null); // { line, pct, reason }
     const [target, setTarget] = useState(null);       // allocate / release
     const [rolls, setRolls] = useState(null);         // fabric: assign / un-assign whole rolls
     const [ov, setOv] = useState(null);               // revoke the release { mode, reason }
     const [releasing, setReleasing] = useState(false); // release for cutting (PPM per line + undertaking)
     const [check, setCheck] = useState(null);         // release check: items on no requisition and no PO
+    const [raising, setRaising] = useState(null);     // Raise dialog: the items (25 Oct 2026)
+    const [raised, setRaised] = useState(null);       // banner after raising: { id, pr_no, count, added }
     const [busy, setBusy] = useState(false);
     const [formError, setFormError] = useState('');
 
@@ -149,31 +164,22 @@ export default function OrderRequirementsPage() {
 
     return (
         <div>
-            <OrderTabs orderId={orderId} active={tab === 'MILESTONES' ? 'milestones' : 'materials'} />
+            <OrderTabs orderId={orderId} active={tab === 'MILESTONES' ? 'milestones' : 'materials'} hideSummary />
             <ErrorBox text={error} />
 
-            {/* Compact header: order facts · readiness chips · menus; then the order lines as chips */}
+            {/* Compact header, two rows (25 Oct 2026, owner: "organise is properly in 2 lines"):
+                1. order facts · Open sales order · menus   2. readiness chips │ order lines as chips */}
             <div className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 mb-3 space-y-2">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                    <h1 className="text-xl font-black text-slate-900">{order.order_no}</h1>
-                    <span className="text-sm text-slate-500">{order.customer_name}{order.buyer_po_no ? ` · PO ${order.buyer_po_no}` : ''} · first ship {fmtDate(order.first_ship_date)}{order.revision_no ? ` · rev ${order.revision_no}` : ''}</span>
-                    {me.menu['sales.orders'] && <Link to={`/v3/sales-orders/${order.id}`} className="text-sm font-semibold text-indigo-700 hover:underline">Open sales order</Link>}
-                    {data.readiness && (() => {
-                        const r = data.readiness;
-                        return <>
-                            <span title={READY_STATUS[r.status]?.hint}><ReadinessChip r={r} /></span>
-                            <span className="text-xs font-bold text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">{r.items_allocated}/{r.items_total} allocated</span>
-                            {r.needed_by && <span className={`text-xs font-bold rounded px-1.5 py-0.5 ${r.late ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>needed by {fmtDate(r.needed_by)} ({daysText(r.days_to_needed_by)})</span>}
-                            <span className={`text-xs font-bold rounded px-1.5 py-0.5 ${r.cut_allowed ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}
-                                title={r.override ? `Released by ${r.override.by_name || '—'} on ${new Date(r.override.at).toLocaleString()}: ${r.override.reason}${r.override.stale ? ' (given before the latest revision)' : ''}` : undefined}>
-                                {r.override ? <><ShieldCheck size={11} className="inline -mt-0.5" /> cutting released{r.override.stale ? ' (old)' : ''}</> : r.status === 'READY' ? 'cutting cleared' : 'cutting blocked'}
-                            </span>
-                            {perms.release && !r.override && r.status !== 'READY' && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline" onClick={() => setReleasing(true)}>Release for cutting…</button>}
-                            {perms.release && r.override && <button type="button" className="text-xs font-bold text-slate-600 hover:underline" onClick={() => { setFormError(''); setOv({ mode: 'revoke', reason: '' }); }}>Revoke release</button>}
-                        </>;
-                    })()}
-                    {!approved && <span className="text-xs font-bold text-amber-700 flex items-center gap-1"><AlertTriangle size={12} />{order.status === 'CANCELLED' ? 'Cancelled — requirements closed' : 'Calculated when the order is approved (estimate)'}</span>}
-                    <span className="ml-auto flex gap-2">
+                <div className="flex items-start gap-3">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1">
+                    {/* the order no. opens the sales order (was a separate "Open sales order" link) */}
+                    <h1 className="text-xl font-black text-slate-900">{me.menu['sales.orders']
+                        ? <Link to={`/v3/sales-orders/${order.id}`} className="hover:text-indigo-700 inline-flex items-center gap-1" title="Open sales order">{order.order_no}<ExternalLink size={13} className="text-slate-400" /></Link>
+                        : order.order_no}</h1>
+                    {order.status && <SalesOrderStatusBadge status={order.status} />}
+                    <span className="text-sm text-slate-500">{order.customer_name}{order.buyer_po_no ? ` · buyer PO ${order.buyer_po_no}` : ''} · first ship {shortDate(order.first_ship_date)}{order.revision_no ? ` · rev ${order.revision_no}` : ''}</span>
+                    </div>
+                    <span className="flex gap-2 shrink-0">
                         <MenuButton title="Downloads" items={[
                             { label: 'Order BOM PDF — detailed', hint: 'Every garment colour on its own row', run: () => downloadOrderBomV2(planningApi, order.id, 'pdf', { summary: false }).catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.'))) },
                             { label: 'Order BOM PDF — summary', hint: 'MATCH TO COLOR / BY SIZE / DTM rows', run: () => downloadOrderBomV2(planningApi, order.id, 'pdf', { summary: true }).catch(err => setError(apiError(err, err.message || 'Failed to make the Order BOM.'))) },
@@ -183,11 +189,33 @@ export default function OrderRequirementsPage() {
                             { label: 'Requirements Excel', hint: 'Items × colours, the calculation per size, the change log', disabled: !data.items.length, run: async () => exportExcel(data, await loadLetterhead()) },
                             { label: 'Trim reservation PDF', hint: 'Trims by type and item, for the store to reserve', disabled: !data.items.some(i => i.kind === 'TRIM'), run: () => exportTrimReservationPdf(data, me?.user?.name) },
                         ]}><FileDown size={14} /> Download <ChevronDown size={13} /></MenuButton>
-                        {perms.settings && approved && <MenuButton title="More" items={[{ label: 'Recalculate', hint: 'Repair tool — requirements are normally recalculated by themselves', run: recalc }]}><MoreHorizontal size={15} /></MenuButton>}
+                        {(() => {   // release / revoke for cutting moved here from the chips row (25 Oct 2026, two-row header)
+                            const r = data.readiness;
+                            const more = [
+                                perms.release && r && !r.override && r.status !== 'READY' ? { label: 'Release for cutting…', hint: 'Let cutting start although materials are not all covered (reason asked)', run: () => setReleasing(true) } : null,
+                                perms.release && r && r.override ? { label: 'Revoke release', hint: 'Cutting waits for the materials again', run: () => { setFormError(''); setOv({ mode: 'revoke', reason: '' }); } } : null,
+                                perms.settings && approved ? { label: 'Recalculate', hint: 'Repair tool — requirements are normally recalculated by themselves', run: recalc } : null,
+                            ].filter(Boolean);
+                            return more.length > 0 && <MenuButton title="More" items={more}><MoreHorizontal size={15} /></MenuButton>;
+                        })()}
                     </span>
                 </div>
-                {/* Order lines as chips: style · Style BOM · ship · pieces · cut allowance (pencil edits it) */}
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                    {data.readiness && (() => {
+                        const r = data.readiness;
+                        return <>
+                            <span title={READY_STATUS[r.status]?.hint}><ReadinessChip r={r} /></span>
+                            <span className="text-xs font-bold text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">{r.items_allocated}/{r.items_total} allocated</span>
+                            {r.needed_by && <span className={`text-xs font-bold rounded px-1.5 py-0.5 ${r.late ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>needed by {shortDate(r.needed_by)} ({daysText(r.days_to_needed_by)})</span>}
+                            <span className={`text-xs font-bold rounded px-1.5 py-0.5 ${r.cut_allowed ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}
+                                title={r.override ? `Released by ${r.override.by_name || '—'} on ${new Date(r.override.at).toLocaleString()}: ${r.override.reason}${r.override.stale ? ' (given before the latest revision)' : ''}` : undefined}>
+                                {r.override ? <><ShieldCheck size={11} className="inline -mt-0.5" /> cutting released{r.override.stale ? ' (old)' : ''}</> : r.status === 'READY' ? 'cutting cleared' : 'cutting blocked'}
+                            </span>
+                        </>;
+                    })()}
+                    {!approved && <span className="text-xs font-bold text-amber-700 flex items-center gap-1"><AlertTriangle size={12} />{order.status === 'CANCELLED' ? 'Cancelled — requirements closed' : 'Calculated when the order is approved (estimate)'}</span>}
+                    {/* Order lines as chips: style · Style BOM · ship · pieces · cut allowance (pencil edits it) */}
+                    <span className="hidden sm:inline-block w-px h-4 bg-slate-200 mx-1" aria-hidden="true" />
                     {(data.lines.length > 3 && !linesOpen ? [] : data.lines).map(l => (
                         <span key={l.id} className={`inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-xs ${l.status !== 'ACTIVE' ? 'border-slate-200 text-slate-400 line-through' : 'border-slate-200 text-slate-700 bg-slate-50'}`}>
                             <b className="text-slate-800">L{l.line_no}</b> · {l.style_code} · {l.bom_version ? `BOM v${l.bom_version}` : <span className="font-semibold text-amber-700">BOM pending</span>} · ship {fmtDate(l.ship_date)} · {l.ordered_pieces.toLocaleString('en-IN')} pcs · cut {l.cut_allowance_pct != null ? `${l.cut_allowance_pct}%` : `${data.settings.default_cut_allowance_pct}% (default)`}
@@ -202,16 +230,20 @@ export default function OrderRequirementsPage() {
             </div>
 
             {approved && check?.unplanned?.length > 0 && data.readiness?.status !== 'READY' && (
-                <div className="mb-3 rounded-xl border-2 border-rose-300 bg-rose-50 px-4 py-2 text-sm text-rose-800">
-                    <p className="font-black flex items-center gap-1.5"><AlertTriangle size={15} />{check.unplanned.length} item{check.unplanned.length === 1 ? ' is' : 's are'} on no requisition and no purchase order</p>
-                    <p className="text-xs mt-0.5">{check.unplanned.slice(0, 6).map(u => `${u.label} (${fmt(u.to_raise, u.uom)} ${u.uom})`).join(' · ')}{check.unplanned.length > 6 ? ` · and ${check.unplanned.length - 6} more` : ''} — raise them before cutting needs them.</p>
+                // 25 Oct 2026 (owner: "hide this banner by default only show on click summary"): one line; the items on click.
+                <div className="mb-3 rounded-xl border border-rose-300 bg-rose-50 px-4 py-1.5 text-sm text-rose-800">
+                    <button type="button" className="w-full font-bold flex items-center gap-1.5 text-left" aria-expanded={unplannedOpen} onClick={() => setUnplannedOpen(o => !o)}>
+                        <AlertTriangle size={14} />{check.unplanned.length} item{check.unplanned.length === 1 ? ' is' : 's are'} on no requisition and no purchase order
+                        <span className="ml-auto text-xs font-bold text-rose-700 underline">{unplannedOpen ? 'Hide' : 'Show items ▸'}</span>
+                    </button>
+                    {unplannedOpen && <p className="text-xs mt-1 pb-0.5">{check.unplanned.map(u => `${u.label} (${fmt(u.to_raise, u.uom)} ${u.uom})`).join(' · ')} — raise them before cutting needs them.</p>}
                 </div>
             )}
 
             {/* Sticky tab bar; the Fabric / Trims tabs carry their filter and view on the right */}
             <div className="sticky top-14 z-20 -mx-1 px-1 bg-slate-50 flex flex-wrap items-end gap-1 border-b border-slate-200 mb-3">
-                {[['FABRIC', `Fabric (${data.totals.fabric_items}${data.items.some(i => i.kind === 'FABRIC' && i.shortfall > 0) ? ` · ${data.items.filter(i => i.kind === 'FABRIC' && i.shortfall > 0).length} short` : ''})`],
-                    ['TRIM', `Trims (${data.totals.trim_items}${data.items.some(i => i.kind === 'TRIM' && i.shortfall > 0) ? ` · ${data.items.filter(i => i.kind === 'TRIM' && i.shortfall > 0).length} short` : ''})`],
+                {[...(matTabs.includes('FABRIC') ? [['FABRIC', `Fabric (${data.totals.fabric_items}${data.items.some(i => i.kind === 'FABRIC' && i.shortfall > 0) ? ` · ${data.items.filter(i => i.kind === 'FABRIC' && i.shortfall > 0).length} short` : ''})`]] : []),
+                    ...(matTabs.includes('TRIM') ? [['TRIM', `Trims (${data.totals.trim_items}${data.items.some(i => i.kind === 'TRIM' && i.shortfall > 0) ? ` · ${data.items.filter(i => i.kind === 'TRIM' && i.shortfall > 0).length} short` : ''})`]] : []),
                     ['CHANGES', `Changes (${data.changes.length + data.allocation_log.length})`], ...(approved ? [['MILESTONES', 'Milestones']] : [])].map(([k, label]) => (
                     <button key={k} type="button" onClick={() => setTab(k)}
                         className={`px-4 py-2 text-sm font-bold border-b-2 -mb-px ${tab === k ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{label}</button>
@@ -232,11 +264,20 @@ export default function OrderRequirementsPage() {
                 )}
             </div>
 
+            {raised && (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                    <b>{raised.count} item{raised.count === 1 ? '' : 's'} {raised.added ? 'added to' : 'raised on'} {raised.pr_no}</b> — still a draft until it is submitted to purchasing.
+                    <Link to={`/v3/planning/purchase-requisitions/${raised.id}`} className="font-bold text-indigo-700 hover:underline">Open it</Link>
+                    <button type="button" className="ml-auto text-xs font-bold text-slate-500 hover:underline" onClick={() => setRaised(null)}>Dismiss</button>
+                </div>
+            )}
+            {raising && <RaiseDialog order={order} items={raising} onClose={() => setRaising(null)} onRaised={(r) => { setRaising(null); setRaised(r); load(); loadCheck(); }} />}
             {(tab === 'FABRIC' || tab === 'TRIM') && (
                 <MaterialRequirements key={tab} data={data} kind={tab} approved={approved} showActions={(myKinds.length > 0 || allocKinds.length > 0) && approved} canRaise={canRaise} canAlloc={canAlloc} busy={busy}
                     filter={fabFilter} view={fabView}
                     onCell={(item, colour) => setCell({ item, colour })}
                     onAllocateFree={allocateFree}
+                    onRaise={(list) => { setRaised(null); setRaising(list); }}
                     onRolls={(it) => setRolls({ orderId: order.id, orderNo: order.order_no, itemId: it.item_id, label: it.label })}
                     onAllocate={(it) => setTarget({ mode: 'allocate', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })}
                     onRelease={(it) => setTarget({ mode: 'release', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })} />

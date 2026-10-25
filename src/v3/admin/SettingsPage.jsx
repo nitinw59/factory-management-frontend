@@ -18,7 +18,7 @@ const SECTIONS = [
     { key: 'planning', label: 'Planning', icon: Calculator, text: 'Cut allowance, lead days, cutting gate' },
     { key: 'calendar', label: 'Working calendar', icon: CalendarDays, text: 'Weekly off days, holidays' },
     { key: 'production', label: 'Production & quality', icon: Factory, text: 'Rework limits, WIP, targets, AQL' },
-    { key: 'stores', label: 'Stores', icon: Warehouse, text: 'Label check, locations' },
+    { key: 'stores', label: 'Stores', icon: Warehouse, text: 'Direct purchase limits, label check, locations' },
     { key: 'alerts', label: 'Alerts', icon: Bell, text: 'Email alerts and recipients' },
     { key: 'approvals', label: 'Approvals', icon: ShieldCheck, text: 'Who approves what' },
     { key: 'log', label: 'Change log', icon: History, text: 'Every settings change' },
@@ -353,8 +353,21 @@ function StoresSection({ data, save, busy }) {
     const [mode, setMode] = useState(data.store.grn_label_check);
     useEffect(() => { setMode(data.store.grn_label_check); }, [data.store.grn_label_check]);
     const [loc, setLoc] = useState(null);
+    // Direct purchase limits (25 Oct 2026, migration 66)
+    const dpOf = (st) => ({ r: String(st.direct_limit_receipt ?? ''), m: String(st.direct_limit_month ?? ''), bill: Boolean(st.direct_bill_required) });
+    const [dp, setDp] = useState(() => dpOf(data.store));
+    useEffect(() => { setDp(dpOf(data.store)); }, [data.store]);
+    const dpChanged = JSON.stringify(dp) !== JSON.stringify(dpOf(data.store));
     return (
         <>
+            <Card title="Direct purchase (spares / general items)" hint="The store buys on a shop's bill with no PO beforehand — the PO is made from the bill. Within these limits (before GST) the stock goes in at once; above them the purchase manager approves first. Trims and fabric always need a PO.">
+                <div className="grid sm:grid-cols-3 gap-3 text-sm">
+                    <Field label="Limit per bill (₹)"><input className={inputCls} type="number" min="0" step="100" value={dp.r} onChange={e => setDp({ ...dp, r: e.target.value })} /></Field>
+                    <Field label="Limit per store user per month (₹)"><input className={inputCls} type="number" min="0" step="500" value={dp.m} onChange={e => setDp({ ...dp, m: e.target.value })} /></Field>
+                    <label className="flex items-center gap-2 mt-6"><input type="checkbox" checked={dp.bill} onChange={e => setDp({ ...dp, bill: e.target.checked })} /> Bill photo / scan required</label>
+                </div>
+                <div className="mt-3 flex justify-end"><PrimaryButton busy={busy} disabled={busy || !dpChanged || dp.r === '' || dp.m === ''} onClick={() => save(() => settingsApi.saveStore({ direct_limit_receipt: Number(dp.r), direct_limit_month: Number(dp.m), direct_bill_required: dp.bill }), 'Direct purchase limits saved.')}>Save</PrimaryButton></div>
+            </Card>
             <Card title="Goods receipt label check">
                 <div className="flex flex-col gap-1.5 text-sm">
                     <label><input type="radio" checked={mode === 'COPY'} onChange={() => setMode('COPY')} /> <b>Copy</b> — the receiver sees the PO's code and can copy it (quick)</label>

@@ -31,6 +31,13 @@ export const purchasingApi = {
     receivablePos: (params) => api.get('/v3/purchasing/receiving/pos', { params }),
     receivingView: (poId) => api.get(`/v3/purchasing/receiving/pos/${poId}`),
     createGrn: (data) => api.post('/v3/purchasing/grns', data),
+    // Direct purchase of spares / general items (25 Oct 2026): the PO is made from the bill. With a bill file → multipart.
+    directSetup: () => api.get('/v3/purchasing/direct-purchases/setup'),
+    createDirect: (data, file) => {
+        if (!file) return api.post('/v3/purchasing/direct-purchases', data);
+        const fd = new FormData(); fd.append('data', JSON.stringify(data)); fd.append('file', file);
+        return api.post('/v3/purchasing/direct-purchases', fd);
+    },
     grns: (params) => api.get('/v3/purchasing/grns', { params }),
     grn: (id) => api.get(`/v3/purchasing/grns/${id}`),
     grnAction: (id, action, reason) => api.post(`/v3/purchasing/grns/${id}/${action}`, reason ? { reason } : undefined),

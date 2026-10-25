@@ -6,9 +6,12 @@
 // 20 Oct 2026: the receipt being typed is kept as a draft in this browser (per user and PO) on every change —
 // ticks, fields, rolls, pastes — and comes back when the PO is opened again; cleared once the GRN saves or on
 // "Discard draft". Browser storage only: it never reaches the server or another device.
+// 25 Oct 2026: each store sees only what it receives (the server's rule on save) — the fabric store manager the POs with
+// an open fabric line and only their fabric lines, the store manager trim / store-item lines; a note counts the rest.
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, PackageCheck, Plus, Trash2, AlertTriangle, Save } from 'lucide-react';
+import { ArrowLeft, PackageCheck, Plus, Trash2, AlertTriangle, Save, ShoppingBag } from 'lucide-react';
+import { useV3Access } from '../V3Access';
 import { purchasingApi } from '../api/purchasingApi';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
@@ -30,6 +33,8 @@ const metresText = (qty, uom) => (uom === 'yd' && qty ? ` (= ${fmt(qty * TO_M.yd
 const isBlank = (header, vals) => !Object.values(vals).some(v => v.on)
     && !['challan_no', 'challan_date', 'vehicle_no', 'notes'].some(k => String(header[k] || '').trim())
     && header.received_date === todayLocal();
+const KIND_TEXT = { FABRIC: 'fabric', TRIM: 'trim', STORE: 'store-item' };
+const otherStore = (kinds) => (kinds.includes('FABRIC') ? 'the fabric store' : 'the trim store');
 const timeText = (ms) => new Date(ms).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 // Ordered / received / waiting / open / due as chips — open is what can be received now; the due date turns
@@ -174,6 +179,7 @@ export default function ReceiveGoodsPage() {
     const navigate = useNavigate();
     const { poId } = useParams();
     const { user } = useAuth();
+    const { me } = useV3Access();
     const userId = user?.id;
     const [pos, setPos] = useState(null);
     const [search, setSearch] = useState('');
@@ -185,6 +191,7 @@ export default function ReceiveGoodsPage() {
     const [restored, setRestored] = useState(null);   // { at, fromGrn } of the draft brought back on opening the PO
     const [savedAt, setSavedAt] = useState(null);     // last draft write (null = nothing saved / storage blocked)
     const [drafts, setDrafts] = useState(() => draftPoIds(userId));
+    const [receives, setReceives] = useState(null);   // line kinds this user receives (server's rule), for the list hint
 
     // Every change while a PO is open → the draft (removed again when the form is back to blank).
     useEffect(() => {
@@ -195,7 +202,7 @@ export default function ReceiveGoodsPage() {
     }, [po, header, vals, userId, restored]);
 
     useEffect(() => {
-        const t = setTimeout(() => purchasingApi.receivablePos({ q: search.trim() || undefined }).then(res => setPos(res.data)).catch(err => setError(apiError(err, 'Failed to load purchase orders.'))), 250);
+        const t = setTimeout(() => purchasingApi.receivablePos({ q: search.trim() || undefined, with_meta: 1 }).then(res => { setPos(res.data.pos); setReceives(res.data.receives); }).catch(err => setError(apiError(err, 'Failed to load purchase orders.'))), 250);
         return () => clearTimeout(t);
     }, [search]);
 
@@ -255,35 +262,45 @@ export default function ReceiveGoodsPage() {
                         <button type="button" className="ml-auto text-xs font-bold text-rose-700 hover:underline" onClick={discardDraft}>Discard draft</button>
                     </div>
                 )}
-                <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 grid sm:grid-cols-4 gap-3">
+                {po.lines.length > 0 && <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 grid sm:grid-cols-4 gap-3">
                     <Field label="Supplier challan / DC no. *"><input className={inputCls} value={header.challan_no} onChange={e => setHeader({ ...header, challan_no: e.target.value })} autoFocus /></Field>
                     <Field label="Challan date"><input className={inputCls} type="date" value={header.challan_date} onChange={e => setHeader({ ...header, challan_date: e.target.value })} /></Field>
                     <Field label="Vehicle no."><input className={`${inputCls} uppercase`} value={header.vehicle_no} onChange={e => setHeader({ ...header, vehicle_no: e.target.value })} /></Field>
                     <Field label="Received on *"><input className={inputCls} type="date" max={todayLocal()} value={header.received_date} onChange={e => setHeader({ ...header, received_date: e.target.value })} /></Field>
                     <div className="sm:col-span-4"><Field label="Notes"><input className={inputCls} value={header.notes} onChange={e => setHeader({ ...header, notes: e.target.value })} /></Field></div>
-                </div>
+                </div>}
                 <div className="space-y-3 mb-4">
                     {/* Settings → Stores: locations offered for roll locations (free text still allowed) */}
                     <datalist id="v3-store-locations">{(po.locations || []).filter(x => x.area === 'ALL' || x.area === 'FABRIC').map(x => <option key={x.code} value={x.code}>{x.name || ''}</option>)}</datalist>
                     {po.label_check === 'BLIND' && <p className="text-xs font-semibold text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">Blind label check: type the code exactly as printed on the supplier's label — the PO's code is not shown (Settings → Stores).</p>}
+                    {po.lines.length === 0 && <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-3">Nothing on {po.po_no} for you to receive — its lines are received by {otherStore(po.other_lines?.kinds || [])}.</p>}
                     {po.lines.map(l => <LineForm key={l.id} l={l} value={vals[l.id] || { on: false }} onChange={(v) => setVals({ ...vals, [l.id]: v })} />)}
+                    {po.lines.length > 0 && po.other_lines?.count > 0 && (
+                        <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                            Not shown: {po.other_lines.count} {po.other_lines.kinds.map(k => KIND_TEXT[k]).join(' / ')} line(s) on this PO{po.other_lines.open ? ` (${po.other_lines.open} still open)` : ''} — received by {otherStore(po.other_lines.kinds)}.
+                        </p>
+                    )}
                 </div>
-                <ReceiptSummary lines={po.lines} vals={vals} />
+                {po.lines.length > 0 && <ReceiptSummary lines={po.lines} vals={vals} />}
                 <ErrorBox text={error} />
-                <div className="flex flex-wrap items-center gap-3">
+                {po.lines.length > 0 && <div className="flex flex-wrap items-center gap-3">
                     <PrimaryButton onClick={submit} busy={busy} disabled={busy || !po.receivable || !header.challan_no.trim() || !Object.values(vals).some(v => v.on)}><PackageCheck size={15} /> Save goods receipt</PrimaryButton>
                     {savedAt
                         ? <span className="text-xs text-slate-500 inline-flex items-center gap-1"><Save size={12} /> Draft saved on this browser · {timeText(savedAt)}{!restored && <button type="button" className="ml-2 font-semibold text-rose-700 hover:underline" onClick={discardDraft}>Discard</button>}</span>
                         : <span className="text-xs text-slate-400">Your entries are kept as a draft on this browser as you type.</span>}
-                </div>
+                </div>}
             </div>
         );
     }
 
     return (
         <div>
-            <PageHeader title="Receive goods" subtitle="Goods are received only against an issued purchase order. No PO? Keep the goods aside and ask the purchase manager to raise one."
-                actions={<SearchInput value={search} onChange={setSearch} placeholder="PO number, supplier" />} />
+            <PageHeader title="Receive goods" subtitle={`Goods are received only against an issued purchase order. No PO? Keep the goods aside and ask the purchase manager to raise one.${receives && receives.length < 3 ? (receives.includes('FABRIC') ? ' Showing the POs with fabric to receive.' : ' Showing the POs with trims / store items to receive.') : ''}`}
+                actions={<span className="flex items-center gap-2">
+                    {/* spares / general bought on a bill: no PO beforehand (25 Oct 2026) */}
+                    {me?.menu?.['purchasing.direct'] && <Link to="/v3/purchasing/direct" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-sm font-bold text-indigo-700 hover:bg-indigo-100"><ShoppingBag size={14} /> Direct purchase</Link>}
+                    <SearchInput value={search} onChange={setSearch} placeholder="PO number, supplier" />
+                </span>} />
             <ErrorBox text={error} />
             {!pos ? <Loading /> : (
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">

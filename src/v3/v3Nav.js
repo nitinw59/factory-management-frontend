@@ -33,6 +33,7 @@ export const NAV = [
     { to: '/v3/purchasing/reports', label: 'Purchasing reports', icon: BarChart3, key: 'purchasing.reports', text: 'Open, overdue, prices, suppliers' },
     { section: 'Stores' },
     { to: '/v3/purchasing/receive', label: 'Receive goods', icon: PackageOpen, key: 'purchasing.receive', text: 'Goods in against a PO (GRN)' },
+    { to: '/v3/purchasing/direct', label: 'Direct purchase', icon: ShoppingBag, key: 'purchasing.direct', text: 'Spares / general items bought on a bill — no PO beforehand' },
     { to: '/v3/purchasing/grns', label: 'Goods receipts', icon: PackageCheck, key: 'purchasing.grns', text: 'GRNs and their status' },
     { to: '/v3/purchasing/grns?status=PENDING_APPROVAL', label: 'GRN approvals', icon: BadgeCheck, key: 'purchasing.grnApprovals', hidden: true },
     { to: '/v3/material-issue', label: 'Issue to production', icon: Forklift, key: 'issue.materialIssue', text: 'Fabric and trims to cutting and lines' },

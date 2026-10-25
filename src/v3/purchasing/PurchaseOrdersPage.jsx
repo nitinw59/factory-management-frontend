@@ -14,16 +14,18 @@ export default function PurchaseOrdersPage() {
     const [params, setParams] = useSearchParams();
     const status = params.get('status') || '';
     const sentBack = params.get('sent_back') === '1';   // My work: "Purchase orders sent back"
+    const source = params.get('source') || '';           // DIRECT: the store's direct purchases (25 Oct 2026)
+    const since = params.get('since') || '';             // "week" from My work
     const [rows, setRows] = useState(null);
     const [search, setSearch] = useState('');
     const [canManage, setCanManage] = useState(false);
     const [error, setError] = useState('');
 
     useEffect(() => {
-        const t = setTimeout(() => purchasingApi.orders({ status: status || undefined, sent_back: sentBack ? 1 : undefined, q: search.trim() || undefined })
+        const t = setTimeout(() => purchasingApi.orders({ status: status || undefined, sent_back: sentBack ? 1 : undefined, source: source || undefined, since: since || undefined, q: search.trim() || undefined })
             .then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load purchase orders.'))), 250);
         return () => clearTimeout(t);
-    }, [status, sentBack, search]);
+    }, [status, sentBack, source, since, search]);
     useEffect(() => { purchasingApi.permissions().then(res => setCanManage(res.data.manage)).catch(() => {}); }, []);
 
     return (
@@ -36,10 +38,17 @@ export default function PurchaseOrdersPage() {
                         <option value="SENT_BACK">Sent back (approval refused)</option>
                         {Object.entries(PO_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                     </select>
-                    <SearchInput value={search} onChange={setSearch} placeholder="PO number, supplier" />
+                    <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={source} aria-label="Filter by how the PO was made"
+                        onChange={e => { const n = Object.fromEntries(params); delete n.since; if (e.target.value) n.source = e.target.value; else delete n.source; setParams(n); }}>
+                        <option value="">All purchase orders</option>
+                        <option value="DIRECT">Direct purchases (store, on a bill)</option>
+                        <option value="STANDARD">Made by purchasing</option>
+                    </select>
+                    <SearchInput value={search} onChange={setSearch} placeholder="PO number, supplier, shop" />
                     {canManage && <Link to="/v3/purchasing/orders/new" className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg"><Plus size={15} /> New purchase order</Link>}
                 </>} />
             <ErrorBox text={error} />
+            {since === 'week' && <p className="mb-3 text-sm bg-indigo-50 text-indigo-800 rounded-lg px-3 py-2">Made this week{source === 'DIRECT' ? ' — the store\'s direct purchases (spares / general items bought on a bill)' : ''}. <button type="button" className="underline font-semibold" onClick={() => { const n = Object.fromEntries(params); delete n.since; setParams(n); }}>Show all</button></p>}
             {!rows ? <Loading /> : (
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
                     <table className="w-full text-sm min-w-[820px]">
@@ -51,8 +60,9 @@ export default function PurchaseOrdersPage() {
                             {rows.map(r => (
                                 <tr key={r.id} {...rowLink(`/v3/purchasing/orders/${r.id}`)} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50 focus-visible:bg-indigo-50 focus:outline-none">
                                     <td className="px-4 py-2.5"><Link to={`/v3/purchasing/orders/${r.id}`} className="font-semibold text-indigo-700 hover:underline whitespace-nowrap">{r.po_no}</Link>
+                                        {r.source === 'DIRECT' && <span className="ml-1.5 align-middle text-[10px] font-black px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300" title={`Bought on a bill by ${r.created_by_name || 'the store'}${r.supplier_reference ? ` · ${r.supplier_reference}` : ''}`}>DIRECT</span>}
                                         <span className="block text-xs text-slate-500">{fmtDate(r.po_date)}{r.revision_no ? ` · rev ${r.revision_no}` : ''} · {r.tax_mode === 'INTRA' ? 'CGST+SGST' : 'IGST'}</span></td>
-                                    <td className="px-4 py-2.5 text-slate-700">{r.supplier_name}</td>
+                                    <td className="px-4 py-2.5 text-slate-700">{r.supplier_name}{r.shop_name && <span className="block text-xs text-slate-500">{r.shop_name}</span>}</td>
                                     <td className="px-4 py-2.5 text-right tabular-nums">{r.line_count}</td>
                                     <td className="px-4 py-2.5 text-right tabular-nums font-semibold">{inr(r.total)}</td>
                                     <td className="px-4 py-2.5 whitespace-nowrap">{fmtDate(r.delivery_date || r.first_delivery)}</td>

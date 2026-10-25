@@ -20,10 +20,11 @@ export default function PurchaseRequisitionsPage({ purpose }) {
     const rowLink = useRowLink();   // the whole row opens the record
     const [params, setParams] = useSearchParams();
     const status = params.get('status') || '';
-    const toOrder = params.get('to_order') === '1';
     const [counts, setCounts] = useState(null);
     const attention = params.get('attention') === 'me';   // My work → requisitions sent back to me
     const store = params.get('store') || '';   // My work (store) → that store's requisitions: TRIM = store + trim lines, FABRIC = fabric lines
+    // 25 Oct 2026 (owner: "by default select to order tab"): the plain page opens on To order; All is ?tab=all.
+    const toOrder = params.get('to_order') === '1' || (!purpose && !status && !attention && !store && params.get('tab') !== 'all');
     const storeLabel = store === 'FABRIC' ? 'fabric' : store === 'TRIM' ? 'trims and store items' : store ? 'trims, fabric and store items' : '';
     const [rows, setRows] = useState(null);
     const [search, setSearch] = useState('');
@@ -39,7 +40,7 @@ export default function PurchaseRequisitionsPage({ purpose }) {
     const today = new Date().toISOString().slice(0, 10);
     const TABS = [['', 'All', 'ALL'], ['DRAFT,REJECTED', 'To finish', null], ['SUBMITTED', 'Submitted', 'SUBMITTED'], ['TO_ORDER', 'To order', 'TO_ORDER'], ['APPROVED', 'Approved', 'APPROVED'], ['REJECTED', 'Rejected', 'REJECTED'], ['CANCELLED', 'Cancelled', 'CANCELLED']];
     const tabKey = toOrder ? 'TO_ORDER' : status;
-    const setTab = (k) => setParams({ ...(k === 'TO_ORDER' ? { to_order: '1' } : k ? { status: k } : {}), ...(store ? { store } : {}) });
+    const setTab = (k) => setParams({ ...(k === 'TO_ORDER' ? { to_order: '1' } : k ? { status: k } : purpose || store ? {} : { tab: 'all' }), ...(store ? { store } : {}) });
     const countOf = (k, c) => (!counts ? null : k === 'DRAFT,REJECTED' ? (counts.DRAFT || 0) + (counts.REJECTED || 0) : counts[c] || 0);
     useV3Live(() => setRev(r => r + 1));   // live: requisitions decided elsewhere show at once
 
@@ -59,9 +60,11 @@ export default function PurchaseRequisitionsPage({ purpose }) {
                     ))}
                 </div>
             )}
+            {/* 25 Oct 2026: a store user sees only its own store's requisitions (server-side) — say so */}
+            {counts?.scope_text && !store && <p className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2">Showing {counts.scope_text} — the ones your store handles.</p>}
             {store && (
                 <p className="mb-3 text-sm bg-indigo-50 text-indigo-800 rounded-lg px-3 py-2">
-                    Requisitions with {storeLabel}. <button type="button" className="underline font-semibold" onClick={() => setParams(status ? { status } : {})}>Show all</button>
+                    Requisitions with {storeLabel}. {!counts?.scope && <button type="button" className="underline font-semibold" onClick={() => setParams(status ? { status } : toOrder ? { to_order: '1' } : purpose ? {} : { tab: 'all' })}>Show all</button>}
                 </p>
             )}
             <ErrorBox text={error} />

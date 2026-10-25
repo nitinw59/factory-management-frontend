@@ -3,7 +3,7 @@
 // approved orders where they have the next step, and their pages as quick links.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Inbox, ArrowRight, RefreshCw, PackageCheck, ClipboardList } from 'lucide-react';
+import { Inbox, ArrowRight, RefreshCw, PackageCheck, ClipboardList, ShoppingBag } from 'lucide-react';
 import { useV3Live } from '../live';
 import { PageHeader, Loading } from '../components/ui';
 import { useV3Access } from '../V3Access';
@@ -149,11 +149,15 @@ export default function V3HomePage() {
     return (
         <div>
             <PageHeader title={`My work${me.user.name ? ` — ${me.user.name}` : ''}`} subtitle={`${me.role_label}${extra}`}
-                actions={ago != null && (
-                    <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                actions={(ago != null || me.menu['purchasing.direct']) && (
+                    <span className="inline-flex flex-wrap items-center gap-3">
+                    {/* store manager: buy spares / general items on a bill with no PO beforehand (25 Oct 2026) */}
+                    {me.menu['purchasing.direct'] && <Link to="/v3/purchasing/direct" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 text-sm font-bold text-white hover:bg-indigo-700 shadow-sm"><ShoppingBag size={15} /> Direct purchase</Link>}
+                    {ago != null && <span className="inline-flex items-center gap-2 text-xs text-slate-500">
                         <span className={`w-2 h-2 rounded-full ${live ? 'bg-emerald-500' : 'bg-slate-300'}`} title={live ? 'Live: updates as work changes' : 'Not live: refreshes every 5 minutes'} />
                         {live ? 'Live' : 'Offline'} · updated {ago < 10 ? 'just now' : ago < 60 ? `${ago} s ago` : `${Math.round(ago / 60)} min ago`}
                         <button type="button" onClick={load} className="inline-flex items-center gap-1 font-bold text-indigo-700 hover:underline"><RefreshCw size={12} /> Refresh</button>
+                    </span>}
                     </span>
                 )} />
             {!work ? <Loading /> : nothing && pages.length === 0 ? (
