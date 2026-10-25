@@ -1,9 +1,11 @@
 // ─── PUBLIC WORKSTATION SCORECARD (KIOSK / TV DISPLAY) ───────────────────────
 // Deliberately unauthenticated — meant to be opened on a factory-floor TV or
-// shared via a plain link, no login required. Full-screen, up to 6
-// workstations visible at once, auto-rotating every 5s through the rest;
-// a horizontal ticker across the top gives the full-factory overview at a
-// glance. Live via the public WebSocket channel (see usePublicSocket.js /
+// shared via a plain link, no login required. Full-screen, ROWS_PER_PAGE
+// workstations visible at once, auto-rotating every ROTATE_MS through the
+// rest; a horizontal ticker gives the full-factory overview at a glance.
+// Every number is 2.0 + 3.0 production together (25 Oct 2026): a
+// workstation's user's checks in both versions today (the factory's day in
+// India), and the line screen lists both versions' batches (3.0 ones tagged). Live via the public WebSocket channel (see usePublicSocket.js /
 // backend utils/websocket.js's ?public=1 opt-in) — falls back to a 60s
 // safety-net poll in case a socket event is ever missed on an unattended
 // screen with nobody around to notice.
@@ -162,7 +164,7 @@ const computeSizes = (rowH, containerW, nameCpl) => {
 // (options.text_scale, whole percents: 100 = the automatic size above). One
 // per grid column plus the ticker. Clamped again here so a bad value can never
 // make text vanish or explode; anything unreadable falls back to 100.
-const TEXT_SCALE_KEYS = ['name', 'approved', 'repaired', 'rework', 'rejected', 'dhu', 'completed', 'today', 'ticker'];
+const TEXT_SCALE_KEYS = ['name', 'approved', 'repaired', 'rework', 'rejected', 'dhu', 'today', 'ticker'];   // as the backend's (companyProfileController)
 const clampPct = (v) => {
     const n = Math.round(Number(v));
     return Number.isFinite(n) ? Math.min(200, Math.max(50, n)) : 100;
@@ -249,7 +251,7 @@ const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString('en-IN'));
 // ("batches 1–4 of 19", "5–8 of 19", …) so every batch is shown, never hidden.
 const buildLineCards = (lines) => lines.flatMap(line => {
     const batches = [...line.batches].sort((a, b) =>
-        (PRIORITY_RANK[a.priority] ?? 1) - (PRIORITY_RANK[b.priority] ?? 1) || Number(a.batch_id) - Number(b.batch_id));
+        (PRIORITY_RANK[a.priority] ?? 1) - (PRIORITY_RANK[b.priority] ?? 1) || (a.sort_no ?? 0) - (b.sort_no ?? 0));
     if (batches.length === 0) return [{ key: line.line_id, line, batches, from: 0, to: 0, total: 0 }];
     const cards = [];
     for (let i = 0; i < batches.length; i += BATCHES_PER_CARD) {
@@ -281,7 +283,10 @@ function LineBatchCard({ card }) {
                         return (
                             <div key={b.batch_id} className="min-w-0">
                                 <div className="flex items-baseline gap-[0.8vw] min-w-0">
-                                    <span className="font-black text-white shrink-0" style={{ fontSize: '2.3vh' }}>#{b.batch_id}</span>
+                                    <span className="font-black text-white shrink-0" style={{ fontSize: '2.3vh' }}>{b.label || `#${b.batch_id}`}</span>
+                                    {b.version === '3.0' && (
+                                        <span className="font-black text-indigo-200 bg-indigo-900/70 rounded px-[0.4vw] shrink-0" style={{ fontSize: '1.4vh' }}>3.0</span>
+                                    )}
                                     {b.priority === 'HIGH' && (
                                         <span className="font-black text-rose-300 bg-rose-900/60 rounded px-[0.4vw] shrink-0" style={{ fontSize: '1.4vh' }}>HIGH</span>
                                     )}

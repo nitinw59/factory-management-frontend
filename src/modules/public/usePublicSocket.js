@@ -5,8 +5,8 @@ import { API_BASE_URL } from '../../utils/api';
 // anonymous kiosk viewer — no JWT at all, just the ?public=1 opt-in the
 // backend's utils/websocket.js requires to register a public socket instead
 // of rejecting the connection. Fires onEvent for every message the server
-// sends (the public channel currently only ever broadcasts QC_LIVE_EVENT,
-// used purely as a "something changed, go re-fetch" signal).
+// sends (the public channel broadcasts 2.0's QC_LIVE_EVENT and 3.0's
+// V3_CHANGED, both used purely as a "something changed, go re-fetch" signal).
 const usePublicSocket = (onEvent) => {
     const [connected, setConnected] = useState(false);
     const wsRef = useRef(null);
