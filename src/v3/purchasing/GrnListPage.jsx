@@ -1,13 +1,16 @@
 // Goods receipts (GRN): list with status filter; "?status=PENDING_APPROVAL"
 // is the purchase manager's approval queue. Factory admins set the
-// over-receipt tolerance here.
+// over-receipt tolerance here. 26 Oct 2026: a printer on rows with fabric prints the fabric inward challan (1 copy).
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { Printer } from 'lucide-react';
 import { purchasingApi } from '../api/purchasingApi';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, ErrorBox, Loading, inputCls, SecondaryButton, useRowLink } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { GRN_STATUS } from './grnShared';
+import { exportFabricInwardChallan } from './grnPrint';
+import { loadLetterhead } from '../components/letterhead';
 import { useAuth } from '../../context/AuthContext';
 
 export default function GrnListPage() {
@@ -19,6 +22,7 @@ export default function GrnListPage() {
     const [error, setError] = useState('');
     const [tol, setTol] = useState(null);
     const [tolMsg, setTolMsg] = useState('');
+    const [printingId, setPrintingId] = useState(null);
     const { user } = useAuth();
     const isAdmin = user?.role === 'factory_admin';
 
@@ -34,6 +38,16 @@ export default function GrnListPage() {
         setTolMsg('');
         try { const res = await purchasingApi.saveSettings({ over_receipt_tolerance_pct: Number(tol) }); setTol(String(res.data.over_receipt_tolerance_pct)); setTolMsg('Saved.'); }
         catch (err) { setTolMsg(apiError(err, 'Failed.')); }
+    };
+
+    const printChallan = async (e, id) => {
+        e.stopPropagation(); e.preventDefault();
+        setPrintingId(id); setError('');
+        try {
+            const [{ data: g }, lh] = await Promise.all([purchasingApi.grn(id), loadLetterhead().catch(() => null)]);
+            exportFabricInwardChallan(g, lh, { printedBy: user?.name || user?.email || '' });
+        } catch (err) { setError(apiError(err, 'Failed to make the challan PDF.')); }
+        finally { setPrintingId(null); }
     };
 
     return (
@@ -52,10 +66,10 @@ export default function GrnListPage() {
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
                     <table className="w-full text-sm min-w-[820px]">
                         <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
-                            <tr><th className="px-4 py-2.5">GRN</th><th className="px-4 py-2.5">PO</th><th className="px-4 py-2.5">Supplier · challan</th><th className="px-4 py-2.5 text-right">Lines</th><th className="px-4 py-2.5">Received by</th><th className="px-4 py-2.5">Status</th></tr>
+                            <tr><th className="px-4 py-2.5">GRN</th><th className="px-4 py-2.5">PO</th><th className="px-4 py-2.5">Supplier · challan</th><th className="px-4 py-2.5 text-right">Lines</th><th className="px-4 py-2.5">Received by</th><th className="px-4 py-2.5">Status</th><th className="px-4 py-2.5 text-center">Challan</th></tr>
                         </thead>
                         <tbody>
-                            {rows.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">{status === 'PENDING_APPROVAL' ? 'Nothing waiting for approval.' : 'No goods receipts yet.'}</td></tr>}
+                            {rows.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">{status === 'PENDING_APPROVAL' ? 'Nothing waiting for approval.' : 'No goods receipts yet.'}</td></tr>}
                             {rows.map(r => (
                                 <tr key={r.id} {...rowLink(`/v3/purchasing/grns/${r.id}`)} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50 focus-visible:bg-indigo-50 focus:outline-none">
                                     <td className="px-4 py-2.5"><Link to={`/v3/purchasing/grns/${r.id}`} className="font-semibold text-indigo-700 hover:underline whitespace-nowrap">{r.grn_no}</Link><span className="block text-xs text-slate-500">{fmtDate(r.received_date)}</span></td>
@@ -64,6 +78,10 @@ export default function GrnListPage() {
                                     <td className="px-4 py-2.5 text-right">{r.line_count}{r.rejected > 0 && <span className="block text-[11px] text-rose-600">rejections</span>}</td>
                                     <td className="px-4 py-2.5 text-slate-600">{r.received_by_name || '—'}</td>
                                     <td className="px-4 py-2.5"><span className={`text-[11px] font-black px-2 py-0.5 rounded border ${GRN_STATUS[r.status].cls}`}>{GRN_STATUS[r.status].label}</span></td>
+                                    <td className="px-4 py-2.5 text-center">{r.fabric_line_count > 0 && (
+                                        <button type="button" onClick={e => printChallan(e, r.id)} disabled={printingId === r.id} title="Print the fabric inward challan (PDF)" aria-label={`Print fabric inward challan ${r.grn_no}`}
+                                            className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"><Printer size={15} /></button>
+                                    )}</td>
                                 </tr>
                             ))}
                         </tbody>

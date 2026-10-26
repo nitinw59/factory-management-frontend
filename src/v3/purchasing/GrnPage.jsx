@@ -1,11 +1,13 @@
 // One goods receipt: PO and challan, each line (label code typed vs the item,
 // accepted / rejected, rolls), the orders it was bought for (allocate next),
 // approve / reject / reverse for the purchase manager, scans, history.
+// 26 Oct 2026: Print challan — the fabric inward challan PDF (grnPrint.js) for a GRN with fabric lines, at any status
+// (stamped when not approved), one copy or two (store + accounts).
 // 20 Oct 2026: while it waits for approval its receiver (or the purchase manager) can withdraw it to correct a
 // data-entry mistake — the entries go back to the receive screen as a draft; a withdrawn GRN can be entered again.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, XCircle, Undo2, Upload, AlertTriangle, PackageX, Pencil } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, Undo2, Upload, AlertTriangle, PackageX, Pencil, Printer } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { purchasingApi } from '../api/purchasingApi';
 import { apiError } from '../api/mastersApi';
@@ -13,6 +15,8 @@ import { API_BASE_URL } from '../../utils/api';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { GRN_STATUS, grnToDraft, writeDraft } from './grnShared';
+import { exportFabricInwardChallan, hasFabric } from './grnPrint';
+import { loadLetterhead } from '../components/letterhead';
 import { useAuth } from '../../context/AuthContext';
 
 const fmt = (v) => Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
@@ -30,6 +34,8 @@ export default function GrnPage() {
     const [file, setFile] = useState(null);
     const [busy, setBusy] = useState(false);
     const [formError, setFormError] = useState('');
+    const [copies, setCopies] = useState(1);
+    const [printing, setPrinting] = useState(false);
 
     const load = useCallback(() => purchasingApi.grn(id).then(res => setG(res.data)).catch(err => setError(apiError(err, 'Failed to load the goods receipt.'))), [id]);
     useEffect(() => { load(); purchasingApi.permissions().then(res => setPerms(res.data)).catch(() => {}); }, [load]);
@@ -44,6 +50,12 @@ export default function GrnPage() {
     const canWithdraw = g.status === 'PENDING_APPROVAL' && (perms.manage || (perms.receive && String(g.received_by_user_id) === String(user?.id)));
     // The GRN's entries as a receive draft in this browser, then the receive screen for its PO.
     const correctAgain = (grn) => { writeDraft(user?.id, grn.po_id, grnToDraft(grn)); navigate(`/v3/purchasing/receive/${grn.po_id}`); };
+    const printChallan = async () => {
+        setPrinting(true); setError('');
+        try { exportFabricInwardChallan(g, await loadLetterhead().catch(() => null), { copies, printedBy: user?.name || user?.email || '' }); }
+        catch (err) { setError(err?.message || 'Failed to make the challan PDF.'); }
+        finally { setPrinting(false); }
+    };
     const withdraw = async () => {
         setBusy(true); setFormError('');
         try { const res = await purchasingApi.grnAction(id, 'withdraw', askText.trim()); setAsk(null); correctAgain(res.data); }
@@ -69,6 +81,15 @@ export default function GrnPage() {
             {g.status === 'REVERSED' && <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Reversed</b>{g.reversed_by_name ? ` by ${g.reversed_by_name}` : ''}: {g.reversed_reason}</div>}
 
             <div className="flex flex-wrap gap-2 mb-3">
+                {hasFabric(g) && (
+                    <span className="inline-flex items-center gap-1">
+                        <SecondaryButton onClick={printChallan} disabled={printing}><Printer size={14} /> {printing ? 'Making PDF…' : 'Print challan'}</SecondaryButton>
+                        <select className="px-2 py-2 text-sm border border-slate-300 rounded-lg" value={copies} onChange={e => setCopies(Number(e.target.value))} aria-label="Challan copies">
+                            <option value={1}>1 copy</option>
+                            <option value={2}>2 copies (store + accounts)</option>
+                        </select>
+                    </span>
+                )}
                 {perms.manage && g.status === 'PENDING_APPROVAL' && <>
                     <PrimaryButton onClick={() => { if (window.confirm(`Approve ${g.grn_no} and put it into stock?`)) run(() => purchasingApi.grnAction(id, 'approve')); }} busy={busy} disabled={busy}><CheckCircle2 size={14} /> Approve into stock</PrimaryButton>
                     <SecondaryButton onClick={() => { setAskText(''); setFormError(''); setAsk({ title: `Reject ${g.grn_no}`, action: 'reject', confirm: 'Reject' }); }}><XCircle size={14} /> Reject</SecondaryButton>
