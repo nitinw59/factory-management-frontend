@@ -9,6 +9,7 @@
 // 20 Oct 2026 (Overview tables "bad UI"): every card is a coloured Section with a header row and a totals row;
 // the line grid and Materials show a summary first — one row per colour / per material kind — and the detail
 // (sizes / items) opens on tap; stage columns appear only once a batch reaches that stage.
+// 27 Oct 2026: the cut batches card is now Batches × stages (BatchStages.jsx) — like 2.0's production workflow.
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import OrderTabs from '../orders/OrderTabs';
@@ -21,9 +22,9 @@ import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { READY_STATUS, daysText } from '../planning/readinessShared';
 import { useV3Access } from '../V3Access';
 import { PHASES, RagChip } from './trackerShared';
+import BatchStages from './BatchStages';
 
 const lower = (s) => String(s || '').toLowerCase().replace(/_/g, ' ');
-const STAGE_CLS = { COMPLETED: 'bg-emerald-100 text-emerald-800', IN_PROGRESS: 'bg-amber-100 text-amber-800', PENDING: 'bg-slate-100 text-slate-500' };
 const MS_CLS = { DONE: 'text-emerald-700', DONE_LATE: 'text-amber-700', LATE: 'text-rose-700 font-bold', DUE: 'text-amber-700', UPCOMING: 'text-slate-600', NO_DATE: 'text-slate-400', NA: 'text-slate-400' };
 
 const TH = 'px-3 py-2 text-[11px] font-bold uppercase tracking-wider';
@@ -301,27 +302,9 @@ export default function OrderTrackPage() {
                 )}
             </div>
 
-            <Section tone="emerald" title="Cut batches" right={`${d.batches.length} batch(es)${d.recuts.OPEN ? ` · ${d.recuts.OPEN} re-cut(s) open` : ''}`}>
-                {!d.batches.length ? <p className="px-4 py-3 text-sm text-slate-500">No cut batches yet.</p> : (
-                    <table className="w-full text-sm">
-                        <thead className={`${TONE.emerald.head} text-left`}><tr><th className={TH}>Batch</th><th className={`${TH} text-right`}>Garments</th><th className={TH}>Stages</th></tr></thead>
-                        <tbody>{d.batches.map(b => (
-                            <tr key={b.id} className="border-t border-slate-100 align-top">
-                                <td className="px-3 py-1.5 whitespace-nowrap"><L to={`/v3/cutting/batches/${b.id}`} k="production.cutting">{b.batch_code}</L><span className="block text-[11px] text-slate-500">line {b.line_no} · {lower(b.status)}</span></td>
-                                <td className="px-3 py-1.5 text-right tabular-nums">{fmtQty(b.garments)}</td>
-                                <td className="px-3 py-1.5"><span className="flex flex-wrap gap-1">{b.stages.length ? b.stages.map(s => (
-                                    <span key={s.name} className={`text-[11px] px-1.5 py-0.5 rounded ${STAGE_CLS[s.status] || STAGE_CLS.PENDING}`} title={s.line || ''}>{s.name === 'Cutting' ? 'Numbering' : s.name}: {lower(s.status)}</span>
-                                )) : <span className="text-xs text-slate-400">stages start when the batch is finalised</span>}</span></td>
-                            </tr>
-                        ))}</tbody>
-                        <tfoot className={`${TONE.emerald.foot} border-t-2 font-bold`}><tr>
-                            <td className="px-3 py-2">Total · {d.batches.length} batch{d.batches.length === 1 ? '' : 'es'}</td>
-                            <td className="px-3 py-2 text-right tabular-nums">{fmtQty(d.batches.reduce((a, b) => a + (Number(b.garments) || 0), 0))}</td>
-                            <td className="px-3 py-2 text-xs font-semibold text-slate-600">{d.recuts.OPEN ? `${d.recuts.OPEN} re-cut(s) open` : ''}</td>
-                        </tr></tfoot>
-                    </table>
-                )}
-            </Section>
+            {/* Batches × stages (27 Oct 2026) — replaces the stage status chips: done / total per stage, line, rework,
+                stuck, and the rolls / sizes of each stage on tap. */}
+            <BatchStages orderId={id} can={can} />
         </div>
     );
 }

@@ -2,9 +2,12 @@
 // usage unit, purchase unit and conversion, plus on-hand stock, the movement
 // ledger and stock adjustments. Listed in one card per trim type (16 Oct 2026), each with its own search.
 // Export (21 Oct 2026): Excel (.xlsx) of the items shown (filters applied) or all items — an Items sheet and a By type summary.
+// Requests (27 Oct 2026): the store manager and the purchase manager don't add or edit directly — the same form sends a
+// request ("Send for approval"); the merchandiser / factory admin approve or reject it in the Requests panel (also
+// linked from the approvals inbox as ?requests=1). Until approved a new item doesn't exist and a change isn't applied.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Pencil, History, Copy, Search, X, FileSpreadsheet, ChevronDown } from 'lucide-react';
+import { Plus, Pencil, History, Copy, Search, X, FileSpreadsheet, ChevronDown, Send, CheckCircle2, XCircle, Undo2, Clock } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { DtmChip } from '../boms/dtmShared';
 import Modal from '../../shared/Modal';
@@ -81,6 +84,12 @@ export default function TrimItemsPage() {
     const [ledgerItem, setLedgerItem] = useState(null);
     const [groupSearch, setGroupSearch] = useState({});   // trim type id → text, when that group's search is open
     const [exportOpen, setExportOpen] = useState(false);
+    const [requests, setRequests] = useState([]);
+    const [notice, setNotice] = useState('');
+    // Store manager / purchase manager: add and edit go through a request; the merchandiser / factory admin approve.
+    const requestMode = !perms.trims && perms.trimRequest;
+    const canAdd = perms.trimsAdd || perms.trimRequest;
+    const seesRequests = perms.trimRequest || perms.trimApprove;
 
     const load = useCallback(() => {
         Promise.all([mastersApi.trimItems(), mastersApi.trimTypes()])
@@ -88,6 +97,12 @@ export default function TrimItemsPage() {
             .catch(err => setError(apiError(err, 'Failed to load trim items.')));
     }, []);
     useEffect(() => { load(); }, [load]);
+    const loadRequests = useCallback(() => {
+        mastersApi.trimItemRequests().then(res => setRequests(res.data)).catch(err => setError(apiError(err, 'Failed to load trim item requests.')));
+    }, []);
+    useEffect(() => { if (seesRequests) loadRequests(); }, [seesRequests, loadRequests]);
+    // Items with a change waiting for approval.
+    const waitingChange = useMemo(() => new Set(requests.filter(r => r.kind === 'EDIT' && r.status === 'SUBMITTED').map(r => String(r.trim_item_id))), [requests]);
 
     const shown = useMemo(() => {
         const q = search.trim().toLowerCase();
@@ -131,6 +146,12 @@ export default function TrimItemsPage() {
     const save = async () => {
         setSaving(true); setFormError('');
         try {
+            if (requestMode) {
+                await mastersApi.requestTrimItem({ ...editing, kind: editing.id ? 'EDIT' : 'NEW', trim_item_id: editing.id || undefined, note: editing.note || '' });
+                setNotice(editing.id ? `Change to ${editing.brand} · ${editing.code} sent for approval.` : `New item ${editing.brand} · ${editing.code} sent for approval.`);
+                setEditing(null); loadRequests();
+                return;
+            }
             if (editing.id) await mastersApi.updateTrimItem(editing.id, editing);
             else await mastersApi.createTrimItem(editing);
             setEditing(null); load();
@@ -169,11 +190,15 @@ export default function TrimItemsPage() {
                             </div>
                         </>)}
                     </div>
-                    {perms.trimsAdd && <PrimaryButton onClick={startNew} disabled={types.length === 0}><Plus size={15} /> Add item</PrimaryButton>}
+                    {canAdd && <PrimaryButton onClick={startNew} disabled={types.length === 0}><Plus size={15} /> {requestMode ? 'Request new item' : 'Add item'}</PrimaryButton>}
                 </>}
             />
             {perms.trimsAdd && types.length === 0 && items && <p className="text-sm text-amber-700 mb-3">Add a trim type first.</p>}
             <ErrorBox text={error} />
+            {notice && <p className="mb-3 text-sm bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-3 py-2 flex items-center gap-2"><Send size={14} /> {notice} The merchandiser or factory admin approves it — see Requests below.<button type="button" className="ml-auto text-emerald-700 hover:text-emerald-900" onClick={() => setNotice('')} aria-label="Close"><X size={14} /></button></p>}
+            {seesRequests && (requests.length > 0 || params.get('requests')) && (
+                <RequestsPanel requests={requests} approver={perms.trimApprove} onChanged={() => { loadRequests(); load(); }} />
+            )}
             {!items ? <Loading /> : groups.length === 0 ? (
                 <p className="bg-white border border-slate-200 rounded-xl px-4 py-8 text-center text-sm text-slate-400">No trim items.</p>
             ) : (
@@ -213,6 +238,7 @@ export default function TrimItemsPage() {
                                                 <tr key={it.id} className="border-t border-slate-100 align-top">
                                                     <td className="px-4 py-2.5">
                                                         <span className="font-semibold text-slate-800">{it.brand} · {it.code}</span>
+                                                        {waitingChange.has(String(it.id)) && <span className="ml-2 inline-flex items-center gap-1 text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200"><Clock size={11} /> change waiting for approval</span>}
                                                         {it.description && <span className="block text-xs text-slate-500">{it.description}</span>}
                                                         {it.dtm_base_item_id && <span className="block mt-1 text-xs text-slate-600"><DtmChip /> dyed to match <b>{it.dtm_reference}</b> <span className="text-slate-500">· base {it.dtm_base_label}</span></span>}
                                                     </td>
@@ -228,8 +254,10 @@ export default function TrimItemsPage() {
                                                     <td className="px-4 py-2.5"><ActiveBadge active={it.is_active} /></td>
                                                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
                                                         <button type="button" onClick={() => setLedgerItem(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Stock history of ${it.brand} ${it.code}`}><History size={15} /></button>
-                                                        {perms.trims && <button type="button" onClick={() => { setFormError(''); setEditing({ ...it, trim_type_id: String(it.trim_type_id), description: it.description || '' }); }} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Edit ${it.brand} ${it.code}`}><Pencil size={15} /></button>}
-                                                        {perms.trimsAdd && <button type="button" onClick={() => startCopy(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Copy ${it.brand} ${it.code} into a new item`} title="Copy into a new item"><Copy size={15} /></button>}
+                                                        {(perms.trims || perms.trimRequest) && <button type="button" onClick={() => { setFormError(''); setEditing({ ...it, trim_type_id: String(it.trim_type_id), description: it.description || '', note: '' }); }}
+                                                            disabled={requestMode && waitingChange.has(String(it.id))} title={requestMode ? (waitingChange.has(String(it.id)) ? 'A change is already waiting for approval' : 'Request a change') : 'Edit'}
+                                                            className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label={`${requestMode ? 'Request a change to' : 'Edit'} ${it.brand} ${it.code}`}><Pencil size={15} /></button>}
+                                                        {canAdd && <button type="button" onClick={() => startCopy(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Copy ${it.brand} ${it.code} into a new item`} title="Copy into a new item"><Copy size={15} /></button>}
                                                     </td>
                                                 </tr>
                                             ))}
@@ -243,8 +271,11 @@ export default function TrimItemsPage() {
             )}
 
             {editing && (
-                <Modal title={editing.id ? 'Edit trim item' : editing.copiedFrom ? `Add trim item — copy of ${editing.copiedFrom}` : 'Add trim item'} onClose={() => setEditing(null)}>
+                <Modal title={requestMode
+                    ? (editing.id ? `Request a change — ${editing.brand} · ${editing.code}` : editing.copiedFrom ? `Request a new trim item — copy of ${editing.copiedFrom}` : 'Request a new trim item')
+                    : (editing.id ? 'Edit trim item' : editing.copiedFrom ? `Add trim item — copy of ${editing.copiedFrom}` : 'Add trim item')} onClose={() => setEditing(null)}>
                     <div className="space-y-4 w-[min(620px,85vw)]">
+                        {requestMode && <p className="text-sm bg-sky-50 border border-sky-200 text-sky-900 rounded-lg px-3 py-2">This goes to the merchandiser or factory admin for approval. {editing.id ? 'The item keeps its current values until the change is approved.' : 'The item can be used on BOMs and purchase orders once it is approved.'}</p>}
                         <div className="grid grid-cols-2 gap-3">
                             <Field label="Brand / vendor *" hint='As written by the vendor, e.g. "Coats".'><input className={inputCls} value={editing.brand} onChange={e => setEditing({ ...editing, brand: e.target.value })} autoFocus={!editing.copiedFrom} /></Field>
                             <Field label="Code *" hint='Vendor code incl. shade, e.g. "1234".'><input className={inputCls} value={editing.code} onChange={e => setEditing({ ...editing, code: e.target.value })} autoFocus={!!editing.copiedFrom} /></Field>
@@ -288,16 +319,108 @@ export default function TrimItemsPage() {
                             <Field label="GST %" hint="Default GST on purchase orders, e.g. 12."><input className={inputCls} type="number" min="0" max="40" step="0.01" value={editing.gst_pct ?? ''} onChange={e => setEditing({ ...editing, gst_pct: e.target.value })} /></Field>
                         </div>
                         {editing.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={editing.is_active} onChange={e => setEditing({ ...editing, is_active: e.target.checked })} /> Active</label>}
+                        {requestMode && <Field label="Note for the approver" hint="Why it's needed, e.g. new supplier, wrong unit on the PO."><textarea className={`${inputCls} min-h-[60px]`} value={editing.note || ''} onChange={e => setEditing({ ...editing, note: e.target.value })} /></Field>}
                         <ErrorBox text={formError} />
                         <div className="flex justify-end gap-2">
                             <SecondaryButton onClick={() => setEditing(null)}>Cancel</SecondaryButton>
-                            <PrimaryButton onClick={save} busy={saving} disabled={saving || !editing.brand.trim() || !editing.code.trim() || !editing.trim_type_id}>Save</PrimaryButton>
+                            <PrimaryButton onClick={save} busy={saving} disabled={saving || !editing.brand.trim() || !editing.code.trim() || !editing.trim_type_id}>{requestMode ? <><Send size={14} /> Send for approval</> : 'Save'}</PrimaryButton>
                         </div>
                     </div>
                 </Modal>
             )}
 
             {ledgerItem && <LedgerModal item={ledgerItem} canAdjust={perms.stock} onClose={() => setLedgerItem(null)} onChanged={load} />}
+        </div>
+    );
+}
+
+const REQ_STATUS = {
+    SUBMITTED: { label: 'Waiting for approval', cls: 'bg-amber-50 text-amber-800 border-amber-300' },
+    APPROVED: { label: 'Approved', cls: 'bg-emerald-50 text-emerald-700 border-emerald-300' },
+    REJECTED: { label: 'Rejected', cls: 'bg-rose-50 text-rose-700 border-rose-300' },
+    WITHDRAWN: { label: 'Withdrawn', cls: 'bg-slate-50 text-slate-500 border-slate-300' },
+};
+const when = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+
+// Waiting requests (approvers: approve / reject; the requester: withdraw) and those decided in the last 14 days.
+function RequestsPanel({ requests, approver, onChanged }) {
+    const [ask, setAsk] = useState(null);   // { id, label } — reject reason
+    const [reason, setReason] = useState('');
+    const [busy, setBusy] = useState(null);
+    const [error, setError] = useState('');
+    const act = async (id, action, why) => {
+        setBusy(id); setError('');
+        try { await mastersApi.trimItemRequestAction(id, action, why); setAsk(null); onChanged(); }
+        catch (err) { setError(apiError(err, 'Failed.')); }
+        finally { setBusy(null); }
+    };
+    const waiting = requests.filter(r => r.status === 'SUBMITTED').length;
+    const labelOf = (r) => (r.kind === 'EDIT' ? r.item_label : `${r.proposed?.brand} · ${r.proposed?.code}`);
+    return (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-4">
+            <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-amber-50/60 border-b border-slate-200">
+                <p className="font-black text-slate-800">Trim item requests</p>
+                <span className="text-xs font-semibold text-slate-500">{approver ? 'From the store manager and the purchase manager — approve to put them in the master.' : 'Your requests — the merchandiser or factory admin approves them.'}</span>
+            </div>
+            <ErrorBox text={error} />
+            <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[820px]">
+                    <thead className="text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
+                        <tr><th className="px-4 py-2">Request</th><th className="px-4 py-2">What</th><th className="px-4 py-2">Asked by</th><th className="px-4 py-2">Status</th><th className="px-4 py-2 w-48" /></tr>
+                    </thead>
+                    <tbody>
+                        {requests.length === 0 && <tr><td colSpan={5} className="px-4 py-4 text-center text-slate-400">No requests waiting or decided in the last 14 days.</td></tr>}
+                        {requests.map(r => (
+                            <tr key={r.id} className="border-t border-slate-100 align-top">
+                                <td className="px-4 py-2.5">
+                                    <span className={`text-[10px] font-black uppercase px-1.5 py-0.5 rounded ${r.kind === 'NEW' ? 'bg-teal-100 text-teal-800' : 'bg-indigo-100 text-indigo-800'}`}>{r.kind === 'NEW' ? 'New item' : 'Change'}</span>
+                                    <span className="block font-semibold text-slate-800 mt-1">{labelOf(r)}</span>
+                                    {r.trim_type_name && <span className="block text-xs text-slate-500">{r.trim_type_name}</span>}
+                                </td>
+                                <td className="px-4 py-2.5 text-xs text-slate-700">
+                                    <ul className="space-y-0.5">{(r.summary || []).map((x, i) => <li key={i}>{x}</li>)}</ul>
+                                    {r.note && <p className="mt-1 text-slate-500 italic">“{r.note}”</p>}
+                                </td>
+                                <td className="px-4 py-2.5 text-xs text-slate-600">{r.requested_by_name || '—'}<span className="block text-slate-400">{when(r.requested_at)}</span></td>
+                                <td className="px-4 py-2.5 text-xs">
+                                    <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${REQ_STATUS[r.status].cls}`}>{REQ_STATUS[r.status].label}</span>
+                                    {r.status !== 'SUBMITTED' && <span className="block mt-1 text-slate-500">{r.decided_by_name ? `${r.decided_by_name} · ` : ''}{when(r.decided_at)}</span>}
+                                    {r.decision_reason && <span className="block mt-1 text-rose-700">{r.decision_reason}</span>}
+                                </td>
+                                <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                                    {r.status === 'SUBMITTED' && approver && <>
+                                        <button type="button" disabled={busy === r.id} onClick={() => { if (window.confirm(`Approve ${r.kind === 'NEW' ? 'the new item' : 'the change to'} ${labelOf(r)}?`)) act(r.id, 'approve'); }}
+                                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"><CheckCircle2 size={13} /> Approve</button>
+                                        <button type="button" disabled={busy === r.id} onClick={() => { setReason(''); setError(''); setAsk({ id: r.id, label: labelOf(r) }); }}
+                                            className="ml-1 inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"><XCircle size={13} /> Reject</button>
+                                    </>}
+                                    {r.status === 'SUBMITTED' && !approver && (
+                                        <button type="button" disabled={busy === r.id} onClick={() => { if (window.confirm('Withdraw this request?')) act(r.id, 'withdraw'); }}
+                                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"><Undo2 size={13} /> Withdraw</button>
+                                    )}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                    {requests.length > 0 && (
+                        <tfoot><tr className="border-t border-slate-200 bg-slate-50 text-xs font-bold text-slate-600">
+                            <td className="px-4 py-2" colSpan={5}>Total {requests.length} · {waiting} waiting · {requests.filter(r => r.status === 'APPROVED').length} approved · {requests.filter(r => r.status === 'REJECTED').length} rejected · {requests.filter(r => r.status === 'WITHDRAWN').length} withdrawn (last 14 days)</td>
+                        </tr></tfoot>
+                    )}
+                </table>
+            </div>
+            {ask && (
+                <Modal title={`Reject the request for ${ask.label}`} onClose={() => setAsk(null)}>
+                    <div className="space-y-3 w-[min(440px,85vw)]">
+                        <Field label="Reason *" hint="The person who asked sees it."><textarea className={`${inputCls} min-h-[80px]`} value={reason} onChange={e => setReason(e.target.value)} autoFocus /></Field>
+                        <ErrorBox text={error} />
+                        <div className="flex justify-end gap-2">
+                            <SecondaryButton onClick={() => setAsk(null)}>Back</SecondaryButton>
+                            <PrimaryButton onClick={() => act(ask.id, 'reject', reason.trim())} busy={busy === ask.id} disabled={busy === ask.id || !reason.trim()}>Reject</PrimaryButton>
+                        </div>
+                    </div>
+                </Modal>
+            )}
         </div>
     );
 }

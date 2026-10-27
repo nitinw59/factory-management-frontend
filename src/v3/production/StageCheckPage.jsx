@@ -10,9 +10,17 @@
 // only for a workstation with 2.0's "approve whole roll" right (as 2.0); others inspect part by part — and at a bundle
 // stage bundle by bundle (no part-level Bulk inspect / Fix rework, as 2.0); Quick approve only with "whole bundle"; one
 // tile at a time (no SELECT ALL) without "many pieces"; at a bundle stage APPROVE takes whole bundles only (2.0's rule).
+// 27 Oct 2026 — barcode scanner as 2.0's garment checker ("build all"): the hardware scanner works anywhere on the page
+// (scanShared — no box needs focus, also over the inspection screen): a garment number or piece label at a garment stage
+// opens the scanned garment's card (one tap to approve); a bundle label or piece label opens its row with those pieces
+// picked — only at piece stages after the stage that makes the bundles (BF sewing; owner: "only implement bundle scan
+// after bf line stage"), so Cutting and Preparatory have no scanner. A label that can't be checked here gets its own screen
+// (not on your line / waiting for an earlier stage / not this stage / not found) with the next step; 2.0's sounds and
+// spoken messages; a recent-scans list under the header.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronRight, Shirt, Layers, Ruler, Package, ScanLine, AlertTriangle, Component, Hammer, Check, CheckCircle2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ChevronDown, ChevronRight, Shirt, Layers, Ruler, Package, ScanLine, AlertTriangle, Component, Hammer, Check, CheckCircle2, X } from 'lucide-react';
 import { productionApi } from '../api/productionApi';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, ErrorBox, Loading } from '../components/ui';
@@ -20,7 +28,9 @@ import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { PriorityBadge } from '../cutting/cutShared';
 import { useV3Live } from '../live';
 import GarmentPanel from './GarmentPanel';
-import InspectOverlay from './InspectOverlay';
+import InspectOverlay, { kindOf } from './InspectOverlay';
+import ScanGarmentCard from './ScanGarmentCard';
+import { useWedgeScanner, feedback } from './scanShared';
 import { WorkLogButton, WhyPanel, StatsBar, ProgressRow, StationDialog } from './stationShared';
 
 const label = (s) => String(s || '').toLowerCase().replace('_', ' ');
@@ -37,6 +47,16 @@ const recount = (ps) => ({
     rework: ps.filter(p => p.status === 'NEEDS_REWORK').length, rejected: ps.filter(p => p.status === 'QC_REJECTED').length,
     earlier: ps.filter(p => !p.status && p.gate_ok && p.rejected_at).length, waiting: ps.filter(p => !p.status && !p.gate_ok).length,
 });
+// The row (bundle, or roll / size group) that holds a scanned piece in the batch view — the keys the tree below uses.
+function rowKeyFor(view, pieceId) {
+    const g = view.groups.find(x => x.pieces.some(p => String(p.id) === String(pieceId)));
+    if (!g) return null;
+    const p = g.pieces.find(x => String(x.id) === String(pieceId));
+    if (view.stage.unit === 'BUNDLE') return p.bundle_id ? `b|${p.bundle_id}` : `g|${g.key}|single`;
+    return `g|${g.key}`;
+}
+const PROBLEM_TONE = { rose: 'bg-rose-600 text-white', amber: 'bg-amber-400 text-black', slate: 'bg-slate-800 text-white' };
+const RECENT_DOT = { ok: 'bg-emerald-500', warn: 'bg-amber-400', bad: 'bg-rose-500' };
 const notesOf = (c) => [...(c.waiting ? [['amber', `${c.waiting} not cleared at an earlier stage`]] : []), ...(c.earlier ? [['rose', `${c.earlier} rejected earlier — fix here`]] : [])];
 
 // 2.0's part filter: tick the parts this checker handles (remembered on the tablet).
@@ -119,7 +139,11 @@ export default function StageCheckPage() {
     const [inspect, setInspect] = useState(null);   // { key, fix, highlightId }
     const [ask, setAsk] = useState(null);           // supervisor dialog: { kind, message, submit }
     const [scan, setScan] = useState('');
-    const [garmentFocus, setGarmentFocus] = useState(null);
+    const [scanCard, setScanCard] = useState(null);       // a scanned garment: the lookup result
+    const [pendingScan, setPendingScan] = useState(null); // a scanned bundle / piece: open its row once its batch is loaded
+    const [problem, setProblem] = useState(null);         // a label that can't be checked here: { title, text, next, code, tone }
+    const [recent, setRecent] = useState([]);             // recent scans and what came of them, newest first
+    const problemTimer = useRef(null);
     const toastTimer = useRef(null);
     const [toast, setToast] = useState(null);
     const [tick, setTick] = useState(0);
@@ -149,10 +173,79 @@ export default function StageCheckPage() {
     }, [queue, batchPick]); // eslint-disable-line react-hooks/exhaustive-deps
     const stage = st?.stages.find(s => s.id === stageId);
     const isGarment = stage?.unit === 'GARMENT';
+    // Scanner: garment stages, and piece stages after a bundle-making stage (BF) — st.stages come in route order.
+    const stageIdx = st ? st.stages.findIndex(s => s.id === stageId) : -1;
+    const canScan = Boolean(stage) && (isGarment || (stageIdx > 0 && st.stages.slice(0, stageIdx).some(s => s.unit === 'BUNDLE')));
     const loadBatch = useCallback(() => { if (openId && stage && !isGarment) productionApi.batchStage(openId, stageId).then(res => setView(res.data)).catch(err => setError(apiError(err, 'Failed to load the batch.'))); }, [openId, stageId, stage, isGarment]);
     useEffect(() => { setView(null); setInspect(null); setOpenParts(new Set()); loadBatch(); }, [loadBatch]);
     // Live: another checker, a re-cut, a load — re-read the queue, the open batch and the numbers (~2 s after a change).
     const live = useV3Live(() => { loadQueue(); loadBatch(); loadRework(); setTick(t => t + 1); }, Boolean(stageId));
+
+    // ── Scanner ──────────────────────────────────────────────────────────
+    const addRecent = (code, text, tone = 'ok') => setRecent(r => [{ id: `${Date.now()}-${Math.random()}`, code, text, tone, at: new Date() }, ...r].slice(0, 8));
+    const showProblem = ({ code, title, text, next, tone = 'rose', sound = 'error' }) => {
+        feedback(sound);
+        setProblem({ code, title, text, next, tone });
+        addRecent(code, title, 'bad');
+        clearTimeout(problemTimer.current);
+        problemTimer.current = setTimeout(() => setProblem(null), 9000);
+    };
+    const runScan = async (raw) => {
+        const c = String(raw || '').trim();
+        if (!c || !canScan) return;
+        setScan(''); setProblem(null);
+        const inQueue = (batchId) => (queue || []).some(q => String(q.id) === String(batchId));
+        try {
+            if (isGarment) {
+                const d = (await productionApi.garmentLookup(c, stageId)).data;
+                const a = d.at_stage;
+                if (!a || a.on_route === false) return showProblem({ code: c, title: `Not checked at ${stage.name}`, text: `Garment ${d.garment_no} (batch #${d.floor_no}) — its style's route doesn't go through ${stage.name}.`, sound: 'wrong_stage' });
+                if (!inQueue(d.batch_id)) return showProblem({ code: c, title: 'Not loaded on your line', text: `Garment ${d.garment_no} is in batch #${d.floor_no} (${d.batch_code}), size ${d.size} — that batch isn't in your queue.`, next: 'Ask the line loader to load it onto your line.', tone: 'amber', sound: 'not_loaded' });
+                if (!a.status && a.gate_ok === false) return showProblem({ code: c, title: 'Waiting for an earlier stage', text: `Garment ${d.garment_no} still needs: ${a.blocked_by.join(', ')}.`, next: 'Check it there first, then scan it again here.', tone: 'amber', sound: 'waiting' });
+                setInspect(null);
+                setScanCard({ ...d, ts: Date.now() });
+                const doneHere = ['APPROVED', 'REPAIRED'].includes(a.status);
+                addRecent(c, `${d.garment_no} · size ${d.size} — ${a.status ? `${label(a.status)} here` : a.flagged?.length ? 'part rejected earlier, fix here' : 'to check'}`, doneHere ? 'warn' : 'ok');
+                feedback(doneHere ? 'already' : 'success');
+                return;
+            }
+            const d = (await productionApi.scan(c, stageId)).data;
+            const what = `${d.kind === 'BUNDLE' ? `Bundle ${d.code}` : `Piece ${d.code}`} · ${d.part_name || ''} · size ${d.size || '—'}`;
+            if (!d.on_route) return showProblem({ code: c, title: `Not checked at ${stage.name}`, text: `${what} (batch #${d.floor_no}) — its style's route doesn't go through ${stage.name}.`, sound: 'wrong_stage' });
+            if (d.later_stage) return showProblem({ code: c, title: `A ${d.bundle_stage} bundle`, text: `${d.code} is the bundle label of ${d.bundle_stage}.`, next: `At ${stage.name} scan this stage's bundle label or a piece label.`, tone: 'amber', sound: 'wrong_stage' });
+            if (!d.piece_ids.length) return showProblem({ code: c, title: 'No pieces on this label', text: `${what} has no pieces in batch #${d.floor_no}.` });
+            if (!inQueue(d.batch_id)) return showProblem({ code: c, title: 'Not loaded on your line', text: `${what} is in batch #${d.floor_no} (${d.batch_code}${d.roll_no ? `, roll #${d.roll_no}` : ''}) — that batch isn't in your queue.`, next: 'Ask the line loader to load it onto your line.', tone: 'amber', sound: 'not_loaded' });
+            setInspect(null); setScanCard(null);
+            if (batchPick !== 'ALL' && batchPick !== String(d.batch_id)) setBatchPick(String(d.batch_id));
+            setOpenId(d.batch_id);
+            setPendingScan({ ...d, scanned: c, what, ts: Date.now() });
+        } catch (err) {
+            showProblem({ code: c, title: 'Label not found', text: apiError(err, `Nothing found for "${c}".`), next: isGarment ? 'Scan the garment number or one of its piece labels — or type it in the box.' : 'Scan a bundle label or a piece label — or type it in the box.' });
+        }
+    };
+    // A scanned bundle / piece: once its batch view is here, open the row with those pieces picked.
+    useEffect(() => {
+        if (!pendingScan || !view || String(view.batch.id) !== String(pendingScan.batch_id)) return;
+        const ps = pendingScan;
+        setPendingScan(null);
+        const key = rowKeyFor(view, ps.piece_ids[0]);
+        if (!key) {
+            // The part is checked here but these pieces aren't in the view: their roll / size isn't loaded on this line yet.
+            const partHere = view.groups.some(g => g.part_name === ps.part_name);
+            if (partHere) showProblem({ code: ps.scanned, title: 'Not loaded on your line', text: `${ps.what} — ${ps.roll_no ? `roll #${ps.roll_no}` : `size ${ps.size}`} of batch #${ps.floor_no} isn't loaded on your line at ${stage?.name || 'this stage'} yet.`, next: 'Ask the line loader to load it onto your line.', tone: 'amber', sound: 'not_loaded' });
+            else showProblem({ code: ps.scanned, title: `Not checked at ${stage?.name || 'this stage'}`, text: `${ps.what} — ${ps.part_name || 'this part'} isn't checked at this stage.`, sound: 'wrong_stage' });
+            return;
+        }
+        const want = new Set(ps.piece_ids.map(String));
+        const pieces = view.groups.flatMap(g => g.pieces).filter(p => want.has(String(p.id)));
+        const open = pieces.filter(p => ['fresh', 'fix'].includes(kindOf({ status: p.status, gate_ok: p.gate_ok, flag: p.rejected_at, waiting_replacement: p.replacement_status })));
+        const waiting = pieces.filter(p => !p.status && !p.gate_ok);
+        setInspect({ key, highlightId: (open[0] || pieces[0])?.id, preselect: open.map(p => p.id), ts: ps.ts });
+        if (!open.length && waiting.length) { feedback('waiting'); addRecent(ps.scanned, `${ps.what} — waiting for ${(waiting[0].blocked_by || []).join(', ') || 'an earlier stage'}`, 'warn'); }
+        else if (!open.length) { feedback('already'); addRecent(ps.scanned, `${ps.what} — already checked here`, 'warn'); }
+        else { feedback('success'); addRecent(ps.scanned, `${ps.what} — ${open.length} to ${open.some(p => p.status === 'NEEDS_REWORK' || p.rejected_at) ? 'fix' : 'check'}`); }
+    }, [pendingScan, view]); // eslint-disable-line react-hooks/exhaustive-deps
+    useWedgeScanner(runScan, canScan);
 
     if (!st) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
     const linesForStage = st.lines.filter(l => stage && l.line_type_id === stage.line_type_id);
@@ -164,40 +257,32 @@ export default function StageCheckPage() {
 
     const done = (res, what, unit) => {
         const n = res.data.checked ?? res.data.repaired ?? res.data.reverted;
+        feedback('success');
         flash(`${what}: ${n} ${unit}${n === 1 ? '' : 's'} · stage ${label(res.data.progress)}`);
         loadRework(); loadBatch(); loadQueue(); setTick(t => t + 1);
     };
-    // fn(extra) → API call. A rework block opens the supervisor dialog and retries with the password; other errors
-    // are thrown with their message (the inspection screen shows them).
+    // fn(extra) → API call; true once saved. A rework block opens the supervisor dialog and retries with the password
+    // (false); other errors are thrown with their message (the inspection screen shows them).
     const act = async (fn, what, unit = 'piece') => {
         setBusy(true);
-        try { done(await fn({}), what, unit); }
+        try { done(await fn({}), what, unit); return true; }
         catch (err) {
             if (err?.response?.data?.code === 'REWORK_BLOCKED') {
+                feedback('error');
                 setAsk({ kind: 'rework', message: err.response.data.error, submit: async (pin, reason) => { done(await fn({ supervisor_pin: pin, override_reason: reason }), `${what} (supervisor allowed)`, unit); setAsk(null); } });
-                return;
+                return false;
             }
+            feedback('error');
             throw new Error(apiError(err, 'Failed.'));
         } finally { setBusy(false); }
     };
-    const askUndo = ({ text, unit, body }) => setAsk({
+    const askUndo = ({ text, unit, body, batchId }) => setAsk({
         kind: 'undo', message: `${text} Undo puts it back to "to check" here.`,
-        submit: async (pin, reason) => { done(await productionApi.revert({ batch_id: openId, stage_type_id: stageId, reason, supervisor_pin: pin, ...body }), 'Undone', unit); setAsk(null); },
+        submit: async (pin, reason) => { done(await productionApi.revert({ batch_id: batchId || openId, stage_type_id: stageId, reason, supervisor_pin: pin, ...body }), 'Undone', unit); setAsk(null); },
     });
     const quick = async (fn, what) => { try { await act(fn, what); } catch (e) { flash(e.message, 'bad'); } };
 
-    // Garment stages only: scan a piece label or garment number.
-    const doScan = async (e) => {
-        e.preventDefault();
-        const c = scan.trim(); if (!c || !stageId) return;
-        setScan('');
-        try {
-            const d = (await productionApi.garmentLookup(c, stageId)).data;
-            if (queue?.some(q => String(q.id) === String(d.batch_id))) { setOpenId(d.batch_id); setGarmentFocus({ id: d.id, ts: Date.now() }); return; }
-            const a = d.at_stage;
-            flash(`${d.garment_no} is in batch ${d.batch_code} — ${!a || a.on_route === false ? 'not at this stage' : a.status ? `already ${label(a.status)} here` : a.gate_ok === false ? `waiting for ${a.blocked_by.join(', ')}` : 'not in your queue (size not loaded onto your line?)'}.`, 'bad');
-        } catch (err) { flash(apiError(err, 'Not found.'), 'bad'); }
-    };
+    const submitScan = (e) => { e.preventDefault(); runScan(scan); };
     const setGrouping = (v) => { setGroupBy(v); setOpenParts(new Set()); store.set('v3.stageGroupBy', v); };
     const secAt = `${openId}|${stageId}|${groupBy}`;
     const secPick = secPickRaw.at === secAt ? secPickRaw.key : 'ALL';
@@ -254,7 +339,7 @@ export default function StageCheckPage() {
         const items = node.pieces.map(p => toItem(p, node.grouped(p)));
         const ids = (x) => ({ piece_ids: x });
         overlay = (
-            <InspectOverlay key={inspect.key} head={[['Batch', `#${view.batch.floor_no}`], ...node.head]} items={items} codes={codes} unit="piece" multi={st.station?.multi !== false} wholeBundle={isBundle} startFix={inspect.fix} highlightId={inspect.highlightId}
+            <InspectOverlay key={`${inspect.key}|${inspect.ts || ''}`} head={[['Batch', `#${view.batch.floor_no}`], ...node.head]} items={items} codes={codes} unit="piece" multi={st.station?.multi !== false} wholeBundle={isBundle} startFix={inspect.fix} highlightId={inspect.highlightId} preselect={inspect.preselect}
                 onClose={() => setInspect(null)}
                 onApprove={(x) => act((e) => productionApi.check({ ...base(), status: 'APPROVED', ...ids(x), ...e }), 'Approved')}
                 onRepairNow={(x, code) => act((e) => productionApi.check({ ...base(), status: 'REPAIRED', defect_code_id: code, ...ids(x), ...e }), 'Repaired now')}
@@ -285,15 +370,34 @@ export default function StageCheckPage() {
                             </select>
                         )}
                         {stage && !isGarment && <PartFilter names={partNames} sel={parts} onChange={setPartFilter} />}
-                        {isGarment && <form onSubmit={doScan} className="flex items-center gap-2 bg-slate-900 rounded-xl pl-3 pr-1 py-1">
-                            <ScanLine className="w-5 h-5 text-slate-400" />
-                            <input value={scan} onChange={e => setScan(e.target.value)} placeholder="Scan piece / garment" className="bg-transparent text-white placeholder-slate-500 font-mono font-bold text-base w-44 sm:w-56 py-2 focus:outline-none" autoFocus={Boolean(st.station)} />
+                        {canScan && <form onSubmit={submitScan} className="flex items-center gap-2 bg-slate-900 rounded-xl pl-3 pr-1 py-1" title="The scanner works anywhere on this page; type here to find a label by hand.">
+                            <ScanLine className="w-5 h-5 text-emerald-400" />
+                            <input value={scan} onChange={e => setScan(e.target.value)} placeholder={isGarment ? 'Scan or type garment / piece' : 'Scan or type bundle / piece'} aria-label="Scan or type a label"
+                                className="bg-transparent text-white placeholder-slate-500 font-mono font-bold text-base w-48 sm:w-60 py-2 focus:outline-none" />
                             <button type="submit" className="px-4 py-2 bg-indigo-600 text-white font-black text-sm rounded-lg uppercase tracking-widest">Find</button>
                         </form>}
                         <WorkLogButton />
                     </span>
                 </div>
                 {stage && <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 rounded-b-2xl"><StatsBar stageId={stageId} lineId={effLine} tick={tick} /></div>}
+                {canScan && recent.length > 0 && (
+                    <div className="px-4 py-2 border-t border-slate-100">
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">Recent scans</span>
+                            <button type="button" onClick={() => setRecent([])} className="ml-auto text-[11px] font-bold text-slate-400 hover:text-slate-600">Clear</button>
+                        </div>
+                        <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {recent.map(r => (
+                                <div key={r.id} className="flex items-center gap-3 text-sm">
+                                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${RECENT_DOT[r.tone]}`} />
+                                    <span className="font-mono font-black text-slate-800 shrink-0">{r.code}</span>
+                                    <span className="text-slate-600 truncate flex-1">{r.text}</span>
+                                    <span className="text-xs text-slate-400 font-mono shrink-0">{r.at.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 {!st.station && st.can_pick_line && (
                     <div className="px-4 py-3 border-t border-slate-100 flex flex-wrap gap-3">
                         <Field label="Stage"><select className={`${inputCls} !py-2.5`} value={stageId} onChange={e => { setStageId(e.target.value); setLineId(''); }}><option value="">Choose…</option>{st.stages.map(s => <option key={s.id} value={s.id}>{s.name === 'Cutting' ? 'Cutting — numbering check' : s.name}</option>)}</select></Field>
@@ -337,7 +441,7 @@ export default function StageCheckPage() {
                                     </div>
                                 </div>
                                 {open && (isGarment ? (
-                                    <GarmentPanel key={`${q.id}-${stageId}`} batchId={q.id} stageId={stageId} multi={st.station?.multi !== false} lineId={st.station ? undefined : lineId || undefined} codes={codes} act={act} askUndo={askUndo} tick={tick} focus={garmentFocus} blockedMsg={blockedMsg} />
+                                    <GarmentPanel key={`${q.id}-${stageId}`} batchId={q.id} stageId={stageId} multi={st.station?.multi !== false} lineId={st.station ? undefined : lineId || undefined} codes={codes} act={act} askUndo={askUndo} tick={tick} blockedMsg={blockedMsg} />
                                 ) : !view || String(view.batch.id) !== String(q.id) ? <div className="p-6"><Loading /></div> : (
                                     <div className="p-4 md:p-6 bg-slate-100 space-y-4">
                                         <div className="flex flex-wrap items-center gap-3">
@@ -392,6 +496,24 @@ export default function StageCheckPage() {
             ))}
 
             {overlay}
+            {scanCard && <ScanGarmentCard scan={scanCard} stageId={stageId} lineId={st.station ? undefined : lineId || undefined} codes={codes} multi={st.station?.multi !== false} act={act} askUndo={askUndo} tick={tick}
+                onClose={() => setScanCard(null)} onActed={(no, what) => addRecent(no, `${what} at ${stage?.name || 'this stage'}`)}
+                onMissing={(g) => { setScanCard(null); showProblem({ code: g.garment_no, title: 'Not loaded on your line', text: `Garment ${g.garment_no} — roll #${String(g.garment_no).split('-').slice(-3, -2)[0] || '?'}, size ${g.size} of batch #${g.floor_no} isn't loaded on your line at ${stage?.name || 'this stage'} yet.`, next: 'Ask the line loader to load it onto your line.', tone: 'amber', sound: 'not_loaded' }); }} />}
+            {problem && createPortal(
+                <div className="fixed inset-x-0 top-4 z-[340] flex justify-center px-4" onClick={() => setProblem(null)}>
+                    <div className={`w-full max-w-2xl rounded-3xl shadow-2xl p-6 ${PROBLEM_TONE[problem.tone] || PROBLEM_TONE.rose}`}>
+                        <div className="flex items-start gap-4">
+                            <AlertTriangle className="w-10 h-10 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-2xl font-black uppercase tracking-tight">{problem.title}</p>
+                                <p className="text-lg font-bold mt-1">{problem.text}</p>
+                                {problem.next && <p className="text-lg font-black mt-2">→ {problem.next}</p>}
+                                <p className="mt-3 font-mono font-black opacity-80">Scanned: {problem.code}</p>
+                            </div>
+                            <button type="button" onClick={() => setProblem(null)} className="p-2 rounded-full bg-black/20 hover:bg-black/30 shrink-0" aria-label="Close"><X className="w-6 h-6" /></button>
+                        </div>
+                    </div>
+                </div>, document.body)}
             {ask && (ask.kind === 'rework'
                 ? <StationDialog title="Rework limit reached" tone="rose" message={ask.message} reasonLabel="Why allow this approval?" quick={['Rework is with the tailor', 'Urgent shipment', 'Rework count is wrong']} submitLabel="Allow" onSubmit={ask.submit} onClose={() => setAsk(null)} />
                 : <StationDialog title="Undo check" tone="amber" message={ask.message} reasonLabel="What was wrong?" quick={UNDO_REASONS} reasonRequired needPin={!perms.revert} submitLabel="Undo" onSubmit={ask.submit} onClose={() => setAsk(null)} />)}

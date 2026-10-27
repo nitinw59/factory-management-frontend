@@ -90,7 +90,7 @@ export const fmtQty = (n) => Number(n ?? 0).toLocaleString('en-IN', { maximumFra
 
 // What the signed-in user may edit (trims / colours / fabric / stock).
 export function useMastersPermissions() {
-    const [perms, setPerms] = useState({ trims: false, trimsAdd: false, colours: false, fabric: false, stock: false });
+    const [perms, setPerms] = useState({ trims: false, trimsAdd: false, trimRequest: false, trimApprove: false, colours: false, fabric: false, stock: false });
     useEffect(() => {
         mastersApi.permissions().then(res => setPerms(res.data)).catch(() => {});
     }, []);

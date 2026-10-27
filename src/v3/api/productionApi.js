@@ -45,6 +45,7 @@ export const productionApi = {
     unload: (data) => api.post('/v3/production/loads/unload', data),
     batchGarments: (batchId, stageTypeId) => api.get(`/v3/production/batches/${batchId}/garments/${stageTypeId}`),
     garmentLookup: (code, stageTypeId) => api.get('/v3/production/garments/lookup', { params: { code, stage_type_id: stageTypeId } }),
+    scan: (code, stageTypeId) => api.get('/v3/production/scan', { params: { code, stage_type_id: stageTypeId } }),   // a bundle / piece label at a piece or bundle stage
     garmentCheck: (data) => api.post('/v3/production/garment-checks', data),
     garmentRepair: (data) => api.post('/v3/production/garment-repairs', data),
     recuts: (params) => api.get('/v3/production/recuts', { params }),

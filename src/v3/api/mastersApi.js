@@ -23,6 +23,10 @@ export const mastersApi = {
     createTrimItem: (data) => api.post(`${base}/trim-items`, data),
     updateTrimItem: (id, data) => api.put(`${base}/trim-items/${id}`, data),
     trimItemLedger: (id) => api.get(`${base}/trim-items/${id}/ledger`),
+    // Trim item requests (27 Oct 2026): store / purchase manager ask, merchandiser / factory admin approve.
+    trimItemRequests: () => api.get(`${base}/trim-item-requests`),
+    requestTrimItem: (data) => api.post(`${base}/trim-item-requests`, data),
+    trimItemRequestAction: (id, action, reason) => api.post(`${base}/trim-item-requests/${id}/${action}`, reason ? { reason } : undefined),
 
     postOpeningStock: (lines, note) => api.post(`${base}/trim-stock/opening`, { lines, note }),
     postAdjustment: (data) => api.post(`${base}/trim-stock/adjustment`, data),

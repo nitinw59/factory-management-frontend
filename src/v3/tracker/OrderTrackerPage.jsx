@@ -3,6 +3,8 @@
 // BOM, materials, issue, cutting, production stages, milestones — worst first.
 // One search box finds the order behind any number: order, buyer PO, customer,
 // PO, GRN, issue slip, cut batch, garment number or piece label.
+// 27 Oct 2026: a Production view (ProductionOrders.jsx) — garments through each stage per order, stuck batches,
+// old rework — for the merchandiser, like 2.0's production workflow; "My orders" = orders the user created.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Search } from 'lucide-react';
@@ -12,6 +14,7 @@ import { PageHeader, inputCls, SecondaryButton, ErrorBox, Loading } from '../com
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { daysText } from '../planning/readinessShared';
 import { PHASES, Dot } from './trackerShared';
+import ProductionOrders from './ProductionOrders';
 
 const TYPE_LABEL = { ORDER: 'Order', PO: 'PO', GRN: 'GRN', ISSUE: 'Issue slip', BATCH: 'Cut batch', GARMENT: 'Garment', PIECE: 'Piece' };
 
@@ -21,15 +24,18 @@ export default function OrderTrackerPage() {
     const [rag, setRag] = useState('');
     const [params, setParams] = useSearchParams();
     const state = params.get('state') || 'active';   // active / shipped / closed (20 Oct 2026, phase 7)
+    const view = params.get('view') === 'production' ? 'production' : 'phases';
     const [mine, setMine] = useState(params.get('mine') === '1');   // My work → "all in the order tracker"
     const [filter, setFilter] = useState('');
+    const [createdByMe, setCreatedByMe] = useState(params.get('created') === 'me');
+    const [prodCounts, setProdCounts] = useState(null);
     const [q, setQ] = useState('');
     const [hits, setHits] = useState(null);
     const [error, setError] = useState('');
     const load = useCallback(() => {
         trackerApi.orders({ rag: rag || undefined, q: filter || undefined, mine: mine ? 1 : undefined, state }).then(res => setRows(res.data.orders)).catch(err => setError(apiError(err, 'Failed to load orders.')));
     }, [rag, filter, mine, state]);
-    useEffect(() => { setRows(null); load(); }, [load]);
+    useEffect(() => { if (view !== 'phases') return; setRows(null); load(); }, [load, view]);
 
     const search = async (e) => {
         e.preventDefault(); setError(''); setHits(null);
@@ -41,15 +47,16 @@ export default function OrderTrackerPage() {
             else setHits(list);
         } catch (err) { setError(apiError(err, 'Search failed.')); }
     };
-    const counts = rows ? { RED: rows.filter(r => r.rag === 'RED').length, AMBER: rows.filter(r => r.rag === 'AMBER').length, GREEN: rows.filter(r => r.rag === 'GREEN').length } : null;
+    const setParam = (k, v) => { const p = new URLSearchParams(params); if (v) p.set(k, v); else p.delete(k); setParams(p); };
+    const counts = view === 'production' ? prodCounts : rows ? { RED: rows.filter(r => r.rag === 'RED').length, AMBER: rows.filter(r => r.rag === 'AMBER').length, GREEN: rows.filter(r => r.rag === 'GREEN').length } : null;
 
     return (
         <div>
             <PageHeader title="Order tracker" subtitle="Every approved order from BOM to production, worst first. Read only — each step is done in its own page." />
             <form onSubmit={search} className="flex flex-wrap gap-2 items-center mb-3">
-                <div className="relative">
+                <div className="relative w-full sm:w-auto">
                     <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input className={`${inputCls} !w-96 pl-9`} value={q} onChange={e => setQ(e.target.value)} placeholder="Find: order, buyer PO, customer, PO, GRN, batch, garment no., piece label" />
+                    <input className={`${inputCls} sm:!w-96 pl-9`} value={q} onChange={e => setQ(e.target.value)} placeholder="Find: order, buyer PO, customer, PO, GRN, batch, garment no., piece label" />
                 </div>
                 <SecondaryButton type="submit">Find</SecondaryButton>
             </form>
@@ -66,6 +73,11 @@ export default function OrderTrackerPage() {
                 </div>
             )}
             <div className="flex flex-wrap gap-2 items-center mb-3">
+                <span className="inline-flex rounded-lg border border-indigo-300 overflow-hidden text-xs font-bold">
+                    {[['phases', 'Phases'], ['production', 'Production']].map(([k, l]) => (
+                        <button key={k} type="button" onClick={() => setParam('view', k === 'phases' ? null : k)} className={`px-3 py-1 ${view === k ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-700 hover:bg-indigo-50'}`}>{l}</button>
+                    ))}
+                </span>
                 <span className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs font-bold">
                     {[['active', 'Active'], ['shipped', 'Shipped'], ['closed', 'Closed']].map(([k, l]) => (
                         <button key={k} type="button" onClick={() => { const p = new URLSearchParams(params); p.set('state', k); setParams(p); }} className={`px-3 py-1 ${state === k ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{l}</button>
@@ -76,11 +88,13 @@ export default function OrderTrackerPage() {
                         {x ? `${x.charAt(0)}${x.slice(1).toLowerCase()}${counts && !rag ? ` (${counts[x]})` : ''}` : 'All'}
                     </button>
                 ))}
-                <label className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-1 cursor-pointer"><input type="checkbox" checked={mine} onChange={e => setMine(e.target.checked)} /> Your next steps</label>
+                {view === 'phases'
+                    ? <label className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-1 cursor-pointer"><input type="checkbox" checked={mine} onChange={e => setMine(e.target.checked)} /> Your next steps</label>
+                    : <label className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-1 cursor-pointer"><input type="checkbox" checked={createdByMe} onChange={e => { setCreatedByMe(e.target.checked); setParam('created', e.target.checked ? 'me' : null); }} /> My orders</label>}
                 <input className={`${inputCls} !w-60 !py-1`} value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filter: order, customer, style" aria-label="Filter orders" />
             </div>
             <ErrorBox text={error} />
-            {!rows ? <Loading /> : (
+            {view === 'production' ? <ProductionOrders state={state} filter={filter} mine={createdByMe} rag={rag} onCounts={setProdCounts} /> : !rows ? <Loading /> : (
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
                     <table className="w-full text-sm min-w-[980px]">
                         <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -101,7 +115,7 @@ export default function OrderTrackerPage() {
                     </table>
                 </div>
             )}
-            <p className="mt-2 text-[11px] text-slate-500">Dots: green done / on track, amber in progress or needs attention, red late or short, grey not started. Hover a dot for the detail; click an order for its trail, progress grid and your next steps (each opens the page where the step is done).</p>
+            {view === 'phases' && <p className="mt-2 text-[11px] text-slate-500">Dots: green done / on track, amber in progress or needs attention, red late or short, grey not started. Hover a dot for the detail; click an order for its trail, progress grid and your next steps (each opens the page where the step is done).</p>}
         </div>
     );
 }

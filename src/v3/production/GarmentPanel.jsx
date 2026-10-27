@@ -2,7 +2,7 @@
 // bar, INSPECT and FIX REWORK; INSPECT opens the full-screen tile grid of garments (InspectOverlay). A garment can be
 // checked once its parts (and earlier garment stages) are cleared; a garment carrying a part rejected earlier is
 // flagged — "PASSED" (repaired) here rescues that part and cancels its re-cut (decision 10). Tap a checked garment to
-// undo it (a supervisor's password unless a manager). A scanned piece label / garment number opens its garment.
+// undo it (a supervisor's password unless a manager). A scanned garment opens on its own card (ScanGarmentCard, 27 Oct 2026).
 import { useCallback, useEffect, useState } from 'react';
 import { Shirt, Ruler } from 'lucide-react';
 import { productionApi } from '../api/productionApi';
@@ -16,7 +16,7 @@ const label = (s) => String(s || '').toLowerCase().replace('_', ' ');
 const tileNo = (no) => Number(String(no).split('-').pop()) || no;
 const rollOf = (no) => String(no).split('-').slice(-3, -2)[0] || '';
 
-export default function GarmentPanel({ batchId, stageId, lineId, codes, act, askUndo, tick = 0, focus, blockedMsg, multi = true }) {
+export default function GarmentPanel({ batchId, stageId, lineId, codes, act, askUndo, tick = 0, blockedMsg, multi = true }) {
     const [view, setView] = useState(null);
     const [error, setError] = useState('');
     const [inspect, setInspect] = useState(null);   // { key, fix, highlightId }
@@ -27,12 +27,6 @@ export default function GarmentPanel({ batchId, stageId, lineId, codes, act, ask
         const key = `${g.size_id}|${g.garment_colour_id}`;
         let x = groups.find(y => y.key === key); if (!x) { x = { key, size: g.size, colour: g.colour, garments: [] }; groups.push(x); } x.garments.push(g);
     }
-    // A scanned garment: open its size × colour with it picked.
-    useEffect(() => {
-        if (!focus || !view) return;
-        const g = view.garments.find(x => x.id === focus.id);
-        if (g) setInspect({ key: `${g.size_id}|${g.garment_colour_id}`, highlightId: g.id });
-    }, [focus, view]);
     if (!view) return <div className="p-6">{error ? <ErrorBox text={error} /> : <Loading />}</div>;
 
     const base = (ids) => ({ batch_id: batchId, stage_type_id: stageId, production_line_id: lineId, garment_ids: ids });
