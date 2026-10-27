@@ -82,7 +82,7 @@ export function OverCutPanel({ oc, batchId, canDecide, onDecided }) {
                 {canDecide && oc.status === 'PENDING' && <span className="ml-auto"><DecideOverCut batchId={batchId} onDone={onDecided} compact /></span>}
             </div>
             <p className="text-sm text-slate-700 mb-2">
-                {oc.preview ? 'Finalising now gives: ' : ''}<b>{free}</b> garment(s) within {pct} % (no approval){above > 0 ? <>, <b className="text-rose-700">{above}</b> above it — {oc.preview ? 'you give the reason at finalise; the merchandiser approves their trims or they are written off' : oc.status === 'PENDING' ? 'waiting for the merchandiser' : oc.status === 'APPROVED' ? 'approved' : 'refused and written off'}</> : ''}.
+                {oc.preview ? 'Finalising now gives: ' : ''}<b>{free}</b> garment(s) within {pct} % (no approval){above > 0 ? <>, <b className="text-rose-700">{above}</b> above it — {oc.preview ? 'you give the reason at finalise; their trims are kitted at once (free stock) — the merchandiser approves the garments or they are written off' : oc.status === 'PENDING' ? 'waiting for the merchandiser (the trim kit does not wait)' : oc.status === 'APPROVED' ? 'approved' : 'refused and written off'}</> : ''}.
                 {' '}Trims for over-cut garments come from the store's free stock, never the order's allocation.
             </p>
             <OverCutCells cells={oc.cells} />
