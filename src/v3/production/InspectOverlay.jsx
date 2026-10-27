@@ -5,9 +5,6 @@
 //   REWORK       to the rework queue → PASSED there, or MATERIAL REPLACEMENT from there
 //   MATERIAL     straight to the cutting manager for new material (pieces only) → back to check here
 // Repair now / Rework / Material ask the defect on big tiles (category → defect). Tapping a checked tile offers undo.
-// Scanner (27 Oct 2026): `preselect` picks a scanned bundle's pieces (the fresh ones, else those to fix); `card` shows one
-// scanned garment as a big card instead of the tiles (2.0's scan screen) — APPROVE is then one tap; `onDone` runs after
-// an action is saved (the scan card closes, ready for the next scan).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Check, CheckCircle2, Wrench, Scissors, Hammer, Lock, RotateCcw, CheckSquare, Square, ArrowLeft, Send, AlertCircle, Loader2, Flag } from 'lucide-react';
@@ -44,15 +41,9 @@ const PICK = {
 // multi = 2.0's "approve many pieces" workstation right (20 Oct 2026): without it one tile at a time, no SELECT ALL (as 2.0).
 // wholeBundle (bundle stages, 20 Oct 2026 — 2.0's rule): APPROVE only when every fresh piece of each bundle picked is
 // selected; part of a bundle → repair now / rework / material only. Items carry `bundle` (none for re-cut singles).
-export default function InspectOverlay({ head, items, codes, unit = 'piece', startFix = false, highlightId, preselect, card, multi = true, wholeBundle = false, onClose, onDone, onApprove, onRepairNow, onRework, onReplace, onRepair, onReplaceRework, onUndo }) {
+export default function InspectOverlay({ head, items, codes, unit = 'piece', startFix = false, highlightId, multi = true, wholeBundle = false, onClose, onApprove, onRepairNow, onRework, onReplace, onRepair, onReplaceRework, onUndo }) {
     const byId = useMemo(() => new Map(items.map(i => [i.id, i])), [items]);
-    const [sel, setSel] = useState(() => {
-        const want = new Set((preselect?.length ? preselect : highlightId ? [highlightId] : []).map(String));
-        const picked = items.filter(i => want.has(String(i.id)));
-        const k = picked.some(i => kindOf(i) === 'fresh') ? 'fresh' : picked.some(i => kindOf(i) === 'fix') ? 'fix' : null;
-        const ids = k ? picked.filter(i => kindOf(i) === k).map(i => i.id) : [];
-        return new Set(multi ? ids : ids.slice(0, 1));
-    });
+    const [sel, setSel] = useState(() => { const h = highlightId && byId.get(highlightId); return new Set(h && ['fresh', 'fix'].includes(kindOf(h)) ? [h.id] : []); });
     const [picker, setPicker] = useState(null);   // REPAIRED | NEEDS_REWORK | REPLACE
     const [category, setCategory] = useState(null);
     const [code, setCode] = useState(null);
@@ -88,7 +79,7 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
     const selectAll = (k) => { const list = of(k); setSel(sel.size === list.length && selKind === k ? new Set() : new Set(list.map(i => i.id))); };
     const run = async (fn) => {
         setBusy(true); setError('');
-        try { await fn([...sel]); setSel(new Set()); setPicker(null); setCategory(null); setCode(null); setSearch(''); onDone?.(); }
+        try { await fn([...sel]); setSel(new Set()); setPicker(null); setCategory(null); setCode(null); setSearch(''); }
         catch (e) { setError(e.message || 'Failed.'); }
         finally { setBusy(false); }
     };
@@ -173,7 +164,6 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
                 )
             ) : (
                 <>
-                    {card ? <ScanCard card={card} item={items[0]} onUndo={onUndo} /> : <>
                     <div className="bg-slate-900 px-5 py-2 border-b border-slate-800 flex flex-wrap justify-between items-center gap-2 shrink-0">
                         <span className="text-xs font-black uppercase tracking-widest text-slate-400">
                             {fresh.length} to check · {fix.length} to fix · {n('APPROVED') + n('REPAIRED')} OK{n('QC_REJECTED') ? ` · ${n('QC_REJECTED')} rejected earlier` : ''}{items.some(i => i.waiting_replacement) ? ` · ${items.filter(i => i.waiting_replacement).length} new material` : ''}{items.some(i => kindOf(i) === 'locked' && !i.status) ? ` · ${items.filter(i => kindOf(i) === 'locked' && !i.status).length} waiting` : ''}
@@ -215,7 +205,6 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
                         </div>
                         <p className="mt-8 text-xs text-slate-500 text-center">Tap numbers to pick. White = to check · amber = rework · violet = waiting for new material · red edge = rejected earlier (fix it) · dark = done here — tap a done tile to undo it.</p>
                     </div>
-                    </>}
                     <div className={`bg-white p-4 border-t-4 ${mode === 'fix' ? 'border-amber-400' : 'border-slate-300'} shrink-0`}>
                         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4">
                             <div className={`px-5 py-3 rounded-xl border-2 text-center min-w-[140px] ${mode === 'fix' ? 'bg-amber-50 border-amber-200' : 'bg-slate-100 border-slate-300'}`}>
@@ -241,39 +230,6 @@ export default function InspectOverlay({ head, items, codes, unit = 'piece', sta
             )}
         </div>,
         document.body,
-    );
-}
-
-// One scanned garment (card mode): its number big, where it is, why it can't be checked yet, what was found before.
-const CARD_STATUS = {
-    fresh: ['To check here', 'bg-white text-black'], fix: ['To fix here', 'bg-amber-400 text-black'], locked: ['Waiting', 'bg-slate-700 text-slate-200'],
-    APPROVED: ['Already approved here', 'bg-emerald-600 text-white'], REPAIRED: ['Already repaired here', 'bg-teal-600 text-white'], QC_REJECTED: ['Rejected here', 'bg-rose-700 text-white'],
-};
-function ScanCard({ card, item, onUndo }) {
-    if (!item) return <div className="flex-grow flex items-center justify-center text-slate-400 font-black text-xl p-6 text-center">{card.empty || 'Loading…'}</div>;
-    const k = kindOf(item);
-    const [text, cls] = k === 'done' ? CARD_STATUS[item.status] || [item.status, 'bg-slate-700 text-white'] : CARD_STATUS[item.status === 'NEEDS_REWORK' ? 'fix' : k];
-    return (
-        <div className="flex-grow overflow-y-auto p-4 md:p-8 flex items-start md:items-center justify-center">
-            <div className="w-full max-w-3xl bg-slate-900 border-2 border-slate-700 rounded-3xl p-6 md:p-8 text-center space-y-5">
-                {card.kicker && <p className="text-xs md:text-sm font-black uppercase tracking-widest text-slate-400">{card.kicker}</p>}
-                <p className="font-mono font-black text-5xl md:text-7xl text-white break-all">{card.title}</p>
-                <span className={`inline-block px-5 py-2 rounded-xl font-black uppercase tracking-widest text-lg ${cls}`}>{item.status === 'NEEDS_REWORK' ? 'In rework here' : text}</span>
-                {card.lines?.length > 0 && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-left">
-                        {card.lines.map(([l, v]) => <div key={l} className="bg-slate-800 rounded-xl px-4 py-3"><p className="text-[11px] font-black uppercase tracking-widest text-slate-400">{l}</p><p className="text-lg font-black text-white truncate">{v || '—'}</p></div>)}
-                    </div>
-                )}
-                {(card.notes || []).map(([tone, t], i) => <p key={i} className={`rounded-xl px-4 py-3 font-black text-base text-left ${tone === 'rose' ? 'bg-rose-600 text-white' : tone === 'amber' ? 'bg-amber-400 text-black' : 'bg-slate-800 text-slate-200'}`}>{t}</p>)}
-                {card.history?.length > 0 && (
-                    <div className="text-left">
-                        <p className="text-[11px] font-black uppercase tracking-widest text-slate-500 mb-2">Garment stages so far</p>
-                        <div className="flex flex-wrap gap-2">{card.history.map((h, i) => <span key={i} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-sm font-bold">{h}</span>)}</div>
-                    </div>
-                )}
-                {k === 'done' && onUndo && <button type="button" onClick={() => onUndo(item)} className="px-6 py-3 rounded-xl border-2 border-slate-500 text-slate-200 font-black uppercase tracking-widest hover:bg-slate-800 inline-flex items-center gap-2"><RotateCcw className="w-5 h-5" /> Undo this check</button>}
-            </div>
-        </div>
     );
 }
 
