@@ -43,7 +43,7 @@ export const productionApi = {
     load: (data) => api.post('/v3/production/loads', data),
     changeLine: (data) => api.post('/v3/production/loads/change-line', data),
     unload: (data) => api.post('/v3/production/loads/unload', data),
-    batchGarments: (batchId, stageTypeId) => api.get(`/v3/production/batches/${batchId}/garments/${stageTypeId}`),
+    batchGarments: (batchId, stageTypeId, params) => api.get(`/v3/production/batches/${batchId}/garments/${stageTypeId}`, { params }),   // params.lite=1: tiles only
     garmentLookup: (code, stageTypeId) => api.get('/v3/production/garments/lookup', { params: { code, stage_type_id: stageTypeId } }),
     recentGarments: (stageTypeId, lineId) => api.get('/v3/production/garments/recent', { params: { stage_type_id: stageTypeId, line_id: lineId || undefined } }),   // the scanner's recent scans
     garmentCheck: (data) => api.post('/v3/production/garment-checks', data),

@@ -50,12 +50,12 @@ export default function GarmentScanner({ stage, stageId, lineId, feedLine, codes
 
     const loadRecent = useCallback(() => { productionApi.recentGarments(stageId, feedLine).then(r => setRecent(r.data)).catch(() => {}); }, [stageId, feedLine]);
     useEffect(() => { loadRecent(); }, [loadRecent, tick]);
-    // Live: someone else checked the garment on screen — show its state now.
+    // Live: someone else checked the garment on screen — show its state now (that one garment, 28 Oct 2026).
     useEffect(() => {
         if (!cur) return;
-        productionApi.batchGarments(cur.d.batch_id, stageId).then(r => {
-            const g = r.data.garments.find(x => String(x.id) === String(cur.d.id));
-            if (g) setCur(c => (c && c.d.id === cur.d.id ? { ...c, v: r.data, g } : c));
+        productionApi.garmentLookup(cur.d.garment_no, stageId).then(r => {
+            const g = r.data.garment;
+            if (g) setCur(c => (c && c.d.id === cur.d.id ? { ...c, g } : c));
         }).catch(() => {});
     }, [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -71,14 +71,16 @@ export default function GarmentScanner({ stage, stageId, lineId, feedLine, codes
                 setPopup({ kind: 'NOT_AT_STAGE', title: 'NOT CHECKED AT THIS STAGE', message: `Garment ${d.garment_no} — its style's route doesn't go through ${stage.name}.`, d });
                 return;
             }
-            const v = (await productionApi.batchGarments(d.batch_id, stageId)).data;
+            // One request (28 Oct 2026, performance — as 2.0's garment details): the lookup carries the garment, the route,
+            // the batch and whether it is loaded at this stage.
+            const v = { route: d.route, batch: d.batch };
             // Batch switch (2.0): loaded at this stage on any of its lines — one roll / size opens the whole batch.
-            if (!v.first && v.loads.length === 0) {
+            if (!d.loaded) {
                 feedback('not_loaded');
                 setPopup({ kind: 'NOT_LOADED', message: `Batch #${d.floor_no} is not loaded on your line. Ask your line loader to load this batch on your line.`, d });
                 return;
             }
-            const g = v.garments.find(x => String(x.id) === String(d.id));
+            const g = d.garment;
             if (!g) {
                 feedback('error');
                 setPopup({ kind: 'NOT_AT_STAGE', title: 'NOT AT THIS STAGE', message: `Garment ${d.garment_no} isn't checked at ${stage.name} (taken out of the batch here).`, d });
@@ -257,6 +259,8 @@ export default function GarmentScanner({ stage, stageId, lineId, feedLine, codes
                                     className="h-[clamp(96px,30vh,300px)] bg-emerald-600 text-white rounded-[2rem] shadow-xl flex flex-col items-center justify-center p-3 hover:bg-emerald-700 active:scale-95 disabled:grayscale disabled:opacity-50">
                                     {busy ? <Loader2 className="w-10 h-10 mb-1 animate-spin" /> : <ShieldCheck className="w-[clamp(22px,4.5vh,44px)] h-[clamp(22px,4.5vh,44px)] mb-1" />}
                                     <span className="font-mono font-black text-[length:clamp(1.5rem,6vh,3rem)] opacity-80 leading-none mb-1 tracking-wider">#{cur.v.batch.floor_no}</span>
+                                    {/* The garment's sales-order colour (28 Oct 2026, asked: "show garment color on approve button") */}
+                                    {g.colour && <span className="max-w-full truncate px-4 py-1 my-1.5 rounded-xl bg-white text-emerald-900 ring-4 ring-yellow-300 shadow-lg font-black uppercase tracking-wide text-[length:clamp(1.25rem,4.5vh,2.25rem)] leading-tight">{g.colour}</span>}
                                     <span className="text-[length:clamp(1.1rem,3.2vh,1.5rem)] font-black">APPROVE</span>
                                     <span className="text-[10px] font-bold opacity-60 mt-0.5 uppercase tracking-widest">Pass to next stage</span>
                                 </button>

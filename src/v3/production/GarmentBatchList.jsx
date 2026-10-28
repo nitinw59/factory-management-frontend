@@ -5,7 +5,7 @@
 //               batch switch): batch, priority, garments approved in the last hour, style, Approved / Pending / Rework /
 //               Rejected, completion bar
 //   A batch     one header row (← Batches, style, batch, priority, counts, "N waiting for BF sewing"); roll tabs — one
-//               roll at a time (pending · done / total · waiting); notes (waiting, not cleared upstream, garments with a
+//               roll at a time (the garment colour(s) from the sales order — added 28 Oct 2026; pending · done / total · waiting); notes (waiting, not cleared upstream, garments with a
 //               part rejected earlier — which part, where); tiles by size (garment no., size, status icon); garments
 //               still waiting for an earlier stage are left out unless a part of them was rejected
 //   A tile      the bottom drawer for that one garment: number, size, colour, roll, stage chain, part chips, QC note;
@@ -13,6 +13,8 @@
 //               "passed"; a part rejected earlier also offers QA override: approve garment); already approved → 2.0's
 //               ALREADY APPROVED popup (revert = 3.0 undo)
 // 3.0's rules and calls as the scanner (garment-checks / garment-repairs; one garment per action, as 2.0).
+// 28 Oct 2026 (performance): the tiles load light (?lite=1 — number, size, status, flags); tapping one reads that garment's
+// full detail (stage chain, parts) with the scan lookup, as 2.0's tile tap calls garment details.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { List, ArrowLeft, Layers, Clock, CheckCircle2, X, Hammer, ShieldCheck, Wrench, Loader2, RefreshCw } from 'lucide-react';
 import { productionApi } from '../api/productionApi';
@@ -41,10 +43,11 @@ export default function GarmentBatchList({ stage, stageId, lineId, queue, codes,
     const [qaFor, setQaFor] = useState(null);
     const [busy, setBusy] = useState(false);
     const [actionError, setActionError] = useState('');
+    const [detail, setDetail] = useState(null);     // the tapped garment's full detail (lookup): { id, garment, route } | { id, loading }
 
     const load = useCallback(() => {
         if (!batchId) { setView(null); return; }
-        productionApi.batchGarments(batchId, stageId).then(r => { setView(r.data); setLoadError(''); }).catch(err => setLoadError(apiError(err, 'Failed to load the garments of this batch.')));
+        productionApi.batchGarments(batchId, stageId, { lite: 1 }).then(r => { setView(r.data); setLoadError(''); }).catch(err => setLoadError(apiError(err, 'Failed to load the garments of this batch.')));
     }, [batchId, stageId]);
     useEffect(() => { load(); }, [load, tick]);
 
@@ -57,8 +60,12 @@ export default function GarmentBatchList({ stage, stageId, lineId, queue, codes,
     const tap = (g) => {
         setActionError(''); setDefect(null);
         if (CLEARED.includes(g.status)) { feedback('already'); setSelId(null); setPopup({ g }); return; }
-        feedback('success'); setSelId(g.id);
+        feedback('success'); setSelId(g.id); setDetail({ id: g.id, loading: true });
+        productionApi.garmentLookup(g.garment_no, stageId)
+            .then(r => setDetail(d => (d && d.id === g.id ? { id: g.id, garment: r.data.garment, route: r.data.route } : d)))
+            .catch(err => setDetail(d => (d && d.id === g.id ? { id: g.id, error: apiError(err, 'Failed to load the garment.') } : d)));
     };
+    const full = detail && sel && String(detail.id) === String(sel.id) ? detail : null;
     const doAction = async (fn, what) => {
         if (!sel || busy) return;
         setBusy(true); setActionError('');
@@ -127,7 +134,8 @@ export default function GarmentBatchList({ stage, stageId, lineId, queue, codes,
     for (const g of garments) { const k = rollOf(g.garment_no) || '?'; if (!byRoll.has(k)) byRoll.set(k, []); byRoll.get(k).push(g); }
     const rolls = [...byRoll].map(([rollNo, all]) => {
         const pieces = all.filter(isShown);
-        return { rollNo, all, pieces, waiting: all.length - pieces.length, pending: pieces.filter(g => !g.status).length,
+        // The sales order's garment colour(s) this roll was cut for (normally one).
+        return { rollNo, all, pieces, colours: [...new Set(all.map(g => g.colour).filter(Boolean))], waiting: all.length - pieces.length, pending: pieces.filter(g => !g.status).length,
             done: pieces.filter(g => CLEARED.includes(g.status)).length, partRejected: pieces.filter(g => g.flagged.length > 0 && isOpen(g)).length };
     }).sort((a, b) => (parseInt(a.rollNo, 10) || 0) - (parseInt(b.rollNo, 10) || 0));
     const active = rolls.find(r => r.rollNo === activeRoll) || rolls.find(r => r.pending > 0) || rolls[0];
@@ -169,6 +177,7 @@ export default function GarmentBatchList({ stage, stageId, lineId, queue, codes,
                                     <span className="font-black text-sm">Roll #{r.rollNo}</span>
                                     {r.partRejected > 0 && <span className={`text-[10px] font-black px-1.5 rounded ${on ? 'bg-rose-500 text-white' : 'bg-rose-100 text-rose-700'}`}>✗{r.partRejected}</span>}
                                 </div>
+                                {r.colours.length > 0 && <div className={`text-xs font-black uppercase tracking-wide mt-0.5 truncate max-w-[180px] ${on ? 'text-white' : 'text-slate-800'}`} title={r.colours.join(', ')}>{r.colours.join(', ')}</div>}
                                 <div className={`text-[10px] font-bold mt-0.5 ${on ? 'text-indigo-100' : 'text-slate-400'}`}>{r.pending} pending · {r.done}/{r.pieces.length} done{r.waiting > 0 ? ` · ${r.waiting} waiting` : ''}</div>
                             </button>
                         );
@@ -251,9 +260,11 @@ export default function GarmentBatchList({ stage, stageId, lineId, queue, codes,
                                     </div>
                                     <button type="button" onClick={() => setSelId(null)} className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-95 ml-4 shrink-0" aria-label="Close"><X size={16} className="text-slate-600" /></button>
                                 </div>
-                                <div className="mb-4"><StageProgressStepper stages={stagesOf(view, sel, stageId)} /></div>
+                                {!full || full.loading ? <p className="mb-4 text-xs font-bold text-slate-400 flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Loading the garment…</p>
+                                    : full.error ? <p className="mb-4 text-xs font-bold text-rose-700">{full.error}</p>
+                                    : full.garment && <div className="mb-4"><StageProgressStepper stages={stagesOf({ route: full.route }, full.garment, stageId)} /></div>}
                                 <div className="flex gap-2 flex-wrap mb-4">
-                                    {partsOf(sel).map(p => (
+                                    {(full?.garment ? partsOf(full.garment) : []).map(p => (
                                         <div key={p.id} className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${p.bad ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`} title={p.note || ''}>
                                             {p.bad ? <X size={10} strokeWidth={3} /> : <ShieldCheck size={10} />}{p.name}{p.note && <span className="text-[10px] uppercase opacity-70">· {p.note}</span>}
                                         </div>

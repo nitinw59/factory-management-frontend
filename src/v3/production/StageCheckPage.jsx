@@ -178,7 +178,8 @@ export default function StageCheckPage() {
         const n = res.data.checked ?? res.data.repaired ?? res.data.reverted;
         if (isGarment) feedback('success');
         flash(`${what}: ${n} ${unit}${n === 1 ? '' : 's'} · stage ${label(res.data.progress)}`);
-        loadRework(); loadBatch(); loadQueue(); setTick(t => t + 1);
+        // 28 Oct 2026 (performance): the scanner screen shows no batch list — don't reload it after each check there.
+        loadRework(); loadBatch(); if (!(isGarment && mode === 'SCANNER')) loadQueue(); setTick(t => t + 1);
     };
     // fn(extra) → API call; true once saved. A rework block opens the supervisor dialog and retries with the password
     // (false); other errors are thrown with their message (the inspection screen shows them).
