@@ -4,7 +4,7 @@
 // accordion per part with BULK INSPECT / FIX REWORK, and inside it a row per size (or roll) — or per bundle at a
 // bundle stage — with a progress bar, INSPECT and FIX REWORK (bundles: QUICK APPROVE). INSPECT opens the full-screen
 // tile grid (InspectOverlay). The checker's 2.0 workstation decides the line and stage; managers pick them. Pieces not
-// cleared at an earlier stage can't be checked (gate). Garment stages (assembly onwards) — GarmentPanel, with a scan box.
+// cleared at an earlier stage can't be checked (gate). Garment stages (assembly onwards): GarmentScanner / GarmentBatchList (2.0's garment checker).
 // 20 Oct 2026: inside an open batch a roll picker (sizes when grouped by size), like the batch picker — shows one roll;
 // the stage status / route line and the "Loaded: …" line are gone (asked: "remove these 2"). "Inspect whole roll / size"
 // only for a workstation with 2.0's "approve whole roll" right (as 2.0); others inspect part by part — and at a bundle
@@ -24,7 +24,7 @@ import { Field, inputCls, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { PriorityBadge } from '../cutting/cutShared';
 import { useV3Live } from '../live';
-import GarmentPanel from './GarmentPanel';
+import GarmentBatchList from './GarmentBatchList';
 import InspectOverlay from './InspectOverlay';
 import GarmentScanner from './GarmentScanner';
 import { useWedgeScanner, feedback } from './scanShared';
@@ -280,7 +280,7 @@ export default function StageCheckPage() {
                     {st.station && <span className="text-sm font-bold text-slate-600 bg-slate-100 px-3 py-2 rounded-lg">{st.station.line}</span>}
                     {stage && <span className={`inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest px-2 ${live ? 'text-emerald-600' : 'text-slate-400'}`} title={live ? 'Updates by itself when others check' : 'Reconnecting'}><span className={`h-2.5 w-2.5 rounded-full ${live ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />{live ? 'Live' : 'Offline'}</span>}
                     <span className="ml-auto flex flex-wrap items-center gap-2">
-                        {stage && !scannerMode && queue && queue.length > 0 && (
+                        {stage && !isGarment && queue && queue.length > 0 && (
                             <select value={batchPick} onChange={e => pickBatch(e.target.value)} aria-label="Batch"
                                 className="bg-slate-900 text-white font-black text-sm px-3 py-2.5 rounded-xl border border-slate-700 focus:outline-none uppercase tracking-widest max-w-[260px]">
                                 <option value="ALL">All batches ({queue.length})</option>
@@ -319,6 +319,9 @@ export default function StageCheckPage() {
             {stage && (scannerMode ? (
                 <GarmentScanner key={stageId} stage={stage} stageId={stageId} lineId={st.station ? undefined : lineId || undefined} feedLine={effLine}
                     codes={codes} act={act} askUndo={askUndo} tick={tick} scanReq={scanReq} />
+            ) : isGarment ? (
+                <GarmentBatchList key={stageId} stage={stage} stageId={stageId} lineId={st.station ? undefined : lineId || undefined}
+                    queue={queue} codes={codes} act={act} askUndo={askUndo} tick={tick} />
             ) : !shownQueue ? <Loading /> : shownQueue.length === 0 ? (
                 <div className="text-center py-24 bg-white rounded-[2rem] border-4 border-dashed border-slate-300"><p className="text-slate-400 font-black text-2xl uppercase tracking-widest">Nothing waiting at this station.</p></div>
             ) : (
@@ -345,9 +348,7 @@ export default function StageCheckPage() {
                                         </div>}
                                     </div>
                                 </div>
-                                {open && (isGarment ? (
-                                    <GarmentPanel key={`${q.id}-${stageId}`} batchId={q.id} stageId={stageId} multi={st.station?.multi !== false} lineId={st.station ? undefined : lineId || undefined} codes={codes} act={act} askUndo={askUndo} tick={tick} blockedMsg={blockedMsg} />
-                                ) : !view || String(view.batch.id) !== String(q.id) ? <div className="p-6"><Loading /></div> : (
+                                {open && (!view || String(view.batch.id) !== String(q.id) ? <div className="p-6"><Loading /></div> : (
                                     <div className="p-4 md:p-6 bg-slate-100 space-y-4">
                                         <div className="flex flex-wrap items-center gap-3">
                                             {tree.length > 1 && (() => {

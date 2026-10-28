@@ -31,6 +31,7 @@ const label = (s) => String(s || '').toLowerCase().replace('_', ' ');
 
 export default function GarmentBatchList({ stage, stageId, lineId, queue, codes, act, askUndo, tick }) {
     const [batchId, setBatchId] = useState(null);
+    const [opened, setOpened] = useState(null);     // the batch card opened (kept when it leaves the queue, as 2.0)
     const [view, setView] = useState(null);
     const [loadError, setLoadError] = useState('');
     const [activeRoll, setActiveRoll] = useState(null);
@@ -47,12 +48,12 @@ export default function GarmentBatchList({ stage, stageId, lineId, queue, codes,
     }, [batchId, stageId]);
     useEffect(() => { load(); }, [load, tick]);
 
-    const batch = (queue || []).find(q => String(q.id) === String(batchId));
+    const batch = (queue || []).find(q => String(q.id) === String(batchId)) || opened;
     const garments = useMemo(() => view?.garments || [], [view]);
     const sel = garments.find(g => String(g.id) === String(selId)) || null;
 
-    const openBatch = (q) => { setBatchId(q.id); setView(null); setActiveRoll(null); setSelId(null); setActionError(''); };
-    const back = () => { setBatchId(null); setView(null); setActiveRoll(null); setSelId(null); };
+    const openBatch = (q) => { setBatchId(q.id); setOpened(q); setView(null); setActiveRoll(null); setSelId(null); setActionError(''); };
+    const back = () => { setBatchId(null); setOpened(null); setView(null); setActiveRoll(null); setSelId(null); };
     const tap = (g) => {
         setActionError(''); setDefect(null);
         if (CLEARED.includes(g.status)) { feedback('already'); setSelId(null); setPopup({ g }); return; }
