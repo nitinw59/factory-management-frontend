@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Scissors, CheckCircle2, Ban, Plus, Trash2, FileDown, Pencil, AlertTriangle, Undo2, Barcode, GripVertical, ChevronUp, ChevronDown, ListOrdered } from 'lucide-react';
 import BundleLabelsPanel from './BundleLabelsPanel';
+import EndBitLabelsPanel from './EndBitLabelsPanel';
 import Modal from '../../shared/Modal';
 import { cuttingApi } from '../api/cuttingApi';
 import { apiError } from '../api/mastersApi';
@@ -222,6 +223,7 @@ export default function CutBatchPage() {
     const [fin, setFin] = useState(null);       // finalise dialog: { reason, pockets (lines | null while loading), put }
     const [undo, setUndo] = useState(null);     // undo finalise: { plan, reason }
     const [bundleLabels, setBundleLabels] = useState(false);   // bundle barcode labels (24 Oct 2026)
+    const [endBitLabels, setEndBitLabels] = useState(false);   // end bit labels (28 Oct 2026)
     const [mode, setMode] = useState(null);     // numbering change while cutting: { numbering_mode, reason }
     const [drag, setDrag] = useState(null);     // roll being dragged: { ids (order on screen), id }
     const dragRef = useRef(null);               // the live drag the window listeners read (state would be stale there)
@@ -337,6 +339,7 @@ export default function CutBatchPage() {
                     <SecondaryButton onClick={() => printDoc(exportLaySheet)}><FileDown size={14} /> Lay sheet</SecondaryButton>
                     {b.rolls.some(r => r.lays) && <SecondaryButton onClick={() => printDoc(exportCutSheet)}><FileDown size={14} /> Cut sheet</SecondaryButton>}
                     {b.status === 'CUT' && <SecondaryButton onClick={() => setBundleLabels(true)}><Barcode size={14} /> Bundle labels</SecondaryButton>}
+                    {b.rolls.some(r => r.end_bits?.length) && <SecondaryButton onClick={() => setEndBitLabels(true)}><Barcode size={14} /> End bit labels</SecondaryButton>}
                 </span>
             </div>
             <ErrorBox text={error} />
@@ -685,6 +688,11 @@ export default function CutBatchPage() {
             {bundleLabels && (
                 <Modal title={`Bundle labels — batch #${b.floor_no}`} onClose={() => setBundleLabels(false)}>
                     <BundleLabelsPanel batchId={b.id} onClose={() => setBundleLabels(false)} />
+                </Modal>
+            )}
+            {endBitLabels && (
+                <Modal title={`End bit labels — batch #${b.floor_no}`} onClose={() => setEndBitLabels(false)}>
+                    <EndBitLabelsPanel batchId={b.id} onClose={() => setEndBitLabels(false)} />
                 </Modal>
             )}
         </div>

@@ -6,6 +6,8 @@
 // marker; the replacement reserve pieces stay off batches.
 // 20 Oct 2026: filters on the roll list (roll / lot search, fabric, colour, dye lot, width, selected) and a
 // "select all shown" box — picks survive filtering; a colour filter pre-chooses that colour on multi-colour rolls.
+// 28 Oct 2026: search boxes on the end bits (lay pieces) table — end bit / source batch, fabric, colour → parts, length;
+// ticks survive filtering; a Total row (shown and selected, per unit).
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Scissors, AlertTriangle } from 'lucide-react';
@@ -24,6 +26,7 @@ export default function NewCutBatchPage() {
     const [ratio, setRatio] = useState({});
     const [picks, setPicks] = useState({});      // roll id → { colour, metres }
     const [ebPicks, setEbPicks] = useState([]);   // lay piece (end bit) ids
+    const [ebF, setEbF] = useState({ tag: '', fabric: '', colour: '', length: '' });   // end bits table searches
     const [notes, setNotes] = useState('');
     const [filter, setFilter] = useState({ q: '', fabric: '', colour: '', lot: '', width: '', show: '' });
     const [error, setError] = useState('');
@@ -82,6 +85,14 @@ export default function NewCutBatchPage() {
     const allShownPicked = shown.length > 0 && shown.every(r => picks[r.id]);
     const pickShown = (on) => setPicks(x => { const n = { ...x }; for (const r of shown) { if (on) n[r.id] = n[r.id] || newPick(r); else delete n[r.id]; } return n; });
     const setF = (k) => (v) => setFilter(f => ({ ...f, [k]: v }));
+    // End bits: one search box per column (case-insensitive "contains").
+    const has = (v, q) => !q.trim() || String(v ?? '').toLowerCase().includes(q.trim().toLowerCase());
+    const ebAll = d.end_bits || [];
+    const ebShown = ebAll.filter(e => has(`${e.tag} ${e.source_floor_no ? `#${e.source_floor_no} ${e.source_floor_no}` : ''}`, ebF.tag) && has(e.fabric_label, ebF.fabric)
+        && has(`${e.colour} ${(e.parts || []).map(x => x.part_name).join(' ')}`, ebF.colour) && has(`${fmt(e.metres)} ${e.metres}`, ebF.length));
+    const ebFiltered = Object.values(ebF).some(v => v.trim());
+    const ebTotal = (list) => Object.entries(list.reduce((a, e) => ({ ...a, [e.uom]: (a[e.uom] || 0) + Number(e.metres || 0) }), {})).map(([u, v]) => `${fmt(v)} ${u}`).join(' + ') || '—';
+    const ebPicked = ebAll.filter(e => ebPicks.includes(e.id));
     const save = async () => {
         setBusy(true); setError('');
         try {
@@ -162,8 +173,19 @@ export default function NewCutBatchPage() {
                     <p className="px-3 pt-2.5 text-xs font-black uppercase tracking-wider text-amber-800">End bits of this order — lay pieces</p>
                     <p className="px-3 pb-1.5 text-xs text-slate-500">Used whole, laid with this batch's marker. Pieces too short for a lay stay for a small-marker batch or replacements.</p>
                     <table className="w-full text-sm min-w-[760px]">
-                        <thead className="bg-amber-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2 w-8" /><th className="px-3 py-2">End bit</th><th className="px-3 py-2">Fabric</th><th className="px-3 py-2">Colour → parts</th><th className="px-3 py-2 text-right">Length</th><th className="px-3 py-2 text-right">Max lays</th></tr></thead>
-                        <tbody>{d.end_bits.map(e => {
+                        <thead className="bg-amber-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
+                            <tr><th className="px-3 py-2 w-8" /><th className="px-3 py-2">End bit</th><th className="px-3 py-2">Fabric</th><th className="px-3 py-2">Colour → parts</th><th className="px-3 py-2 text-right">Length</th><th className="px-3 py-2 text-right">Max lays</th></tr>
+                            <tr className="normal-case tracking-normal font-normal">
+                                <th className="px-3 pb-2" />
+                                {[['tag', 'End bit or batch #'], ['fabric', 'Fabric'], ['colour', 'Colour or part'], ['length', 'Length']].map(([k, ph]) => (
+                                    <th key={k} className="px-3 pb-2"><input className={`${inputCls} !py-1 !text-xs ${k === 'length' ? 'text-right' : ''}`} value={ebF[k]} placeholder={`Search ${ph.toLowerCase()}`}
+                                        onChange={e => setEbF(f => ({ ...f, [k]: e.target.value }))} aria-label={`Search end bits: ${ph}`} /></th>
+                                ))}
+                                <th className="px-3 pb-2 text-right">{ebFiltered && <button type="button" className="text-xs font-semibold text-indigo-700 hover:underline" onClick={() => setEbF({ tag: '', fabric: '', colour: '', length: '' })}>Clear</button>}</th>
+                            </tr>
+                        </thead>
+                        <tbody>{ebShown.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">No end bits match these searches.</td></tr>}
+                        {ebShown.map(e => {
                             const on = ebPicks.includes(e.id);
                             const lay = perLay(length, e.uom);
                             return (
@@ -177,6 +199,14 @@ export default function NewCutBatchPage() {
                                 </tr>
                             );
                         })}</tbody>
+                        <tfoot className="bg-amber-50/60 border-t-2 border-amber-200 text-xs font-bold text-slate-700">
+                            <tr>
+                                <td className="px-3 py-2" />
+                                <td className="px-3 py-2" colSpan={3}>Total {ebFiltered ? `${ebShown.length} of ${ebAll.length}` : ebAll.length} end bit{ebAll.length === 1 ? '' : 's'}{ebPicked.length > 0 && <span className="text-amber-800"> · {ebPicked.length} selected ({ebTotal(ebPicked)}){ebPicked.some(e => !ebShown.includes(e)) && ' — some hidden by the searches'}</span>}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{ebTotal(ebShown)}</td>
+                                <td className="px-3 py-2" />
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
             )}

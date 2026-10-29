@@ -38,13 +38,29 @@ export function exportPrPdf(pr, company) {
         pr.approved_at ? `Approved by ${pr.approved_by_name || '—'} on ${new Date(pr.approved_at).toLocaleDateString('en-IN')}` : null].filter(Boolean).join('   |   ');
     doc.text(who, 14, y);
     if (pr.status !== 'APPROVED') { y += 4.5; doc.setTextColor(190, 18, 60); doc.text(pr.status === 'CANCELLED' ? `CANCELLED: ${pr.cancelled_reason || ''}` : 'NOT APPROVED — not for ordering', 14, y); doc.setTextColor(0, 0, 0); }
+    // (29 Oct 2026) requested · on PO · received · still to order per line, totals per unit; borders like the other 3.0 PDFs
+    const live = pr.status === 'APPROVED';
+    const open = pr.lines.filter(l => l.line_status === 'OPEN');
+    const perUnit = (f, unit = (l) => l.uom) => {
+        const m = new Map();
+        for (const l of open) if (f(l) > 0) m.set(unit(l), (m.get(unit(l)) || 0) + f(l));
+        return [...m].map(([u, v]) => `${n(v)} ${u}`).join('\n') || '—';
+    };
+    const q0 = (v, u) => (v > 0.0005 ? `${n(v)} ${u}` : '—');
     autoTable(doc, {
         startY: y + 4,
-        head: [['#', 'Item', 'Type', 'Quantity', 'Unit', 'Usage qty', 'Needed by', 'For orders', 'Notes']],
-        body: pr.lines.map(l => [l.line_no, l.label, l.type_name || '', n(l.purchase_qty), l.purchase_uom, `${n(l.usage_qty)} ${l.uom}`, fmtDate(l.needed_by),
-            [...l.orders.map(o => `${o.order_no}: ${n(o.covers)}${o.from_surplus ? ' (surplus)' : ''}`), l.uncommitted > 0 ? `uncommitted: ${n(l.uncommitted)}` : ''].filter(Boolean).join('\n'), l.notes || '']),
-        styles: { fontSize: 8, cellPadding: 1.5, valign: 'top' }, headStyles: { fillColor: [79, 70, 229] },
-        columnStyles: { 0: { cellWidth: 8 }, 3: { halign: 'right', fontStyle: 'bold' }, 5: { halign: 'right' } },
+        theme: 'grid', rowPageBreak: 'avoid', showHead: 'everyPage',
+        head: [['#', 'Item', 'Type', 'Requested', 'On PO', 'Received', live ? 'Still to order' : 'To order', 'Needed by', 'For orders', 'Notes']],
+        body: pr.lines.map(l => [l.line_no, `${l.label}${l.line_status !== 'OPEN' ? ` (${l.line_status.toLowerCase()})` : ''}`, l.type_name || '',
+            `${n(l.purchase_qty)} ${l.purchase_uom}${l.purchase_uom !== l.uom || Number(l.factor) !== 1 ? `\n= ${n(l.usage_qty)} ${l.uom}` : ''}`,
+            `${q0(l.on_po, l.uom)}${(l.purchase_orders || []).length ? `\n${l.purchase_orders.map(p => p.po_no).join(', ')}` : ''}`,
+            q0(l.received, l.uom), q0(l.to_order, l.uom), fmtDate(l.needed_by),
+            [...l.orders.map(o => `${o.order_no}: ${n(o.covers)}${o.from_surplus ? ' (uses spare)' : ''}`), l.uncommitted > 0 ? `spare: ${n(l.uncommitted)}` : ''].filter(Boolean).join('\n'), l.notes || '']),
+        foot: [['', `Total · ${open.length} open line${open.length === 1 ? '' : 's'}`, '', perUnit(l => l.purchase_qty, l => l.purchase_uom), perUnit(l => l.on_po), perUnit(l => l.received), perUnit(l => l.to_order), '', '', '']],
+        styles: { fontSize: 8, cellPadding: 1.5, valign: 'top', lineColor: [148, 163, 184], lineWidth: 0.2, textColor: 20 },
+        headStyles: { fillColor: [79, 70, 229], textColor: 255 }, footStyles: { fillColor: [241, 245, 249], textColor: 20, fontStyle: 'bold' },
+        columnStyles: { 0: { cellWidth: 8 }, 3: { halign: 'right', fontStyle: 'bold' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right', fontStyle: 'bold' } },
+        didParseCell: (d) => { if ((d.section === 'head' || d.section === 'foot') && [3, 4, 5, 6].includes(d.column.index)) d.cell.styles.halign = 'right'; },
         margin: { left: 14, right: 14 },
     });
     if (pr.notes) { doc.setFontSize(8.5); doc.text(`Notes: ${pr.notes}`, 14, doc.lastAutoTable.finalY + 6, { maxWidth: pageW - 28 }); }
@@ -61,12 +77,16 @@ export function exportPrExcel(pr) {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pr.lines.map(l => ({
         'PR no.': pr.pr_no, Status: PR_STATUS[pr.status]?.label || pr.status, Line: l.line_no, Item: l.label, Type: l.type_name || '',
-        Quantity: l.purchase_qty, Unit: l.purchase_uom, 'Usage qty': l.usage_qty, 'Usage unit': l.uom, 'Raised for orders': l.for_orders,
-        'Covers orders': l.covers, Uncommitted: l.uncommitted || '', 'Needed by': l.needed_by || '', Notes: l.notes || '',
+        Quantity: l.purchase_qty, Unit: l.purchase_uom, 'Usage qty': l.usage_qty, 'Usage unit': l.uom, 'On PO': l.on_po || '',
+        'PO no.': (l.purchase_orders || []).map(p => p.po_no).join(', '), Received: l.received || '', 'Still to order': l.to_order || '',
+        'Short-closed': l.short_closed || '', 'Raised for orders': l.for_orders, 'Covers orders': l.covers, Spare: l.uncommitted || '',
+        'Line status': l.line_status, 'Needed by': l.needed_by || '', Notes: l.notes || '',
     }))), 'Lines');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pr.lines.flatMap(l => l.orders.map(o => ({
         Line: l.line_no, Item: l.label, 'Order no.': o.order_no, Customer: o.customer_name, 'Order status': o.order_status, Unit: l.uom,
-        'Raised for': o.raised_for, Covers: o.covers, 'From surplus': o.from_surplus ? 'yes' : '',
+        'Raised for': o.raised_for, Needs: o.position?.needs ?? '', Issued: o.position?.issued ?? '', Allocated: o.position?.allocated ?? '',
+        'Free stock': o.position?.from_stock ?? '', 'On open POs': o.position?.on_po ?? '', 'Other requisitions': o.position?.other_prs ?? '',
+        'This line': o.covers, 'Still short': o.position?.short ?? '', 'Uses spare': o.from_surplus ? 'yes' : '',
     })))), 'Orders');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pr.history.map(h => ({
         When: new Date(h.created_at).toLocaleString('en-IN'), Action: h.action, By: h.user_name || '', Reason: h.reason || '', Detail: (h.detail?.summary || []).join('\n'),

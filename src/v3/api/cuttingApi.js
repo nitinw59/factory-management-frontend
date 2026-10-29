@@ -23,6 +23,12 @@ export const cuttingApi = {
     cancelBundleLabelJob: (id, jobId, reason) => api.post(`/v3/cutting/batches/${id}/bundle-labels/jobs/${jobId}/cancel`, { reason }),
     retryBundleLabelJob: (id, jobId, data) => api.post(`/v3/cutting/batches/${id}/bundle-labels/jobs/${jobId}/retry`, data || {}),
     bundleLabelsCsv: (id, partIds) => api.get(`/v3/cutting/batches/${id}/bundle-labels/csv`, { params: { parts: (partIds || []).join(',') }, responseType: 'blob' }),
+    // End bit labels (28 Oct 2026)
+    endBitLabels: (id) => api.get(`/v3/cutting/batches/${id}/end-bit-labels`),
+    printEndBitLabels: (id, data) => api.post(`/v3/cutting/batches/${id}/end-bit-labels/print`, data),   // { end_bit_ids, printer_id, reason? }
+    cancelEndBitLabelJob: (id, jobId, reason) => api.post(`/v3/cutting/batches/${id}/end-bit-labels/jobs/${jobId}/cancel`, { reason }),
+    retryEndBitLabelJob: (id, jobId, data) => api.post(`/v3/cutting/batches/${id}/end-bit-labels/jobs/${jobId}/retry`, data || {}),
+    endBitLabelsCsv: (id, ids) => api.get(`/v3/cutting/batches/${id}/end-bit-labels/csv`, { params: { ids: (ids || []).join(',') }, responseType: 'blob' }),
     setPriority: (id, priority, note) => api.put(`/v3/cutting/batches/${id}/priority`, { priority, note }),
     cancel: (id, reason) => api.post(`/v3/cutting/batches/${id}/cancel`, { reason }),
     // fabric end bits (19 Oct 2026, phase 3)

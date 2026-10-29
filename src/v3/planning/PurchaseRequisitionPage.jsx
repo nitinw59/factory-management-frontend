@@ -1,18 +1,19 @@
-// One purchase requisition: lines (item, quantity in purchase units, needed-by,
-// what it covers now per order and what is uncommitted (MOQ / pack surplus that
-// covers future orders — item-level netting), actions by
+// One purchase requisition: lines (item, quantity in purchase units, on PO,
+// received, still to order, needed-by / late; per line the orders it covers —
+// each order's whole position on the item — and its spare (MOQ / pack surplus that
+// covers future orders — item-level netting)), actions by
 // status and role, history, PDF / Excel. Merchandisers edit and submit;
 // the purchase manager approves or rejects. Store requisitions (purpose STORE:
 // spares, general items) have no orders behind them; the store edits them.
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Send, Undo2, CheckCircle2, XCircle, Ban, Pencil, Trash2, FileDown, FileSpreadsheet, Info, Plus } from 'lucide-react';
+import { ArrowLeft, Send, Undo2, CheckCircle2, XCircle, Ban, Pencil, Trash2, FileDown, FileSpreadsheet, Info, Plus, ChevronDown, ChevronRight } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { planningApi } from '../api/planningApi';
 import { adminApi } from '../../api/adminApi';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
-import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
+import { fmtDate, todayLocal } from '../salesOrders/SalesOrderStatusBadge';
 import { PR_STATUS, exportPrPdf, exportPrExcel } from './prShared';
 import StoreItemPicker from '../store/StoreItemPicker';
 
@@ -33,7 +34,8 @@ export default function PurchaseRequisitionPage() {
     const [busy, setBusy] = useState(false);
     const [formError, setFormError] = useState('');
     const [deciding, setDeciding] = useState(null);   // approval with a decision per line: { [lineId]: { decision, qty, reason } }
-    const [chip, setChip] = useState('');           // lines filter (17 Oct 2026): '' | NOT_ON_PO | ON_PO | NOT_NEEDED | SURPLUS | CLOSED
+    const [chip, setChip] = useState('');           // lines filter (17 Oct 2026): '' | TO_ORDER | LATE | ON_PO | NOT_NEEDED | SURPLUS | CLOSED
+    const [openLines, setOpenLines] = useState(() => new Set());   // lines showing who they're for (29 Oct 2026)
     const [q, setQ] = useState('');
 
     const load = useCallback(() => planningApi.pr(id).then(res => setPr(res.data)).catch(err => setError(apiError(err, 'Failed to load the requisition.'))), [id]);
@@ -110,13 +112,20 @@ export default function PurchaseRequisitionPage() {
             )}
             {pr.notes && <p className="text-sm text-slate-600 mb-3 whitespace-pre-line"><b>Notes:</b> {pr.notes}</p>}
 
-            {/* Lines (17 Oct 2026): filter chips, search, grouped by type; a line on a PO says so instead of "covers 0". */}
+            {/* Lines (17 Oct 2026): filter chips, search, grouped by type. Columns (29 Oct 2026, owner: the line "is very bad
+                UI"): requested · on PO · received · still to order · needed by (late), a totals row per unit, and per line
+                "who it's for" — each order's whole position on the item, so the line's share reads against it. */}
             {(() => {
+                const today = todayLocal();
+                const live = pr.status === 'APPROVED';   // only an approved requisition has something to order, and can be late
+                const lateDays = (l) => (live && l.line_status === 'OPEN' && l.needed_by && l.needed_by < today && l.received + l.short_closed + 0.0005 < l.usage_qty
+                    ? Math.round((new Date(today) - new Date(l.needed_by)) / 86400000) : 0);
                 const CHIPS = [
-                    ['NOT_ON_PO', 'Not on PO', (l) => l.line_status === 'OPEN' && !(l.on_po > 0), 'bg-amber-50 text-amber-800 border-amber-200'],
+                    ['TO_ORDER', 'Still to order', (l) => live && l.to_order > 0, 'bg-amber-50 text-amber-800 border-amber-200'],
+                    ['LATE', 'Late', (l) => lateDays(l) > 0, 'bg-rose-50 text-rose-700 border-rose-200'],
                     ['ON_PO', 'On PO', (l) => l.on_po > 0, 'bg-indigo-50 text-indigo-700 border-indigo-200'],
                     ['NOT_NEEDED', 'Not needed', (l) => l.line_status === 'OPEN' && l.not_needed_qty > 0, 'bg-rose-50 text-rose-700 border-rose-200'],
-                    ['SURPLUS', 'Surplus', (l) => l.uncommitted > 0, 'bg-sky-50 text-sky-800 border-sky-200'],
+                    ['SURPLUS', 'With spare', (l) => l.uncommitted > 0, 'bg-sky-50 text-sky-800 border-sky-200'],
                     ['CLOSED', 'Closed / rejected', (l) => l.line_status !== 'OPEN', 'bg-slate-100 text-slate-700 border-slate-300'],
                 ];
                 const test = Object.fromEntries(CHIPS.map(c => [c[0], c[2]]));
@@ -124,9 +133,24 @@ export default function PurchaseRequisitionPage() {
                 const shown = pr.lines.filter(l => (!chip || test[chip](l)) && (!words.length || words.every(w => `${l.label} ${l.type_name || ''} ${l.notes || ''}`.toLowerCase().includes(w))));
                 const groups = new Map();
                 for (const l of shown) { const g = l.type_name || 'Other'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(l); }
-                const allOnPo = (l) => l.on_po > 0 && l.on_po + 0.0005 >= l.usage_qty;
-                const poLinks = (l) => (l.purchase_orders || []).map((p, i) => <span key={p.po_id}>{i ? ', ' : ''}<Link to={`/v3/purchasing/orders/${p.po_id}`} className="underline">{p.po_no}</Link></span>);
-                const cols = store ? 5 : 5;
+                const stateOf = (l) => (!live || l.line_status !== 'OPEN' ? null
+                    : l.to_order > 0.0005 ? (l.on_po > 0 ? ['Partly on PO', 'bg-amber-50 text-amber-800 border-amber-200'] : ['Not on PO', 'bg-amber-50 text-amber-800 border-amber-200'])
+                    : l.received + l.short_closed + 0.0005 >= l.usage_qty ? ['Received', 'bg-emerald-50 text-emerald-700 border-emerald-200'] : ['On PO', 'bg-indigo-50 text-indigo-700 border-indigo-200']);
+                const poLinks = (l) => (l.purchase_orders || []).map((p, i) => <span key={p.po_id}>{i ? ', ' : ''}<Link to={`/v3/purchasing/orders/${p.po_id}`} className="underline">{p.po_no}</Link>{p.status === 'DRAFT' ? ' (draft)' : p.status === 'SHORT_CLOSED' ? ' (short-closed)' : ''}</span>);
+                const hasSplit = (l) => !store && (l.orders.length > 0 || l.uncommitted > 0);
+                const toggle = (lid) => setOpenLines(s => { const n = new Set(s); if (n.has(lid)) n.delete(lid); else n.add(lid); return n; });
+                const splitLines = shown.filter(hasSplit);
+                const allOpen = splitLines.length > 0 && splitLines.every(l => openLines.has(l.id));
+                // totals per unit (lines can be in yd, m, pcs …): open lines only
+                const totals = (f, unit = (l) => l.uom) => {
+                    const m = new Map();
+                    for (const l of shown) if (l.line_status === 'OPEN' && f(l) > 0) m.set(unit(l), (m.get(unit(l)) || 0) + f(l));
+                    return [...m].map(([u, v]) => `${fmt(v, u)} ${u}`);
+                };
+                const openCount = shown.filter(l => l.line_status === 'OPEN').length;
+                const TotalCell = ({ vals, cls = '' }) => <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${cls}`}>{vals.length ? vals.map(v => <span key={v} className="block">{v}</span>) : '—'}</td>;
+                const cols = 7;
+                const num = (v, uom, cls = '') => (v > 0.0005 ? <span className={cls}><b>{fmt(v, uom)}</b> <span className="text-xs font-normal text-slate-500">{uom}</span></span> : <span className="text-slate-300">—</span>);
                 return (
                     <>
                         {pr.lines.length > 0 && (
@@ -137,15 +161,18 @@ export default function PurchaseRequisitionPage() {
                                     return <button key={k} type="button" onClick={() => setChip(chip === k ? '' : k)} title={chip === k ? 'Show all lines' : `Show only: ${label.toLowerCase()}`}
                                         className={`text-xs font-bold px-2 py-0.5 rounded border ${cls} ${chip === k ? 'ring-2 ring-offset-1 ring-indigo-500' : chip ? 'opacity-50 hover:opacity-100' : ''}`}>{n} {label.toLowerCase()}</button>;
                                 })}
+                                {splitLines.length > 0 && <button type="button" onClick={() => setOpenLines(allOpen ? new Set() : new Set(splitLines.map(l => l.id)))}
+                                    className="text-xs font-semibold text-indigo-700 hover:underline">{allOpen ? 'Hide orders' : 'Show orders for every line'}</button>}
                                 <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search item, type, notes…" aria-label="Search lines" className="ml-auto px-2 py-1 text-xs border border-slate-300 rounded-lg bg-white w-56" />
                                 {(chip || q) && <span className="text-xs text-slate-500">{shown.length} of {pr.lines.length} lines</span>}
                             </div>
                         )}
                         <div className="bg-white border border-slate-200 rounded-xl overflow-auto max-h-[75vh] mb-4">
-                            <table className="w-full text-sm min-w-[760px]">
+                            <table className="w-full text-sm min-w-[900px]">
                                 <thead className="sticky top-0 z-[1] bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                                    <tr className="text-left"><th className="px-3 py-2.5 w-10">#</th><th className="px-3 py-2.5">Item</th><th className="px-3 py-2.5 text-right">Quantity</th>
-                                        {!store && <th className="px-3 py-2.5">Covers</th>}{store && <th className="px-3 py-2.5">On PO</th>}<th className="px-3 py-2.5">Needed by</th>{editable && <th className="px-3 py-2.5 w-16" />}</tr>
+                                    <tr className="text-left"><th className="px-3 py-2.5 w-10">#</th><th className="px-3 py-2.5">Item</th><th className="px-3 py-2.5 text-right">Requested</th>
+                                        <th className="px-3 py-2.5 text-right">On PO</th><th className="px-3 py-2.5 text-right">Received</th>
+                                        <th className="px-3 py-2.5 text-right" title="Approved but not on any purchase order yet">Still to order</th><th className="px-3 py-2.5">Needed by</th>{editable && <th className="px-3 py-2.5 w-16" />}</tr>
                                 </thead>
                                 <tbody>
                                     {pr.lines.length === 0 && <tr><td colSpan={cols + 1} className="px-4 py-6 text-center text-slate-400">No lines. Add items {store ? 'with “Add item”' : 'from the buy list'}.</td></tr>}
@@ -153,10 +180,16 @@ export default function PurchaseRequisitionPage() {
                                     {[...groups.entries()].map(([g, ls]) => (
                                         <Fragment key={g}>
                                             <tr className="bg-slate-50 border-t border-slate-200"><td colSpan={cols + 1} className="px-3 py-1.5 text-xs font-black uppercase tracking-wide text-slate-600">{g} <span className="font-semibold normal-case tracking-normal text-slate-400">({ls.length})</span></td></tr>
-                                            {ls.map(l => (
-                                                <tr key={l.id} className="border-t border-slate-100 align-top">
+                                            {ls.map(l => {
+                                                const st = stateOf(l);
+                                                const late = lateDays(l);
+                                                const isOpen = openLines.has(l.id);
+                                                return (
+                                                <Fragment key={l.id}>
+                                                <tr className="border-t border-slate-100 align-top">
                                                     <td className="px-3 py-2.5">{l.line_no}</td>
                                                     <td className={`px-3 py-2.5 ${l.line_status !== 'OPEN' ? 'opacity-70' : ''}`}><Link to={store ? `/v3/store/items/${l.item_id}` : `/v3/planning/position/${l.kind}/${l.item_id}`} className={`font-semibold text-indigo-700 hover:underline ${l.line_status !== 'OPEN' ? 'line-through' : ''}`}>{l.label}</Link>
+                                                        {st && <span className={`ml-2 text-[10px] font-black px-1.5 py-0.5 rounded border whitespace-nowrap ${st[1]}`}>{st[0]}</span>}
                                                         {l.notes && <span className="block text-xs text-slate-500">{l.notes}</span>}
                                                         {LINE_STATUS[l.line_status] && <span className="block mt-1 text-xs"><span className={`text-[10px] font-black px-1.5 py-0.5 rounded border ${LINE_STATUS[l.line_status][1]}`}>{LINE_STATUS[l.line_status][0]}</span> <span className="text-slate-600">{l.decision_reason}</span>{l.decided_by_name ? <span className="text-slate-400"> · {l.decided_by_name}</span> : null}{l.noted_at ? <span className="text-slate-400"> · handled</span> : null}</span>}
                                                         {/* (16 Oct 2026) its orders are covered by a firm PO's free quantity: not needed — close it rather than order it twice */}
@@ -166,26 +199,26 @@ export default function PurchaseRequisitionPage() {
                                                             </span>
                                                         )}
                                                         {l.requested_qty != null && <span className="block mt-1 text-xs text-amber-800"><b>Reduced</b> from {fmt(l.requested_qty, 'pcs')} {l.purchase_uom} — {l.decision_reason}{l.decided_by_name ? <span className="text-slate-400"> · {l.decided_by_name}</span> : null}</span>}
+                                                        {hasSplit(l) && (
+                                                            <button type="button" onClick={() => toggle(l.id)} aria-expanded={isOpen}
+                                                                className="mt-1 flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-indigo-700">
+                                                                {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                                                                For {l.orders.length} order{l.orders.length === 1 ? '' : 's'}{l.orders.some(o => o.from_surplus) ? ` (${l.orders.filter(o => o.from_surplus).length} not in the request)` : ''}
+                                                                {l.uncommitted > 0 && <span className="text-sky-700">· {fmt(l.uncommitted, l.uom)} {l.uom} spare</span>}
+                                                            </button>
+                                                        )}
                                                         {perms.prApprove && pr.status === 'APPROVED' && l.line_status === 'OPEN' && !(l.on_po > 0) && !(l.purchase_orders || []).length && (
-                                                            <button type="button" className="mt-1 text-[11px] font-bold text-rose-700 hover:underline"
+                                                            <button type="button" className="mt-1 block text-[11px] font-bold text-rose-700 hover:underline"
                                                                 onClick={() => askReason({ title: `Close line ${l.line_no} — ${l.label}`, confirm: 'Close line', run: (r) => planningApi.closePrLine(id, l.id, r) })}>Close line</button>
                                                         )}</td>
                                                     <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap"><b>{fmt(l.purchase_qty, 'pcs')}</b> <span className="text-xs text-slate-500">{l.purchase_uom}</span>
                                                         {(l.purchase_uom !== l.uom || Number(l.factor) !== 1) && <span className="block text-[11px] text-slate-500">= {fmt(l.usage_qty, l.uom)} {l.uom}</span>}</td>
-                                                    {!store && <td className="px-3 py-2.5 text-xs">
-                                                        {/* the part on a PO covers the orders through the PO — said, not shown as 0 */}
-                                                        {l.on_po > 0 && <p className="font-semibold text-indigo-700">{allOnPo(l) ? 'All' : `${fmt(l.on_po, l.uom)} ${l.uom}`} on {poLinks(l)}</p>}
-                                                        {(!allOnPo(l) || l.covers > 0) && <p className="text-slate-700">{fmt(l.covers, l.uom)} {l.uom} for orders{l.uncommitted > 0 && <span className="ml-1 font-semibold text-sky-700">+ {fmt(l.uncommitted, l.uom)} surplus</span>}</p>}
-                                                        {l.orders.map(o => (
-                                                            <p key={o.order_id} className="text-slate-600"><Link to={`/v3/planning/orders/${o.order_id}`} className="font-semibold text-indigo-700 hover:underline">{o.order_no}</Link>{' '}
-                                                                {o.covers > 0 ? `${fmt(o.covers, l.uom)}` : l.on_po > 0 && !o.from_surplus ? <span className="text-indigo-700">via the PO</span> : fmt(0, l.uom)}
-                                                                {o.from_surplus && <span className="ml-1 text-sky-700">from the surplus</span>}
-                                                                {!o.from_surplus && !(l.on_po > 0) && Math.abs(o.covers - o.raised_for) > 0.0005 && <span className="ml-1 text-slate-500">(raised for {fmt(o.raised_for, l.uom)})</span>}
-                                                                {o.order_status === 'CANCELLED' && <span className="ml-1 font-bold text-rose-600">order cancelled</span>}</p>
-                                                        ))}
-                                                    </td>}
-                                                    {store && <td className="px-3 py-2.5 text-xs">{l.purchase_orders.length ? poLinks(l) : '—'}</td>}
-                                                    <td className="px-3 py-2.5 whitespace-nowrap">{fmtDate(l.needed_by)}</td>
+                                                    <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">{num(l.on_po, l.uom, 'text-indigo-700')}
+                                                        {l.purchase_orders.length > 0 && <span className="block text-[11px] text-indigo-700">{poLinks(l)}</span>}
+                                                        {l.short_closed > 0 && <span className="block text-[11px] font-semibold text-rose-700">{fmt(l.short_closed, l.uom)} short-closed — not coming</span>}</td>
+                                                    <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">{num(l.received, l.uom, l.on_po > 0 && l.received + 0.0005 >= l.on_po ? 'text-emerald-700' : '')}</td>
+                                                    <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">{num(l.to_order, l.uom, live ? 'text-amber-700' : '')}</td>
+                                                    <td className="px-3 py-2.5 whitespace-nowrap">{fmtDate(l.needed_by)}{late > 0 && <span className="block text-xs font-bold text-rose-700">{late} day{late === 1 ? '' : 's'} late</span>}</td>
                                                     {editable && (
                                                         <td className="px-3 py-2.5 text-right whitespace-nowrap">
                                                             <button type="button" className="p-1 rounded text-slate-500 hover:bg-slate-100" aria-label={`Edit line ${l.line_no}`}
@@ -195,10 +228,23 @@ export default function PurchaseRequisitionPage() {
                                                         </td>
                                                     )}
                                                 </tr>
-                                            ))}
+                                                {isOpen && <tr><td /><td colSpan={cols - 1 + (editable ? 1 : 0)} className="px-3 pb-3"><OrderSplit l={l} live={live} /></td></tr>}
+                                                </Fragment>
+                                                );
+                                            })}
                                         </Fragment>
                                     ))}
                                 </tbody>
+                                {openCount > 0 && (
+                                    <tfoot className="sticky bottom-0 bg-slate-50 border-t-2 border-slate-200 font-bold">
+                                        <tr><td /><td className="px-3 py-2.5">Total · {openCount} open line{openCount === 1 ? '' : 's'}</td>
+                                            <TotalCell vals={totals(l => l.purchase_qty, l => l.purchase_uom)} />
+                                            <TotalCell vals={totals(l => l.on_po)} cls="text-indigo-700" />
+                                            <TotalCell vals={totals(l => l.received)} />
+                                            <TotalCell vals={totals(l => l.to_order)} cls={live ? 'text-amber-700' : ''} />
+                                            <td colSpan={editable ? 2 : 1} /></tr>
+                                    </tfoot>
+                                )}
                             </table>
                         </div>
                     </>
@@ -315,6 +361,63 @@ export default function PurchaseRequisitionPage() {
                     </div>
                 </Modal>
             )}
+        </div>
+    );
+}
+
+// (29 Oct 2026) Who a line is for: each order's whole position on the item — needs = already has (issued + allocated +
+// free stock) + on open POs + this line + other requisitions + still short — then the line's spare, and a total.
+// "This line" is its part not on a PO yet; its PO part counts under "On open POs" until received, then under "Already has".
+function OrderSplit({ l, live }) {
+    const u = l.uom;
+    const v = (x, cls = '') => (x > 0.0005 ? <span className={cls}>{fmt(x, u)}</span> : <span className="text-slate-300">—</span>);
+    const sum = (f) => l.orders.reduce((s, o) => s + (f(o) || 0), 0);
+    const TD = 'px-2 py-1.5 text-right tabular-nums whitespace-nowrap';
+    return (
+        <div className="border border-slate-200 rounded-lg overflow-x-auto bg-slate-50/50">
+            <table className="w-full text-xs">
+                <thead className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100">
+                    <tr className="text-left"><th className="px-2 py-1.5">Order ({u})</th><th className={TD}>Raised for</th><th className={TD}>Needs</th><th className={TD}>Already has</th>
+                        <th className={TD}>On open POs</th><th className={TD}>Other requisitions</th><th className={`${TD} bg-amber-50`}>This line{live ? ', to order' : ''}</th><th className={TD}>Still short</th></tr>
+                </thead>
+                <tbody>
+                    {l.orders.map(o => {
+                        const p = o.position;
+                        const has = p ? [p.issued > 0 && `${fmt(p.issued, u)} issued`, p.allocated > 0 && `${fmt(p.allocated, u)} allocated`, p.from_stock > 0 && `${fmt(p.from_stock, u)} free stock — allocate it`].filter(Boolean) : [];
+                        const note = [
+                            o.order_status === 'CANCELLED' && <span key="c" className="font-bold text-rose-600">order cancelled</span>,
+                            o.from_surplus && <span key="s" className="text-sky-700">not in the request — uses this line’s spare</span>,
+                            !o.from_surplus && p?.only_line && Math.abs(p.needs - o.raised_for) >= 1   /* below a unit is rounding */ && <span key="g" className="text-slate-600">need {p.needs > o.raised_for ? 'grew' : 'dropped'} {fmt(Math.abs(p.needs - o.raised_for), u)} since raised</span>,
+                        ].filter(Boolean);
+                        return (
+                            <tr key={o.order_id} className="border-t border-slate-200 align-top">
+                                <td className="px-2 py-1.5"><Link to={`/v3/planning/orders/${o.order_id}`} className="font-semibold text-indigo-700 hover:underline whitespace-nowrap">{o.order_no}</Link>
+                                    {note.length > 0 && <span className="block text-[10px] leading-tight max-w-[14rem]">{note.map((x, i) => <span key={i} className="block">{x}</span>)}</span>}</td>
+                                <td className={`${TD} text-slate-500`}>{o.from_surplus ? '—' : fmt(o.raised_for, u)}</td>
+                                <td className={`${TD} font-semibold`}>{p ? fmt(p.needs, u) : '—'}</td>
+                                <td className={TD}>{p ? v(p.has) : '—'}{has.length > 0 && <span className="block text-[10px] text-slate-500">{has.join(' · ')}</span>}</td>
+                                <td className={TD}>{p ? v(p.on_po, 'text-indigo-700') : '—'}</td>
+                                <td className={TD}>{p ? v(p.other_prs) : '—'}</td>
+                                <td className={`${TD} bg-amber-50/60 font-bold`}>{v(o.covers, live ? 'text-amber-700' : '')}</td>
+                                <td className={TD}>{p ? v(p.short, 'font-bold text-rose-700') : '—'}</td>
+                            </tr>
+                        );
+                    })}
+                    {l.uncommitted > 0 && (
+                        <tr className="border-t border-slate-200">
+                            <td className="px-2 py-1.5 font-semibold text-sky-700" colSpan={6}>Spare — no order needs it yet (minimum order, pack size, rounding or a need that dropped); planning uses it for the next order</td>
+                            <td className={`${TD} bg-amber-50/60 font-bold text-sky-700`}>{fmt(l.uncommitted, u)}</td><td />
+                        </tr>
+                    )}
+                </tbody>
+                <tfoot className="border-t-2 border-slate-300 font-bold bg-slate-100">
+                    <tr><td className="px-2 py-1.5">Total</td><td className={`${TD} text-slate-500`}>{fmt(sum(o => o.raised_for), u)}</td>
+                        <td className={TD}>{fmt(sum(o => o.position?.needs), u)}</td><td className={TD}>{fmt(sum(o => o.position?.has), u)}</td>
+                        <td className={TD}>{fmt(sum(o => o.position?.on_po), u)}</td><td className={TD}>{fmt(sum(o => o.position?.other_prs), u)}</td>
+                        <td className={`${TD} bg-amber-50`}>{fmt(sum(o => o.covers) + (l.uncommitted || 0), u)}</td>
+                        <td className={`${TD} ${sum(o => o.position?.short) > 0.0005 ? 'text-rose-700' : ''}`}>{fmt(sum(o => o.position?.short), u)}</td></tr>
+                </tfoot>
+            </table>
         </div>
     );
 }
