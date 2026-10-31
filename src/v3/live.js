@@ -68,17 +68,29 @@ if (typeof document !== 'undefined') {
 }
 
 // Call `onChange` whenever 3.0 work may have changed. Returns whether the live connection is up.
-export function useV3Live(onChange, enabled = true) {
+// minGapMs (31 Oct 2026, production slowdown): at most one refresh per gap — a burst of changes while checkers scan
+// gives one refresh at the end of the gap, not one every 2 s (the Floor page and the Line loading board read every batch).
+export function useV3Live(onChange, enabled = true, { minGapMs = 0 } = {}) {
     const cb = useRef(onChange);
     cb.current = onChange;
+    const gap = useRef(minGapMs);
+    gap.current = minGapMs;
     const [up, setUp] = useState(connected);
     useEffect(() => {
         if (!enabled) return undefined;
-        const f = (reason) => cb.current?.(reason);
+        let last = 0;
+        let later = null;
+        const run = (reason) => { last = Date.now(); cb.current?.(reason); };
+        const f = (reason) => {
+            const wait = last + gap.current - Date.now();
+            if (!gap.current || wait <= 0) run(reason);
+            else if (!later) later = setTimeout(() => { later = null; run(reason); }, wait);
+        };
         subs.add(f);
         listeners.add(setUp);
         connect();
         return () => {
+            clearTimeout(later);
             subs.delete(f);
             listeners.delete(setUp);
             if (!subs.size && !msgSubs.size) disconnect();

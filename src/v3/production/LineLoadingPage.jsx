@@ -588,7 +588,7 @@ export default function LineLoadingPage() {
     useEffect(() => { productionApi.permissions().then(r => setPerms(r.data)).catch(() => {}); }, []);
     useEffect(() => { load(); }, [load]);
     const [tick, setTick] = useState(0);
-    const live = useV3Live(useCallback(() => { load(); setTick(t => t + 1); }, [load]));
+    const live = useV3Live(useCallback(() => { load(); setTick(t => t + 1); }, [load]), true, { minGapMs: 30000 });   // reads every batch: at most every 30 s (31 Oct 2026)
     const done = (text) => { setAssign(false); setMove(false); setMsg(text); load(); };
     // Check & complete (as 2.0): recalculate the batch; the stage closes once every piece / garment is OK (no Reject
     // since 18 Oct 2026 — rework and material replacement hold it open), else say what is holding it.

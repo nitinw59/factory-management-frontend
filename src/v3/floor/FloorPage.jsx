@@ -42,7 +42,7 @@ export default function FloorPage() {
     const [perms, setPerms] = useState({});
     const load = useCallback(() => productionApi.floor().then(r => { setD(r.data); setError(''); }).catch(err => setError(apiError(err, 'Failed to load the floor.'))), []);
     useEffect(() => { load(); productionApi.permissions().then(r => setPerms(r.data)).catch(() => {}); }, [load]);
-    const live = useV3Live(load);
+    const live = useV3Live(load, true, { minGapMs: 30000 });   // reads every batch: at most every 30 s (31 Oct 2026)
     if (!d) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
     const types = [...new Set(d.lines.map(l => l.line_type))];
     const full = d.lines.filter(l => l.wip_limit && l.open_batches >= l.wip_limit).length;
