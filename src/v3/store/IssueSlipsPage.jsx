@@ -8,9 +8,11 @@ import { apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { TARGET_LABEL, inr, useStorePermissions, exportIssueRegister } from './storeShared';
+import { useSeesPrices } from '../V3Access';
 
 export default function IssueSlipsPage() {
     const perms = useStorePermissions();
+    const prices = useSeesPrices();
     const navigate = useNavigate();
     const [rows, setRows] = useState(null);
     const [search, setSearch] = useState('');
@@ -30,7 +32,7 @@ export default function IssueSlipsPage() {
 
     return (
         <div>
-            <PageHeader title="Store issue slips" subtitle={`Spares and general items issued to people, machines and departments. Net value shown: ₹${inr(total)}.`}
+            <PageHeader title="Store issue slips" subtitle={`Spares and general items issued to people, machines and departments.${prices ? ` Net value shown: ₹${inr(total)}.` : ''}`}
                 actions={<>
                     <SecondaryButton onClick={excel}><FileSpreadsheet size={14} /> Excel register</SecondaryButton>
                     {perms.stock && <PrimaryButton onClick={() => navigate('/v3/store/issues/new')}><Plus size={14} /> New issue slip</PrimaryButton>}
@@ -48,10 +50,10 @@ export default function IssueSlipsPage() {
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
                     <table className="w-full text-sm min-w-[860px]">
                         <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
-                            <tr><th className="px-3 py-2.5">Slip</th><th className="px-3 py-2.5">Date</th><th className="px-3 py-2.5">Issued to</th><th className="px-3 py-2.5">Department</th><th className="px-3 py-2.5">Purpose</th><th className="px-3 py-2.5 text-right">Items</th><th className="px-3 py-2.5 text-right">Value ₹</th></tr>
+                            <tr><th className="px-3 py-2.5">Slip</th><th className="px-3 py-2.5">Date</th><th className="px-3 py-2.5">Issued to</th><th className="px-3 py-2.5">Department</th><th className="px-3 py-2.5">Purpose</th><th className="px-3 py-2.5 text-right">Items</th>{prices && <th className="px-3 py-2.5 text-right">Value ₹</th>}</tr>
                         </thead>
                         <tbody>
-                            {rows.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No issue slips.</td></tr>}
+                            {rows.length === 0 && <tr><td colSpan={prices ? 7 : 6} className="px-4 py-8 text-center text-slate-400">No issue slips.</td></tr>}
                             {rows.map(r => (
                                 <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
                                     <td className="px-3 py-2.5"><Link to={`/v3/store/issues/${r.id}`} className="font-semibold text-indigo-700 hover:underline whitespace-nowrap">{r.issue_no}</Link></td>
@@ -60,7 +62,7 @@ export default function IssueSlipsPage() {
                                     <td className="px-3 py-2.5 text-slate-600">{r.department_name || '—'}</td>
                                     <td className="px-3 py-2.5 text-slate-600 text-xs">{r.purpose || ''}</td>
                                     <td className="px-3 py-2.5 text-right tabular-nums">{r.line_count}</td>
-                                    <td className="px-3 py-2.5 text-right tabular-nums">{inr(r.net_value)}{r.returned_value > 0 && <span className="block text-[11px] text-slate-500">after ₹{inr(r.returned_value)} returned</span>}</td>
+                                    {prices && <td className="px-3 py-2.5 text-right tabular-nums">{inr(r.net_value)}{r.returned_value > 0 && <span className="block text-[11px] text-slate-500">after ₹{inr(r.returned_value)} returned</span>}</td>}
                                 </tr>
                             ))}
                         </tbody>

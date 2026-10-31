@@ -12,6 +12,7 @@ import { GRN_STATUS } from './grnShared';
 import { exportFabricInwardChallan } from './grnPrint';
 import { loadLetterhead } from '../components/letterhead';
 import { useAuth } from '../../context/AuthContext';
+import PoLink from '../components/PoLink';
 
 export default function GrnListPage() {
     const rowLink = useRowLink();   // the whole row opens the record
@@ -73,7 +74,7 @@ export default function GrnListPage() {
                             {rows.map(r => (
                                 <tr key={r.id} {...rowLink(`/v3/purchasing/grns/${r.id}`)} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50 focus-visible:bg-indigo-50 focus:outline-none">
                                     <td className="px-4 py-2.5"><Link to={`/v3/purchasing/grns/${r.id}`} className="font-semibold text-indigo-700 hover:underline whitespace-nowrap">{r.grn_no}</Link><span className="block text-xs text-slate-500">{fmtDate(r.received_date)}</span></td>
-                                    <td className="px-4 py-2.5"><Link to={`/v3/purchasing/orders/${r.po_id}`} className="text-indigo-700 hover:underline">{r.po_no}</Link></td>
+                                    <td className="px-4 py-2.5"><PoLink id={r.po_id} className="text-indigo-700 hover:underline">{r.po_no}</PoLink></td>
                                     <td className="px-4 py-2.5">{r.supplier_name}<span className="block text-xs text-slate-500">challan {r.challan_no}</span></td>
                                     <td className="px-4 py-2.5 text-right">{r.line_count}{r.rejected > 0 && <span className="block text-[11px] text-rose-600">rejections</span>}</td>
                                     <td className="px-4 py-2.5 text-slate-600">{r.received_by_name || '—'}</td>

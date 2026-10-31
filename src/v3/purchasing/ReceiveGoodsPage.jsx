@@ -11,7 +11,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, PackageCheck, Plus, Trash2, AlertTriangle, Save, ShoppingBag } from 'lucide-react';
-import { useV3Access } from '../V3Access';
+import { useV3Access, useSeesPrices } from '../V3Access';
 import { purchasingApi } from '../api/purchasingApi';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
@@ -134,13 +134,15 @@ function LineForm({ l, value, onChange }) {
 }
 
 // Receipt summary (20 Oct 2026): each ticked line — rolls, accepted quantity (+ metres for yard fabric), rate, value
-// before GST — and a Total row: lines, rolls, quantity per unit (+ metres), value, GST and value with GST.
+// before GST — and a Total row: lines, rolls, quantity per unit (+ metres), value, GST and value with GST. The stores see
+// no rates or values (29 Oct 2026): rolls and quantities only.
 function ReceiptSummary({ lines, vals }) {
+    const prices = useSeesPrices();
     const rows = lines.filter(l => vals[l.id]?.on).map(l => {
         const v = vals[l.id]; const qty = acceptedOf(l, v);
         return { l, rolls: l.kind === 'FABRIC' ? rollsOf(v).length : null, qty, amount: qty * (l.rate || 0), gst: qty * (l.rate || 0) * (l.gst_pct || 0) / 100 };
     });
-    if (!rows.length) return <p className="mb-4 text-sm text-slate-400">Tick the lines that arrived — their rolls, quantity and value add up here.</p>;
+    if (!rows.length) return <p className="mb-4 text-sm text-slate-400">Tick the lines that arrived — their rolls{prices ? ', quantity and value' : ' and quantity'} add up here.</p>;
     const byUom = rows.reduce((m, r) => { m[r.l.purchase_uom] = (m[r.l.purchase_uom] || 0) + r.qty; return m; }, {});
     const metres = rows.reduce((s, r) => s + (TO_M[r.l.purchase_uom] ? r.qty * TO_M[r.l.purchase_uom] : 0), 0);
     const rollCount = rows.reduce((s, r) => s + (r.rolls || 0), 0);
@@ -150,14 +152,14 @@ function ReceiptSummary({ lines, vals }) {
         <div className="mb-4 bg-white border border-slate-200 border-l-4 border-l-indigo-500 rounded-xl overflow-x-auto shadow-sm">
             <p className="px-4 py-2.5 border-b bg-indigo-50 border-indigo-100 text-sm font-black uppercase tracking-wider text-indigo-900">Receipt summary</p>
             <table className="w-full text-sm min-w-[620px]">
-                <thead className="bg-indigo-50/60 text-indigo-900/70 text-left"><tr><th className={TH}>PO line</th><th className={`${TH} text-right`}>Rolls</th><th className={`${TH} text-right`}>Accepted</th><th className={`${TH} text-right`}>Rate</th><th className={`${TH} text-right`}>Value (before GST)</th></tr></thead>
+                <thead className="bg-indigo-50/60 text-indigo-900/70 text-left"><tr><th className={TH}>PO line</th><th className={`${TH} text-right`}>Rolls</th><th className={`${TH} text-right`}>Accepted</th>{prices && <><th className={`${TH} text-right`}>Rate</th><th className={`${TH} text-right`}>Value (before GST)</th></>}</tr></thead>
                 <tbody>{rows.map(({ l, rolls, qty, amount: a }) => (
                     <tr key={l.id} className="border-t border-slate-100">
                         <td className="px-3 py-1.5"><b>{l.line_no}</b> <span className="text-xs text-slate-500">{l.label}</span></td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{rolls == null ? '—' : rolls}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{fmt(qty)} {l.purchase_uom}{metresText(qty, l.purchase_uom)}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{l.rate ? `${money(l.rate)}/${l.purchase_uom}` : '—'}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">{money(a)}</td>
+                        {prices && <><td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{l.rate ? `${money(l.rate)}/${l.purchase_uom}` : '—'}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{money(a)}</td></>}
                     </tr>
                 ))}</tbody>
                 <tfoot className="bg-indigo-50/70 border-t-2 border-indigo-200 font-bold">
@@ -165,12 +167,12 @@ function ReceiptSummary({ lines, vals }) {
                         <td className="px-3 py-2">Total · {rows.length} line{rows.length === 1 ? '' : 's'}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{rollCount || '—'}</td>
                         <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{Object.entries(byUom).map(([u, q]) => `${fmt(q)} ${u}`).join(' + ')}{metres > 0 && <span className="block text-[11px] font-semibold text-slate-600">= {fmt(metres)} m</span>}</td>
-                        <td className="px-3 py-2" />
-                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(amount)}{gst > 0 && <span className="block text-[11px] font-semibold text-slate-600">+ GST {money(gst)} = {money(amount + gst)}</span>}</td>
+                        {prices && <><td className="px-3 py-2" />
+                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{money(amount)}{gst > 0 && <span className="block text-[11px] font-semibold text-slate-600">+ GST {money(gst)} = {money(amount + gst)}</span>}</td></>}
                     </tr>
                 </tfoot>
             </table>
-            <p className="px-3 py-1.5 text-[11px] text-slate-500 border-t border-slate-100">Accepted quantities only (rejected goods are not paid for) at the PO rate.</p>
+            <p className="px-3 py-1.5 text-[11px] text-slate-500 border-t border-slate-100">Accepted quantities only{prices ? ' (rejected goods are not paid for) at the PO rate' : ''}.</p>
         </div>
     );
 }

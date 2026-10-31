@@ -107,10 +107,12 @@ function NotForRole({ me }) {
 
 const linkCls = ({ isActive }) => `flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-semibold ${isActive ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`;
 
-// Menu: sections of the user's own work (fold open / shut, remembered), then "More" — pages the
+// Menu: a search box (29 Oct 2026), sections of the user's own work (fold open / shut, remembered), then "More" — pages the
 // user may only look at. The section of the open page is always shown open.
 function Sidebar({ me, approvals, onNavigate }) {
     const location = useLocation();
+    const navigate = useNavigate();
+    const [find, setFind] = useState('');
     const [shut, setShut] = useState(() => store.get('v3.nav.shut', {}));
     const [moreOpen, setMoreOpen] = useState(() => store.get('v3.nav.more', false));
     const toggle = (s) => setShut(prev => { const next = { ...prev, [s]: !prev[s] }; store.set('v3.nav.shut', next); return next; });
@@ -122,6 +124,12 @@ function Sidebar({ me, approvals, onNavigate }) {
     };
     const main = groups(visibleNav(me.menu, me.work));
     const more = groups(visibleNav(me.menu, me.work, { lookOnly: true }));
+    // Search: every page the user may open (own work and "More"), by name, section or what it is for.
+    const words = find.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const found = words.length ? [...main, ...more].flatMap(g => g.items.map(n => ({ ...n, section: g.section })))
+        .filter(n => { const hay = `${n.label} ${n.section} ${n.text || ''}`.toLowerCase(); return words.every(w => hay.includes(w)); })
+        .sort((a, b) => Number(!a.label.toLowerCase().includes(words[0])) - Number(!b.label.toLowerCase().includes(words[0]))) : null;
+    const go = (n) => { setFind(''); navigate(n.to); onNavigate?.(); };
     const link = (n) => (
         <NavLink key={n.to} to={n.to} end={n.end} className={linkCls} onClick={onNavigate}>
             <n.icon size={16} className="shrink-0" /> <span className="min-w-0 flex-1">{n.label}</span>
@@ -130,7 +138,19 @@ function Sidebar({ me, approvals, onNavigate }) {
     );
     return (
         <nav className="p-3 space-y-0.5" aria-label="3.0 menu">
-            {main.map(g => {
+            <div className="relative mb-2">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input type="search" value={find} onChange={e => setFind(e.target.value)} placeholder="Find a page…" aria-label="Find a page in the menu"
+                    onKeyDown={e => { if (e.key === 'Escape') setFind(''); if (e.key === 'Enter' && found?.length) go(found[0]); }}
+                    className="w-full pl-8 pr-2 py-1.5 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200" />
+            </div>
+            {found && (found.length ? found.map(n => (
+                <button key={n.to} type="button" onClick={() => go(n)} className="w-full text-left flex items-start gap-2.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                    <n.icon size={16} className="shrink-0 mt-0.5" />
+                    <span className="min-w-0 flex-1">{n.label}<span className="block text-[11px] font-normal text-slate-400 truncate">{n.section}{n.text ? ` · ${n.text}` : ''}</span></span>
+                </button>
+            )) : <p className="px-3 py-2 text-xs text-slate-400">No page matches “{find.trim()}”.</p>)}
+            {!found && main.map(g => {
                 const open = g.section === 'Home' || g.section === here || !shut[g.section];
                 return (
                     <div key={g.section}>
@@ -145,7 +165,7 @@ function Sidebar({ me, approvals, onNavigate }) {
                     </div>
                 );
             })}
-            {more.length > 0 && (
+            {!found && more.length > 0 && (
                 <div className="pt-3 mt-3 border-t border-slate-100">
                     <button type="button" onClick={() => { setMoreOpen(!moreOpen); store.set('v3.nav.more', !moreOpen); }} aria-expanded={moreOpen}
                         className="w-full flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-700 px-3 py-1.5">

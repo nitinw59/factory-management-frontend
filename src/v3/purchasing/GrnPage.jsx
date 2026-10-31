@@ -18,6 +18,7 @@ import { GRN_STATUS, grnToDraft, writeDraft } from './grnShared';
 import { exportFabricInwardChallan, hasFabric } from './grnPrint';
 import { loadLetterhead } from '../components/letterhead';
 import { useAuth } from '../../context/AuthContext';
+import PoLink from '../components/PoLink';
 
 const fmt = (v) => Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
 const ACTION = { RECEIVED: 'Received', PENDING_APPROVAL: 'Sent for approval', APPROVED: 'Approved', REJECTED: 'Rejected', REVERSED: 'Reversed', DOCUMENT: 'Document', RETURNED: 'Returned to supplier', WITHDRAWN: 'Withdrawn to correct' };
@@ -68,7 +69,7 @@ export default function GrnPage() {
             <div className="flex flex-wrap items-center gap-3 mb-2">
                 <h1 className="text-2xl font-black text-slate-900">{g.grn_no}</h1>
                 <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${GRN_STATUS[g.status].cls}`}>{GRN_STATUS[g.status].label}</span>
-                <span className="text-sm text-slate-500">against <Link to={`/v3/purchasing/orders/${g.po_id}`} className="text-indigo-700 font-semibold hover:underline">{g.po_no}</Link> · {g.supplier_name}</span>
+                <span className="text-sm text-slate-500">against <PoLink id={g.po_id} className="text-indigo-700 font-semibold hover:underline">{g.po_no}</PoLink> · {g.supplier_name}</span>
             </div>
             {g.status === 'PENDING_APPROVAL' && (
                 <div className="mb-3 text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-3 py-2">

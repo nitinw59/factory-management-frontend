@@ -9,10 +9,12 @@ import { storeApi } from '../api/storeApi';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { inr, fmt, LEDGER_LABEL, useStorePermissions } from './storeShared';
+import { useSeesPrices } from '../V3Access';
 
 export default function StoreItemPage() {
     const { id } = useParams();
     const perms = useStorePermissions();
+    const prices = useSeesPrices();
     const [item, setItem] = useState(null);
     const [error, setError] = useState('');
     const [adj, setAdj] = useState(null);
@@ -44,34 +46,33 @@ export default function StoreItemPage() {
             <div className="grid sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
                 {[
                     ['On hand', `${fmt(item.on_hand, item.usage_uom)} ${item.usage_uom}`, item.below_min ? 'text-rose-700' : ''],
-                    ['Average cost', `₹${inr(item.avg_cost)} / ${item.usage_uom}`],
-                    ['Stock value', `₹${inr(item.stock_value)}`],
+                    ...(prices ? [['Average cost', `₹${inr(item.avg_cost)} / ${item.usage_uom}`], ['Stock value', `₹${inr(item.stock_value)}`]] : []),
                     ['Minimum / reorder', item.min_stock ? `${fmt(item.min_stock, item.usage_uom)} / ${fmt(item.reorder_qty, item.usage_uom)}` : 'not watched'],
                     ['Requested', `${fmt(item.requested, item.usage_uom)} ${item.usage_uom}`],
                     ['On order (PO)', `${fmt(item.on_order, item.usage_uom)} ${item.usage_uom}`],
                 ].map(([k, v, cls]) => <div key={k} className="bg-white border border-slate-200 rounded-xl p-3"><p className="text-xs font-bold text-slate-500">{k}</p><p className={`font-black ${cls || 'text-slate-800'}`}>{v}</p></div>)}
             </div>
             <div className="flex flex-wrap gap-2 mb-3">
-                {perms.stock && <SecondaryButton onClick={() => { setFormError(''); setAdj({ dir: 'out', qty: '', cost: '', reason: '' }); }}><SlidersHorizontal size={14} /> Adjust stock</SecondaryButton>}
-                {perms.stock && !item.has_movements && <Link to="/v3/store/opening-stock" className="text-sm font-semibold text-indigo-700 hover:underline self-center">Enter opening stock →</Link>}
+                {perms.count && <SecondaryButton onClick={() => { setFormError(''); setAdj({ dir: 'out', qty: '', cost: '', reason: '' }); }}><SlidersHorizontal size={14} /> Adjust stock</SecondaryButton>}
+                {perms.count && !item.has_movements && <Link to="/v3/store/opening-stock" className="text-sm font-semibold text-indigo-700 hover:underline self-center">Enter opening stock →</Link>}
                 <span className="text-xs text-slate-500 self-center">Bought in {item.purchase_uom}{item.purchase_uom !== item.usage_uom ? ` of ${fmt(item.factor)} ${item.usage_uom}` : ''}{item.hsn_code ? ` · HSN ${item.hsn_code}` : ''}{item.gst_pct != null ? ` · GST ${item.gst_pct}%` : ''}</span>
             </div>
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
                 <table className="w-full text-sm min-w-[860px]">
                     <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
-                        <tr><th className="px-3 py-2.5">When</th><th className="px-3 py-2.5">Movement</th><th className="px-3 py-2.5 text-right">Qty</th><th className="px-3 py-2.5 text-right">Balance</th><th className="px-3 py-2.5 text-right">Rate ₹</th><th className="px-3 py-2.5 text-right">Value ₹</th><th className="px-3 py-2.5 text-right">Avg after ₹</th><th className="px-3 py-2.5">Reference / reason</th></tr>
+                        <tr><th className="px-3 py-2.5">When</th><th className="px-3 py-2.5">Movement</th><th className="px-3 py-2.5 text-right">Qty</th><th className="px-3 py-2.5 text-right">Balance</th>{prices && <><th className="px-3 py-2.5 text-right">Rate ₹</th><th className="px-3 py-2.5 text-right">Value ₹</th><th className="px-3 py-2.5 text-right">Avg after ₹</th></>}<th className="px-3 py-2.5">Reference / reason</th></tr>
                     </thead>
                     <tbody>
-                        {item.ledger.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">No stock movements yet.</td></tr>}
+                        {item.ledger.length === 0 && <tr><td colSpan={prices ? 8 : 5} className="px-4 py-8 text-center text-slate-400">No stock movements yet.</td></tr>}
                         {item.ledger.map(l => (
                             <tr key={l.id} className="border-t border-slate-100 align-top">
                                 <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{new Date(l.created_at).toLocaleString()}{l.user_name ? <span className="block">{l.user_name}</span> : null}</td>
                                 <td className="px-3 py-2">{LEDGER_LABEL[l.kind] || l.kind}</td>
                                 <td className={`px-3 py-2 text-right tabular-nums font-bold ${l.quantity < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{l.quantity > 0 ? '+' : ''}{fmt(l.quantity, item.usage_uom)}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{fmt(l.balance_after, item.usage_uom)}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{inr(l.unit_cost)}</td>
+                                {prices && <><td className="px-3 py-2 text-right tabular-nums">{inr(l.unit_cost)}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{inr(l.value)}</td>
-                                <td className="px-3 py-2 text-right tabular-nums text-slate-500">{inr(l.avg_cost_after)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-slate-500">{inr(l.avg_cost_after)}</td></>}
                                 <td className="px-3 py-2 text-xs">{refLink(l)}{l.reason ? <span className="block text-slate-500">{l.reason}</span> : null}</td>
                             </tr>
                         ))}

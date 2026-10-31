@@ -6,12 +6,12 @@
 // Under each status: the purchase orders reserved for this order as chips (PO · qty · due) — red when due after the
 // item's needed-by date, dashed while not issued; tap for the details (25 Oct 2026). Fabric spelled two ways on one order (two fabric records) is flagged.
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { AlertTriangle, FileDown, ChevronDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { loadLetterhead, drawPdfLetterhead } from '../components/letterhead';
+import PoLink from '../components/PoLink';
 
 const fmt = (n, uom) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 2 });
 const dmy = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '');
@@ -74,7 +74,7 @@ function PoChip({ p, it }) {
             </button>
             {open && (
                 <span className="absolute left-0 top-full z-30 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 text-xs text-slate-700 shadow-lg whitespace-normal">
-                    <Link to={`/v3/purchasing/orders/${p.po_id}`} className="font-bold text-indigo-700 hover:underline">{p.po_no}</Link>
+                    <PoLink id={p.po_id} className="font-bold text-indigo-700 hover:underline">{p.po_no}</PoLink>
                     <span className="block">{fmt(p.qty, u)} {u} for this order · due {p.due ? dmy(p.due) : '—'}</span>
                     {it.needed_by && <span className={`block ${p.late ? 'font-bold text-rose-700' : ''}`}>needed by {dmy(it.needed_by)}{p.late ? ' — the PO arrives after it' : ''}</span>}
                     {draft && <span className="block font-semibold text-amber-800">Draft — not sent to the supplier yet</span>}

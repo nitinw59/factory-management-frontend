@@ -59,7 +59,7 @@ export default function ReorderPage() {
                                             <td className="px-3 py-2 text-right tabular-nums">{r.on_order != null ? fmt(r.on_order, r.usage_uom) : '—'}</td>
                                             <td className="px-3 py-2 text-right tabular-nums">{fmt(r.min_stock, r.usage_uom)}</td>
                                             <td className="px-3 py-2 text-right tabular-nums font-bold text-rose-700">{r.short ? fmt(r.short, r.usage_uom) : '—'}</td>
-                                            <td className="px-3 py-2 text-xs text-slate-600">{r.last_rate ? `₹${inr(r.last_rate)} / ${r.purchase_uom} · ${r.last_supplier}` : '—'}</td>
+                                            <td className="px-3 py-2 text-xs text-slate-600">{r.last_rate ? `₹${inr(r.last_rate)} / ${r.purchase_uom} · ${r.last_supplier}` : (r.last_supplier || '—')}</td>
                                             <td className="px-3 py-2">{on ? <div className="flex items-center gap-1"><input className={`${inputCls} !py-1`} type="number" min="1" step="1" value={picks[r.id]} onChange={e => setPicks({ ...picks, [r.id]: e.target.value })} aria-label={`Quantity of ${r.label}`} /><span className="text-xs text-slate-500">{r.purchase_uom}</span></div>
                                                 : r.suggest_purchase_qty ? <span className="text-xs text-slate-500">suggest {r.suggest_purchase_qty} {r.purchase_uom}</span> : null}</td>
                                         </tr>

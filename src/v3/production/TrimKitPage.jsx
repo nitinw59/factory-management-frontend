@@ -347,7 +347,10 @@ function KitView({ id }) {
                                 {h.note && <span className="block text-xs text-slate-500">{h.note}</span>}
                                 <ul className="ml-5 list-disc text-xs text-slate-600">{h.lines.map(x => <li key={x.kit_line_id}>{x.label}: {x.units ? `${x.units} ${k.lines.find(l => l.id === x.kit_line_id)?.purchase_uom} = ` : ''}{qty(x.qty, x.uom)} {x.uom}</li>)}
                                     {h.labels_qty > 0 && <li>Garment labels: {h.labels_qty} pcs{h.labels_counted != null && h.labels_counted !== h.labels_qty ? ` (counted ${h.labels_counted})` : ''}{h.labels_note ? ` — ${h.labels_note}` : ''}</li>}</ul>
-                                {bill && <p className="mt-1 text-xs"><b>Valuation bill {bill.bill_no}</b> · {money(bill.total)}{bill.unpriced ? <span className="text-amber-700"> · some items without a rate (valued at 0)</span> : ''} · <button type="button" className="font-bold text-indigo-700 hover:underline" onClick={async () => exportKitBill(k, bill, await loadLetterhead())}>PDF</button></p>}
+                                {/* Without prices (the stores and the floor, 29 Oct 2026) the bill shows its number only — its values are for accounts. */}
+                                {bill && (bill.total === undefined
+                                    ? <p className="mt-1 text-xs"><b>Valuation bill {bill.bill_no}</b> <span className="text-slate-500">· values with accounts</span></p>
+                                    : <p className="mt-1 text-xs"><b>Valuation bill {bill.bill_no}</b> · {money(bill.total)}{bill.unpriced ? <span className="text-amber-700"> · some items without a rate (valued at 0)</span> : ''} · <button type="button" className="font-bold text-indigo-700 hover:underline" onClick={async () => exportKitBill(k, bill, await loadLetterhead())}>PDF</button></p>)}
                             </div>
                         );
                     })}

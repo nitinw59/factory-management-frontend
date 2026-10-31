@@ -11,8 +11,10 @@ import { PageHeader, Field, inputCls, PrimaryButton, ErrorBox } from '../compone
 import { todayLocal } from '../salesOrders/SalesOrderStatusBadge';
 import StoreItemPicker from './StoreItemPicker';
 import { TARGET_LABEL, inr, fmt } from './storeShared';
+import { useSeesPrices } from '../V3Access';
 
 export default function NewIssueSlipPage() {
+    const prices = useSeesPrices();
     const navigate = useNavigate();
     const [type, setType] = useState('PERSON');
     const [q, setQ] = useState('');
@@ -89,7 +91,7 @@ export default function NewIssueSlipPage() {
                 <StoreItemPicker exclude={lines.map(l => String(l.item.id))} onPick={(item) => setLines([...lines, { item, qty: '', notes: '' }])} />
                 {lines.length > 0 && (
                     <table className="w-full text-sm mt-3">
-                        <thead className="text-left text-xs text-slate-500"><tr><th className="py-1">Item</th><th className="py-1 text-right">In stock</th><th className="py-1 w-32">Quantity</th><th className="py-1">Note</th><th className="py-1 text-right">Value ₹</th><th className="w-8" /></tr></thead>
+                        <thead className="text-left text-xs text-slate-500"><tr><th className="py-1">Item</th><th className="py-1 text-right">In stock</th><th className="py-1 w-32">Quantity</th><th className="py-1">Note</th>{prices && <th className="py-1 text-right">Value ₹</th>}<th className="w-8" /></tr></thead>
                         <tbody>
                             {lines.map((l, i) => {
                                 const over = Number(l.qty) > l.item.on_hand;
@@ -99,7 +101,7 @@ export default function NewIssueSlipPage() {
                                         <td className={`py-1.5 text-right tabular-nums ${over ? 'text-rose-700 font-bold' : ''}`}>{fmt(l.item.on_hand, l.item.usage_uom)} {l.item.usage_uom}</td>
                                         <td className="py-1.5"><input className={`${inputCls} !py-1`} type="number" min="0" step="any" value={l.qty} onChange={e => setLines(lines.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))} aria-label={`Quantity of ${l.item.label}`} /></td>
                                         <td className="py-1.5 pl-2"><input className={`${inputCls} !py-1`} value={l.notes} onChange={e => setLines(lines.map((x, j) => (j === i ? { ...x, notes: e.target.value } : x)))} aria-label="Note" /></td>
-                                        <td className="py-1.5 text-right tabular-nums">{inr(Number(l.qty || 0) * l.item.avg_cost)}</td>
+                                        {prices && <td className="py-1.5 text-right tabular-nums">{inr(Number(l.qty || 0) * l.item.avg_cost)}</td>}
                                         <td className="py-1.5 text-right"><button type="button" className="p-1 text-rose-500" aria-label="Remove" onClick={() => setLines(lines.filter((_, j) => j !== i))}><Trash2 size={14} /></button></td>
                                     </tr>
                                 );
@@ -109,7 +111,7 @@ export default function NewIssueSlipPage() {
                 )}
             </div>
             <ErrorBox text={error} />
-            <PrimaryButton onClick={save} busy={busy} disabled={busy || !valid}><PackageMinus size={15} /> Issue · ₹{inr(value)}</PrimaryButton>
+            <PrimaryButton onClick={save} busy={busy} disabled={busy || !valid}><PackageMinus size={15} /> Issue{prices ? ` · ₹${inr(value)}` : ''}</PrimaryButton>
         </div>
     );
 }

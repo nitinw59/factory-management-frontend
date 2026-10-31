@@ -16,6 +16,7 @@ import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } fr
 import { fmtDate, todayLocal } from '../salesOrders/SalesOrderStatusBadge';
 import { PR_STATUS, exportPrPdf, exportPrExcel } from './prShared';
 import StoreItemPicker from '../store/StoreItemPicker';
+import PoLink from '../components/PoLink';
 
 const EDITABLE = ['DRAFT', 'REJECTED'];
 const fmt = (v, uom) => Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 3 });
@@ -136,7 +137,7 @@ export default function PurchaseRequisitionPage() {
                 const stateOf = (l) => (!live || l.line_status !== 'OPEN' ? null
                     : l.to_order > 0.0005 ? (l.on_po > 0 ? ['Partly on PO', 'bg-amber-50 text-amber-800 border-amber-200'] : ['Not on PO', 'bg-amber-50 text-amber-800 border-amber-200'])
                     : l.received + l.short_closed + 0.0005 >= l.usage_qty ? ['Received', 'bg-emerald-50 text-emerald-700 border-emerald-200'] : ['On PO', 'bg-indigo-50 text-indigo-700 border-indigo-200']);
-                const poLinks = (l) => (l.purchase_orders || []).map((p, i) => <span key={p.po_id}>{i ? ', ' : ''}<Link to={`/v3/purchasing/orders/${p.po_id}`} className="underline">{p.po_no}</Link>{p.status === 'DRAFT' ? ' (draft)' : p.status === 'SHORT_CLOSED' ? ' (short-closed)' : ''}</span>);
+                const poLinks = (l) => (l.purchase_orders || []).map((p, i) => <span key={p.po_id}>{i ? ', ' : ''}<PoLink id={p.po_id} className="underline">{p.po_no}</PoLink>{p.status === 'DRAFT' ? ' (draft)' : p.status === 'SHORT_CLOSED' ? ' (short-closed)' : ''}</span>);
                 const hasSplit = (l) => !store && (l.orders.length > 0 || l.uncommitted > 0);
                 const toggle = (lid) => setOpenLines(s => { const n = new Set(s); if (n.has(lid)) n.delete(lid); else n.add(lid); return n; });
                 const splitLines = shown.filter(hasSplit);
@@ -195,7 +196,7 @@ export default function PurchaseRequisitionPage() {
                                                         {/* (16 Oct 2026) its orders are covered by a firm PO's free quantity: not needed — close it rather than order it twice */}
                                                         {l.line_status === 'OPEN' && l.not_needed_qty > 0 && pr.status !== 'CANCELLED' && (
                                                             <span className="block mt-1 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
-                                                                Not needed{l.not_needed_qty + 1e-9 < l.usage_qty ? ` for ${fmt(l.not_needed_qty, l.uom)} ${l.uom}` : ''}: its order is covered by {l.covered_by_po.map((p, i) => <span key={p.po_id}>{i ? ', ' : ''}<Link to={`/v3/purchasing/orders/${p.po_id}`} className="underline">{p.po_no}</Link></span>)} — close the line so it isn’t ordered twice.
+                                                                Not needed{l.not_needed_qty + 1e-9 < l.usage_qty ? ` for ${fmt(l.not_needed_qty, l.uom)} ${l.uom}` : ''}: its order is covered by {l.covered_by_po.map((p, i) => <span key={p.po_id}>{i ? ', ' : ''}<PoLink id={p.po_id} className="underline">{p.po_no}</PoLink></span>)} — close the line so it isn’t ordered twice.
                                                             </span>
                                                         )}
                                                         {l.requested_qty != null && <span className="block mt-1 text-xs text-amber-800"><b>Reduced</b> from {fmt(l.requested_qty, 'pcs')} {l.purchase_uom} — {l.decision_reason}{l.decided_by_name ? <span className="text-slate-400"> · {l.decided_by_name}</span> : null}</span>}

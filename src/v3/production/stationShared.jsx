@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
-import { CalendarDays, Download, HelpCircle, RefreshCw, KeyRound, Hammer, CheckCircle2, Check, Clock, ThumbsUp, Undo2, Loader2, Wrench } from 'lucide-react';
+import { CalendarDays, Download, HelpCircle, RefreshCw, KeyRound, Hammer, CheckCircle2, Check, Clock, ThumbsUp, Undo2, Loader2, Wrench, ChevronRight } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { productionApi } from '../api/productionApi';
 import { apiError } from '../api/mastersApi';
@@ -12,7 +12,9 @@ import { Field, inputCls, SecondaryButton, ErrorBox, Loading } from '../componen
 
 const label = (s) => String(s || '').toLowerCase().replace('_', ' ');
 
-// The checker's own work, per day × batch × stage, with an Excel download.
+// The checker's own work (30 Oct 2026, like 2.0's Today's Work): by batch, hourly, by roll (part × size under it),
+// the defects found most, each piece / garment underneath, and an Excel download. Each item counts once a day by its
+// last check — rework then repaired is one item, repaired (the server's checkedItems).
 export function WorkLogButton() {
     const [open, setOpen] = useState(false);
     return (
@@ -25,50 +27,177 @@ export function WorkLogButton() {
     );
 }
 
+const RESULT = { APPROVED: ['OK', 'text-emerald-700'], REPAIRED: ['Repaired', 'text-teal-700'], NEEDS_REWORK: ['In rework', 'text-amber-700'], QC_REJECTED: ['Rejected', 'text-rose-700'], UNDONE: ['Undone', 'text-slate-400 line-through'] };
+const COLS = [['checked', 'Checked', 'font-black text-slate-800'], ['approved', 'OK', 'text-emerald-700'], ['repaired', 'Repaired', 'text-teal-700'], ['in_rework', 'In rework', 'text-amber-700'], ['rejected', 'Rejected', 'text-rose-700'], ['rework_found', 'Rework found', 'text-indigo-700']];
+const istTime = (t) => new Date(t).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const dayLabel = (day) => new Date(`${day}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+const hourLabel = (h) => `${h}:00 – ${String(Number(h) + 1).padStart(2, '0')}:00`;
+const rollLabel = (r) => (r.roll_no != null ? `Roll #${r.roll_no}` : 'No roll');
+const groupLabel = (g) => [g.part_name, g.size && `Size ${g.size}`].filter(Boolean).join(' · ') || '—';
+const sumOf = (list) => Object.fromEntries(COLS.map(([k]) => [k, list.reduce((t, r) => t + (r[k] || 0), 0)]));
+const th = 'px-3 py-2', td = 'px-3 py-1.5';
+
+function Nums({ t }) {
+    return COLS.map(([k, , cls]) => <td key={k} className={`${td} text-right tabular-nums ${cls}`}>{t[k] || ''}</td>);
+}
+function Head({ first, extra = [] }) {
+    return (
+        <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider sticky top-0 z-10"><tr className="text-left">
+            {first.map(f => <th key={f} className={th}>{f}</th>)}
+            {COLS.map(([k, l]) => <th key={k} className={`${th} text-right`}>{l}</th>)}
+            {extra.map(f => <th key={f} className={`${th} text-right`}>{f}</th>)}
+        </tr></thead>
+    );
+}
+function Foot({ span, t, extra = [] }) {
+    return (
+        <tfoot className="bg-slate-100 font-bold sticky bottom-0"><tr className="border-t-2 border-slate-300">
+            <td colSpan={span} className={td}>Total</td><Nums t={t} />{extra.map((x, i) => <td key={i} className={`${td} text-right tabular-nums`}>{x || ''}</td>)}
+        </tr></tfoot>
+    );
+}
+// The pieces / garments under an hour or a part × size.
+function ItemRows({ items, span, truncated }) {
+    if (!items.length) return <tr><td colSpan={span} className="px-6 py-2 text-xs text-slate-500">{truncated ? 'Too many checks to list here — choose a shorter range.' : 'Nothing to list.'}</td></tr>;
+    return (
+        <tr><td colSpan={span} className="px-6 pb-2 pt-1 bg-slate-50/60">
+            <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white">
+                <table className="w-full text-xs">
+                    <tbody>{items.map(i => (
+                        <tr key={i.id} className="border-t border-slate-100 first:border-t-0">
+                            <td className="px-2 py-1 tabular-nums text-slate-500 w-24">{istTime(i.at)}</td>
+                            <td className="px-2 py-1 font-mono font-bold text-slate-800">{i.label}</td>
+                            <td className="px-2 py-1 text-slate-500">{i.batch_code} · {i.stage}{i.roll_no != null ? ` · Roll #${i.roll_no}` : ''}{i.part_name ? ` · ${i.part_name}` : ''}{i.size ? ` · ${i.size}` : ''}</td>
+                            <td className={`px-2 py-1 font-bold ${RESULT[i.result]?.[1] || ''}`}>{RESULT[i.result]?.[0] || i.result}{i.rework_found && i.result !== 'NEEDS_REWORK' ? <span className="ml-1 font-normal text-indigo-600">(after rework)</span> : null}</td>
+                            <td className="px-2 py-1 font-mono text-slate-600">{i.defect_code || ''}</td>
+                        </tr>
+                    ))}</tbody>
+                </table>
+            </div>
+        </td></tr>
+    );
+}
+function Toggle({ open, onClick, children, cls = '' }) {
+    return (
+        <button type="button" onClick={onClick} className={`inline-flex items-center gap-1.5 text-left ${cls}`}>
+            <ChevronRight size={14} className={`text-slate-400 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />{children}
+        </button>
+    );
+}
+
 function WorkLog({ onClose }) {
     const [range, setRange] = useState({ from: '', to: '' });
     const [d, setD] = useState(null);
     const [error, setError] = useState('');
-    const load = (p) => { setError(''); productionApi.workLog(p).then(r => { setD(r.data); setRange({ from: r.data.from, to: r.data.to }); }).catch(err => setError(apiError(err, 'Failed to load.'))); };
+    const [mode, setMode] = useState('hourly');
+    const [open, setOpen] = useState(() => new Set());
+    const load = (p) => { setError(''); setOpen(new Set()); productionApi.workLog(p).then(r => { setD(r.data); setRange({ from: r.data.from, to: r.data.to }); }).catch(err => setError(apiError(err, 'Failed to load.'))); };
     useEffect(() => { load({}); }, []);
+    const toggle = (k) => setOpen(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+    const multiDay = d && d.from !== d.to;
+    const t = d?.totals;
     const excel = () => {
+        const nums = (r) => Object.fromEntries(COLS.map(([k, l]) => [l, r[k] || 0]));
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.rows.map(r => ({
-            Date: r.day, Batch: r.batch_code, Order: r.order_no, Stage: r.stage, Unit: r.unit, OK: r.approved, Rework: r.rework, Repaired: r.repaired, Rejected: r.rejected, Undone: r.reverted,
-            First: new Date(r.first_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }), Last: new Date(r.last_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }),
-        }))), 'My work');
-        XLSX.writeFile(wb, `My-work-${d.from}-to-${d.to}.xlsx`);
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.rows.map(r => ({ Date: r.day, Batch: r.batch_code, Order: r.order_no, Stage: r.stage, Unit: r.unit, ...nums(r), Undone: r.undone, 'Undos by me': r.reverted, First: istTime(r.first_at), Last: istTime(r.last_at) }))), 'By batch');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.hours.map(h => ({ Date: h.day, Hour: hourLabel(h.hour), ...nums(h) }))), 'Hourly');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.rolls.flatMap(r => r.groups.map(g => ({ Batch: r.batch_code, Stage: r.stage, Roll: r.roll_no ?? '', Part: g.part_name || '', Size: g.size || '', ...nums(g) })))), 'By roll');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.defects.map(x => ({ Defect: x.code, Description: x.description, Items: x.count }))), 'Defects');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.items.map(i => ({ Date: i.day, Time: istTime(i.at), Item: i.label, Batch: i.batch_code, Stage: i.stage, Roll: i.roll_no ?? '', Part: i.part_name || '', Size: i.size || '', Result: RESULT[i.result]?.[0] || i.result, 'After rework': i.rework_found && i.result !== 'NEEDS_REWORK' ? 'Yes' : '', Defect: i.defect_code || '' }))), 'Checks');
+        XLSX.writeFile(wb, `My-work-${d.from}${multiDay ? `-to-${d.to}` : ''}.xlsx`);
     };
     const days = d ? [...new Set(d.rows.map(r => r.day))] : [];
+    const hourDays = d ? [...new Set(d.hours.map(h => h.day))] : [];
+    const tab = (k, l) => <button type="button" onClick={() => { setMode(k); setOpen(new Set()); }} className={`px-3 py-1.5 text-sm font-bold rounded-md ${mode === k ? 'bg-white shadow text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>{l}</button>;
     return (
         <Modal title="My work log" onClose={onClose}>
-            <div className="w-[min(860px,92vw)] space-y-3">
+            <div className="w-[min(1000px,94vw)] space-y-3">
                 <div className="flex flex-wrap items-end gap-2">
                     <Field label="From"><input type="date" className={inputCls} value={range.from} onChange={e => setRange({ ...range, from: e.target.value })} /></Field>
                     <Field label="To"><input type="date" className={inputCls} value={range.to} onChange={e => setRange({ ...range, to: e.target.value })} /></Field>
                     <SecondaryButton onClick={() => load(range)}>Show</SecondaryButton>
-                    {d?.rows.length > 0 && <span className="ml-auto"><SecondaryButton onClick={excel}><Download size={14} /> Excel</SecondaryButton></span>}
+                    <SecondaryButton onClick={() => load({})}>Today</SecondaryButton>
+                    {d?.items.length > 0 && <span className="ml-auto"><SecondaryButton onClick={excel}><Download size={14} /> Excel</SecondaryButton></span>}
                 </div>
                 <ErrorBox text={error} />
-                {!d ? (!error && <Loading />) : d.rows.length === 0 ? <p className="text-sm text-slate-500 py-6 text-center">No checks by you in these days.</p> : (
+                {!d ? (!error && <Loading />) : t.checked + t.undone === 0 && !t.reverted ? <p className="text-sm text-slate-500 py-6 text-center">No checks by you in these days.</p> : (
                     <>
-                        <p className="text-sm text-slate-700"><b>{d.totals.approved + d.totals.repaired}</b> OK · <b>{d.totals.rework}</b> rework · <b>{d.totals.rejected}</b> rejected{d.totals.reverted ? ` · ${d.totals.reverted} undone` : ''}</p>
-                        <div className="max-h-[60vh] overflow-auto border border-slate-200 rounded-xl">
-                            <table className="w-full text-sm min-w-[640px]">
-                                <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider sticky top-0"><tr className="text-left">
-                                    <th className="px-3 py-2">Batch</th><th className="px-3 py-2">Stage</th><th className="px-3 py-2 text-right">OK</th><th className="px-3 py-2 text-right">Rework</th><th className="px-3 py-2 text-right">Repaired</th><th className="px-3 py-2 text-right">Rejected</th><th className="px-3 py-2 text-right">Undone</th></tr></thead>
-                                <tbody>{days.map(day => [
-                                    <tr key={day} className="bg-slate-100/70"><td colSpan={7} className="px-3 py-1 text-xs font-black text-slate-600">{new Date(`${day}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</td></tr>,
-                                    ...d.rows.filter(r => r.day === day).map(r => (
-                                        <tr key={`${day}-${r.batch_id}-${r.stage}`} className="border-t border-slate-100">
-                                            <td className="px-3 py-1.5"><b>{r.batch_code}</b></td><td className="px-3 py-1.5">{r.stage}{r.unit === 'garments' ? ' (garments)' : ''}</td>
-                                            <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700">{r.approved || ''}</td><td className="px-3 py-1.5 text-right tabular-nums text-amber-700">{r.rework || ''}</td>
-                                            <td className="px-3 py-1.5 text-right tabular-nums">{r.repaired || ''}</td><td className="px-3 py-1.5 text-right tabular-nums text-rose-700">{r.rejected || ''}</td><td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{r.reverted || ''}</td>
-                                        </tr>
-                                    )),
-                                ])}</tbody>
-                            </table>
+                        <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+                            {COLS.map(([k, l, cls]) => <span key={k} className="text-sm text-slate-500">{l} <b className={`text-lg tabular-nums ${cls}`}>{t[k]}</b>{k === 'rework_found' && t.checked > 0 ? <span className="text-xs text-slate-400"> ({Math.round((t.rework_found / t.checked) * 100)}%)</span> : null}</span>)}
+                            {t.undone > 0 && <span className="text-xs text-slate-400 inline-flex items-center gap-1"><Undo2 size={11} /> {t.undone} undone</span>}
+                            {t.reverted > 0 && <span className="text-xs text-slate-400">· {t.reverted} undos by me</span>}
                         </div>
+                        <p className="text-xs text-slate-500">Each piece / garment counts once a day, by your last check — sent to rework and then repaired counts once, as repaired. An undone check is not counted.</p>
+                        {d.defects.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl">
+                                <span className="text-xs font-black text-amber-800 uppercase tracking-wider">Top rework</span>
+                                {d.defects.slice(0, 3).map((x, i) => (
+                                    <span key={x.code} className="inline-flex items-center gap-1.5 bg-white border border-amber-200 rounded-lg px-2 py-0.5">
+                                        <span className="text-xs font-black text-amber-700">{i + 1}</span>
+                                        <span className="text-xs font-black font-mono text-slate-800">{x.code}</span>
+                                        {x.description && <span className="text-xs text-slate-500 hidden sm:inline">{x.description}</span>}
+                                        <span className="text-xs font-bold text-amber-700 bg-amber-100 rounded-full px-1.5">{x.count}×</span>
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+                        <div className="inline-flex bg-slate-100 rounded-lg p-0.5">{tab('hourly', 'Hourly')}{tab('roll', 'By roll')}{tab('batch', 'By batch')}</div>
+                        <div className="max-h-[55vh] overflow-auto border border-slate-200 rounded-xl">
+                            {mode === 'hourly' && (
+                                <table className="w-full text-sm min-w-[720px]">
+                                    <Head first={['Hour']} />
+                                    <tbody>{hourDays.map(day => [
+                                        multiDay && <tr key={day} className="bg-slate-100/70"><td colSpan={7} className="px-3 py-1 text-xs font-black text-slate-600">{dayLabel(day)}</td></tr>,
+                                        ...d.hours.filter(h => h.day === day).flatMap(h => {
+                                            const k = `h|${h.day}|${h.hour}`;
+                                            return [
+                                                <tr key={k} className="border-t border-slate-100 hover:bg-slate-50"><td className={td}><Toggle open={open.has(k)} onClick={() => toggle(k)} cls="font-bold text-slate-800">{hourLabel(h.hour)}</Toggle></td><Nums t={h} /></tr>,
+                                                open.has(k) && <ItemRows key={`${k}|i`} span={7} truncated={d.items_truncated} items={d.items.filter(i => i.day === h.day && i.hour === h.hour)} />,
+                                            ];
+                                        }),
+                                    ])}</tbody>
+                                    <Foot span={1} t={sumOf(d.hours)} />
+                                </table>
+                            )}
+                            {mode === 'roll' && (
+                                <table className="w-full text-sm min-w-[720px]">
+                                    <Head first={['Roll']} />
+                                    <tbody>{d.rolls.flatMap(r => {
+                                        const k = `r|${r.key}`;
+                                        return [
+                                            <tr key={k} className="border-t border-slate-200 bg-white hover:bg-slate-50">
+                                                <td className={td}><Toggle open={open.has(k)} onClick={() => toggle(k)}><b className="text-slate-800">{rollLabel(r)}</b><span className="text-xs text-slate-500">{r.batch_code} · {r.stage}</span></Toggle></td><Nums t={r} />
+                                            </tr>,
+                                            ...(open.has(k) ? r.groups.flatMap(g => {
+                                                const gk = `${k}|${g.part_name || ''}|${g.size || ''}`;
+                                                return [
+                                                    <tr key={gk} className="border-t border-slate-100 bg-slate-50/50"><td className={`${td} pl-8`}><Toggle open={open.has(gk)} onClick={() => toggle(gk)} cls="text-slate-700 font-semibold">{groupLabel(g)}</Toggle></td><Nums t={g} /></tr>,
+                                                    open.has(gk) && <ItemRows key={`${gk}|i`} span={7} truncated={d.items_truncated} items={d.items.filter(i => `${i.batch_id}|${i.stage}|${i.roll_no ?? ''}` === `${r.batch_id}|${r.stage}|${r.roll_no ?? ''}` && (i.part_name || '') === (g.part_name || '') && (i.size || '') === (g.size || ''))} />,
+                                                ];
+                                            }) : []),
+                                        ];
+                                    })}</tbody>
+                                    <Foot span={1} t={sumOf(d.rolls)} />
+                                </table>
+                            )}
+                            {mode === 'batch' && (
+                                <table className="w-full text-sm min-w-[820px]">
+                                    <Head first={['Batch', 'Stage']} extra={['Undone', 'Time']} />
+                                    <tbody>{days.map(day => [
+                                        <tr key={day} className="bg-slate-100/70"><td colSpan={10} className="px-3 py-1 text-xs font-black text-slate-600">{dayLabel(day)}</td></tr>,
+                                        ...d.rows.filter(r => r.day === day).map(r => (
+                                            <tr key={`${day}-${r.batch_id}-${r.stage}`} className="border-t border-slate-100">
+                                                <td className={td}><b>{r.batch_code}</b></td><td className={td}>{r.stage}{r.unit === 'garments' ? ' (garments)' : ''}</td><Nums t={r} />
+                                                <td className={`${td} text-right tabular-nums text-slate-500`}>{r.undone || ''}{r.reverted ? <span className="text-xs"> {r.undone ? '· ' : ''}{r.reverted} by me</span> : ''}</td>
+                                                <td className={`${td} text-right tabular-nums text-xs text-slate-500 whitespace-nowrap`}>{istTime(r.first_at).slice(0, 5)}–{istTime(r.last_at).slice(0, 5)}</td>
+                                            </tr>
+                                        )),
+                                    ])}</tbody>
+                                    <Foot span={2} t={sumOf(d.rows)} extra={[d.rows.reduce((x, r) => x + (r.undone || 0), 0), '']} />
+                                </table>
+                            )}
+                        </div>
+                        {d.items_truncated && <p className="text-xs text-amber-700">The counts are complete; only the latest {d.items.length} checks are listed under the rows and in Excel — choose a shorter range for all of them.</p>}
                     </>
                 )}
             </div>
@@ -135,7 +264,7 @@ export function StatsBar({ stageId, lineId, tick }) {
     const items = [
         [Hammer, 'Pending rework', v(s?.rework?.pending ?? '—'), s?.rework?.blocked ? 'text-rose-600' : s?.rework?.pending ? 'text-amber-500' : 'text-emerald-600', 'text-amber-500'],
         [ThumbsUp, 'Today OK', v((s?.me.approved || 0) + (s?.me.repaired || 0)), 'text-emerald-600', 'text-emerald-500'],
-        [Hammer, 'Today rework', v(s?.me.rework), 'text-indigo-600', 'text-indigo-400'],
+        [Hammer, 'Today rework', v(s?.me.rework_found), 'text-indigo-600', 'text-indigo-400'],
         [Wrench, 'Today repaired', v(s?.me.repaired), 'text-teal-600', 'text-teal-500'],
         [Clock, 'This hour', v(s?.me.this_hour), 'text-sky-600', 'text-sky-500'],
     ];
@@ -148,8 +277,8 @@ export function StatsBar({ stageId, lineId, tick }) {
                     <span className={`text-base font-black tabular-nums ${cls}`}>{n}</span>
                 </div>
             ))}
-            {s?.station && <span className="text-xs text-slate-400">· station today {s.station.total}</span>}
-            {s?.me.reverted > 0 && <span className="text-xs text-slate-400 inline-flex items-center gap-1"><Undo2 size={11} /> {s.me.reverted} undone</span>}
+            {s?.station && <span className="text-xs text-slate-400">· station today {s.station.checked}</span>}
+            {s?.me.undone > 0 && <span className="text-xs text-slate-400 inline-flex items-center gap-1"><Undo2 size={11} /> {s.me.undone} undone</span>}
         </div>
     );
 }

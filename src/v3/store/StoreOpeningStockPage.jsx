@@ -63,7 +63,7 @@ export default function StoreOpeningStockPage() {
                             </tbody>
                         </table>
                     </div>
-                    {perms.stock && (
+                    {perms.count && (
                         <div className="flex flex-wrap items-end gap-3">
                             <div className="w-72"><Field label="Note"><input className={inputCls} value={note} onChange={e => setNote(e.target.value)} placeholder="Opening stock count" /></Field></div>
                             <PrimaryButton onClick={post} busy={saving} disabled={saving || !filled.length || filled.some(([, c]) => c.cost === '')}>Post {filled.length} item(s) · ₹{inr(total)}</PrimaryButton>

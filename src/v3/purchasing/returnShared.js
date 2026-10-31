@@ -29,12 +29,14 @@ export function exportReturnNotePdf(rn, company) {
     if (rn.vehicle_no) { y += 5; doc.text(`Vehicle: ${rn.vehicle_no}`, 14, y); }
     y += 5; doc.text(`Reason: ${rn.reason}`, 14, y, { maxWidth: pageW - 28 });
     y += 5; doc.text(rn.replacement_expected ? 'Replacement expected against the same PO.' : 'No replacement: please issue a credit note.', 14, y);
+    const priced = rn.totals !== undefined;   // without prices (the stores, 29 Oct 2026): quantities only
     autoTable(doc, {
         startY: y + 4,
-        head: [['#', 'Item', 'Type', 'Qty', 'Rate (Rs)', 'Value (Rs)', 'GST %', 'GST (Rs)']],
+        head: [['#', 'Item', 'Type', 'Qty', ...(priced ? ['Rate (Rs)', 'Value (Rs)', 'GST %', 'GST (Rs)'] : [])]],
         body: rn.lines.map(l => [l.line_no, `${l.label}${l.rolls.length ? `\nRolls: ${l.rolls.map(r => `${r.roll_no} (${qty(r.qty)})`).join(', ')}` : ''}`,
-            l.source === 'REJECTED' ? 'Rejected at receipt' : 'From stock', `${qty(l.qty)} ${l.purchase_uom}`, inr(l.rate), inr(l.value), l.gst_pct, inr(l.gst)]),
-        foot: [['', 'Total', '', '', '', inr(rn.totals.taxable), '', inr(rn.totals.gst)], ['', 'Value with GST', '', '', '', inr(rn.totals.total), '', '']],
+            l.source === 'REJECTED' ? 'Rejected at receipt' : 'From stock', `${qty(l.qty)} ${l.purchase_uom}`, ...(priced ? [inr(l.rate), inr(l.value), l.gst_pct, inr(l.gst)] : [])]),
+        foot: priced ? [['', 'Total', '', '', '', inr(rn.totals.taxable), '', inr(rn.totals.gst)], ['', 'Value with GST', '', '', '', inr(rn.totals.total), '', '']]
+            : [['', `Total · ${rn.lines.length} line(s)`, '', Object.entries(rn.lines.reduce((m, l) => ({ ...m, [l.purchase_uom]: (m[l.purchase_uom] || 0) + l.qty }), {})).map(([u, q]) => `${qty(q)} ${u}`).join(' + ')]],
         styles: { fontSize: 8 }, headStyles: { fillColor: [79, 70, 229] }, footStyles: { fillColor: [241, 245, 249], textColor: 20 },
         columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 7: { halign: 'right' } },
     });

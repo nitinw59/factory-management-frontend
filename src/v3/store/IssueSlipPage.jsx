@@ -10,10 +10,12 @@ import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { TARGET_LABEL, inr, fmt, useStorePermissions, exportIssueSlipPdf } from './storeShared';
+import { useSeesPrices } from '../V3Access';
 
 export default function IssueSlipPage() {
     const { id } = useParams();
     const perms = useStorePermissions();
+    const prices = useSeesPrices();
     const [s, setS] = useState(null);
     const [error, setError] = useState('');
     const [ret, setRet] = useState(null);
@@ -45,11 +47,11 @@ export default function IssueSlipPage() {
                 {s.recover_from_salary && <span className="text-[11px] font-black px-2 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300">Recover from salary</span>}
                 <span className="text-sm text-slate-500">{fmtDate(s.issue_date)} · issued by {s.issued_by_name || '—'}</span>
             </div>
-            <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 grid sm:grid-cols-4 gap-3 text-sm">
+            <div className={`bg-white border border-slate-200 rounded-xl p-4 mb-4 grid ${prices ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-3 text-sm`}>
                 <div><p className="text-xs font-bold text-slate-500">Issued to ({TARGET_LABEL[s.target_type]})</p><p className="font-semibold">{s.target_name}</p></div>
                 <div><p className="text-xs font-bold text-slate-500">Department</p><p className="font-semibold">{s.department_name || '—'}</p></div>
                 <div><p className="text-xs font-bold text-slate-500">Purpose</p><p>{s.purpose || '—'}</p></div>
-                <div><p className="text-xs font-bold text-slate-500">Value</p><p className="font-black">₹{inr(s.net_value)}{s.returned_value > 0 && <span className="block text-xs font-normal text-slate-500">₹{inr(s.total_value)} issued − ₹{inr(s.returned_value)} returned</span>}</p></div>
+                {prices && <div><p className="text-xs font-bold text-slate-500">Value</p><p className="font-black">₹{inr(s.net_value)}{s.returned_value > 0 && <span className="block text-xs font-normal text-slate-500">₹{inr(s.total_value)} issued − ₹{inr(s.returned_value)} returned</span>}</p></div>}
             </div>
             <div className="flex flex-wrap gap-2 mb-3">
                 {canReturn && <SecondaryButton onClick={() => { setFormError(''); setRet({ reason: '', qty: {} }); }}><Undo2 size={14} /> Return items</SecondaryButton>}
@@ -59,7 +61,7 @@ export default function IssueSlipPage() {
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
                 <table className="w-full text-sm min-w-[720px]">
                     <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
-                        <tr><th className="px-3 py-2.5">#</th><th className="px-3 py-2.5">Item</th><th className="px-3 py-2.5 text-right">Issued</th><th className="px-3 py-2.5 text-right">Returned</th><th className="px-3 py-2.5 text-right">Rate ₹</th><th className="px-3 py-2.5 text-right">Value ₹</th><th className="px-3 py-2.5">Note</th></tr>
+                        <tr><th className="px-3 py-2.5">#</th><th className="px-3 py-2.5">Item</th><th className="px-3 py-2.5 text-right">Issued</th><th className="px-3 py-2.5 text-right">Returned</th>{prices && <><th className="px-3 py-2.5 text-right">Rate ₹</th><th className="px-3 py-2.5 text-right">Value ₹</th></>}<th className="px-3 py-2.5">Note</th></tr>
                     </thead>
                     <tbody>
                         {s.lines.map(l => (
@@ -68,8 +70,8 @@ export default function IssueSlipPage() {
                                 <td className="px-3 py-2"><Link to={`/v3/store/items/${l.store_item_id}`} className="font-semibold text-indigo-700 hover:underline">{l.label}</Link></td>
                                 <td className="px-3 py-2 text-right tabular-nums">{fmt(l.qty, l.uom)} {l.uom}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{l.returned_qty ? `${fmt(l.returned_qty, l.uom)} ${l.uom}` : '—'}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{inr(l.unit_cost)}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{inr(l.value)}</td>
+                                {prices && <><td className="px-3 py-2 text-right tabular-nums">{inr(l.unit_cost)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{inr(l.value)}</td></>}
                                 <td className="px-3 py-2 text-xs text-slate-500">{l.notes || ''}</td>
                             </tr>
                         ))}

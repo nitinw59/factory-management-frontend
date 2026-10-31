@@ -12,6 +12,7 @@ import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButto
 import { todayLocal } from '../salesOrders/SalesOrderStatusBadge';
 import { UNITS, GROUP_LABEL, inr, fmt, useStorePermissions, exportStock } from './storeShared';
 import LocationList from '../components/LocationList';
+import { useSeesPrices } from '../V3Access';
 
 const blank = { category_id: '', name: '', code: '', make: '', description: '', usage_uom: 'pcs', purchase_uom: '', usage_per_purchase_uom: '1', hsn_code: '', gst_pct: '', min_stock: '', reorder_qty: '', location: '', is_active: true };
 
@@ -35,6 +36,7 @@ export default function StoreItemsPage() {
     useEffect(() => { loadCats(); }, [loadCats]);
     useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
 
+    const prices = useSeesPrices();
     const totalValue = useMemo(() => (items || []).reduce((s, i) => s + i.stock_value, 0), [items]);
     const openForm = (item, copy = false) => {
         setFormError('');
@@ -68,7 +70,7 @@ export default function StoreItemsPage() {
 
     return (
         <div>
-            <PageHeader title="Spares & general items" subtitle={`Spares and general items, with stock at average cost. Stock value shown: ₹${inr(totalValue)}.`}
+            <PageHeader title="Spares & general items" subtitle={prices ? `Spares and general items, with stock at average cost. Stock value shown: ₹${inr(totalValue)}.` : 'Spares and general items with their stock.'}
                 actions={<>
                     <SecondaryButton onClick={() => exportStock(items || [], todayLocal())} disabled={!items?.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                     {perms.items && <SecondaryButton onClick={() => { setFormError(''); setCatForm({ list: true }); }}><Tags size={14} /> Categories</SecondaryButton>}
@@ -92,10 +94,10 @@ export default function StoreItemsPage() {
                     <table className="w-full text-sm min-w-[980px]">
                         <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
                             <tr><th className="px-3 py-2.5">Item</th><th className="px-3 py-2.5">Category</th><th className="px-3 py-2.5 text-right">On hand</th><th className="px-3 py-2.5 text-right">Min</th>
-                                <th className="px-3 py-2.5 text-right">Avg cost ₹</th><th className="px-3 py-2.5 text-right">Value ₹</th><th className="px-3 py-2.5">Buying</th><th className="px-3 py-2.5">Location</th><th className="px-3 py-2.5 w-20" /></tr>
+                                {prices && <><th className="px-3 py-2.5 text-right">Avg cost ₹</th><th className="px-3 py-2.5 text-right">Value ₹</th></>}<th className="px-3 py-2.5">Buying</th><th className="px-3 py-2.5">Location</th><th className="px-3 py-2.5 w-20" /></tr>
                         </thead>
                         <tbody>
-                            {items.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-400">No store items{search || group || catId || belowMin ? ' match' : ' yet'}.</td></tr>}
+                            {items.length === 0 && <tr><td colSpan={prices ? 9 : 7} className="px-4 py-8 text-center text-slate-400">No store items{search || group || catId || belowMin ? ' match' : ' yet'}.</td></tr>}
                             {items.map(i => (
                                 <tr key={i.id} className={`border-t border-slate-100 ${i.is_active ? '' : 'opacity-60'}`}>
                                     <td className="px-3 py-2.5"><Link to={`/v3/store/items/${i.id}`} className="font-semibold text-indigo-700 hover:underline">{i.label}</Link>
@@ -103,8 +105,8 @@ export default function StoreItemsPage() {
                                     <td className="px-3 py-2.5 text-slate-600">{i.group_label} · {i.category_name}</td>
                                     <td className={`px-3 py-2.5 text-right tabular-nums font-bold ${i.below_min ? 'text-rose-700' : ''}`}>{fmt(i.on_hand, i.usage_uom)} <span className="text-xs font-normal text-slate-500">{i.usage_uom}</span></td>
                                     <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{i.min_stock ? fmt(i.min_stock, i.usage_uom) : '—'}</td>
-                                    <td className="px-3 py-2.5 text-right tabular-nums">{inr(i.avg_cost)}</td>
-                                    <td className="px-3 py-2.5 text-right tabular-nums">{inr(i.stock_value)}</td>
+                                    {prices && <><td className="px-3 py-2.5 text-right tabular-nums">{inr(i.avg_cost)}</td>
+                                    <td className="px-3 py-2.5 text-right tabular-nums">{inr(i.stock_value)}</td></>}
                                     <td className="px-3 py-2.5 text-xs text-slate-600">{i.purchase_uom !== i.usage_uom ? `${i.purchase_uom} of ${fmt(i.factor)} ${i.usage_uom}` : i.usage_uom}{i.hsn_code ? ` · HSN ${i.hsn_code}` : ''}{i.gst_pct != null ? ` · GST ${i.gst_pct}%` : ''}</td>
                                     <td className="px-3 py-2.5 text-xs text-slate-600">{i.location || '—'}</td>
                                     <td className="px-3 py-2.5 text-right whitespace-nowrap">

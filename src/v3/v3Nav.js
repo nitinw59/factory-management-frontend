@@ -29,24 +29,28 @@ export const NAV = [
     { to: '/v3/purchasing/orders', label: 'Purchase orders', icon: ShoppingBag, key: 'purchasing.orders', text: 'POs to suppliers' },
     { to: '/v3/purchasing/suppliers', label: 'Suppliers', icon: Truck, key: 'purchasing.suppliers', text: 'Supplier list' },
     { to: '/v3/purchasing/invoices', label: 'Supplier invoices', icon: Receipt, key: 'purchasing.invoices', text: 'Three-way match' },
-    { to: '/v3/purchasing/return-notes', label: 'Returns to supplier', icon: PackageX, key: 'purchasing.returns', text: 'Rejected goods going back' },
     { to: '/v3/purchasing/reports', label: 'Purchasing reports', icon: BarChart3, key: 'purchasing.reports', text: 'Open, overdue, prices, suppliers' },
-    { section: 'Stores' },
+    // Stores split by job (29 Oct 2026 menu review): goods in, stock and issue to production, spares & general items;
+    // the one-time opening counts moved to Setup.
+    { section: 'Goods in' },
     { to: '/v3/purchasing/receive', label: 'Receive goods', icon: PackageOpen, key: 'purchasing.receive', text: 'Goods in against a PO (GRN)' },
     { to: '/v3/purchasing/direct', label: 'Direct purchase', icon: ShoppingBag, key: 'purchasing.direct', text: 'Spares / general items bought on a bill — no PO beforehand' },
     { to: '/v3/purchasing/grns', label: 'Goods receipts', icon: PackageCheck, key: 'purchasing.grns', text: 'GRNs and their status' },
     { to: '/v3/purchasing/grns?status=PENDING_APPROVAL', label: 'GRN approvals', icon: BadgeCheck, key: 'purchasing.grnApprovals', hidden: true },
+    { to: '/v3/purchasing/return-notes', label: 'Returns to supplier', icon: PackageX, key: 'purchasing.returns', text: 'Rejected goods going back' },
+    { section: 'Stores' },
+    { to: '/v3/masters/fabric-stock', label: 'Fabric rolls', icon: Warehouse, key: 'masters.fabricStock', text: 'Rolls in stock with dye lot and width' },
+    // The trim store's stock page (the Trim items & stock master) — in its place for them, not twice in the menu.
+    { to: '/v3/masters/trim-items?stock=1', label: 'Trim stock', icon: Package, key: 'store.trimStock', replaces: 'masters.trimItems', text: 'Trim items with stock on hand and each item\'s ledger' },
     { to: '/v3/material-issue', label: 'Issue to production', icon: Forklift, key: 'issue.materialIssue', text: 'Fabric and trims to cutting and lines' },
     { to: '/v3/trim-kits', label: 'Trim kits', icon: Package, key: 'store.trimKits', text: 'Kits prepared for the lines; the line loader counts and signs' },
-    { to: '/v3/material-returns', label: 'Material returns', icon: Undo2, key: 'store.materialReturns', text: 'Return slips from the cutting room — count and receive (partial allowed)' },
+    { to: '/v3/material-returns', label: 'Material returns', icon: Undo2, key: 'store.materialReturns', text: 'Fabric back from the cutting room, trims back from the lines — count and receive (partial allowed)' },
     { to: '/v3/replacement-fabric', label: 'Fabric for replacements', icon: PackageMinus, key: 'store.replacementFabric', text: 'Issue a whole roll when the cutting room has nothing for a replacement panel' },
-    { to: '/v3/masters/fabric-stock', label: 'Fabric rolls', icon: Warehouse, key: 'masters.fabricStock', text: 'Rolls in stock with dye lot and width' },
-    { to: '/v3/masters/opening-stock', label: 'Trim opening stock', icon: ClipboardList, key: 'masters.openingStock', text: 'Physical count of trims, once per item' },
+    { section: 'Spares & general items' },
     { to: '/v3/store/items', label: 'Spares & general items', icon: Wrench, key: 'store.items', text: 'Store items and stock' },
     { to: '/v3/store/issues', label: 'Store issue slips', icon: PackageMinus, key: 'store.issues', text: 'Spares and general items issued and returned' },
     { to: '/v3/store/reorder', label: 'Reorder list', icon: ListRestart, key: 'store.reorder', text: 'Store items below minimum' },
     { to: '/v3/store/requisitions', label: 'Store requisitions', icon: ClipboardPlus, key: 'store.requisitions', text: 'Spares and general items to buy' },
-    { to: '/v3/store/opening-stock', label: 'Store opening stock', icon: ClipboardList, key: 'store.openingStock', text: 'Physical count of store items, once per item' },
     { section: 'Production' },
     { to: '/v3/floor', label: 'Floor', icon: LayoutDashboard, key: 'production.floor', text: 'WIP per line, waiting to load, rework, replacements, priorities' },
     { to: '/v3/production/floor-layout', label: 'Floor layout', icon: MapIcon, key: 'production.floorLayout', text: 'Lines, workstations in order, responsible supervisor and line loader' },
@@ -72,6 +76,8 @@ export const NAV = [
     { to: '/v3/masters/trim-items', label: 'Trim items & stock', icon: Package, key: 'masters.trimItems', text: 'Vendor items, units and stock' },
     { to: '/v3/masters/fabric-items', label: 'Fabric items', icon: Layers, key: 'masters.fabricItems', text: 'Mill + quality + shade' },
     { to: '/v3/stage-types', label: 'Production stages', icon: Route, key: 'styles.stageTypes', text: 'Stages used in style routes' },
+    { to: '/v3/masters/opening-stock', label: 'Trim opening stock', icon: ClipboardList, key: 'masters.openingStock', text: 'Physical count of trims, once per item — the factory admin posts' },
+    { to: '/v3/store/opening-stock', label: 'Store opening stock', icon: ClipboardList, key: 'store.openingStock', text: 'Physical count of store items, once per item — the factory admin posts' },
     { to: '/v3/planning/settings', label: 'Planning settings', icon: Settings2, key: 'planning.settings', text: 'Cut allowance and lead times' },
     { section: 'Admin' },
     { to: '/v3/admin/access', label: 'Users & access', icon: UserCog, key: 'admin.access', text: 'Add / edit users (shared with 2.0) and extra 3.0 roles' },
@@ -108,9 +114,10 @@ export function keyForPath(pathname) {
 export function visibleNav(menu, work = null, { lookOnly = false } = {}) {
     const out = [];
     let section = null;
+    const replaced = new Set(NAV.filter(n => n.replaces && menu?.[n.key]).map(n => n.replaces));   // menu only — the page stays open
     for (const n of NAV) {
         if (n.section) { section = n; continue; }
-        if (n.hidden || !menu?.[n.key]) continue;
+        if (n.hidden || !menu?.[n.key] || replaced.has(n.key)) continue;
         if (work && n.key !== 'home' && (work[n.key] === false) !== lookOnly) continue;
         if (work && lookOnly && n.key === 'home') continue;
         if (section) { out.push(section); section = null; }

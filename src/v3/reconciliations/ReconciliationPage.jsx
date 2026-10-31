@@ -16,25 +16,28 @@ import { reconciliationsApi } from '../api/reconciliationsApi';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { KIND, StatusChip, ProvisionalChip, fmt, money, scopeOf, when } from './recShared';
+import { useSeesPrices } from '../V3Access';
 
 const STAGE_ROWS = [['approved_first', 'Approved first time'], ['approved_after_rework', 'Approved after rework'], ['repaired_now', 'Repaired at once'], ['repaired_after_rework', 'Repaired after rework'],
     ['replaced', 'Replaced (new material), then passed'], ['recut', 'Re-cut replacement (before 18 Oct)'], ['rejected', 'Rejected (floor in-charge)'], ['still_open', 'Still in rework / replacement'], ['not_checked', 'Not checked']];
 
-function exportExcel(r) {
+// prices = false (the stores, 29 Oct 2026): quantities only — the API leaves rates and values out.
+function exportExcel(r, prices = true) {
     const wb = XLSX.utils.book_new();
     const f = r.figures;
     if (r.kind === 'FABRIC') {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(f.fabrics.map(x => ({
             Fabric: x.label, Kind: x.support ? 'Pocketing / lining' : 'Shell', Unit: x.uom, Issued: x.issued_net, Laid: x.laid, 'Waste at lays': x.waste_at_lay ?? 0, Short: x.short, 'Not accounted': x.unaccounted, Replacements: x.replacements, 'Written off': x.written_off,
             'End bits in cutting (left out)': x.end_bits_in_cutting, 'Not cut (left out)': x.not_cut, Consumption: x.consumption, 'Garments cut': x.garments_cut,
-            'Per garment': x.actual_per_garment, 'BOM per garment': x.bom_per_garment, Within: x.within ? 'yes' : 'NO', Rate: x.rate, 'Write-off value': x.writeoff_value, 'Over-BOM value': x.overrun_value,
+            'Per garment': x.actual_per_garment, 'BOM per garment': x.bom_per_garment, Within: x.not_used ? 'NOT USED' : x.within ? 'yes' : 'NO',
+            ...(prices ? { Rate: x.rate, 'Write-off value': x.writeoff_value, 'Over-BOM value': x.overrun_value } : {}),
         }))), 'Fabric');
     } else if (r.kind === 'STAGE') {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{ Line: 'In (came to the stage)', Count: f.in }, ...STAGE_ROWS.map(([k, l]) => ({ Line: l, Count: f[k] })), { Line: 'Dropped out earlier', Count: f.dropped_earlier }]), 'Stage');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(f.rejected_list.map(x => ({ Item: x.label, Part: x.part_name || '', Reason: x.reason, Was: x.previous_status, By: x.rejected_by }))), 'Rejected');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(f.defects.map(d => ({ Code: d.code, Defect: d.description, Count: d.n }))), 'Defects');
     } else {
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(f.items.map(x => ({ Item: x.label, Unit: x.uom, Kit: x.kit_qty, Handed: x.handed, 'Not handed': x.not_handed, Returned: x.returned, Net: x.net, Used: x.used, 'Over (+) / under (−)': x.variance, Rate: x.rate, 'Lost value': x.lost_value }))), 'Trims');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(f.items.map(x => ({ Item: x.label, Unit: x.uom, Kit: x.kit_qty, Handed: x.handed, 'Not handed': x.not_handed, Returned: x.returned, Net: x.net, Used: x.used, 'Over (+) / under (−)': x.variance, ...(prices ? { Rate: x.rate, 'Lost value': x.lost_value } : {}) }))), 'Trims');
     }
     XLSX.writeFile(wb, `Reconciliation-${r.kind}-${scopeOf(r).replace(/[^\w-]+/g, '-')}-run${r.run_no}.xlsx`);
 }
@@ -42,6 +45,9 @@ function exportExcel(r) {
 // Fabric figures as tables (21 Oct 2026): one per kind (shell / pocketing & lining) × unit, so totals never add yards to
 // metres. Per garment on the Total row = total consumption ÷ total garments; BOM = the BOM weighted by garments.
 const sum = (rows, k) => rows.reduce((a, x) => a + (Number(x[k]) || 0), 0);
+// vs BOM: over, not used (31 Oct 2026 — garments cut, none of the fabric issued or used) or ✓.
+const verdict = (x) => (x.not_used ? 'not used' : x.within ? '✓' : 'over');
+const groupVerdict = (rows) => (rows.some(x => !x.within && !x.not_used) ? 'over' : rows.some(x => x.not_used) ? 'not used' : '✓');
 const r4 = (n) => Math.round(n * 10000) / 10000;
 const FAB_COLS = {
     shell: [['issued_net', 'Issued'], ['laid', 'Laid in batches'], ['short', 'Short (supplier)'], ['unaccounted', 'Not accounted for'], ['replacements', 'Replacements'], ['written_off', 'Written off'], ['left_out', 'Left out (end bits / not cut)'], ['consumption', 'Consumption']],
@@ -54,6 +60,7 @@ const FAB_COLS_RETURN = {
 };
 const FOLDABLE = ['short', 'unaccounted', 'replacements', 'written_off', 'waste_at_lay', 'left_out', 'end_bits_in_cutting', 'end_bits_returned'];
 function FabricTables({ fabrics, rules }) {
+    const prices = useSeesPrices();
     const returnRule = rules === 'RETURN_OR_CONSUMED';
     const groups = new Map();
     for (const x of fabrics) {
@@ -67,7 +74,7 @@ function FabricTables({ fabrics, rules }) {
         const all = (returnRule ? FAB_COLS_RETURN : FAB_COLS)[g.kind];
         const zero = all.filter(([k]) => FOLDABLE.includes(k) && g.rows.every(x => !Number(x[k])));
         const cols = all.filter(c => !zero.includes(c));
-        const over = g.rows.some(x => Number(x.overrun_value));
+        const over = prices && g.rows.some(x => Number(x.overrun_value));
         const garments = sum(g.rows, 'garments_cut'), cons = sum(g.rows, 'consumption');
         const bomW = g.rows.reduce((a, x) => a + (x.bom_per_garment != null ? x.bom_per_garment * x.garments_cut : 0), 0);
         const totPer = garments ? r4(cons / garments) : null, totBom = garments ? r4(bomW / garments) : null;
@@ -81,22 +88,22 @@ function FabricTables({ fabrics, rules }) {
                     <thead className="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wide"><tr>
                         <th className="px-3 py-2 text-left">Fabric</th>{cols.map(([k, l]) => <th key={k} className={th}>{l}</th>)}
                         <th className={th}>Garments</th><th className={th}>Per garment</th><th className={th}>BOM</th><th className="px-2 py-2 text-center">vs BOM</th>
-                        <th className={th}>Write-off ₹</th>{over && <th className={th}>Over BOM ₹</th>}
+                        {prices && <th className={th}>Write-off ₹</th>}{over && <th className={th}>Over BOM ₹</th>}
                     </tr></thead>
                     <tbody>{g.rows.map(x => (
                         <tr key={x.item_id} className={`border-t border-slate-100 ${x.within ? '' : 'bg-rose-50/60'}`}>
-                            <td className="px-3 py-1.5 font-semibold text-slate-800 whitespace-nowrap">{x.label}{x.rate != null ? <span className="block text-[11px] font-normal text-slate-500">₹{fmt(x.rate, 2)} / {x.uom} ({x.rate_source})</span> : <span className="block text-[11px] font-normal text-amber-700">no rate</span>}</td>
+                            <td className="px-3 py-1.5 font-semibold text-slate-800 whitespace-nowrap">{x.label}{!prices ? null : x.rate != null ? <span className="block text-[11px] font-normal text-slate-500">₹{fmt(x.rate, 2)} / {x.uom} ({x.rate_source})</span> : <span className="block text-[11px] font-normal text-amber-700">no rate</span>}</td>
                             {cols.map(([k]) => <td key={k} className={`${td} ${k === 'consumption' ? 'font-bold' : ''} ${k === 'unaccounted' && x[k] ? 'text-amber-700 font-semibold' : ''}`}>{fmt(x[k])}{k === 'written_off' && woDetail(x) ? <span className="block text-[10px] text-slate-500">{woDetail(x)}</span> : null}</td>)}
                             <td className={td}>{x.garments_cut}</td><td className={`${td} font-bold ${x.within ? 'text-emerald-700' : 'text-rose-700'}`}>{fmt(x.actual_per_garment, 4)}</td><td className={td}>{fmt(x.bom_per_garment, 4)}</td>
-                            <td className={`px-2 py-1.5 text-center font-black ${x.within ? 'text-emerald-700' : 'text-rose-700'}`}>{x.within ? '✓' : 'over'}</td>
-                            <td className={td}>{money(x.writeoff_value)}</td>{over && <td className={`${td} text-rose-700`}>{money(x.overrun_value)}</td>}
+                            <td className={`px-2 py-1.5 text-center font-black whitespace-nowrap ${x.within ? 'text-emerald-700' : 'text-rose-700'}`}>{verdict(x)}</td>
+                            {prices && <td className={td}>{money(x.writeoff_value)}</td>}{over && <td className={`${td} text-rose-700`}>{money(x.overrun_value)}</td>}
                         </tr>
                     ))}</tbody>
                     <tfoot><tr className="border-t-2 border-slate-300 bg-slate-50 font-black">
                         <td className="px-3 py-2">Total ({g.rows.length})</td>{cols.map(([k]) => <td key={k} className={`${td} py-2`}>{fmt(sum(g.rows, k))}</td>)}
                         <td className={`${td} py-2`}>{garments}</td><td className={`${td} py-2 ${allWithin ? 'text-emerald-700' : 'text-rose-700'}`}>{fmt(totPer, 4)}</td><td className={`${td} py-2`}>{fmt(totBom, 4)}</td>
-                        <td className={`px-2 py-2 text-center ${allWithin ? 'text-emerald-700' : 'text-rose-700'}`}>{allWithin ? '✓' : 'over'}</td>
-                        <td className={`${td} py-2`}>{money(sum(g.rows, 'writeoff_value'))}</td>{over && <td className={`${td} py-2 text-rose-700`}>{money(sum(g.rows, 'overrun_value'))}</td>}
+                        <td className={`px-2 py-2 text-center whitespace-nowrap ${allWithin ? 'text-emerald-700' : 'text-rose-700'}`}>{groupVerdict(g.rows)}</td>
+                        {prices && <td className={`${td} py-2`}>{money(sum(g.rows, 'writeoff_value'))}</td>}{over && <td className={`${td} py-2 text-rose-700`}>{money(sum(g.rows, 'overrun_value'))}</td>}
                     </tr></tfoot>
                 </table>
                 {pieces && (
@@ -121,6 +128,7 @@ function FabricTables({ fabrics, rules }) {
 
 export default function ReconciliationPage() {
     const { id } = useParams();
+    const prices = useSeesPrices();
     const [r, setR] = useState(null);
     const [perm, setPerm] = useState({ generate: {} });
     const [error, setError] = useState('');
@@ -176,12 +184,12 @@ export default function ReconciliationPage() {
                 {live && perm.accounts && r.accounts_approval_required && !r.accounts_approved_at && <PrimaryButton onClick={() => open({ title: 'Approve the write-off (accounts)', label: 'Note (optional)', run: (t) => reconciliationsApi.acknowledge(id, { approve: true, note: t || undefined }) })}><CheckCircle2 size={14} /> Approve write-off (accounts)</PrimaryButton>}
                 {live && perm.accounts && !r.acknowledged_at && <SecondaryButton onClick={() => open({ title: 'Acknowledge', label: 'Note (optional)', run: (t) => reconciliationsApi.acknowledge(id, { note: t || undefined }) })}><BookCheck size={14} /> Acknowledge</SecondaryButton>}
                 <span className="ml-auto flex gap-2">
-                    <SecondaryButton onClick={() => exportExcel(r)}><FileDown size={14} /> Excel</SecondaryButton>
+                    <SecondaryButton onClick={() => exportExcel(r, prices)}><FileDown size={14} /> Excel</SecondaryButton>
                     <SecondaryButton onClick={() => window.print()}><Printer size={14} /> Print / PDF</SecondaryButton>
                 </span>
             </div>
             <ErrorBox text={error} />
-            <div className={`grid gap-3 mb-4 text-sm ${f.order ? 'sm:grid-cols-2 lg:grid-cols-4' : 'sm:grid-cols-3'}`}>
+            <div className={`grid gap-3 mb-4 text-sm ${(f.order ? 1 : 0) + (prices ? 1 : 0) === 2 ? 'sm:grid-cols-2 lg:grid-cols-4' : (f.order || prices) ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
                 {f.order && <div className="bg-white border border-slate-200 rounded-xl p-3"><p className="text-xs font-bold text-slate-500">Order</p>
                     <p className="font-bold text-slate-800">{fmt(f.order.cut)} of {fmt(f.order.ordered)} garments cut</p>
                     <p className="text-xs text-slate-600">{f.order.batches_cut} batch(es) finalised{f.order.batches_open ? ` · ${f.order.batches_open} still being cut` : ''}</p></div>}
@@ -192,9 +200,9 @@ export default function ReconciliationPage() {
                     <p className="font-bold text-slate-800">{r.acknowledged_at ? `Acknowledged by ${r.acknowledged_by_name || '—'}` : 'Not acknowledged yet'}</p>
                     {r.accounts_approval_required && <p className="text-xs font-semibold text-amber-800">{r.accounts_approved_at ? `Write-off approved by ${r.accounts_approved_by_name || '—'}` : 'Write-off above the threshold — needs accounts\' approval'}</p>}
                     {r.ack_note && <p className="text-xs text-slate-600">“{r.ack_note}”</p>}</div>
-                <div className="bg-white border border-slate-200 rounded-xl p-3"><p className="text-xs font-bold text-slate-500">Value</p>
+                {prices && <div className="bg-white border border-slate-200 rounded-xl p-3"><p className="text-xs font-bold text-slate-500">Value</p>
                     <p className="font-bold text-slate-800">{r.kind === 'TRIM' ? `Lost / unaccounted ${money(r.writeoff_value)}` : r.kind === 'FABRIC' ? `Written off ${money(r.writeoff_value)}` : '—'}</p>
-                    {r.overrun_value ? <p className="text-xs text-rose-700">Over the BOM: {money(r.overrun_value)}</p> : null}{r.unpriced && <p className="text-xs text-slate-500">Some items have no rate.</p>}</div>
+                    {r.overrun_value ? <p className="text-xs text-rose-700">Over the BOM: {money(r.overrun_value)}</p> : null}{r.unpriced && <p className="text-xs text-slate-500">Some items have no rate.</p>}</div>}
             </div>
             {warnings.length > 0 && <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">{warnings.map(w => <p key={w}>{w}</p>)}</div>}
 
@@ -222,14 +230,14 @@ export default function ReconciliationPage() {
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
                     <p className="px-4 pt-3 text-sm text-slate-600">{f.kit_no} · {f.garments_cut} garments cut{f.garments_rejected ? ` · ${f.garments_rejected} rejected (left out of "used")` : ''} · used = good garments × the kit's per-garment rate</p>
                     <table className="w-full text-sm min-w-[860px]">
-                        <thead className="text-xs font-bold text-slate-500 uppercase tracking-wider text-right"><tr><th className="px-3 py-2 text-left">Item</th><th className="px-3 py-2">Kit</th><th className="px-3 py-2">Handed</th><th className="px-3 py-2">Not handed</th><th className="px-3 py-2">Returned</th><th className="px-3 py-2">Net</th><th className="px-3 py-2">Used</th><th className="px-3 py-2">Over / under</th><th className="px-3 py-2">Value</th></tr></thead>
+                        <thead className="text-xs font-bold text-slate-500 uppercase tracking-wider text-right"><tr><th className="px-3 py-2 text-left">Item</th><th className="px-3 py-2">Kit</th><th className="px-3 py-2">Handed</th><th className="px-3 py-2">Not handed</th><th className="px-3 py-2">Returned</th><th className="px-3 py-2">Net</th><th className="px-3 py-2">Used</th><th className="px-3 py-2">Over / under</th>{prices && <th className="px-3 py-2">Value</th>}</tr></thead>
                         <tbody>{f.items.map(x => (
                             <tr key={x.item_id} className="border-t border-slate-100 text-right tabular-nums">
                                 <td className="px-3 py-2 text-left font-semibold text-slate-800">{x.label}<span className="block text-xs font-normal text-slate-500">{x.uom}</span></td>
                                 <td className="px-3 py-2">{fmt(x.kit_qty)}</td><td className="px-3 py-2">{fmt(x.handed)}</td><td className="px-3 py-2">{fmt(x.not_handed)}</td><td className="px-3 py-2">{fmt(x.returned)}</td>
                                 <td className="px-3 py-2 font-semibold">{fmt(x.net)}</td><td className="px-3 py-2">{fmt(x.used)}</td>
                                 <td className={`px-3 py-2 font-bold ${x.variance > 0.0005 ? 'text-rose-700' : x.variance < -0.0005 ? 'text-amber-700' : 'text-emerald-700'}`}>{x.variance > 0 ? '+' : ''}{fmt(x.variance)}</td>
-                                <td className="px-3 py-2">{money(x.lost_value)}</td>
+                                {prices && <td className="px-3 py-2">{money(x.lost_value)}</td>}
                             </tr>
                         ))}</tbody>
                     </table>
