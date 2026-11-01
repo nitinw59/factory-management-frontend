@@ -26,7 +26,7 @@ const companyName = (c) => (c?.trade_name || c?.legal_name || '').toUpperCase();
 const sizeGarments = (b, r) => Object.fromEntries(b.ratios.map(x => [x.size, r.lays && r.garments ? r.lays * x.ratio : 0]));
 // Fabric used by the lays (in the roll's unit) and what is not accounted for: taken − used − end bit.
 const usedOf = (b, r) => (r.lays && LEN_PER_IN[r.uom] ? r.lays * Number(b.layer_length_in) * LEN_PER_IN[r.uom] : null);
-const unaccountedOf = (b, r) => { const u = usedOf(b, r); return u == null ? null : Math.round((r.metres - u - (r.end_bit_m || 0) - (r.short_m || 0)) * 100) / 100; };
+const unaccountedOf = (b, r) => { const u = usedOf(b, r); return u == null ? null : Math.round((r.metres + (r.extra_m || 0) - u - (r.end_bit_m || 0) - (r.short_m || 0)) * 100) / 100; };   // + extra found on the roll (31 Oct 2026)
 
 // Batch number on every lay / cut sheet (20 Oct 2026, asked: "show and highlight batch id mandatorily"): the number
 // printed on the pieces (#floor_no; the batch code if it has none) in a black box — big on page 1 by the title, small

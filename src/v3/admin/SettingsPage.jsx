@@ -344,6 +344,13 @@ function ProductionSection({ data, save, busy }) {
                 {n('over_cut_free_pct', 'Over-cut allowed without approval %', 'Cutting: garments cut above the order up to this % of the ordered quantity per colour × size (rounded down) need no approval; above it the merchandiser approves their trims (from free stock) or they are written off.', { max: 100 })}
                 {n('pocket_end_allowance_in', 'Pocketing / lining end allowance per ply (in)', 'New pocketing / lining lay: waste is filled in as plies × this at each end of the lay (the cutting master can change it on the lay).', { max: 50 })}
             </div>
+            <p className="mt-4 mb-2 text-xs font-black uppercase tracking-wider text-slate-500">Reconciliation flags (drill-down)</p>
+            <div className="grid sm:grid-cols-4 gap-3">
+                {n('rec_short_pct', 'Roll short above (%)', 'Fabric report: a roll short against its label by more than this is flagged (a supplier claim).', { max: 100 })}
+                {n('rec_unaccounted_pct', 'Not accounted for above (% of roll)', 'Fabric report: a roll whose fabric isn\'t accounted for beyond this % — either way — is flagged …', { max: 100 })}
+                {n('rec_unaccounted_abs', '… or above (m / yd)', '… or beyond this much in the roll\'s unit.', { max: 1000 })}
+                {n('rec_end_bit_age_days', 'End bits kept after (days)', 'Fabric report: end bits still in the cutting room this long after the order is fully cut are flagged.', { max: 365, step: 1 })}
+            </div>
             <div className="mt-3 flex justify-end"><PrimaryButton busy={busy} disabled={busy} onClick={() => save(() => settingsApi.saveProduction(f), 'Production settings saved.')}>Save</PrimaryButton></div>
         </Card>
     );

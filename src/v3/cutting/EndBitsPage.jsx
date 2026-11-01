@@ -6,9 +6,12 @@
 // production application"): by order → fabric × colour → pieces (opened on demand), totals per unit, age, tag search; no
 // return by a click — pieces go onto the order's draft return slip (Material returns), the fabric store receives them.
 // Whatever is still here at the fabric reconciliation counts as consumed.
+// 31 Oct 2026 (owner: "there is measurements mistake with endbits in physical these endbits are more than 45 inches"):
+// Re-measure — the piece in hand is longer than recorded (the roll had more than its label); the measured length is kept
+// and the fabric found goes on the roll it came from as extra. Large corrections need a supervisor's override password.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Trash2, Undo2, ChevronRight, ChevronDown, History } from 'lucide-react';
+import { Trash2, Undo2, ChevronRight, ChevronDown, History, Ruler } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { cuttingApi } from '../api/cuttingApi';
 import { materialReturnsApi } from '../api/materialReturnsApi';
@@ -19,7 +22,7 @@ import { fmt, useCuttingPermissions } from './cutShared';
 const STATUS = { AVAILABLE: ['Available', 'bg-emerald-50 text-emerald-800 border-emerald-300'], ON_BATCH: ['On a batch', 'bg-sky-50 text-sky-800 border-sky-300'], USED: ['Used', 'bg-slate-50 text-slate-600 border-slate-300'], WRITTEN_OFF: ['Written off', 'bg-rose-50 text-rose-700 border-rose-300'], RETURNED: ['Returned to store', 'bg-indigo-50 text-indigo-800 border-indigo-300'], ON_RETURN: ['On a return slip', 'bg-amber-50 text-amber-800 border-amber-300'] };
 const KIND = { RESERVE: ['Reserve', 'bg-violet-50 text-violet-800 border-violet-300'], LAY: ['Lay piece', 'bg-amber-50 text-amber-800 border-amber-300'] };
 const WHY = { UNDER_MIN: 'under 0.3 m', SURPLUS: 'surplus', MANUAL: 'by hand' };
-const ACTION = { CREATED: 'Made', ON_BATCH: 'Put on a batch', OFF_BATCH: 'Taken off the batch', LAID: 'Laid', REPLACEMENT: 'Used for a replacement', WRITTEN_OFF: 'Written off', RETURNED: 'Returned to the store', ON_RETURN: 'Put on a return slip', OFF_RETURN: 'Taken off the return slip' };
+const ACTION = { CREATED: 'Made', ON_BATCH: 'Put on a batch', OFF_BATCH: 'Taken off the batch', LAID: 'Laid', REPLACEMENT: 'Used for a replacement', WRITTEN_OFF: 'Written off', RETURNED: 'Returned to the store', ON_RETURN: 'Put on a return slip', OFF_RETURN: 'Taken off the return slip', REMEASURED: 'Re-measured' };
 const chip = ([label, cls]) => <span className={`text-[10px] font-black px-1.5 py-0.5 rounded border ${cls}`}>{label}</span>;
 
 function Detail({ id, onClose }) {
@@ -56,10 +59,16 @@ function Detail({ id, onClose }) {
 
 const TABS = [['open', 'In the cutting room'], ['RETURNED', 'Returned to store'], ['WRITTEN_OFF', 'Written off'], ['USED', 'Used'], ['ALL', 'All']];
 const ageOf = (d) => { if (!d) return '—'; const n = Math.floor((Date.now() - new Date(d).getTime()) / 86400000); return n <= 0 ? 'today' : `${n} day${n === 1 ? '' : 's'}`; };
+// Re-measure (31 Oct 2026): typed in the piece's unit or in inches (the lay is in inches); the same limits as the server.
+const IN_PER = { m: 0.0254, yd: 1 / 36 };
+const FREE_M = 0.5, FREE_SHARE = 0.5;
+const M_PER = { m: 1, yd: 0.9144 };
+const r3 = (n) => Math.round(n * 1000) / 1000;
+const measuredOf = (rm) => { const n = Number(rm.value); if (!(n > 0)) return null; return rm.unit === 'in' ? r3(n * IN_PER[rm.e.uom]) : r3(n); };
 const unitText = (totals, key) => (totals || []).filter(t => t[key] > 0).map(t => `${fmt(t[key])} ${t.uom}`).join(' · ') || '—';
 
 // Pieces of one order × fabric × colour (loaded when the row is opened).
-function Pieces({ order, f, status, perms, picks, setPicks, onDetail, onWriteOff, refreshKey, highlight }) {
+function Pieces({ order, f, status, perms, picks, setPicks, onDetail, onWriteOff, onRemeasure, refreshKey, highlight }) {
     const [rows, setRows] = useState(null);
     const [error, setError] = useState('');
     useEffect(() => {
@@ -85,6 +94,7 @@ function Pieces({ order, f, status, perms, picks, setPicks, onDetail, onWriteOff
                             {e.write_off_reason && <span className="block text-[11px] text-slate-500">{WHY[e.write_off_reason]}{e.write_off_note ? ` — ${e.write_off_note}` : ''}</span>}</td>
                         <td className="px-2 py-1.5 text-right whitespace-nowrap">
                             <button type="button" className="p-1 text-slate-500" title="History" aria-label={`History of ${e.tag}`} onClick={() => onDetail(e.id)}><History size={14} /></button>
+                            {perms.manage && e.status === 'AVAILABLE' && e.source_batch_id && <button type="button" className="p-1 text-indigo-600" title="Re-measure (longer than recorded)" aria-label={`Re-measure ${e.tag}`} onClick={() => onRemeasure({ ...e, fabric_label: f.fabric_label, order_no: order.order_no })}><Ruler size={14} /></button>}
                             {perms.end_bits && e.status === 'AVAILABLE' && <button type="button" className="p-1 text-rose-500" title="Write off" aria-label={`Write off ${e.tag}`} onClick={() => onWriteOff(e)}><Trash2 size={14} /></button>}
                         </td>
                     </tr>
@@ -107,6 +117,7 @@ export default function EndBitsPage() {
     const [picks, setPicks] = useState({});              // end bit id → order id
     const [detail, setDetail] = useState(null);
     const [wo, setWo] = useState(null);                  // { e, reason }
+    const [rm, setRm] = useState(null);                  // re-measure: { e, value, unit: uom | 'in', reason, pin, needPin }
     const [busy, setBusy] = useState(false);
     const [formError, setFormError] = useState('');
     const [refreshKey, setRefreshKey] = useState(0);
@@ -149,6 +160,18 @@ export default function EndBitsPage() {
         setBusy(true); setFormError('');
         try { await cuttingApi.writeOffEndBit(wo.e.id, wo.reason.trim()); setMsg(`${wo.e.tag} written off.`); setWo(null); load(); setRefreshKey(k => k + 1); }
         catch (err) { setFormError(apiError(err, 'Failed.')); } finally { setBusy(false); }
+    };
+    const remeasure = async () => {
+        const metres = measuredOf(rm);
+        setBusy(true); setFormError('');
+        try {
+            const r = await cuttingApi.remeasureEndBit(rm.e.id, { metres, reason: rm.reason.trim(), supervisor_pin: rm.pin || undefined });
+            setMsg(`${r.data.tag} re-measured: ${fmt(r.data.before)} → ${fmt(r.data.metres)} ${r.data.uom}${r.data.approved_by ? ` (approved by ${r.data.approved_by})` : ''}.`);
+            setRm(null); load(); setRefreshKey(k => k + 1);
+        } catch (err) {
+            if (err.response?.data?.code === 'SUPERVISOR_PIN_REQUIRED') setRm(x => ({ ...x, needPin: true }));
+            setFormError(apiError(err, 'Failed.'));
+        } finally { setBusy(false); }
     };
     const picked = (orderId) => Object.entries(picks).filter(([, v]) => v === orderId).map(([id]) => id);
     const open = status === 'open';
@@ -216,7 +239,7 @@ export default function EndBitsPage() {
                                                 <td className="px-3 py-2 text-xs">{open && f.surplus ? (f.surplus.ready ? (perms.end_bits ? <button type="button" className="font-bold text-rose-700 hover:underline" disabled={busy} onClick={() => surplus(o, f)}>Write off surplus</button> : <span className="text-emerald-700 font-semibold">surplus can be written off</span>) : <span className="text-slate-500">{f.surplus.reason}</span>) : null}</td>
                                                 <td className="px-3 py-2 text-right" colSpan={2}>{open && perms.end_bits && f.available_n > 0 && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline whitespace-nowrap" disabled={busy} onClick={() => toSlip(o.order_id, [{ kind: 'ALL_END_BITS', fabric_item_id: f.fabric_item_id, colour_id: f.colour_id }])}>Add all ({f.available_n}) to return slip</button>}</td>
                                             </tr>,
-                                            rowOpen && <Pieces key={`${rk}|p`} order={o} f={f} status={status} perms={perms} picks={picks} setPicks={setPicks} onDetail={setDetail} onWriteOff={(e) => { setFormError(''); setWo({ e, reason: '' }); }} refreshKey={refreshKey} highlight={highlight} />,
+                                            rowOpen && <Pieces key={`${rk}|p`} order={o} f={f} status={status} perms={perms} picks={picks} setPicks={setPicks} onDetail={setDetail} onWriteOff={(e) => { setFormError(''); setWo({ e, reason: '' }); }} onRemeasure={(e) => { setFormError(''); setRm({ e, value: '', unit: IN_PER[e.uom] ? 'in' : e.uom, reason: '', pin: '', needPin: false }); }} refreshKey={refreshKey} highlight={highlight} />,
                                         ];
                                     })}</tbody>
                                     <tfoot>{o.totals.map(t => (
@@ -236,6 +259,32 @@ export default function EndBitsPage() {
                 );
             })}
             {detail && <Detail id={detail} onClose={() => setDetail(null)} />}
+            {rm && (() => {
+                const u = rm.e.uom;
+                const measured = measuredOf(rm);
+                const delta = measured != null ? r3(measured - rm.e.metres) : null;
+                const big = delta != null && (delta > FREE_M / (M_PER[u] || 1) + 1e-9 || delta > rm.e.metres * FREE_SHARE + 1e-9);
+                const extraBefore = rm.e.source_extra_m || 0;
+                const shorter = delta != null && delta < 0 && -delta > extraBefore + 1e-9;
+                const askPin = big || rm.needPin;
+                return (
+                    <Modal title={`Re-measure ${rm.e.tag}`} onClose={() => setRm(null)}>
+                        <div className="space-y-3 w-[min(460px,88vw)]">
+                            <p className="text-sm text-slate-600">Recorded <b>{fmt(rm.e.metres)} {u}</b>{IN_PER[u] ? ` (${Math.round(rm.e.metres / IN_PER[u])} in)` : ''} · {rm.e.fabric_label} · {rm.e.order_no}. Measure the piece on the table. The fabric found is kept on roll {rm.e.parent_roll_no || '—'} (#{rm.e.source_floor_no}) as extra — the roll had more than its label — and shows in the order's fabric reconciliation.</p>
+                            <div className="flex gap-2 items-end">
+                                <div className="flex-1"><Field label="Measured length *"><input className={inputCls} type="number" min="0" step="any" value={rm.value} onChange={e => setRm({ ...rm, value: e.target.value })} autoFocus /></Field></div>
+                                {IN_PER[u] && <div className="w-28"><Field label="In"><select className={inputCls} value={rm.unit} onChange={e => setRm({ ...rm, unit: e.target.value })}><option value="in">inches</option><option value={u}>{u}</option></select></Field></div>}
+                            </div>
+                            {measured != null && <p className={`text-sm ${shorter ? 'text-rose-700' : 'text-slate-700'}`}>= <b>{fmt(measured)} {u}</b>{IN_PER[u] && rm.unit !== 'in' ? ` (${Math.round(measured / IN_PER[u])} in)` : ''} · {delta > 0 ? `+${fmt(delta)} ${u} found on the roll` : delta < 0 ? (shorter ? `shorter than recorded — re-measuring can only take back extra added before${extraBefore > 0 ? ` (${fmt(extraBefore)} ${u})` : ''}; if the piece is too short to use, write it off` : `${fmt(delta)} ${u} — takes back extra added before`) : 'same as recorded'}</p>}
+                            <Field label="Reason *"><input className={inputCls} value={rm.reason} onChange={e => setRm({ ...rm, reason: e.target.value })} placeholder="e.g. measured on the table — roll longer than its label" /></Field>
+                            {askPin && <Field label="Supervisor's override password *"><input className={inputCls} type="password" autoComplete="off" value={rm.pin} onChange={e => setRm({ ...rm, pin: e.target.value })} /><span className="block text-xs text-slate-500 mt-1">Needed above +{fmt(FREE_M / (M_PER[u] || 1))} {u} or more than half the piece.</span></Field>}
+                            <ErrorBox text={formError} />
+                            <div className="flex justify-end gap-2"><SecondaryButton onClick={() => setRm(null)}>Back</SecondaryButton>
+                                <PrimaryButton onClick={remeasure} busy={busy} disabled={busy || measured == null || !delta || shorter || !rm.reason.trim() || (askPin && !rm.pin)}>Save length</PrimaryButton></div>
+                        </div>
+                    </Modal>
+                );
+            })()}
             {wo && (
                 <Modal title={`Write off ${wo.e.tag}`} onClose={() => setWo(null)}>
                     <div className="space-y-3 w-[min(420px,85vw)]">

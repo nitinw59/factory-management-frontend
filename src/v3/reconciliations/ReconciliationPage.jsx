@@ -7,6 +7,8 @@
 // 21 Oct 2026 (rules RETURN_OR_CONSUMED): left-out fabric is back in the store before the report; shell end bits kept in
 // the cutting room are consumed (own column), end bits returned to the store shown; written off = loss. Older reports keep
 // their own columns.
+// 31 Oct 2026 (owner: "can we add drill down on each calculation in reconcilation with flagged warnings" → "build all"):
+// every figure opens the rows behind it (DrillDown.jsx), a red dot where rows are flagged; a warning opens its rows.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, FileDown, Printer, CheckCircle2, RotateCcw, BookCheck } from 'lucide-react';
@@ -17,17 +19,19 @@ import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { KIND, StatusChip, ProvisionalChip, fmt, money, scopeOf, when } from './recShared';
 import { useSeesPrices } from '../V3Access';
+import { Drill, DrillPanel } from './DrillDown';
 
+const TRIM_COLS = [['kit_qty', 'Kit'], ['handed', 'Handed'], ['not_handed', 'Not handed'], ['returned', 'Returned'], ['net', 'Net'], ['used', 'Used'], ['variance', 'Over / under']];
 const STAGE_ROWS = [['approved_first', 'Approved first time'], ['approved_after_rework', 'Approved after rework'], ['repaired_now', 'Repaired at once'], ['repaired_after_rework', 'Repaired after rework'],
     ['replaced', 'Replaced (new material), then passed'], ['recut', 'Re-cut replacement (before 18 Oct)'], ['rejected', 'Rejected (floor in-charge)'], ['still_open', 'Still in rework / replacement'], ['not_checked', 'Not checked']];
 
 // prices = false (the stores, 29 Oct 2026): quantities only — the API leaves rates and values out.
-function exportExcel(r, prices = true) {
+function exportExcel(r, prices = true, detail = null) {
     const wb = XLSX.utils.book_new();
     const f = r.figures;
     if (r.kind === 'FABRIC') {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(f.fabrics.map(x => ({
-            Fabric: x.label, Kind: x.support ? 'Pocketing / lining' : 'Shell', Unit: x.uom, Issued: x.issued_net, Laid: x.laid, 'Waste at lays': x.waste_at_lay ?? 0, Short: x.short, 'Not accounted': x.unaccounted, Replacements: x.replacements, 'Written off': x.written_off,
+            Fabric: x.label, Kind: x.support ? 'Pocketing / lining' : 'Shell', Unit: x.uom, Issued: x.issued_net, 'Extra on rolls': x.extra_on_rolls ?? 0, Laid: x.laid, 'Waste at lays': x.waste_at_lay ?? 0, Short: x.short, 'Not accounted': x.unaccounted, Replacements: x.replacements, 'Written off': x.written_off,
             'End bits in cutting (left out)': x.end_bits_in_cutting, 'Not cut (left out)': x.not_cut, Consumption: x.consumption, 'Garments cut': x.garments_cut,
             'Per garment': x.actual_per_garment, 'BOM per garment': x.bom_per_garment, Within: x.not_used ? 'NOT USED' : x.within ? 'yes' : 'NO',
             ...(prices ? { Rate: x.rate, 'Write-off value': x.writeoff_value, 'Over-BOM value': x.overrun_value } : {}),
@@ -38,6 +42,19 @@ function exportExcel(r, prices = true) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(f.defects.map(d => ({ Code: d.code, Defect: d.description, Count: d.n }))), 'Defects');
     } else {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(f.items.map(x => ({ Item: x.label, Unit: x.uom, Kit: x.kit_qty, Handed: x.handed, 'Not handed': x.not_handed, Returned: x.returned, Net: x.net, Used: x.used, 'Over (+) / under (−)': x.variance, ...(prices ? { Rate: x.rate, 'Lost value': x.lost_value } : {}) }))), 'Trims');
+    }
+    // Flagged rows behind the figures (31 Oct 2026) — one line per flagged row (a row shown under two figures once).
+    if (detail?.sections) {
+        const seen = new Set(); const out = [];
+        for (const sec of Object.values(detail.sections)) for (const [col, tables] of Object.entries(sec.cells)) for (const t of tables) for (const x of t.rows) {
+            const warns = (x.flags || []).filter(fl => fl.level === 'warn').map(fl => fl.text);
+            if (!warns.length) continue;
+            const row = t.columns.map(c => `${c.l ? `${c.l} ` : ''}${x[c.k] ?? '—'}`).join(' · ');
+            const key = `${sec.label}|${t.title}|${row}|${warns.join()}`;
+            if (seen.has(key)) continue; seen.add(key);
+            out.push({ [r.kind === 'STAGE' ? 'Stage' : 'Item']: sec.label, Figure: col, Rows: t.title, Row: row, Flag: warns.join(' · ') });
+        }
+        if (out.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(out), 'Flagged');
     }
     XLSX.writeFile(wb, `Reconciliation-${r.kind}-${scopeOf(r).replace(/[^\w-]+/g, '-')}-run${r.run_no}.xlsx`);
 }
@@ -50,16 +67,16 @@ const verdict = (x) => (x.not_used ? 'not used' : x.within ? '✓' : 'over');
 const groupVerdict = (rows) => (rows.some(x => !x.within && !x.not_used) ? 'over' : rows.some(x => x.not_used) ? 'not used' : '✓');
 const r4 = (n) => Math.round(n * 10000) / 10000;
 const FAB_COLS = {
-    shell: [['issued_net', 'Issued'], ['laid', 'Laid in batches'], ['short', 'Short (supplier)'], ['unaccounted', 'Not accounted for'], ['replacements', 'Replacements'], ['written_off', 'Written off'], ['left_out', 'Left out (end bits / not cut)'], ['consumption', 'Consumption']],
+    shell: [['issued_net', 'Issued'], ['extra_on_rolls', 'Extra on rolls (found at cutting)'], ['laid', 'Laid in batches'], ['short', 'Short (supplier)'], ['unaccounted', 'Not accounted for'], ['replacements', 'Replacements'], ['written_off', 'Written off'], ['left_out', 'Left out (end bits / not cut)'], ['consumption', 'Consumption']],
     support: [['issued_net', 'Issued'], ['laid', 'Laid in lays'], ['waste_at_lay', 'Waste at lays'], ['written_off', 'Written off'], ['left_out', 'Left out (at cutting)'], ['consumption', 'Consumption']],
 };
 // Reports under "left-out fabric must go back to the store" (21 Oct 2026).
 const FAB_COLS_RETURN = {
-    shell: [['issued_net', 'Issued (net of returns)'], ['laid', 'Laid in batches'], ['short', 'Short (supplier)'], ['unaccounted', 'Not accounted for'], ['replacements', 'Replacements'], ['written_off', 'Written off (loss)'], ['end_bits_in_cutting', 'End bits kept (consumed)'], ['end_bits_returned', 'End bits returned to store'], ['consumption', 'Consumption']],
+    shell: [['issued_net', 'Issued (net of returns)'], ['extra_on_rolls', 'Extra on rolls (found at cutting)'], ['laid', 'Laid in batches'], ['short', 'Short (supplier)'], ['unaccounted', 'Not accounted for'], ['replacements', 'Replacements'], ['written_off', 'Written off (loss)'], ['end_bits_in_cutting', 'End bits kept (consumed)'], ['end_bits_returned', 'End bits returned to store'], ['consumption', 'Consumption']],
     support: [['issued_net', 'Issued (net of returns)'], ['laid', 'Laid in lays'], ['waste_at_lay', 'Waste at lays'], ['written_off', 'Written off (loss)'], ['consumption', 'Consumption']],
 };
-const FOLDABLE = ['short', 'unaccounted', 'replacements', 'written_off', 'waste_at_lay', 'left_out', 'end_bits_in_cutting', 'end_bits_returned'];
-function FabricTables({ fabrics, rules }) {
+const FOLDABLE = ['extra_on_rolls', 'short', 'unaccounted', 'replacements', 'written_off', 'waste_at_lay', 'left_out', 'end_bits_in_cutting', 'end_bits_returned'];
+function FabricTables({ fabrics, rules, detail, onOpen }) {
     const prices = useSeesPrices();
     const returnRule = rules === 'RETURN_OR_CONSUMED';
     const groups = new Map();
@@ -93,8 +110,8 @@ function FabricTables({ fabrics, rules }) {
                     <tbody>{g.rows.map(x => (
                         <tr key={x.item_id} className={`border-t border-slate-100 ${x.within ? '' : 'bg-rose-50/60'}`}>
                             <td className="px-3 py-1.5 font-semibold text-slate-800 whitespace-nowrap">{x.label}{!prices ? null : x.rate != null ? <span className="block text-[11px] font-normal text-slate-500">₹{fmt(x.rate, 2)} / {x.uom} ({x.rate_source})</span> : <span className="block text-[11px] font-normal text-amber-700">no rate</span>}</td>
-                            {cols.map(([k]) => <td key={k} className={`${td} ${k === 'consumption' ? 'font-bold' : ''} ${k === 'unaccounted' && x[k] ? 'text-amber-700 font-semibold' : ''}`}>{fmt(x[k])}{k === 'written_off' && woDetail(x) ? <span className="block text-[10px] text-slate-500">{woDetail(x)}</span> : null}</td>)}
-                            <td className={td}>{x.garments_cut}</td><td className={`${td} font-bold ${x.within ? 'text-emerald-700' : 'text-rose-700'}`}>{fmt(x.actual_per_garment, 4)}</td><td className={td}>{fmt(x.bom_per_garment, 4)}</td>
+                            {cols.map(([k, l]) => <td key={k} className={`${td} ${k === 'consumption' ? 'font-bold' : ''} ${k === 'unaccounted' && x[k] ? 'text-amber-700 font-semibold' : ''}`}><Drill detail={detail} section={x.item_id} col={k} onOpen={(sct, c) => onOpen(sct, c, l)}>{fmt(x[k])}</Drill>{k === 'written_off' && woDetail(x) ? <span className="block text-[10px] text-slate-500">{woDetail(x)}</span> : null}</td>)}
+                            <td className={td}>{x.garments_cut}</td><td className={`${td} font-bold ${x.within ? 'text-emerald-700' : 'text-rose-700'}`}><Drill detail={detail} section={x.item_id} col="actual_per_garment" onOpen={(sct, c) => onOpen(sct, c, 'Per garment')}>{fmt(x.actual_per_garment, 4)}</Drill></td><td className={td}>{fmt(x.bom_per_garment, 4)}</td>
                             <td className={`px-2 py-1.5 text-center font-black whitespace-nowrap ${x.within ? 'text-emerald-700' : 'text-rose-700'}`}>{verdict(x)}</td>
                             {prices && <td className={td}>{money(x.writeoff_value)}</td>}{over && <td className={`${td} text-rose-700`}>{money(x.overrun_value)}</td>}
                         </tr>
@@ -120,6 +137,7 @@ function FabricTables({ fabrics, rules }) {
                         ? <>Consumption = issued, net of what went back to the store{g.kind === 'shell' ? '; end bits kept in the cutting room are counted as consumed' : ' (waste at the lays is part of it, like the shell\'s lay ends)'}. Written off = loss.</>
                         : <>Consumption = issued − left out{g.kind === 'support' ? ' (waste at the lays is part of it, like the shell\'s lay ends)' : ''}.</>} Total per garment = total consumption ÷ total garments; BOM weighted by garments.
                     {zero.length > 0 && <> 0 for every fabric (not shown): {zero.map(([, l]) => l).join(', ')}.</>}
+                    {detail && <span className="print:hidden"> Click a figure to see the rows behind it; a red dot marks flagged rows.</span>}
                 </p>
             </div>
         );
@@ -136,8 +154,11 @@ export default function ReconciliationPage() {
     const [txt, setTxt] = useState('');
     const [busy, setBusy] = useState(false);
     const [formError, setFormError] = useState('');
+    const [detail, setDetail] = useState(null);     // the rows behind each figure (31 Oct 2026)
+    const [drill, setDrill] = useState(null);       // { section, col, title, flagged }
     const load = useCallback(() => reconciliationsApi.get(id).then(res => setR(res.data)).catch(err => setError(apiError(err, 'Failed to load.'))), [id]);
     useEffect(() => { load(); reconciliationsApi.permissions().then(res => setPerm(res.data)).catch(() => {}); }, [load]);
+    useEffect(() => { setDetail(null); reconciliationsApi.detail(id).then(res => setDetail(res.data)).catch(() => {}); }, [id]);
     if (!r) return error ? <ErrorBox text={error} /> : <Loading />;
     const f = r.figures;
     const open = (cfg) => { setTxt(''); setFormError(''); setAsk(cfg); };
@@ -149,8 +170,13 @@ export default function ReconciliationPage() {
     const live = !r.superseded && !r.outdated_at;
     const current = r.runs.find(x => !x.superseded);
     const provisional = Array.isArray(f.provisional) ? f.provisional : [];
-    // Left-out / still-open warnings are listed under Provisional; the rest stay as warnings.
-    const warnings = (f.warnings || []).filter(w => !provisional.length || !/left out|not handed|still being cut|waiting for the merchandiser/.test(w));
+    // Left-out / still-open warnings are listed under Provisional; the rest stay as warnings. Each keeps its link to the
+    // rows behind it (warning_refs, same order).
+    const refs = f.warning_refs || [];
+    const warnings = (f.warnings || []).map((w, i) => ({ w, ref: refs[i] || null })).filter(({ w }) => !provisional.length || !/left out|not handed|still being cut|waiting for the merchandiser/.test(w));
+    const COL_TITLE = Object.fromEntries([...FAB_COLS.shell, ...FAB_COLS.support, ...FAB_COLS_RETURN.shell, ...FAB_COLS_RETURN.support, ['left_out', 'Left out'], ['actual_per_garment', 'Per garment'],
+        ...TRIM_COLS, ...STAGE_ROWS, ['in', 'In (came to the stage)'], ['dropped_earlier', 'Dropped out earlier']]);
+    const openDrill = (section, col, title, flagged = false) => setDrill({ section, col, title: title || COL_TITLE[col] || col, flagged });
     return (
         <div>
             <Link to="/v3/reconciliations" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3 print:hidden"><ArrowLeft size={15} /> Reconciliations</Link>
@@ -184,7 +210,7 @@ export default function ReconciliationPage() {
                 {live && perm.accounts && r.accounts_approval_required && !r.accounts_approved_at && <PrimaryButton onClick={() => open({ title: 'Approve the write-off (accounts)', label: 'Note (optional)', run: (t) => reconciliationsApi.acknowledge(id, { approve: true, note: t || undefined }) })}><CheckCircle2 size={14} /> Approve write-off (accounts)</PrimaryButton>}
                 {live && perm.accounts && !r.acknowledged_at && <SecondaryButton onClick={() => open({ title: 'Acknowledge', label: 'Note (optional)', run: (t) => reconciliationsApi.acknowledge(id, { note: t || undefined }) })}><BookCheck size={14} /> Acknowledge</SecondaryButton>}
                 <span className="ml-auto flex gap-2">
-                    <SecondaryButton onClick={() => exportExcel(r, prices)}><FileDown size={14} /> Excel</SecondaryButton>
+                    <SecondaryButton onClick={() => exportExcel(r, prices, detail)}><FileDown size={14} /> Excel</SecondaryButton>
                     <SecondaryButton onClick={() => window.print()}><Printer size={14} /> Print / PDF</SecondaryButton>
                 </span>
             </div>
@@ -204,18 +230,20 @@ export default function ReconciliationPage() {
                     <p className="font-bold text-slate-800">{r.kind === 'TRIM' ? `Lost / unaccounted ${money(r.writeoff_value)}` : r.kind === 'FABRIC' ? `Written off ${money(r.writeoff_value)}` : '—'}</p>
                     {r.overrun_value ? <p className="text-xs text-rose-700">Over the BOM: {money(r.overrun_value)}</p> : null}{r.unpriced && <p className="text-xs text-slate-500">Some items have no rate.</p>}</div>}
             </div>
-            {warnings.length > 0 && <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">{warnings.map(w => <p key={w}>{w}</p>)}</div>}
+            {warnings.length > 0 && <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">{warnings.map(({ w, ref }) => (
+                <p key={w}>{w}{ref && detail?.sections?.[ref.section]?.cells?.[ref.col] && <> <button type="button" className="font-bold text-indigo-700 hover:underline print:hidden" onClick={() => openDrill(ref.section, ref.col, null, true)}>Show rows</button></>}</p>
+            ))}</div>}
 
-            {r.kind === 'FABRIC' && <FabricTables fabrics={f.fabrics} rules={f.rules} />}
+            {r.kind === 'FABRIC' && <FabricTables fabrics={f.fabrics} rules={f.rules} detail={detail} onOpen={(sct, c, l) => openDrill(sct, c, l)} />}
 
             {r.kind === 'STAGE' && (
                 <div className="grid lg:grid-cols-2 gap-4 mb-4">
                     <div className="bg-white border border-slate-200 rounded-xl p-4">
                         <h2 className="font-black text-slate-800 mb-2">{f.stage} — {f.unit}</h2>
                         <table className="w-full text-sm"><tbody>
-                            <tr className="font-black"><td className="py-1">In (came to the stage)</td><td className="py-1 text-right tabular-nums">{f.in}</td></tr>
-                            {STAGE_ROWS.map(([k, l]) => <tr key={k} className="border-t border-slate-100"><td className={`py-1 ${k === 'rejected' && f[k] ? 'text-rose-700 font-semibold' : 'text-slate-600'}`}>{l}</td><td className="py-1 text-right tabular-nums">{f[k]}</td></tr>)}
-                            <tr className="border-t-2 border-slate-300"><td className="py-1 text-slate-600">Dropped out earlier (garment rejected at an earlier stage)</td><td className="py-1 text-right tabular-nums">{f.dropped_earlier}</td></tr>
+                            <tr className="font-black"><td className="py-1">In (came to the stage)</td><td className="py-1 text-right tabular-nums"><Drill detail={detail} section="stage" col="in" onOpen={(sct, c) => openDrill(sct, c)}>{f.in}</Drill></td></tr>
+                            {STAGE_ROWS.map(([k, l]) => <tr key={k} className="border-t border-slate-100"><td className={`py-1 ${k === 'rejected' && f[k] ? 'text-rose-700 font-semibold' : 'text-slate-600'}`}>{l}</td><td className="py-1 text-right tabular-nums"><Drill detail={detail} section="stage" col={k} onOpen={(sct, c) => openDrill(sct, c)}>{f[k]}</Drill></td></tr>)}
+                            <tr className="border-t-2 border-slate-300"><td className="py-1 text-slate-600">Dropped out earlier (garment rejected at an earlier stage)</td><td className="py-1 text-right tabular-nums"><Drill detail={detail} section="stage" col="dropped_earlier" onOpen={(sct, c) => openDrill(sct, c)}>{f.dropped_earlier}</Drill></td></tr>
                         </tbody></table>
                         <p className={`mt-2 text-xs font-bold ${f.balanced ? 'text-emerald-700' : 'text-rose-700'}`}>{f.balanced ? 'Balanced: in = every outcome.' : 'Does not balance — check the stage.'}</p>
                     </div>
@@ -234,9 +262,8 @@ export default function ReconciliationPage() {
                         <tbody>{f.items.map(x => (
                             <tr key={x.item_id} className="border-t border-slate-100 text-right tabular-nums">
                                 <td className="px-3 py-2 text-left font-semibold text-slate-800">{x.label}<span className="block text-xs font-normal text-slate-500">{x.uom}</span></td>
-                                <td className="px-3 py-2">{fmt(x.kit_qty)}</td><td className="px-3 py-2">{fmt(x.handed)}</td><td className="px-3 py-2">{fmt(x.not_handed)}</td><td className="px-3 py-2">{fmt(x.returned)}</td>
-                                <td className="px-3 py-2 font-semibold">{fmt(x.net)}</td><td className="px-3 py-2">{fmt(x.used)}</td>
-                                <td className={`px-3 py-2 font-bold ${x.variance > 0.0005 ? 'text-rose-700' : x.variance < -0.0005 ? 'text-amber-700' : 'text-emerald-700'}`}>{x.variance > 0 ? '+' : ''}{fmt(x.variance)}</td>
+                                {TRIM_COLS.slice(0, 6).map(([k]) => <td key={k} className={`px-3 py-2 ${k === 'net' ? 'font-semibold' : ''}`}><Drill detail={detail} section={x.item_id} col={k} onOpen={(sct, c) => openDrill(sct, c)}>{fmt(x[k])}</Drill></td>)}
+                                <td className={`px-3 py-2 font-bold ${x.variance > 0.0005 ? 'text-rose-700' : x.variance < -0.0005 ? 'text-amber-700' : 'text-emerald-700'}`}><Drill detail={detail} section={x.item_id} col="variance" onOpen={(sct, c) => openDrill(sct, c)}>{x.variance > 0 ? '+' : ''}{fmt(x.variance)}</Drill></td>
                                 {prices && <td className="px-3 py-2">{money(x.lost_value)}</td>}
                             </tr>
                         ))}</tbody>
@@ -251,6 +278,8 @@ export default function ReconciliationPage() {
                     {r.runs.map(x => <p key={x.id} className="text-sm py-0.5">{x.id === r.id ? <b>Run {x.run_no}</b> : <Link to={`/v3/reconciliations/${x.id}`} className="text-indigo-700 hover:underline">Run {x.run_no}</Link>} · {when(x.generated_at)} · {x.outdated_at ? <span className="text-rose-700 font-semibold">outdated</span> : x.status.toLowerCase().replace('_', ' ')}{x.superseded ? ' (older)' : ''}</p>)}
                 </div>
             )}
+
+            {drill && detail && <DrillPanel detail={detail} open={drill} onClose={() => setDrill(null)} />}
 
             {ask && (
                 <Modal title={ask.title} onClose={() => setAsk(null)}>

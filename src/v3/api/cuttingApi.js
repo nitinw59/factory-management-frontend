@@ -37,6 +37,7 @@ export const cuttingApi = {
     endBit: (id) => api.get(`/v3/cutting/end-bits/${id}`),
     replacementRate: () => api.get('/v3/cutting/replacement-rate'),
     writeOffEndBit: (id, reason) => api.post(`/v3/cutting/end-bits/${id}/write-off`, { reason }),
+    remeasureEndBit: (id, data) => api.post(`/v3/cutting/end-bits/${id}/remeasure`, data),   // { metres, reason, supervisor_pin? } (31 Oct 2026)
     writeOffSurplus: (orderId, fabricItemId) => api.post(`/v3/cutting/orders/${orderId}/end-bits/write-off-surplus`, { fabric_item_id: fabricItemId }),
     // pocketing / lining (20 Oct 2026)
     pocketing: () => api.get('/v3/cutting/pocketing'),

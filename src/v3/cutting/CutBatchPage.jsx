@@ -377,7 +377,7 @@ export default function CutBatchPage() {
                                 <td className="px-3 py-2 text-lg font-black" title="Number on the pieces">{drag && nosSorted[i] !== r.floor_roll_no ? <span className="text-indigo-700">{nosSorted[i]}<span className="block text-[10px] font-semibold text-slate-400 line-through">{r.floor_roll_no}</span></span> : r.floor_roll_no}</td>
                                 <td className="px-3 py-2 font-semibold">{r.roll_no}{r.end_bit_id && <span className="ml-1 text-[10px] font-black px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300">lay piece of roll {r.parent_roll_no}</span>}<span className="block text-xs font-normal text-slate-500">{r.dye_lot ? `lot ${r.dye_lot} · ` : ''}{r.fabric_label}</span></td>
                                 <td className="px-3 py-2 text-xs">{r.colour}<span className="block text-slate-500">{r.parts.map(p => p.part_name).join(', ')}</span></td>
-                                <td className="px-3 py-2 text-right tabular-nums">{fmt(r.metres)} {r.uom}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{fmt(r.metres)} {r.uom}{r.extra_m > 0 && <span className="block text-[11px] font-semibold text-emerald-700" title="Found by re-measuring its end bit — the roll had more than its label">+{fmt(r.extra_m)} extra</span>}</td>
                                 <td className="px-3 py-2 text-right tabular-nums font-bold">{r.lays ?? '—'}</td>
                                 <td className="px-3 py-2 text-right tabular-nums font-bold">{r.garments || '—'}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{r.expected_m != null ? fmt(r.expected_m) : '—'}</td>
@@ -449,21 +449,22 @@ export default function CutBatchPage() {
             )}
             {cut && (() => {
                 const cutLay = perLay(b.layer_length_in, cut.roll.uom);
+                const taken = Math.round((cut.roll.metres + (cut.roll.extra_m || 0)) * 1000) / 1000;   // + extra found by re-measuring its end bit (31 Oct 2026)
                 // Suggested end bit (20 Oct 2026): what the lays leave of the roll — taken − lays × layer − short, ≥ 0.
                 // Fills the End bit box while it hasn't been typed in (endAuto); typing stops it, "Use" puts it back.
                 const suggestEnd = (lays, short) => (cutLay && Number(lays) > 0
-                    ? Math.max(0, Math.round((cut.roll.metres - Number(lays) * cutLay - (Number(short) || 0)) * 100) / 100) : null);
+                    ? Math.max(0, Math.round((taken - Number(lays) * cutLay - (Number(short) || 0)) * 100) / 100) : null);
                 const withSuggestion = (next) => {
                     if (!next.endAuto) return next;
                     const s = suggestEnd(next.lays, next.short);
                     return { ...next, end: s == null ? '' : String(s) };
                 };
                 const suggested = suggestEnd(cut.lays, cut.short);
-                const overRoll = cutLay && Number(cut.lays) > 0 && Number(cut.lays) * cutLay + (Number(cut.short) || 0) > cut.roll.metres + 0.005;
+                const overRoll = cutLay && Number(cut.lays) > 0 && Number(cut.lays) * cutLay + (Number(cut.short) || 0) > taken + 0.005;
                 return (
                 <Modal title={`${cut.roll.lays ? 'Re-cut' : 'Cut'} roll ${cut.roll.floor_roll_no} (tag ${cut.roll.roll_no})`} onClose={() => setCut(null)}>
                     <div className="space-y-3 w-[min(460px,88vw)]">
-                        <p className="text-sm text-slate-600">{fmt(cut.roll.metres)} {cut.roll.uom}{cutLay ? <> · layer {fmt(cutLay, 2)} {cut.roll.uom} → up to {Math.floor((cut.roll.metres - (cut.endAuto ? 0 : Number(cut.end) || 0) - (Number(cut.short) || 0)) / cutLay + 0.001)} lays</> : ' · weighed fabric: no lay-length check'}. Parts: {cut.roll.parts.map(p => p.part_name).join(', ')}.</p>
+                        <p className="text-sm text-slate-600">{fmt(cut.roll.metres)} {cut.roll.uom}{cut.roll.extra_m > 0 ? ` + ${fmt(cut.roll.extra_m)} extra` : ''}{cutLay ? <> · layer {fmt(cutLay, 2)} {cut.roll.uom} → up to {Math.floor((taken - (cut.endAuto ? 0 : Number(cut.end) || 0) - (Number(cut.short) || 0)) / cutLay + 0.001)} lays</> : ' · weighed fabric: no lay-length check'}. Parts: {cut.roll.parts.map(p => p.part_name).join(', ')}.</p>
                         <div className="grid grid-cols-3 gap-3">
                             <Field label="Lays made *" hint={Number(cut.lays) > 0 ? `${Number(cut.lays) * b.ratio_sum} garments${cutLay ? ` · ${fmt(Number(cut.lays) * cutLay, 2)} ${cut.roll.uom}` : ''}` : ' '}><input className={inputCls} type="number" min="1" step="1" value={cut.lays} onChange={e => setCut(withSuggestion({ ...cut, lays: e.target.value }))} autoFocus /></Field>
                             <Field label={`End bit (${cut.roll.uom})`} hint={<>
