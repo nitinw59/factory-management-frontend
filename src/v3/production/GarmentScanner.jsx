@@ -24,7 +24,7 @@ import { productionApi } from '../api/productionApi';
 import { apiError } from '../api/mastersApi';
 import { feedback } from './scanShared';
 import { StationDialog } from './stationShared';
-import { CLEARED, rollOf, StageProgressStepper, stagesOf, partsOf, Popup, DefectSheet } from './garmentShared';
+import { CLEARED, rollOf, StageProgressStepper, stagesOf, partsOf, Popup, DefectSheet, QaPassedNote } from './garmentShared';
 
 const fmtTime = (iso) => { try { return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { return '—'; } };
 const STATUS_DOT = { APPROVED: 'bg-emerald-500', NEEDS_REWORK: 'bg-amber-400', REPAIRED: 'bg-teal-500', QC_REJECTED: 'bg-rose-500' };
@@ -186,7 +186,7 @@ export default function GarmentScanner({ stage, stageId, lineId, feedLine, codes
                             <div className="flex justify-between items-start gap-3">
                                 <div className="min-w-0">
                                     <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                        <span className={`${parts.some(p => p.bad) ? 'bg-rose-600' : 'bg-indigo-600'} px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest`}>{parts.some(p => p.bad) ? 'Part not OK' : 'Parts OK'}</span>
+                                        <span className={`${parts.some(p => p.bad) ? 'bg-rose-600' : parts.some(p => p.warn) ? 'bg-amber-600' : 'bg-indigo-600'} px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest`}>{parts.some(p => p.bad) ? 'Part not OK' : parts.some(p => p.warn) ? 'Part open earlier' : 'Parts OK'}</span>
                                         <h2 className="text-2xl font-black tracking-tighter truncate font-mono">{g.garment_no}</h2>
                                     </div>
                                     <p className="text-slate-400 font-bold text-sm truncate">{cur.v.batch.style_name} · {cur.v.batch.style_code}</p>
@@ -203,6 +203,7 @@ export default function GarmentScanner({ stage, stageId, lineId, feedLine, codes
                             </div>
                         </div>
                         <div className="px-5 py-2.5 bg-slate-50 border-b border-slate-100"><StageProgressStepper stages={stagesOf(cur.v, g, stageId)} /></div>
+                        <QaPassedNote overrides={cur.d.qa_overrides} garment={g} className="mx-4 mt-3" />
                         {flagged && (
                             <div className="mx-4 mt-3 px-4 py-2.5 rounded-xl border-2 border-amber-300 bg-amber-50 text-amber-900">
                                 <p className="text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5"><AlertCircle size={12} /> Check before approving</p>
@@ -217,12 +218,12 @@ export default function GarmentScanner({ stage, stageId, lineId, feedLine, codes
                             </div>
                             <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                                 {parts.map((p, i) => (
-                                    <div key={p.id} className={`px-3 py-2.5 rounded-xl border-2 flex items-center justify-between gap-2 ${p.bad ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                                    <div key={p.id} className={`px-3 py-2.5 rounded-xl border-2 flex items-center justify-between gap-2 ${p.bad ? 'bg-rose-50 border-rose-200' : p.warn ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
                                         <div className="flex items-center gap-2 min-w-0">
-                                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${p.bad ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'}`}>{i + 1}</div>
-                                            <span className="font-black text-slate-700 text-sm truncate">{p.name}{p.note && <span className={`block text-[10px] font-black uppercase tracking-wider ${p.bad ? 'text-rose-500' : 'text-slate-400'}`}>{p.note}</span>}</span>
+                                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${p.bad ? 'bg-rose-500 text-white' : p.warn ? 'bg-amber-500 text-white' : 'bg-emerald-500 text-white'}`}>{i + 1}</div>
+                                            <span className="font-black text-slate-700 text-sm truncate">{p.name}{p.note && <span className={`block text-[10px] font-black uppercase tracking-wider ${p.bad ? 'text-rose-500' : p.warn ? 'text-amber-600' : 'text-slate-400'}`}>{p.note}</span>}</span>
                                         </div>
-                                        {p.bad ? <X size={16} className="text-rose-500 shrink-0" strokeWidth={4} /> : <Check size={16} className="text-emerald-500 shrink-0" strokeWidth={4} />}
+                                        {p.bad ? <X size={16} className="text-rose-500 shrink-0" strokeWidth={4} /> : p.warn ? <AlertCircle size={16} className="text-amber-500 shrink-0" strokeWidth={3} /> : <Check size={16} className="text-emerald-500 shrink-0" strokeWidth={4} />}
                                     </div>
                                 ))}
                             </div>
@@ -296,7 +297,7 @@ export default function GarmentScanner({ stage, stageId, lineId, feedLine, codes
                         <div className="mb-6">
                             <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-2">Parts at {(popup.waitStages || []).join(', ') || 'earlier stages'}</p>
                             <div className="flex flex-wrap justify-center gap-2">
-                                {partsOf(popup.g).map(p => (
+                                {partsOf(popup.g).filter(p => !(popup.waitStages?.length && popup.waitStages.every(w => popup.d.part_skips?.[p.id]?.includes(w)))).map(p => (
                                     <span key={p.id} className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border-2 font-black text-sm uppercase tracking-wide ${p.bad ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-emerald-50 border-emerald-300 text-emerald-700'}`}>
                                         {p.bad ? <X size={14} strokeWidth={3} /> : <Check size={14} strokeWidth={3} />}{p.name}
                                     </span>

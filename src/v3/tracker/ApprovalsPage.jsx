@@ -8,8 +8,9 @@ import { PageHeader, ErrorBox, Loading } from '../components/ui';
 import { workApi } from '../api/workApi';
 import { useV3Live } from '../live';
 import { apiError } from '../api/mastersApi';
+import { DtmLinkReview } from '../planning/DtmStockLinks';
 
-const KIND_CLS = { BOM: 'bg-violet-100 text-violet-800', ORDER: 'bg-sky-100 text-sky-800', REQUISITION: 'bg-amber-100 text-amber-800', PO: 'bg-rose-100 text-rose-800', GRN: 'bg-emerald-100 text-emerald-800', TRIM_ITEM: 'bg-teal-100 text-teal-800' };
+const KIND_CLS = { BOM: 'bg-violet-100 text-violet-800', ORDER: 'bg-sky-100 text-sky-800', REQUISITION: 'bg-amber-100 text-amber-800', PO: 'bg-rose-100 text-rose-800', GRN: 'bg-emerald-100 text-emerald-800', TRIM_ITEM: 'bg-teal-100 text-teal-800', DTM_LINK: 'bg-teal-100 text-teal-800' };
 
 function waited(since) {
     if (!since) return '';
@@ -25,6 +26,7 @@ export default function ApprovalsPage() {
     const [data, setData] = useState(null);
     const [type, setType] = useState('');
     const [error, setError] = useState('');
+    const [review, setReview] = useState(null);   // a DTM in-house link: decided here, it has no page of its own
     const load = () => workApi.approvals().then(res => setData(res.data)).catch(err => setError(apiError(err, 'Failed to load approvals.')));
     useEffect(() => { load(); }, []);
     useV3Live(load);   // live: the list follows approvals as they happen
@@ -48,7 +50,7 @@ export default function ApprovalsPage() {
                 ) : (
                     <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
                         {items.map(i => (
-                            <button key={`${i.type}${i.id}`} type="button" onClick={() => navigate(i.to)} className="w-full text-left flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 hover:bg-slate-50">
+                            <button key={`${i.type}${i.id}`} type="button" onClick={() => (i.type === 'DTM_LINK' ? setReview(i.id) : navigate(i.to))} className="w-full text-left flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 hover:bg-slate-50">
                                 <span className={`text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded ${KIND_CLS[i.type] || 'bg-slate-100 text-slate-700'}`}>{i.kind_label}</span>
                                 <span className="font-black text-slate-800">{i.number}</span>
                                 <span className="text-sm text-slate-600">{i.title}</span>
@@ -59,6 +61,7 @@ export default function ApprovalsPage() {
                     </div>
                 )}
             </>}
+            {review && <DtmLinkReview id={review} onClose={() => setReview(null)} onDone={() => { setReview(null); load(); }} />}
         </div>
     );
 }

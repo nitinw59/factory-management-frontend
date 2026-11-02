@@ -37,13 +37,15 @@ export default function BomLineEditor({ kind, line, bom, style, tones, fabricIte
     const [error, setError] = useState('');
     const set = (patch) => setF(prev => ({ ...prev, ...patch }));
 
+    // DTM qualities and stand-ins aren't items to pick; a stand-in already on the line stays listed so the line shows it.
+    const pickable = (t) => !t.is_dtm_quality && (!t.dtm_base_item_id || (f.items || []).some(i => String(i.trim_item_id) === String(t.id)));
     const itemOptions = isTrim
-        ? trimItems.filter(t => t.is_active && String(t.trim_type_id) === f.trim_type_id && t.usage_uom === f.uom)
+        ? trimItems.filter(t => pickable(t) && t.is_active && String(t.trim_type_id) === f.trim_type_id && t.usage_uom === f.uom)
         : fabricItems.filter(x => x.is_active && x.usage_uom === f.uom);
     // Items the unit hides: the line lists only items counted in its own unit (consumption must match).
     const UNIT_NAME = { m: 'metres', yd: 'yards', kg: 'kg', pcs: 'pieces' };
     const hiddenByUnit = (isTrim
-        ? trimItems.filter(t => t.is_active && String(t.trim_type_id) === f.trim_type_id && t.usage_uom !== f.uom)
+        ? trimItems.filter(t => pickable(t) && t.is_active && String(t.trim_type_id) === f.trim_type_id && t.usage_uom !== f.uom)
         : fabricItems.filter(x => x.is_active && x.usage_uom !== f.uom))
         .reduce((m, it) => ({ ...m, [it.usage_uom]: (m[it.usage_uom] || 0) + 1 }), {});
     const unitHint = Object.keys(hiddenByUnit).length ? (

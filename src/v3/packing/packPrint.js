@@ -53,17 +53,18 @@ export function exportDispatchNote(d, company = null, assets = {}) {
     const addr = [company?.address_line1, company?.address_line2, company?.city, company?.state, company?.pin_code].filter(Boolean).join(', ');
     if (addr) doc.text(addr, M + lw, 20, { maxWidth: CW - lw - 60 });
     if (company?.gstin) doc.text(`GSTIN ${company.gstin}`, M + lw, 24);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.text('DISPATCH NOTE', W - M, 15, { align: 'right' });
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.text('DISPATCH RECEIPT', W - M, 15, { align: 'right' });
     doc.setFontSize(10); doc.text(d.dispatch_no, W - M, 21, { align: 'right' });
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.text(`Date ${dmy(d.dispatch_date)}${d.status !== 'DISPATCHED' ? `  ·  ${d.status.toLowerCase()}` : ''}`, W - M, 26, { align: 'right' });
     doc.setLineWidth(0.4); doc.line(M, 30, W - M, 30);
     autoTable(doc, {
         ...GRID, startY: 33, margin: { left: M, right: M },
         body: [
-            ['Consignee', d.customer_name, 'Order', d.order_no],
+            ['Buyer', d.customer_name, 'Order', d.order_no],
             ['Destination', d.destination || '', 'Buyer PO', d.buyer_po_no || ''],
             ['Vehicle no.', d.vehicle_no || '', 'Invoice no.', d.invoice_no || ''],
             ['Transporter', d.transporter || '', 'LR no.', d.lr_no || ''],
+            ...(d.source_line ? [['Batch ID', `#${d.source_floor_no} · ${d.source_batch_code}`, 'From line', `${d.source_line} (${d.source_stage})`]] : []),
         ],
         styles: { ...GRID.styles, fontSize: 8.5, cellPadding: 1.5 }, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 26 }, 2: { fontStyle: 'bold', cellWidth: 24 } },
     });
@@ -106,5 +107,5 @@ export function exportDispatchNote(d, company = null, assets = {}) {
     if (y > H - 8) { doc.addPage(); y = 40; }
     doc.setFontSize(8.5);
     ['Prepared by', 'Checked by (security)', 'Driver', `For ${nameOf(company) || 'the company'}`].forEach((t, i) => { const x = M + (i * CW) / 4; doc.line(x, y, x + CW / 4 - 8, y); doc.text(t, x, y + 4); });
-    doc.save(`DispatchNote-${d.dispatch_no.replace(/[^\w-]+/g, '-')}.pdf`);
+    doc.save(`DispatchReceipt-${d.dispatch_no.replace(/[^\w-]+/g, '-')}.pdf`);
 }

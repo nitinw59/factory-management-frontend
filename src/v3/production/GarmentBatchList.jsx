@@ -22,7 +22,7 @@ import { apiError } from '../api/mastersApi';
 import { PriorityBadge } from '../cutting/cutShared';
 import { feedback } from './scanShared';
 import { StationDialog } from './stationShared';
-import { CLEARED, rollOf, StageProgressStepper, stagesOf, partsOf, Popup, DefectSheet } from './garmentShared';
+import { CLEARED, rollOf, StageProgressStepper, stagesOf, partsOf, Popup, DefectSheet, QaPassedNote } from './garmentShared';
 
 const seqOf = (no) => Number(String(no).split('-').pop()) || 0;
 const isOpen = (g) => !CLEARED.includes(g.status) && g.status !== 'QC_REJECTED';
@@ -62,7 +62,7 @@ export default function GarmentBatchList({ stage, stageId, lineId, queue, codes,
         if (CLEARED.includes(g.status)) { feedback('already'); setSelId(null); setPopup({ g }); return; }
         feedback('success'); setSelId(g.id); setDetail({ id: g.id, loading: true });
         productionApi.garmentLookup(g.garment_no, stageId)
-            .then(r => setDetail(d => (d && d.id === g.id ? { id: g.id, garment: r.data.garment, route: r.data.route } : d)))
+            .then(r => setDetail(d => (d && d.id === g.id ? { id: g.id, garment: r.data.garment, route: r.data.route, qa: r.data.qa_overrides } : d)))
             .catch(err => setDetail(d => (d && d.id === g.id ? { id: g.id, error: apiError(err, 'Failed to load the garment.') } : d)));
     };
     const full = detail && sel && String(detail.id) === String(sel.id) ? detail : null;
@@ -262,10 +262,10 @@ export default function GarmentBatchList({ stage, stageId, lineId, queue, codes,
                                 </div>
                                 {!full || full.loading ? <p className="mb-4 text-xs font-bold text-slate-400 flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Loading the garment…</p>
                                     : full.error ? <p className="mb-4 text-xs font-bold text-rose-700">{full.error}</p>
-                                    : full.garment && <div className="mb-4"><StageProgressStepper stages={stagesOf({ route: full.route }, full.garment, stageId)} /></div>}
+                                    : full.garment && <div className="mb-4"><StageProgressStepper stages={stagesOf({ route: full.route }, full.garment, stageId)} /><QaPassedNote overrides={full.qa} garment={full.garment} className="mt-2" /></div>}
                                 <div className="flex gap-2 flex-wrap mb-4">
                                     {(full?.garment ? partsOf(full.garment) : []).map(p => (
-                                        <div key={p.id} className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${p.bad ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`} title={p.note || ''}>
+                                        <div key={p.id} className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${p.bad ? 'bg-rose-50 border-rose-200 text-rose-700' : p.warn ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-slate-50 border-slate-200 text-slate-600'}`} title={p.note || ''}>
                                             {p.bad ? <X size={10} strokeWidth={3} /> : <ShieldCheck size={10} />}{p.name}{p.note && <span className="text-[10px] uppercase opacity-70">· {p.note}</span>}
                                         </div>
                                     ))}

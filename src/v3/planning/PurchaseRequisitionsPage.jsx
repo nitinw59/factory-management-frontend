@@ -23,8 +23,8 @@ export default function PurchaseRequisitionsPage({ purpose }) {
     const [counts, setCounts] = useState(null);
     const attention = params.get('attention') === 'me';   // My work → requisitions sent back to me
     const store = params.get('store') || '';   // My work (store) → that store's requisitions: TRIM = store + trim lines, FABRIC = fabric lines
-    // 25 Oct 2026 (owner: "by default select to order tab"): the plain page opens on To order; All is ?tab=all.
-    const toOrder = params.get('to_order') === '1' || (!purpose && !status && !attention && !store && params.get('tab') !== 'all');
+    // 3 Nov 2026 (owner: "by default select all tab on load"; was To order since 25 Oct): the plain page opens on All.
+    const toOrder = params.get('to_order') === '1';
     const storeLabel = store === 'FABRIC' ? 'fabric' : store === 'TRIM' ? 'trims and store items' : store ? 'trims, fabric and store items' : '';
     const [rows, setRows] = useState(null);
     const [search, setSearch] = useState('');
@@ -40,7 +40,7 @@ export default function PurchaseRequisitionsPage({ purpose }) {
     const today = new Date().toISOString().slice(0, 10);
     const TABS = [['', 'All', 'ALL'], ['DRAFT,REJECTED', 'To finish', null], ['SUBMITTED', 'Submitted', 'SUBMITTED'], ['TO_ORDER', 'To order', 'TO_ORDER'], ['APPROVED', 'Approved', 'APPROVED'], ['REJECTED', 'Rejected', 'REJECTED'], ['CANCELLED', 'Cancelled', 'CANCELLED']];
     const tabKey = toOrder ? 'TO_ORDER' : status;
-    const setTab = (k) => setParams({ ...(k === 'TO_ORDER' ? { to_order: '1' } : k ? { status: k } : purpose || store ? {} : { tab: 'all' }), ...(store ? { store } : {}) });
+    const setTab = (k) => setParams({ ...(k === 'TO_ORDER' ? { to_order: '1' } : k ? { status: k } : {}), ...(store ? { store } : {}) });
     const countOf = (k, c) => (!counts ? null : k === 'DRAFT,REJECTED' ? (counts.DRAFT || 0) + (counts.REJECTED || 0) : counts[c] || 0);
     useV3Live(() => setRev(r => r + 1));   // live: requisitions decided elsewhere show at once
 

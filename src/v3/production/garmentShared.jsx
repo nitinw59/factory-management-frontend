@@ -12,11 +12,12 @@ const STAGE_STATE_STYLE = {
     passed: { circle: 'bg-emerald-500 border-emerald-500 text-white', label: 'text-emerald-600', line: 'bg-emerald-400' },
     current: { circle: 'bg-amber-500 border-amber-500 text-white animate-pulse', label: 'text-amber-600', line: 'bg-slate-200' },
     upcoming: { circle: 'bg-white border-slate-200 text-slate-300', label: 'text-slate-300', line: 'bg-slate-200' },
+    open: { circle: 'bg-white border-amber-400 text-amber-600', label: 'text-amber-600', line: 'bg-emerald-400' },   // passed over by a QA override, not cleared yet
 };
 export function StageProgressStepper({ stages }) {
     if (!stages?.length) return null;
     return (
-        <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+        <div className="flex items-center gap-1 overflow-x-auto py-1 px-1">
             {stages.map((s, i) => {
                 const style = STAGE_STATE_STYLE[s.state] || STAGE_STATE_STYLE.upcoming;
                 return (
@@ -25,9 +26,9 @@ export function StageProgressStepper({ stages }) {
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 font-black text-[11px] ${style.circle} ${s.you ? 'ring-4 ring-red-800' : ''}`}>
                                 {s.state === 'passed' ? <Check size={14} strokeWidth={4} /> : i + 1}
                             </div>
-                            <span className={`mt-1 text-[9px] font-bold uppercase tracking-wide whitespace-nowrap ${s.you ? 'text-red-800' : style.label}`}>{s.label}{s.you ? ' (You)' : ''}</span>
+                            <span className={`mt-1 max-w-[60px] text-center leading-tight text-[9px] font-bold uppercase tracking-tight ${s.you ? 'text-red-800' : style.label}`}>{s.label}{s.you ? ' (You)' : ''}</span>
                         </div>
-                        {i < stages.length - 1 && <div className={`h-0.5 flex-1 min-w-[16px] ${style.line}`} />}
+                        {i < stages.length - 1 && <div className={`h-0.5 flex-1 min-w-[8px] ${style.line}`} />}
                     </Fragment>
                 );
             })}
@@ -41,7 +42,8 @@ export function stagesOf(view, g, stageId) {
     return view.route.map((r, i) => {
         const st = g.statuses?.[r.stage_type_id];
         let state;
-        if (r.unit === 'GARMENT') state = CLEARED.includes(st) ? 'passed' : i <= idx ? 'current' : 'upcoming';
+        if ((g.open_earlier || []).some(b => b === r.name || b.startsWith(`${r.name} (`))) state = 'open';
+        else if (r.unit === 'GARMENT') state = CLEARED.includes(st) ? 'passed' : i <= idx ? 'current' : 'upcoming';
         else state = g.blocked_by.some(b => b.startsWith(`${r.name} (`)) ? 'current' : i < idx ? 'passed' : 'upcoming';
         return { key: `${r.stage_type_id}-${i}`, label: r.name, state, you: i === idx, status: st ? st.replace('_', ' ') : '' };
     });
@@ -50,8 +52,22 @@ export function stagesOf(view, g, stageId) {
 export const partsOf = (g) => g.parts.map(p => {
     const flag = g.flagged.find(f => f.part_name === p.part_name);
     const wait = g.blocked_by.find(b => b.endsWith(`(${p.part_name})`));
-    return { id: p.id, name: p.part_name, bad: Boolean(flag || wait), note: flag ? `Rejected @ ${flag.rejected_at}` : wait ? `Not cleared @ ${wait.slice(0, wait.lastIndexOf(' ('))}` : p.replacement ? 'Re-cut' : null };
+    const open = (g.open_earlier || []).find(b => b.endsWith(`(${p.part_name})`));
+    return { id: p.id, name: p.part_name, bad: Boolean(flag || wait), warn: Boolean(!flag && !wait && open), note: flag ? `Rejected @ ${flag.rejected_at}` : wait ? `Not cleared @ ${wait.slice(0, wait.lastIndexOf(' ('))}` : open ? `Not cleared @ ${open.slice(0, open.lastIndexOf(' ('))}` : p.replacement ? 'Re-cut' : null };
 });
+
+// A garment passed at an earlier garment stage by a QA override (2 Nov 2026): who, where, and what is still not cleared.
+// It can be checked here as normal; the part stays open at its own stage.
+export function QaPassedNote({ overrides, garment, className = '' }) {
+    const open = garment?.open_earlier || [];
+    if (!overrides?.length && !open.length) return null;
+    return (
+        <div className={`px-4 py-2.5 rounded-xl border-2 border-amber-300 bg-amber-50 text-amber-900 ${className}`}>
+            {(overrides || []).map(o => <p key={o.stage} className="text-xs font-black">Passed {o.stage} by QA override ({o.by})</p>)}
+            {open.length > 0 && <p className="text-xs font-bold">Still not cleared: {open.join(', ')}. You can check this garment; tell that stage's checker.</p>}
+        </div>
+    );
+}
 
 // Full-screen 2.0 popup (BATCH NOT LOADED / NOT AT THIS STAGE / ALREADY APPROVED).
 const POPUP = {
@@ -63,13 +79,13 @@ export function Popup({ tone, icon: Icon, title, message, rows = [], children, b
     const c = POPUP[tone];
     return (
         <div className={`fixed inset-0 z-[320] ${c.back} backdrop-blur-sm flex items-center justify-center p-4`}>
-            <div className={`bg-white border-[8px] ${c.border} rounded-[3rem] p-8 md:p-10 max-w-2xl w-full max-h-[92vh] overflow-y-auto text-center shadow-2xl`}>
-                <div className={`w-24 h-24 ${c.disc} rounded-full flex items-center justify-center mx-auto mb-6`}><Icon className={`w-14 h-14 ${c.icon}`} /></div>
-                <h2 className={`text-3xl md:text-5xl font-black ${c.title} tracking-tight mb-3`}>{title}</h2>
-                <p className="text-slate-500 font-bold text-lg mb-6">{message}</p>
+            <div className={`bg-white border-[8px] ${c.border} rounded-[3rem] p-8 md:p-10 [@media(max-height:820px)]:p-5 max-w-2xl w-full max-h-[92vh] overflow-y-auto text-center shadow-2xl`}>
+                <div className={`w-24 h-24 [@media(max-height:820px)]:w-14 [@media(max-height:820px)]:h-14 ${c.disc} rounded-full flex items-center justify-center mx-auto mb-6 [@media(max-height:820px)]:mb-2`}><Icon className={`w-3/5 h-3/5 ${c.icon}`} /></div>
+                <h2 className={`text-3xl md:text-5xl [@media(max-height:820px)]:text-3xl font-black ${c.title} tracking-tight mb-3 [@media(max-height:820px)]:mb-1`}>{title}</h2>
+                <p className="text-slate-500 font-bold text-lg mb-6 [@media(max-height:820px)]:mb-3">{message}</p>
                 {children}
                 {rows.length > 0 && (
-                    <div className={`${c.box} border-2 rounded-3xl p-6 mb-8 text-left space-y-2.5`}>
+                    <div className={`${c.box} border-2 rounded-3xl p-6 mb-8 [@media(max-height:820px)]:p-3 [@media(max-height:820px)]:mb-3 text-left space-y-2.5`}>
                         {rows.map(([l, v]) => <div key={l} className="flex justify-between items-center gap-3"><span className="text-slate-400 font-bold text-xs uppercase tracking-widest">{l}</span><span className={`font-mono font-black text-lg ${c.val}`}>{v}</span></div>)}
                     </div>
                 )}

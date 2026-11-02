@@ -19,6 +19,7 @@ import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { PO_STATUS, EXTRA_REASONS, inr, amountInWords } from './poShared';
+import DtmCodeField from './DtmCodeField';
 import { exportPoPdf, exportPoExcel } from './poPrint';
 import RequisitionLinePicker from './RequisitionLinePicker';
 import DirectItemsEditor, { directProblem, directPayload } from './DirectItemsEditor';
@@ -89,7 +90,7 @@ export default function PurchaseOrderPage() {
     const intra = po.tax_mode === 'INTRA';
     const receivable = ['ISSUED', 'PARTLY_RECEIVED'].includes(po.status);
     const anyReceived = po.lines.some(l => l.received_qty > 0 || l.pending_qty > 0);
-    const editLine = (l) => { setFormError(''); setLineEdit({ line: l, qty: String(l.qty), rate: String(l.rate), gst_pct: String(l.gst_pct), delivery_date: l.delivery_date || '', notes: l.notes || '', reason: '', extra_reason: l.extra_reason || '', extra_note: l.extra_note || '' }); };
+    const editLine = (l) => { setFormError(''); setLineEdit({ line: l, qty: String(l.qty), rate: String(l.rate), gst_pct: String(l.gst_pct), delivery_date: l.delivery_date || '', supplier_code: l.supplier_code || '', garment_colour: l.garment_colour || '', notes: l.notes || '', reason: '', extra_reason: l.extra_reason || '', extra_note: l.extra_note || '' }); };
     const pending = po.status === 'PENDING_APPROVAL';
     const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
     const limitNote = Number(po.approval_limit) > 0 ? `${rupees(po.totals.total)} is above the ${rupees(po.approval_limit)} approval limit` : 'Every PO needs factory admin approval (no approval limit set)';
@@ -116,6 +117,16 @@ export default function PurchaseOrderPage() {
     const run = async (fn, close) => {
         setBusy(true); setFormError(''); setError('');
         try { setPo((await fn()).data); if (close) close(); } catch (err) { (close ? setFormError : setError)(apiError(err, 'Failed.')); } finally { setBusy(false); }
+    };
+    // Change item: the dialog stays open on the same line, now waiting for its code, so the next choice is right there.
+    const changeLineItem = async () => {
+        setBusy(true); setFormError('');
+        try {
+            const res = await purchasingApi.changeLineItem(id, lineEdit.line.id);
+            setPo(res.data);
+            const line = res.data.lines.find(x => x.id === lineEdit.line.id);
+            if (line) editLine(line); else setLineEdit(null);
+        } catch (err) { setFormError(apiError(err, 'Failed.')); setLineEdit(cur => (cur ? { ...cur, confirmChange: false } : cur)); } finally { setBusy(false); }
     };
     const askReason = (cfg) => { setAskText(''); setFormError(''); setAsk(cfg); };
     // Company profile + the images Settings → Documents (PO) picks. The logo is compulsory on a PO (16 Oct 2026):
@@ -254,7 +265,11 @@ export default function PurchaseOrderPage() {
                         {po.lines.map(l => (
                             <tr key={l.id} className="border-t border-slate-100 align-top text-right tabular-nums">
                                 <td className="px-3 py-2.5 text-left">{l.line_no}</td>
-                                <td className="px-3 py-2.5 text-left"><span className="font-semibold text-slate-800">{l.label}</span>
+                                <td className="px-3 py-2.5 text-left"><span className="font-semibold text-slate-800">{l.label}</span>{l.dtm && <span className="ml-1 text-[10px] font-black px-1.5 py-0.5 rounded border bg-indigo-50 text-indigo-700 border-indigo-200">DTM</span>}
+                                    {l.dtm_pending ? <span className="block text-xs font-semibold text-rose-700">Supplier code not entered: edit this line. Supplier sees: {l.doc_label}</span>
+                                        : l.kind === 'TRIM' && l.supplier_code && <span className="block text-xs text-slate-600">Supplier code: {l.supplier_code}</span>}
+                                    {l.stock_allocated > 0 && <span className="block text-xs font-semibold text-amber-800">{fmt(l.stock_allocated, l.uom)} {l.uom} of this item is allocated from stock. Reduce the quantity if it is no longer needed.</span>}
+                                    {l.dtm && <span className={`block text-xs ${l.garment_colour ? 'text-slate-600' : 'font-semibold text-rose-700'}`}>Garment colour: {l.garment_colour || 'not entered'}</span>}
                                     <span className="block text-xs text-slate-500">{l.type_name}{l.hsn_code ? ` · HSN ${l.hsn_code}` : ' · no HSN'}{l.notes ? ` · ${l.notes}` : ''}</span>
                                     <span className="block text-[11px] text-slate-400">{l.requisitions.map(r => `${r.pr_no}/${r.pr_line_no}`).join(', ')}</span>
                                     {l.extra_qty > 0 && (
@@ -370,7 +385,7 @@ export default function PurchaseOrderPage() {
                 <Modal title={`Line ${lineEdit.line.line_no} — ${lineEdit.line.label}`} onClose={() => setLineEdit(null)}>
                     <div className="space-y-3 w-[min(520px,90vw)]">
                         <div className="grid grid-cols-3 gap-3">
-                            <Field label={`Quantity (${lineEdit.line.purchase_uom})`} hint={`At least ${lineEdit.line.min_qty}`}><input className={inputCls} type="number" min={lineEdit.line.min_qty} step="any" value={lineEdit.qty} onChange={e => setLineEdit({ ...lineEdit, qty: e.target.value })} autoFocus /></Field>
+                            <Field label={`Quantity (${lineEdit.line.purchase_uom})`} hint={lineEdit.line.dtm && lineEdit.line.covered > 0 ? `Requisitions need ${needUnits(lineEdit.line)}; less is fine if stock covers the rest` : `At least ${lineEdit.line.min_qty}`}><input className={inputCls} type="number" min={lineEdit.line.min_qty} step="any" value={lineEdit.qty} onChange={e => setLineEdit({ ...lineEdit, qty: e.target.value })} autoFocus /></Field>
                             <Field label={`Rate ₹ / ${lineEdit.line.purchase_uom}`} hint="Before GST"><input className={inputCls} type="number" min="0" step="any" value={lineEdit.rate} onChange={e => setLineEdit({ ...lineEdit, rate: e.target.value })} /></Field>
                             <Field label="GST %"><input className={inputCls} type="number" min="0" max="40" step="0.01" value={lineEdit.gst_pct} onChange={e => setLineEdit({ ...lineEdit, gst_pct: e.target.value })} /></Field>
                         </div>
@@ -387,6 +402,30 @@ export default function PurchaseOrderPage() {
                                 </div>
                             </div>
                         )}
+                        {lineEdit.line.dtm && !lineEdit.line.dtm_pending && po.status === 'DRAFT' && (
+                            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-200 bg-indigo-50/50 px-3 py-2">
+                                {lineEdit.confirmChange ? <>
+                                    <p className="text-xs font-semibold text-slate-800">Take {lineEdit.line.label} off this line? If it was made only for this line, it is removed.</p>
+                                    <span className="flex gap-2">
+                                        <SecondaryButton disabled={busy} onClick={() => setLineEdit({ ...lineEdit, confirmChange: false })}>Keep it</SecondaryButton>
+                                        <PrimaryButton busy={busy} disabled={busy} onClick={changeLineItem}>Yes, change it</PrimaryButton>
+                                    </span>
+                                </> : <>
+                                    <p className="text-xs text-slate-700">Wrong item for this fabric? Change it to enter another code, pick an existing item, or use In-house on the order page.</p>
+                                    <SecondaryButton disabled={busy} onClick={() => { setFormError(''); setLineEdit({ ...lineEdit, confirmChange: true }); }}>Change item</SecondaryButton>
+                                </>}
+                            </div>
+                        )}
+                        {lineEdit.line.kind === 'TRIM' && (
+                            <div className="grid grid-cols-2 gap-3">
+                                <Field label={`Supplier code${lineEdit.line.dtm ? ' *' : ''}`} hint={lineEdit.line.dtm_pending ? 'Makes the real trim item for this fabric, e.g. TKT 120 33445.' : "The supplier's shade / code. Remembered for the next PO."}>
+                                    {lineEdit.line.dtm_pending
+                                        ? <DtmCodeField itemId={lineEdit.line.item_id} value={lineEdit.supplier_code} matchedId={lineEdit.matched_item_id} matchedLabel={lineEdit.matched_label} onChange={(code, matched, name) => setLineEdit({ ...lineEdit, supplier_code: code, matched_item_id: matched, matched_label: name })} />
+                                        : <input className={inputCls} maxLength={60} value={lineEdit.supplier_code} onChange={e => setLineEdit({ ...lineEdit, supplier_code: e.target.value })} />}
+                                </Field>
+                                {lineEdit.line.dtm && <Field label="Garment colour *" hint="Suppliers see this, not the fabric."><input className={inputCls} maxLength={200} value={lineEdit.garment_colour} onChange={e => setLineEdit({ ...lineEdit, garment_colour: e.target.value })} /></Field>}
+                            </div>
+                        )}
                         <div className="grid grid-cols-2 gap-3">
                             <Field label="Delivery date"><input className={inputCls} type="date" value={lineEdit.delivery_date} onChange={e => setLineEdit({ ...lineEdit, delivery_date: e.target.value })} /></Field>
                             <Field label="Notes"><input className={inputCls} value={lineEdit.notes} onChange={e => setLineEdit({ ...lineEdit, notes: e.target.value })} /></Field>
@@ -396,7 +435,7 @@ export default function PurchaseOrderPage() {
                         <div className="flex justify-end gap-2">
                             <SecondaryButton onClick={() => setLineEdit(null)}>Cancel</SecondaryButton>
                             <PrimaryButton busy={busy} disabled={busy || (issued && !lineEdit.reason.trim()) || (Number(lineEdit.qty || 0) > needUnits(lineEdit.line) && (!lineEdit.extra_reason || (lineEdit.extra_reason === 'OTHER' && !lineEdit.extra_note.trim())))}
-                                onClick={() => run(() => purchasingApi.updateLine(id, lineEdit.line.id, { qty: Number(lineEdit.qty), rate: Number(lineEdit.rate), gst_pct: Number(lineEdit.gst_pct), delivery_date: lineEdit.delivery_date || null, notes: lineEdit.notes, reason: lineEdit.reason,
+                                onClick={() => run(() => purchasingApi.updateLine(id, lineEdit.line.id, { ...(lineEdit.line.kind === 'TRIM' ? { supplier_code: lineEdit.supplier_code, matched_item_id: lineEdit.matched_item_id || undefined, garment_colour: lineEdit.garment_colour } : {}), qty: Number(lineEdit.qty), rate: Number(lineEdit.rate), gst_pct: Number(lineEdit.gst_pct), delivery_date: lineEdit.delivery_date || null, notes: lineEdit.notes, reason: lineEdit.reason,
                                     ...(Number(lineEdit.qty || 0) > needUnits(lineEdit.line) ? { extra_reason: lineEdit.extra_reason, extra_note: lineEdit.extra_note.trim() || null } : {}) }), () => setLineEdit(null))}>Save</PrimaryButton>
                         </div>
                     </div>

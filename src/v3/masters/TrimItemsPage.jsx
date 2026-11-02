@@ -1,4 +1,4 @@
-// Trim items (v3.trim_items): one record per vendor item (brand + code), with
+// Trim items (v3.trim_items): one record per brand item (brand + code), with
 // usage unit, purchase unit and conversion, plus on-hand stock, the movement
 // ledger and stock adjustments. Listed in one card per trim type (16 Oct 2026), each with its own search.
 // Export (21 Oct 2026): Excel (.xlsx) of the items shown (filters applied) or all items — an Items sheet and a By type summary.
@@ -17,7 +17,7 @@ import { todayLocal } from '../salesOrders/SalesOrderStatusBadge';
 
 const PURCHASE_UNITS = ['pcs', 'cone', 'gross', 'box', 'roll', 'packet', 'dozen'];
 const UOM_LABEL = { pcs: 'pcs', m: 'm' };
-const DTM_FILTERS = [['', 'All items'], ['dtm', 'DTM items only'], ['plain', 'Without DTM items']];
+const DTM_FILTERS = [['', 'All items'], ['dtm', 'DTM qualities only'], ['plain', 'Without DTM qualities']];
 
 const conversionText = (it) => (it.purchase_uom === it.usage_uom && Number(it.usage_per_purchase_uom) === 1
     ? `bought in ${it.usage_uom}`
@@ -39,7 +39,7 @@ function exportExcel(list, scope) {
         'DTM reference': it.dtm_reference || '', 'DTM base item': it.dtm_base_label || '',
         'Usage unit': it.usage_uom, 'Purchase unit': it.purchase_uom, 'Usage per purchase unit': Number(it.usage_per_purchase_uom),
         'On hand (usage unit)': Number(it.on_hand || 0), 'On hand (purchase units)': r2(Number(it.on_hand || 0) / Number(it.usage_per_purchase_uom || 1)),
-        'Opening stock entered': it.has_opening ? 'yes' : 'no', 'HSN code': it.hsn_code || '', 'GST %': it.gst_pct != null && it.gst_pct !== '' ? Number(it.gst_pct) : '',
+        'Opening stock entered': it.has_opening ? 'yes' : 'no', 'DTM quality': it.is_dtm_quality ? 'yes' : '', 'HSN code': it.hsn_code || '', 'GST %': it.gst_pct != null && it.gst_pct !== '' ? Number(it.gst_pct) : '',
         Status: it.is_active ? 'Active' : 'Inactive',
     }));
     // On hand totals only add up within one unit — one Total row per usage unit.
@@ -56,7 +56,7 @@ function exportExcel(list, scope) {
         t.Items += 1; t[it.is_active ? 'Active' : 'Inactive'] += 1;
         if (Number(it.on_hand) > 0) t['With stock'] += 1;
         if (!it.has_opening) t['No opening stock'] += 1;
-        if (it.dtm_base_item_id) t['DTM items'] += 1;
+        if (it.is_dtm_quality) t['DTM items'] += 1;
     }
     const typeRows = [...byType.values()];
     const sum = (key) => typeRows.reduce((a, t) => a + t[key], 0);
@@ -92,8 +92,8 @@ export default function TrimItemsPage() {
     const seesRequests = perms.trimRequest || perms.trimApprove;
 
     const load = useCallback(() => {
-        Promise.all([mastersApi.trimItems(), mastersApi.trimTypes()])
-            .then(([i, t]) => { setItems(i.data); setTypes(t.data); })
+        Promise.all([mastersApi.trimItems({ include: 'dtm' }), mastersApi.trimTypes()])
+            .then(([i, t]) => { setItems(i.data.filter(x => !x.dtm_base_item_id)); setTypes(t.data); })
             .catch(err => setError(apiError(err, 'Failed to load trim items.')));
     }, []);
     useEffect(() => { load(); }, [load]);
@@ -108,7 +108,7 @@ export default function TrimItemsPage() {
         const q = search.trim().toLowerCase();
         return (items || []).filter(it =>
             (!typeFilter || String(it.trim_type_id) === typeFilter)
-            && (!dtmFilter || (dtmFilter === 'dtm') === Boolean(it.dtm_base_item_id))
+            && (!dtmFilter || (dtmFilter === 'dtm') === Boolean(it.is_dtm_quality))
             && (!q || `${it.brand} ${it.code} ${it.description || ''} ${it.dtm_reference || ''}`.toLowerCase().includes(q)));
     }, [items, search, typeFilter, dtmFilter]);
 
@@ -166,7 +166,7 @@ export default function TrimItemsPage() {
         <div>
             <PageHeader
                 title="Trim items & stock"
-                subtitle="One item per vendor item (brand + code). Stock is kept in the usage unit."
+                subtitle="One item per brand and code. Stock is kept in the usage unit."
                 actions={<>
                     <select className={`${inputCls} w-44`} value={typeFilter} onChange={e => setTypeFilter(e.target.value)} aria-label="Filter by type">
                         <option value="">All types</option>
@@ -240,6 +240,7 @@ export default function TrimItemsPage() {
                                                         <span className="font-semibold text-slate-800">{it.brand} · {it.code}</span>
                                                         {waitingChange.has(String(it.id)) && <span className="ml-2 inline-flex items-center gap-1 text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200"><Clock size={11} /> change waiting for approval</span>}
                                                         {it.description && <span className="block text-xs text-slate-500">{it.description}</span>}
+                                                        {it.is_dtm_quality && <span className="block mt-1 text-xs text-slate-600"><DtmChip /> DTM quality: no stock. Its real items are named {it.dtm_name} + the supplier's code.</span>}
                                                         {it.dtm_base_item_id && <span className="block mt-1 text-xs text-slate-600"><DtmChip /> dyed to match <b>{it.dtm_reference}</b> <span className="text-slate-500">· base {it.dtm_base_label}</span></span>}
                                                     </td>
                                                     <td className="px-4 py-2.5 text-xs text-slate-600">
@@ -277,8 +278,8 @@ export default function TrimItemsPage() {
                     <div className="space-y-4 w-[min(620px,85vw)]">
                         {requestMode && <p className="text-sm bg-sky-50 border border-sky-200 text-sky-900 rounded-lg px-3 py-2">This goes to the merchandiser or factory admin for approval. {editing.id ? 'The item keeps its current values until the change is approved.' : 'The item can be used on BOMs and purchase orders once it is approved.'}</p>}
                         <div className="grid grid-cols-2 gap-3">
-                            <Field label="Brand / vendor *" hint='As written by the vendor, e.g. "Coats".'><input className={inputCls} value={editing.brand} onChange={e => setEditing({ ...editing, brand: e.target.value })} autoFocus={!editing.copiedFrom} /></Field>
-                            <Field label="Code *" hint='Vendor code incl. shade, e.g. "1234".'><input className={inputCls} value={editing.code} onChange={e => setEditing({ ...editing, code: e.target.value })} autoFocus={!!editing.copiedFrom} /></Field>
+                            <Field label="Brand *" hint='As written by the brand, e.g. "Coats".'><input className={inputCls} value={editing.brand} onChange={e => setEditing({ ...editing, brand: e.target.value })} autoFocus={!editing.copiedFrom} /></Field>
+                            <Field label="Code *" hint='Brand code incl. shade, e.g. "1234".'><input className={inputCls} value={editing.code} onChange={e => setEditing({ ...editing, code: e.target.value })} autoFocus={!!editing.copiedFrom} /></Field>
                         </div>
                         <Field label="Description" hint='e.g. "Navy", "Epic TKT 120".'><input className={inputCls} value={editing.description} onChange={e => setEditing({ ...editing, description: e.target.value })} /></Field>
                         <Field label="Trim type *">
@@ -318,6 +319,7 @@ export default function TrimItemsPage() {
                             <Field label="HSN code" hint="4, 6 or 8 digits — printed on purchase orders."><input className={inputCls} inputMode="numeric" value={editing.hsn_code ?? ''} onChange={e => setEditing({ ...editing, hsn_code: e.target.value })} /></Field>
                             <Field label="GST %" hint="Default GST on purchase orders, e.g. 12."><input className={inputCls} type="number" min="0" max="40" step="0.01" value={editing.gst_pct ?? ''} onChange={e => setEditing({ ...editing, gst_pct: e.target.value })} /></Field>
                         </div>
+                        {editing.is_dtm_quality && <Field label="Quality name *" hint="Starts the name of the real items, e.g. TKT 120 33445. Items already made keep their names."><input className={inputCls} maxLength={80} value={editing.dtm_name ?? ''} onChange={e => setEditing({ ...editing, dtm_name: e.target.value })} /></Field>}
                         {editing.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={editing.is_active} onChange={e => setEditing({ ...editing, is_active: e.target.checked })} /> Active</label>}
                         {requestMode && <Field label="Note for the approver" hint="Why it's needed, e.g. new supplier, wrong unit on the PO."><textarea className={`${inputCls} min-h-[60px]`} value={editing.note || ''} onChange={e => setEditing({ ...editing, note: e.target.value })} /></Field>}
                         <ErrorBox text={formError} />

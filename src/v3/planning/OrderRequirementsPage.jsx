@@ -19,6 +19,7 @@ import RollAssignModal from './RollAssignModal';
 import ReleaseForCuttingModal from './ReleaseForCuttingModal';
 import OrderMilestonesPanel from './OrderMilestonesPanel';
 import MaterialRequirements from './MaterialRequirements';
+import { DtmLinksPanel, DtmLinkModal } from './DtmStockLinks';
 import { exportTrimReservationPdf } from './trimReservationPdf';
 import { downloadOrderBomV2 } from '../boms/bomV2';
 import { loadLetterhead, sheetWithLetterhead } from '../components/letterhead';
@@ -113,6 +114,10 @@ export default function OrderRequirementsPage() {
     const [ov, setOv] = useState(null);               // revoke the release { mode, reason }
     const [releasing, setReleasing] = useState(false); // release for cutting (PPM per line + undertaking)
     const [check, setCheck] = useState(null);         // release check: items on no requisition and no PO
+    const [linking, setLinking] = useState(null);     // DTM from in-house stock: the item being linked (3 Nov 2026)
+    const [linksTick, setLinksTick] = useState(0);
+    const [dtmWaiting, setDtmWaiting] = useState(() => new Map());   // need → its link waiting for approval
+    const [canLink, setCanLink] = useState(false);   // In-house: the trim store and the purchase manager
     const [raising, setRaising] = useState(null);     // Raise dialog: the items (25 Oct 2026)
     const [raised, setRaised] = useState(null);       // banner after raising: { id, pr_no, count, added }
     const [busy, setBusy] = useState(false);
@@ -273,7 +278,9 @@ export default function OrderRequirementsPage() {
             )}
             {raising && <RaiseDialog order={order} items={raising} onClose={() => setRaising(null)} onRaised={(r) => { setRaising(null); setRaised(r); load(); loadCheck(); }} />}
             {(tab === 'FABRIC' || tab === 'TRIM') && (
-                <MaterialRequirements key={tab} data={data} kind={tab} approved={approved} showActions={(myKinds.length > 0 || allocKinds.length > 0) && approved} canRaise={canRaise} canAlloc={canAlloc} busy={busy}
+                <>
+                {tab === 'TRIM' && approved && <DtmLinksPanel orderId={orderId} tick={linksTick} onChanged={load} onLinks={(ls, can) => { setCanLink(can); setDtmWaiting(new Map(ls.filter(l => l.status === 'PENDING').map(l => [String(l.dtm_item_id), l]))); }} />}
+                <MaterialRequirements key={tab} onLink={setLinking} dtmWaiting={dtmWaiting} canLink={canLink} data={data} kind={tab} approved={approved} showActions={(myKinds.length > 0 || allocKinds.length > 0 || (tab === 'TRIM' && canLink)) && approved} canRaise={canRaise} canAlloc={canAlloc} busy={busy}
                     filter={fabFilter} view={fabView}
                     onCell={(item, colour) => setCell({ item, colour })}
                     onAllocateFree={allocateFree}
@@ -281,8 +288,10 @@ export default function OrderRequirementsPage() {
                     onRolls={(it) => setRolls({ orderId: order.id, orderNo: order.order_no, itemId: it.item_id, label: it.label })}
                     onAllocate={(it) => setTarget({ mode: 'allocate', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })}
                     onRelease={(it) => setTarget({ mode: 'release', orderId: order.id, orderNo: order.order_no, kind: it.kind, itemId: it.item_id, label: it.label, uom: it.uom, open: it.shortfall, allocated: it.allocated, free: it.free })} />
+                </>
             )}
 
+            {linking && <DtmLinkModal orderId={orderId} item={linking} onClose={() => setLinking(null)} onDone={() => { setLinking(null); setLinksTick(t => t + 1); }} />}
             {tab === 'MILESTONES' && approved && <OrderMilestonesPanel orderId={orderId} canEdit={perms.plan} />}
 
             {tab === 'CHANGES' && (

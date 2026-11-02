@@ -117,15 +117,17 @@ function StatusBar({ it }) {
 
 // Raise: the planner of the kind. Allocate: the store of the kind (19 Oct 2026) — fabric in whole rolls (Assign opens
 // the roll list; Rolls shows what the order holds and gives rolls back), trims by quantity.
-function Actions({ it, canRaise, canAlloc, onAllocate, onRelease, onRolls, onRaise }) {
+function Actions({ it, canRaise, canAlloc, onAllocate, onRelease, onRolls, onRaise, onLink, waiting, canLink }) {
     const fabric = it.kind === 'FABRIC' && !it.by_metres;   // pocketing / lining (20 Oct 2026): by metres, like trims
     return (
         <span className="whitespace-nowrap">
             {/* Raise opens the dialog here (25 Oct 2026; was a link to the buy list) */}
             {canRaise && it.to_raise > 0 && <button type="button" className="text-xs font-bold text-amber-700 hover:underline mr-3" onClick={() => onRaise([it])}>Raise</button>}
+            {waiting && <span className="text-xs font-bold text-violet-800 mr-3">Waiting for DTM approval</span>}
+            {!waiting && canLink && it.kind === 'TRIM' && it.info?.dtm && it.shortfall > 0 && onLink && <button type="button" className="text-xs font-bold text-violet-700 hover:underline mr-3" onClick={() => onLink(it)}>In-house</button>}
             {fabric && canAlloc && it.shortfall > 0 && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline mr-3" onClick={() => onRolls(it)}>Assign rolls</button>}
             {fabric && it.allocated > 0 && !(canAlloc && it.shortfall > 0) && <button type="button" className="text-xs font-bold text-slate-600 hover:underline" onClick={() => onRolls(it)}>Rolls</button>}
-            {!fabric && canAlloc && it.shortfall > 0 && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline mr-3" onClick={() => onAllocate(it)}>Allocate</button>}
+            {!fabric && canAlloc && it.shortfall > 0 && !it.info?.dtm && <button type="button" className="text-xs font-bold text-indigo-700 hover:underline mr-3" onClick={() => onAllocate(it)}>Allocate</button>}
             {!fabric && canAlloc && it.allocated > 0 && <button type="button" className="text-xs font-bold text-slate-600 hover:underline" onClick={() => onRelease(it)}>Release</button>}
         </span>
     );
@@ -296,7 +298,7 @@ function DownloadMenu({ options }) {
     );
 }
 
-export default function MaterialRequirements({ data, kind, approved, showActions, canRaise, canAlloc, filter, view, onCell, onAllocate, onRelease, onRolls, onAllocateFree, onRaise, busy }) {
+export default function MaterialRequirements({ data, kind, approved, showActions, canRaise, canAlloc, filter, view, onCell, onAllocate, onRelease, onRolls, onAllocateFree, onRaise, onLink, dtmWaiting, canLink, busy }) {
     const items = data.items.filter(i => i.kind === kind);
     const colours = data.colours;
     // Filters (16 Oct 2026): the tab bar's All / Short / Covered, plus a clicked count chip (covered / part / none),
@@ -321,6 +323,7 @@ export default function MaterialRequirements({ data, kind, approved, showActions
     // 25 Oct 2026 (owner: the metre / piece totals and "N items on a PO due after needed-by" were "irrelevant data"):
     // the totals added unlike items together (thread metres + fabric metres), so they're gone; what's left is what to
     // act on — items still to raise, and items whose PO arrives too late — as count chips that filter the list.
+    const waitingOf = (it) => (it.kind === 'TRIM' ? dtmWaiting?.get(String(it.item_id)) : null);   // sent for DTM approval (3 Nov 2026)
     const lateText = late.map(it => `${nameOf(it)}: ${it.incoming_pos.filter(p => p.late).map(p => `${p.po_no} due ${p.due ? dmy(p.due) : '—'}`).join(', ')} — needed by ${dmy(it.needed_by)}`).join('\n');
     const chip = (key, n, cls, label, title) => (
         <button type="button" onClick={() => setCoverPick(coverPick === key ? '' : key)} title={coverPick === key ? 'Show all again' : title}
@@ -346,6 +349,7 @@ export default function MaterialRequirements({ data, kind, approved, showActions
     const nameCell = (it, g) => (
         <td className={`px-3 py-2 bg-white ${STICKY_COL}`}>
             <p className="font-semibold text-slate-800">{nameOf(it)}{!it.active && <span className="ml-1 text-[10px] font-bold text-rose-600">inactive</span>}</p>
+            {waitingOf(it) && <p className="mt-0.5"><span className="inline-block text-[11px] font-black px-2 py-0.5 rounded border bg-violet-100 text-violet-900 border-violet-300">Sent for DTM approval: {waitingOf(it).source_label} · {fmt(waitingOf(it).qty, waitingOf(it).uom)} {waitingOf(it).uom}</span></p>}
             {subOf(it, g?.title) && <p className="text-[11px] text-slate-500">{subOf(it, g?.title)}</p>}
             {it.duplicate_note && <p className="mt-0.5 text-[11px] font-semibold text-amber-800 flex items-start gap-1"><AlertTriangle size={11} className="mt-0.5 shrink-0" />{it.duplicate_note}</p>}
         </td>
@@ -419,12 +423,12 @@ export default function MaterialRequirements({ data, kind, approved, showActions
                                         {showActions && <td />}
                                     </tr>,
                                     ...g.items.map(it => (
-                                        <tr key={it.key} className="border-t border-slate-100 align-top">
+                                        <tr key={it.key} className={`border-t border-slate-100 align-top ${waitingOf(it) ? 'bg-violet-50 border-l-4 border-l-violet-500' : ''}`}>
                                             {nameCell(it, g)}
                                             <td className="px-3 py-2 text-xs text-slate-700">{colourLinks(it)}</td>
                                             {reqCell(it)}
                                             <td className="px-3 py-2"><StatusBar it={it} /></td>
-                                            {showActions && <td className="px-3 py-2 text-right"><Actions it={it} canRaise={canRaise(it.kind)} canAlloc={canAlloc(it.kind)} onAllocate={onAllocate} onRelease={onRelease} onRolls={onRolls} onRaise={onRaise} /></td>}
+                                            {showActions && <td className="px-3 py-2 text-right"><Actions it={it} onLink={onLink} canLink={canLink} waiting={Boolean(waitingOf(it))} canRaise={canRaise(it.kind)} canAlloc={canAlloc(it.kind)} onAllocate={onAllocate} onRelease={onRelease} onRolls={onRolls} onRaise={onRaise} /></td>}
                                         </tr>
                                     )),
                                 ];
@@ -446,7 +450,7 @@ export default function MaterialRequirements({ data, kind, approved, showActions
                         </thead>
                         <tbody>
                             {ordered.flatMap(g => g.items.map(it => ({ it, g }))).map(({ it, g }) => (
-                                <tr key={it.key} className="border-t border-slate-100 align-top">
+                                <tr key={it.key} className={`border-t border-slate-100 align-top ${waitingOf(it) ? 'bg-violet-50 border-l-4 border-l-violet-500' : ''}`}>
                                     {nameCell(it, g)}
                                     {colours.map(c => (
                                         <td key={c.id} className="px-3 py-2 text-right tabular-nums">
@@ -455,7 +459,7 @@ export default function MaterialRequirements({ data, kind, approved, showActions
                                     ))}
                                     {reqCell(it)}
                                     <td className="px-3 py-2"><StatusBar it={it} /></td>
-                                    {showActions && <td className="px-3 py-2 text-right"><Actions it={it} canRaise={canRaise(it.kind)} canAlloc={canAlloc(it.kind)} onAllocate={onAllocate} onRelease={onRelease} onRolls={onRolls} onRaise={onRaise} /></td>}
+                                    {showActions && <td className="px-3 py-2 text-right"><Actions it={it} onLink={onLink} canLink={canLink} waiting={Boolean(waitingOf(it))} canRaise={canRaise(it.kind)} canAlloc={canAlloc(it.kind)} onAllocate={onAllocate} onRelease={onRelease} onRolls={onRolls} onRaise={onRaise} /></td>}
                                 </tr>
                             ))}
                         </tbody>

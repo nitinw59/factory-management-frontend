@@ -131,7 +131,12 @@ function Sidebar({ me, approvals, onNavigate }) {
         .sort((a, b) => Number(!a.label.toLowerCase().includes(words[0])) - Number(!b.label.toLowerCase().includes(words[0]))) : null;
     const go = (n) => { setFind(''); navigate(n.to); onNavigate?.(); };
     const link = (n) => (
-        <NavLink key={n.to} to={n.to} end={n.end} className={linkCls} onClick={onNavigate}>
+        <NavLink key={n.to} to={n.to} end={n.end} onClick={onNavigate} className={({ isActive }) => {
+            // Two items can share a page (Requisitions / To order): the address's query decides which one is lit.
+            const here = `${location.pathname}${location.search}`;
+            const lit = n.to.includes('?') ? here === n.to : isActive && !NAV.some(x => !x.hidden && x.to !== n.to && x.to === here);
+            return linkCls({ isActive: lit });
+        }}>
             <n.icon size={16} className="shrink-0" /> <span className="min-w-0 flex-1">{n.label}</span>
             {n.key === 'approvals' && approvals > 0 && <span className="text-[11px] font-black bg-rose-600 text-white rounded-full px-1.5 min-w-[20px] text-center">{approvals}</span>}
         </NavLink>

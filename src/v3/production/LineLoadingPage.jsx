@@ -10,7 +10,7 @@
 // pieces in rework can be sent for material replacement (the cutting manager accepts and fulfils on the Re-cuts page).
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Package, ArrowRight, X, RefreshCw, Zap, Loader2, CheckCircle2, AlertTriangle, History, Layers, Ruler, Shirt } from 'lucide-react';
+import { Package, ArrowRight, X, RefreshCw, Zap, Loader2, CheckCircle2, AlertTriangle, History, Layers, Ruler, Shirt, ChevronDown, ChevronRight } from 'lucide-react';
 import { trimKitsApi } from '../api/trimKitsApi';
 import { useV3Live } from '../live';
 import Modal from '../../shared/Modal';
@@ -493,43 +493,168 @@ function HistoryModal({ onClose }) {
 
 // Pieces marked for material replacement, for the line loader to collect (19 Oct 2026, phase 4): pick up → the cutting
 // manager accepts or rejects (reason shown here) → fulfils; the piece goes back to its station to check.
-const REP_STATE = { REQUESTED: ['To collect', 'bg-violet-100 text-violet-800'], PICKED_UP: ['Picked up', 'bg-sky-100 text-sky-800'], ACCEPTED: ['At cutting', 'bg-indigo-100 text-indigo-800'], REJECTED: ['Rejected — check again', 'bg-rose-100 text-rose-800'] };
-function PickupPanel({ canPickup, tick }) {
+// 2 Nov 2026 (owner: the list grew with every piece and didn't say who has what; "whoever pickup its his job"): one row per
+// batch × stage × line that opens into its pieces, tabs To collect / Mine / Others, several pieces picked up in one tap.
+// Bringing the piece back ("build phase 2"): once cutting has finished, it is To return for whoever picked it up — Delivered
+// at the station closes it, or the station checking it first. Any loader may bring it; it never blocks a check.
+const REP_STATE = { REQUESTED: ['To collect', 'bg-violet-100 text-violet-800'], PICKED_UP: ['Picked up', 'bg-sky-100 text-sky-800'], ACCEPTED: ['At cutting', 'bg-indigo-100 text-indigo-800'], REJECTED: ['Rejected — check again', 'bg-rose-100 text-rose-800'], TO_RETURN: ['To return', 'bg-amber-100 text-amber-900'] };
+const REP_OUTCOME = { FULFILLED: 'New material done — to check at the station', REJECTED: 'Not replaced — to check at the station', CANCELLED: 'Request cancelled — still in rework' };
+const repReturning = (r) => r.return_status === 'TO_RETURN';
+const repKey = (r) => (repReturning(r) ? 'TO_RETURN' : r.status);
+const REP_SHOWN_KEY = 'lineLoader3.replacementShown';
+const repWhen = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
+const repCount = (n) => `${n} piece${n === 1 ? '' : 's'}`;
+function PickupPanel({ canPickup, tick, lineName }) {
     const [rows, setRows] = useState(null);
-    const [busy, setBusy] = useState(null);
+    const [tab, setTab] = useState(null);         // null = the first tab with something in it
+    const [openKey, setOpenKey] = useState(null); // one group open at a time, so the panel stays short
+    const [sel, setSel] = useState(() => new Set());
+    const [busy, setBusy] = useState(false);
     const [err, setErr] = useState('');
-    const load = useCallback(() => Promise.all([productionApi.replacements({ status: 'open' }), productionApi.replacements({ status: 'REJECTED' })])
-        .then(([o, rj]) => setRows([...o.data, ...rj.data.filter(r => r.resolved_at && Date.now() - new Date(r.resolved_at).getTime() < 86400000)]))
+    const [msg, setMsg] = useState('');
+    const [shown, setShown] = useState(() => { try { return localStorage.getItem(REP_SHOWN_KEY) !== '0'; } catch { return true; } });
+    const load = useCallback(() => Promise.all([productionApi.replacements({ status: 'open' }), productionApi.replacements({ status: 'to_return' }), productionApi.replacements({ status: 'REJECTED' })])
+        .then(([o, back, rj]) => setRows([...o.data, ...back.data, ...rj.data.filter(r => !r.return_status && r.resolved_at && Date.now() - new Date(r.resolved_at).getTime() < 86400000)]))
         .catch(() => setRows(null)), []);
     useEffect(() => { load(); }, [load, tick]);
     if (!rows || rows.length === 0) return null;
-    const pick = async (r) => {
-        setBusy(r.id); setErr('');
-        try { await productionApi.pickupReplacement(r.id); load(); } catch (e) { setErr(apiError(e, 'Failed.')); } finally { setBusy(null); }
+
+    const toggleShown = () => { const v = !shown; setShown(v); try { localStorage.setItem(REP_SHOWN_KEY, v ? '1' : '0'); } catch { /* this device only */ } };
+    const tabOf = (r) => (r.status === 'REQUESTED' ? 'COLLECT' : canPickup && r.picked_by_me ? 'MINE' : 'OTHERS');
+    const visible = lineName ? rows.filter(r => r.line === lineName) : rows;
+    const hidden = rows.length - visible.length;
+    const counts = { COLLECT: 0, MINE: 0, OTHERS: 0 };
+    visible.forEach(r => { counts[tabOf(r)] += 1; });
+    const mineToReturn = visible.filter(r => repReturning(r) && tabOf(r) === 'MINE').length;
+    const tabs = canPickup ? [['COLLECT', 'To collect'], ['MINE', 'Mine'], ['OTHERS', 'Others']] : [['COLLECT', 'To collect'], ['OTHERS', 'Picked up']];
+    const active = tab || tabs.find(([k]) => counts[k] > 0)?.[0] || 'COLLECT';
+
+    const groups = [];
+    const byKey = new Map();
+    visible.filter(r => tabOf(r) === active).forEach(r => {
+        const key = [r.batch_id, r.stage_type_id, r.line || '', active === 'OTHERS' ? r.picked_up_by_user_id || '' : '', repReturning(r) ? 'BACK' : ''].join('|');
+        if (!byKey.has(key)) { const g = { key, head: r, rows: [], back: repReturning(r) }; byKey.set(key, g); groups.push(g); }
+        byKey.get(key).rows.push(r);
+    });
+    groups.sort((a, b) => b.back - a.back);   // what has to go back first
+    const canAct = (g) => canPickup && (active === 'COLLECT' || g.back);
+    const tally = (list, of) => { const m = new Map(); list.forEach(r => m.set(of(r), (m.get(of(r)) || 0) + 1)); return [...m]; };
+    const total = groups.reduce((n, g) => n + g.rows.length, 0);
+    const openGroup = groups.find(g => g.key === openKey);
+    const openTicked = openGroup ? openGroup.rows.filter(r => sel.has(r.id)) : [];   // the button stays in view below the scrolling list
+
+    const chooseTab = (k) => { setTab(k); setOpenKey(null); setErr(''); setMsg(''); };
+    const toggleGroup = (g) => {
+        setErr(''); setMsg('');
+        if (openKey === g.key) { setOpenKey(null); return; }
+        setOpenKey(g.key);
+        setSel(new Set(g.rows.map(r => r.id)));   // all ticked; a piece that arrives later stays unticked
     };
-    const toCollect = rows.filter(r => r.status === 'REQUESTED').length;
+    const togglePiece = (id) => setSel(cur => { const next = new Set(cur); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+    const act = async (g, ids) => {
+        setBusy(true); setErr(''); setMsg('');
+        try {
+            if (g.back) {
+                const { data } = await productionApi.returnReplacements(ids);
+                setMsg(`${repCount(data.delivered)} delivered to the station.${data.skipped ? ` ${data.skipped} had already been delivered or checked.` : ''}`);
+            } else {
+                const { data } = await productionApi.pickupReplacements(ids);
+                setMsg(`${repCount(data.picked)} picked up — now under Mine.${data.skipped ? ` ${data.skipped} had already been taken by another loader.` : ''}`);
+            }
+            setOpenKey(null);
+        } catch (e) { setErr(apiError(e, 'Failed.')); } finally { setBusy(false); load(); }
+    };
+
     return (
         <div className="rounded-xl border-2 border-violet-200 bg-white">
-            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-violet-100 bg-violet-50 rounded-t-xl">
-                <Package size={18} className="text-violet-700" /><span className="font-black text-slate-800">Material replacement — {toCollect} piece{toCollect === 1 ? '' : 's'} to collect</span>
-                <span className="text-xs text-slate-500 hidden sm:inline">Take the piece from the station to cutting, then tap Picked up.</span>
-            </div>
-            {err && <p className="px-4 pt-2 text-sm font-bold text-rose-700">{err}</p>}
-            <div className="divide-y divide-slate-100">{rows.map(r => (
-                <div key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-                    <span className="text-lg font-black text-slate-900">#{r.floor_no}</span>
-                    <span className="text-sm"><b>{r.part_name} · {r.size} #{r.no}</b> <span className="text-slate-500">roll #{r.roll_no ?? '—'} · {r.colour}</span>
-                        <span className="block text-xs text-slate-500">{r.stage}{r.line ? ` · ${r.line}` : ''} · since {new Date(r.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{r.rejected_reason ? ` · “${r.rejected_reason}”` : ''}</span></span>
-                    <span className={`ml-auto text-[11px] font-black px-2 py-1 rounded-lg ${REP_STATE[r.status]?.[1] || 'bg-slate-100'}`}>{REP_STATE[r.status]?.[0] || r.status}</span>
-                    {canPickup && r.status === 'REQUESTED' && <button type="button" disabled={busy === r.id} onClick={() => pick(r)} className="px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-black disabled:opacity-50">Picked up</button>}
-                </div>
-            ))}</div>
+            <button type="button" onClick={toggleShown} className={`w-full flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 bg-violet-50 text-left rounded-t-xl ${shown ? 'border-b border-violet-100' : 'rounded-b-xl'}`}>
+                <Package size={18} className="text-violet-700" /><span className="font-black text-slate-800">Material replacement</span>
+                <span className="text-sm font-black text-violet-800">{counts.COLLECT} to collect</span>
+                {canPickup && <span className="text-sm font-bold text-sky-800">{counts.MINE} mine</span>}
+                {mineToReturn > 0 && <span className="text-[11px] font-black px-2 py-1 rounded-lg bg-amber-100 text-amber-900">{mineToReturn} to bring back</span>}
+                <span className="text-sm font-bold text-slate-500">{counts.OTHERS} {canPickup ? 'with others' : 'picked up'}</span>
+                <span className="ml-auto text-xs font-bold text-indigo-700">{shown ? 'Hide' : 'Show'}</span>
+            </button>
+            {shown && (
+                <>
+                    <div className="flex gap-1 px-3 pt-2 border-b border-slate-200">
+                        {tabs.map(([k, label]) => (
+                            <button key={k} type="button" onClick={() => chooseTab(k)} className={`px-4 py-2 rounded-t-lg text-sm font-black border-b-2 ${active === k ? 'border-violet-600 text-violet-800 bg-violet-50' : 'border-transparent text-slate-500'}`}>{label} ({counts[k]})</button>
+                        ))}
+                    </div>
+                    {err && <p className="px-4 pt-2 text-sm font-bold text-rose-700">{err}</p>}
+                    {msg && <p className="px-4 pt-2 text-sm font-bold text-emerald-700">{msg}</p>}
+                    {groups.length === 0 ? <p className="px-4 py-3 text-sm text-slate-400">Nothing here.</p> : (
+                        <div className="divide-y divide-slate-100 max-h-[26rem] overflow-y-auto">{groups.map(g => {
+                            const open = openKey === g.key;
+                            const h = g.head;
+                            const acting = canAct(g);
+                            const ticked = g.rows.filter(r => sel.has(r.id));
+                            const who = active === 'MINE' ? 'Picked up by you' : h.picked_up_by_name ? `Picked up by ${h.picked_up_by_name}` : 'Not picked up';
+                            return (
+                                <div key={g.key}>
+                                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
+                                        <button type="button" onClick={() => toggleGroup(g)} className="flex-1 min-w-[14rem] flex items-center gap-3 text-left">
+                                            {open ? <ChevronDown size={18} className="text-slate-400 shrink-0" /> : <ChevronRight size={18} className="text-slate-400 shrink-0" />}
+                                            <span className="text-lg font-black text-slate-900">#{h.floor_no}</span>
+                                            <span className="text-sm"><b>{h.stage}{h.line ? ` · ${h.line}` : ''}</b>
+                                                <span className="block text-xs text-slate-500">{tally(g.rows, r => r.part_name).map(([n, c]) => `${n} ×${c}`).join(' · ')} · {g.back ? `ready since ${repWhen(g.rows[0].return_requested_at)}` : `since ${repWhen(g.rows[0].created_at)}`}</span></span>
+                                        </button>
+                                        {active !== 'COLLECT' && <span className="text-xs font-bold text-slate-600">{who}</span>}
+                                        {active !== 'COLLECT' && tally(g.rows, repKey).map(([st, c]) => <span key={st} className={`text-[11px] font-black px-2 py-1 rounded-lg ${REP_STATE[st]?.[1] || 'bg-slate-100'}`}>{REP_STATE[st]?.[0] || st} {c}</span>)}
+                                        <span className="text-sm font-black text-slate-800 whitespace-nowrap">{repCount(g.rows.length)}</span>
+                                        {acting && !open && <button type="button" onClick={() => toggleGroup(g)} className={`px-4 py-2 rounded-xl text-white text-sm font-black ${g.back ? 'bg-amber-600' : 'bg-violet-600'}`}>{g.back ? 'Deliver' : 'Pick up'}</button>}
+                                    </div>
+                                    {open && (
+                                        <div className="px-4 pb-3">
+                                            <table className="w-full text-sm border border-slate-200 rounded-lg">
+                                                <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
+                                                    <tr>
+                                                        {acting && <th className="w-10 px-3 py-2"><input type="checkbox" className="w-5 h-5 align-middle" aria-label="Tick all" checked={ticked.length === g.rows.length} onChange={() => setSel(new Set(ticked.length === g.rows.length ? [] : g.rows.map(r => r.id)))} /></th>}
+                                                        <th className="px-3 py-2 text-left">Piece</th>
+                                                        <th className="px-3 py-2 text-left">Roll</th>
+                                                        <th className="px-3 py-2 text-left">{active === 'COLLECT' ? 'Waiting since' : g.back ? 'Ready since' : 'Picked up'}</th>
+                                                        {active !== 'COLLECT' && <th className="px-3 py-2 text-left">State</th>}
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100">{g.rows.map(r => (
+                                                    <tr key={r.id} onClick={acting ? () => togglePiece(r.id) : undefined} className={acting ? 'cursor-pointer' : ''}>
+                                                        {acting && <td className="px-3 py-2"><input type="checkbox" className="w-5 h-5 align-middle" aria-label={`${r.part_name} ${r.size} ${r.no}`} checked={sel.has(r.id)} onChange={() => togglePiece(r.id)} onClick={e => e.stopPropagation()} /></td>}
+                                                        <td className="px-3 py-2"><b>{r.part_name} · {r.size} #{r.no}</b><span className="block text-xs text-slate-500">{r.colour}</span></td>
+                                                        <td className="px-3 py-2 text-slate-700">#{r.roll_no ?? '—'}</td>
+                                                        <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">{repWhen(active === 'COLLECT' ? r.created_at : g.back ? r.return_requested_at : r.picked_up_at)}</td>
+                                                        {active !== 'COLLECT' && <td className="px-3 py-2"><span className={`text-[11px] font-black px-2 py-1 rounded-lg ${REP_STATE[repKey(r)]?.[1] || 'bg-slate-100'}`}>{REP_STATE[repKey(r)]?.[0] || r.status}</span>{repReturning(r) && <span className="block mt-1 text-xs text-slate-600">{REP_OUTCOME[r.status]}</span>}{(r.rejected_reason || r.cancelled_reason) && <span className="block mt-1 text-xs text-rose-700">“{r.rejected_reason || r.cancelled_reason}”</span>}</td>}
+                                                    </tr>
+                                                ))}</tbody>
+                                                <tfoot className="bg-slate-50 font-black text-slate-800 border-t border-slate-200">
+                                                    <tr><td colSpan={(acting ? 1 : 0) + 3 + (active === 'COLLECT' ? 0 : 1)} className="px-3 py-2">Total {repCount(g.rows.length)}{acting ? ` · ${ticked.length} ticked` : ''}</td></tr>
+                                                </tfoot>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}</div>
+                    )}
+                    <div className="flex flex-wrap items-center gap-x-3 px-4 py-2 border-t border-slate-200 bg-slate-50 rounded-b-xl text-sm font-black text-slate-800">
+                        Total {repCount(total)}
+                        {hidden > 0 && <span className="text-xs font-bold text-amber-700">{repCount(hidden)} more on other lines — show all lines to see them</span>}
+                        {openGroup && canAct(openGroup) && (
+                            <span className="ml-auto flex flex-wrap items-center justify-end gap-3">
+                                <span className="text-xs font-semibold text-slate-500">{openGroup.back ? 'Take the ticked pieces from cutting back to the station, then tap Delivered.' : 'Take the ticked pieces to cutting, then tap Picked up. They become your job.'}</span>
+                                <button type="button" disabled={busy || !openTicked.length} onClick={() => act(openGroup, openTicked.map(r => r.id))} className={`px-5 py-2.5 rounded-xl text-white text-sm font-black disabled:opacity-50 ${openGroup.back ? 'bg-amber-600' : 'bg-violet-600'}`}>{openGroup.back ? 'Delivered' : 'Picked up'} ({openTicked.length})</button>
+                            </span>
+                        )}
+                    </div>
+                </>
+            )}
         </div>
     );
 }
 
 // Line accountability (20 Oct 2026): the lines this line loader is responsible for, and what others did on them in the
-// last 7 days (loads, unloads, line changes, replacement pickups, trim kit signatures) — anyone may cover a line.
+// last 7 days (loads, unloads, line changes, replacement pickups, trim kit signatures). `covering` from the server = done by
+// someone else; the screen only names them (2 Nov 2026, owner: "remove covering label").
 const MY_WHAT = { LOADED: 'Loaded', UNLOADED: 'Unloaded', LINE_CHANGED: 'Line changed', COMPLETED: 'Completed', PICKED_UP: 'Replacement picked up', SIGNED: 'Trim kit signed' };
 function MyLinesPanel({ tick }) {
     const [d, setD] = useState(null);
@@ -541,13 +666,13 @@ function MyLinesPanel({ tick }) {
         <div className="rounded-xl border border-slate-200 bg-white">
             <button type="button" onClick={() => setOpen(!open)} className="w-full flex flex-wrap items-center gap-2 px-4 py-2.5 text-left">
                 <span className="font-black text-slate-800">My lines: {d.lines.map(l => l.name).join(', ')}</span>
-                <span className={`text-xs font-bold ${others.length ? 'text-amber-700' : 'text-slate-500'}`}>{others.length ? `${others.length} thing(s) done by others covering in the last 7 days` : 'nothing done by others in the last 7 days'}</span>
+                <span className="text-xs font-bold text-slate-500">{others.length ? `${others.length} thing(s) done by others in the last 7 days` : 'nothing done by others in the last 7 days'}</span>
                 <span className="ml-auto text-xs font-bold text-indigo-700">{open ? 'Hide' : 'Show'}</span>
             </button>
             {open && <div className="divide-y divide-slate-100 border-t border-slate-100 max-h-72 overflow-y-auto">{d.activity.length === 0 ? <p className="px-4 py-2 text-sm text-slate-400">Nothing in the last 7 days.</p> : d.activity.map((a, i) => (
                 <p key={i} className="px-4 py-1.5 text-sm"><span className="text-xs text-slate-400 mr-2">{new Date(a.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                     <b>{MY_WHAT[a.what] || a.what}</b>{a.floor_no ? ` · #${a.floor_no}` : ''}{a.stage ? ` · ${a.stage}` : ''} · {a.line}{a.note ? <span className="text-slate-500"> — {a.note}</span> : null}
-                    {a.covering ? <span className="ml-1 text-[11px] font-black px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300">by {a.by_name || 'someone'} — covering</span> : <span className="text-slate-500"> · by you</span>}</p>
+                    <span className="text-slate-500"> · by {a.covering ? a.by_name || 'someone' : 'you'}</span></p>
             ))}</div>}
         </div>
     );
@@ -633,7 +758,7 @@ export default function LineLoadingPage() {
             )}
             <LineWipPanel panel={lineFilter ? linePanel : null} />
             <MyLinesPanel tick={tick} />
-            <PickupPanel canPickup={perms.replacePickup} tick={tick} />
+            <PickupPanel canPickup={perms.replacePickup} tick={tick} lineName={lineFilter ? lineList.find(l => String(l.id) === String(lineFilter))?.name : null} />
             <ErrorBox text={error} />
             {msg && <p className="text-sm font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5">{msg}</p>}
             {!list ? (!error && <Loading />) : list.length === 0 ? (

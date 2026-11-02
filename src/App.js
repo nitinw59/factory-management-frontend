@@ -250,6 +250,7 @@ const V3MilestoneCalendarPage = lazyPage(() => import('./v3/planning/MilestoneCa
 const V3SuppliersPage = lazyPage(() => import('./v3/purchasing/SuppliersPage'));
 const V3PurchaseOrdersPage = lazyPage(() => import('./v3/purchasing/PurchaseOrdersPage'));
 const V3NewPurchaseOrderPage = lazyPage(() => import('./v3/purchasing/NewPurchaseOrderPage'));
+const V3ToOrderPage = lazyPage(() => import('./v3/purchasing/ToOrderPage'));
 const V3PurchaseOrderPage = lazyPage(() => import('./v3/purchasing/PurchaseOrderPage'));
 const V3ReceiveGoodsPage = lazyPage(() => import('./v3/purchasing/ReceiveGoodsPage'));
 const V3DirectPurchasePage = lazyPage(() => import('./v3/purchasing/DirectPurchasePage'));
@@ -365,6 +366,7 @@ const appRoutes = (
           <Route path="planning/readiness" element={<V3ReadinessDashboardPage />} />
           <Route path="planning/milestones" element={<V3MilestoneCalendarPage />} />
           <Route path="purchasing/suppliers" element={<V3SuppliersPage />} />
+          <Route path="purchasing/to-order" element={<V3ToOrderPage />} />
           <Route path="purchasing/orders" element={<V3PurchaseOrdersPage />} />
           <Route path="purchasing/orders/new" element={<V3NewPurchaseOrderPage />} />
           <Route path="purchasing/orders/:id" element={<V3PurchaseOrderPage />} />

@@ -3,6 +3,8 @@
 // dispatches anyway); Dispatch; cancel (draft; a dispatched note only by the factory admin); PDF; history.
 // 20 Oct 2026 (phase 7): no packing — the note carries quantities per line × colour × size (editable while a draft, up to
 // what is finished and ready) and the boxes typed for the paperwork; cartons only show on old carton notes.
+// 2 Nov 2026: shown as a dispatch receipt, with the buyer, batch and line its garments are taken from; "ready" = free there.
+// The vehicle no. is optional.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Truck, Ban, FileDown, AlertTriangle, Save } from 'lucide-react';
@@ -15,7 +17,7 @@ import { loadLetterhead } from '../components/letterhead';
 import { exportDispatchNote } from './packPrint';
 import { DispatchStatus } from './PackingPage';
 
-const FIELDS = [['dispatch_date', 'Date', 'date'], ['vehicle_no', 'Vehicle no. *'], ['transporter', 'Transporter'], ['lr_no', 'LR no.'], ['invoice_no', 'Invoice no.'], ['destination', 'Destination']];
+const FIELDS = [['dispatch_date', 'Date', 'date'], ['vehicle_no', 'Vehicle no.'], ['transporter', 'Transporter'], ['lr_no', 'LR no.'], ['invoice_no', 'Invoice no.'], ['destination', 'Destination']];
 const ACTION = { CREATED: 'Created', EDITED: 'Edited', DISPATCHED: 'Dispatched', CANCELLED: 'Cancelled' };
 
 export default function DispatchPage() {
@@ -45,16 +47,16 @@ export default function DispatchPage() {
     const pdf = async () => { const lh = await loadLetterhead(); exportDispatchNote(d, lh.company, { logo: lh.logo }); };
     return (
         <div>
-            <Link to="/v3/packing?tab=dispatches" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Dispatch notes</Link>
+            <Link to="/v3/packing?tab=dispatches" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Dispatch receipts</Link>
             <div className="flex flex-wrap items-center gap-3 mb-1">
                 <h1 className="text-2xl font-black text-slate-900">{d.dispatch_no}</h1><DispatchStatus s={d.status} />
-                <span className="text-sm text-slate-500"><Link to={`/v3/packing/orders/${d.order_id}`} className="text-indigo-700 hover:underline">{d.order_no}</Link> · {d.customer_name}{d.buyer_po_no ? ` · PO ${d.buyer_po_no}` : ''}</span>
+                <span className="text-sm text-slate-500"><Link to={`/v3/packing/orders/${d.order_id}`} className="text-indigo-700 hover:underline">{d.order_no}</Link> · Buyer <b className="text-slate-700">{d.customer_name}</b>{d.buyer_po_no ? ` · PO ${d.buyer_po_no}` : ''}</span>
                 <span className="ml-auto flex gap-2">
-                    <SecondaryButton onClick={pdf}><FileDown size={14} /> Dispatch note</SecondaryButton>
-                    {perms.dispatch && (draft || perms.cancel_dispatched) && d.status !== 'CANCELLED' && <SecondaryButton onClick={() => setAsk({ kind: 'cancel', text: '' })}><Ban size={14} /> Cancel note</SecondaryButton>}
+                    <SecondaryButton onClick={pdf}><FileDown size={14} /> Dispatch receipt</SecondaryButton>
+                    {perms.dispatch && (draft || perms.cancel_dispatched) && d.status !== 'CANCELLED' && <SecondaryButton onClick={() => setAsk({ kind: 'cancel', text: '' })}><Ban size={14} /> Cancel receipt</SecondaryButton>}
                 </span>
             </div>
-            <p className="text-sm text-slate-600 mb-3">{d.cartons.length ? `${d.cartons.length} carton(s) · ` : ''}<b>{d.qty} pcs</b>{d.boxes != null ? ` · ${d.boxes} box(es)` : ''}{d.dispatched_at ? ` · dispatched ${fmtDate(d.dispatched_at)} by ${d.dispatched_by_name || ''}` : ''}{d.cancelled_reason ? ` · cancelled: ${d.cancelled_reason}` : ''}{d.over_reason ? ` · over-shipment: ${d.over_reason}` : ''}</p>
+            <p className="text-sm text-slate-600 mb-3">{d.cartons.length ? `${d.cartons.length} carton(s) · ` : ''}{d.source_floor_no && <>Batch <b>#{d.source_floor_no}</b> ({d.source_batch_code}) · </>}{d.source_line && <>From <b>{d.source_line}</b> ({d.source_stage}) · </>}<b>{d.qty} pcs</b>{d.boxes != null ? ` · ${d.boxes} box(es)` : ''}{d.dispatched_at ? ` · dispatched ${fmtDate(d.dispatched_at)} by ${d.dispatched_by_name || ''}` : ''}{d.cancelled_reason ? ` · cancelled: ${d.cancelled_reason}` : ''}{d.over_reason ? ` · over-shipment: ${d.over_reason}` : ''}</p>
             <ErrorBox text={error} />
             {d.over_shipment?.length > 0 && (
                 <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -73,7 +75,7 @@ export default function DispatchPage() {
                 <div className="mt-3"><Field label="Notes"><textarea className={`${inputCls} min-h-[50px]`} value={f.notes} onChange={e => setF({ ...f, notes: e.target.value })} disabled={!canEdit} /></Field></div>
             </div>
 
-            <h2 className="font-black text-slate-800 mb-2">Quantities{draft ? ' — finished garments ready to ship' : ''}</h2>
+            <h2 className="font-black text-slate-800 mb-2">Quantities{draft ? (d.source_line ? ` — approved and free at ${d.source_line}, batch #${d.source_floor_no}` : ' — finished garments ready to ship') : ''}</h2>
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
                 <table className="w-full text-sm min-w-[560px]">
                     <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider text-right"><tr><th className="px-3 py-2 text-left">Line · colour · size</th>{draft && <><th className="px-3 py-2">Ordered</th><th className="px-3 py-2">Dispatched</th><th className="px-3 py-2">Ready</th></>}<th className="px-3 py-2 w-28">On this note</th></tr></thead>
@@ -128,14 +130,14 @@ export default function DispatchPage() {
                 <Modal title={ask.kind === 'over' ? 'Dispatch above the tolerance' : `Cancel ${d.dispatch_no}`} onClose={() => setAsk(null)}>
                     <div className="space-y-3 w-[min(440px,85vw)]">
                         {ask.kind === 'over' ? <p className="text-sm text-slate-600">{d.over_shipment.join('; ')}. Give the reason to dispatch anyway (it is logged).</p>
-                            : <p className="text-sm text-slate-600">{d.status === 'DISPATCHED' ? 'The cartons go back to closed (the goods came back or the note was wrong).' : 'The cartons go back to closed and can go on another note.'}</p>}
+                            : <p className="text-sm text-slate-600">{d.status === 'DISPATCHED' ? 'The garments count as not dispatched again (the goods came back or the receipt was wrong).' : 'Nothing has left; this receipt is cancelled.'}</p>}
                         <Field label="Reason *"><textarea className={`${inputCls} min-h-[60px]`} value={ask.text} onChange={e => setAsk({ ...ask, text: e.target.value })} autoFocus /></Field>
                         <div className="flex justify-end gap-2">
                             <SecondaryButton onClick={() => setAsk(null)}>Back</SecondaryButton>
                             <PrimaryButton busy={busy} disabled={busy || !ask.text.trim()} onClick={async () => {
                                 const ok = await run(() => (ask.kind === 'over' ? packingApi.confirmDispatch(id, ask.text.trim()) : packingApi.cancelDispatch(id, ask.text.trim())));
                                 if (ok) setAsk(null);
-                            }}>{ask.kind === 'over' ? 'Dispatch' : 'Cancel the note'}</PrimaryButton>
+                            }}>{ask.kind === 'over' ? 'Dispatch' : 'Cancel the receipt'}</PrimaryButton>
                         </div>
                     </div>
                 </Modal>

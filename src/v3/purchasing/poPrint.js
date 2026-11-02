@@ -74,6 +74,8 @@ function hsnSummary(po) {
     return { intra, rows: [...m.values()].sort((a, b) => String(a.hsn).localeCompare(String(b.hsn)) || a.gst - b.gst) };
 }
 
+// A PO goes to the supplier: a DTM line prints the real item (its code is the supplier's) and the garment colour, never the fabric (3 Nov 2026).
+const supplierLines = (l) => [l.supplier_code && !String(l.doc_label || l.label).includes(l.supplier_code) ? `Supplier code: ${l.supplier_code}` : null, l.garment_colour ? `Garment colour: ${l.garment_colour}` : null];
 const termLines = (terms) => String(terms || '').split(/\r?\n/).map(t => t.trim()).filter(Boolean)
     .map((t, i) => (/^\d+[.)]/.test(t) ? t : `${i + 1}. ${t}`));
 
@@ -144,11 +146,11 @@ export function exportPoPdf(po, company, assets = {}) {
     // Items
     const taxHead = intra ? ['CGST', 'SGST'] : ['IGST'];
     // the quantity is in its own column; the usage quantity only when the purchase unit differs (gross → pcs, cone → m)
-    const desc = (l) => joinLines(l.type_name, l.factor !== 1 ? `= ${qty(l.usage_qty)} ${l.uom}` : null, l.notes);
+    const desc = (l) => joinLines(...supplierLines(l), l.type_name, l.factor !== 1 ? `= ${qty(l.usage_qty)} ${l.uom}` : null, l.notes);
     autoTable(doc, {
         startY: y, theme: 'striped', margin: { left: M, right: M, top: 20, bottom: 16 }, showHead: 'everyPage', showFoot: 'lastPage', rowPageBreak: 'avoid',
         head: [['Sr', 'Item & description', 'HSN', 'Delivery', 'Qty', 'Unit', 'Rate (Rs.)', 'Taxable (Rs.)', 'GST %', ...taxHead.map(t => `${t} (Rs.)`), 'Amount (Rs.)']],
-        body: po.lines.map(l => [l.line_no, { content: `${l.label}\n${desc(l)}` }, l.hsn_code || '—', dmy(l.delivery_date || po.delivery_date) || '—', qty(l.qty), l.purchase_uom, inr(l.rate), inr(l.value), `${l.gst_pct}%`,
+        body: po.lines.map(l => [l.line_no, { content: `${l.doc_label || l.label}\n${desc(l)}` }, l.hsn_code || '—', dmy(l.delivery_date || po.delivery_date) || '—', qty(l.qty), l.purchase_uom, inr(l.rate), inr(l.value), `${l.gst_pct}%`,
             ...(intra ? [inr(l.cgst), inr(l.sgst)] : [inr(l.igst)]), inr(l.total)]),
         foot: [['', 'Total', '', '', '', '', '', inr(po.totals.taxable), '', ...(intra ? [inr(po.totals.cgst), inr(po.totals.sgst)] : [inr(po.totals.igst)]), inr(po.totals.total)]],
         styles: { fontSize: 7.8, cellPadding: 1.8, valign: 'top', textColor: INK, lineColor: RULE, lineWidth: 0.1 },
@@ -166,11 +168,11 @@ export function exportPoPdf(po, company, assets = {}) {
             if (d.section === 'body' && d.column.index === 1) {
                 const l = po.lines[d.row.index];
                 set(7.8, 'bold');
-                if (doc.getTextWidth(String(l.label)) > d.cell.width - 3.6) { set(7.8, 'normal'); return; }   // a wrapped name stays as it is
+                if (doc.getTextWidth(String(l.doc_label || l.label)) > d.cell.width - 3.6) { set(7.8, 'normal'); return; }   // a wrapped name stays as it is
                 const bg = d.cell.styles.fillColor;   // the row's own colour (striped rows), so no band shows behind the name
                 doc.setFillColor(...(Array.isArray(bg) ? bg : typeof bg === 'number' ? [bg, bg, bg] : [255, 255, 255]));
                 doc.rect(d.cell.x + 0.3, d.cell.y + 0.3, d.cell.width - 0.6, 4.2, 'F');
-                doc.text(String(l.label), d.cell.x + 1.8, d.cell.y + 1.8 + 2.4, { maxWidth: d.cell.width - 3.6 });
+                doc.text(String(l.doc_label || l.label), d.cell.x + 1.8, d.cell.y + 1.8 + 2.4, { maxWidth: d.cell.width - 3.6 });
             }
         },
         didDrawPage: (d) => { if (d.pageNumber > 1) nextHeader(); },
@@ -328,7 +330,7 @@ export async function exportPoExcel(po, company, assets = {}) {
     po.lines.forEach((l, i) => {
         const r = first + i;
         const z = i % 2 ? 'FFF8FAFC' : null;
-        const desc = joinLines(l.label, l.type_name, l.factor !== 1 ? `= ${qty(l.usage_qty)} ${l.uom}` : null, l.notes);
+        const desc = joinLines(l.doc_label || l.label, ...supplierLines(l), l.type_name, l.factor !== 1 ? `= ${qty(l.usage_qty)} ${l.uom}` : null, l.notes);
         const vals = [
             [l.line_no, { align: 'center' }], [desc, {}], [l.hsn_code || '—', {}], [dmy(l.delivery_date || po.delivery_date) || '—', {}],
             [l.qty, { align: 'right', fmt: '#,##0.###' }], [l.purchase_uom, {}], [l.rate, { align: 'right', fmt: NUM }],
@@ -411,10 +413,10 @@ export async function exportPoExcel(po, company, assets = {}) {
 
     // Second sheet: the line data for analysis
     const data = wb.addWorksheet('Lines data');
-    const keys = ['PO no.', 'Supplier', 'Line', 'Item', 'HSN', 'Qty', 'Unit', 'Usage qty', 'Usage unit', 'Rate', 'Taxable', 'GST %', ...(intra ? ['CGST', 'SGST'] : ['IGST']), 'Amount', 'Delivery', 'Requisitions', 'Covers orders', 'Uncommitted', 'No requisition', 'Why'];
+    const keys = ['PO no.', 'Supplier', 'Line', 'Item', 'Supplier code', 'Garment colour', 'HSN', 'Qty', 'Unit', 'Usage qty', 'Usage unit', 'Rate', 'Taxable', 'GST %', ...(intra ? ['CGST', 'SGST'] : ['IGST']), 'Amount', 'Delivery', 'Requisitions', 'Covers orders', 'Uncommitted', 'No requisition', 'Why'];
     data.addRow(keys).font = BOLD;
     for (const l of po.lines) {
-        data.addRow([po.po_no, po.supplier_name, l.line_no, l.label, l.hsn_code || '', l.qty, l.purchase_uom, l.usage_qty, l.uom, l.rate, l.value, l.gst_pct,
+        data.addRow([po.po_no, po.supplier_name, l.line_no, l.doc_label || l.label, l.supplier_code || '', l.garment_colour || '', l.hsn_code || '', l.qty, l.purchase_uom, l.usage_qty, l.uom, l.rate, l.value, l.gst_pct,
             ...(intra ? [l.cgst, l.sgst] : [l.igst]), l.total, l.delivery_date || '', l.requisitions.map(x => `${x.pr_no} line ${x.pr_line_no} (${x.qty})`).join(', '),
             l.covers.map(c => `${c.order_no} ${c.qty}`).join(', '), l.uncommitted || '', l.extra_qty || '', l.extra_qty ? [l.extra_reason_label, l.extra_note].filter(Boolean).join(' — ') : '']);
     }

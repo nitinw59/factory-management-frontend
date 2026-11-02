@@ -116,6 +116,7 @@ export default function GrnPage() {
                         <div className="flex flex-wrap items-start gap-3">
                             <div className="flex-1 min-w-[240px]">
                                 <p className="font-bold text-slate-800">PO line {l.po_line_no}: {l.label}</p>
+                                {(l.supplier_code || l.garment_colour) && <p className="text-xs text-slate-600">{[l.supplier_code && `Supplier code ${l.supplier_code}`, l.garment_colour && `Garment colour ${l.garment_colour}`].filter(Boolean).join(' · ')}</p>}
                                 <p className="text-xs text-slate-500">Label typed at receipt: <span className="font-mono">{l.label_code}</span> ✓ matched</p>
                             </div>
                             <div className="text-right text-sm">

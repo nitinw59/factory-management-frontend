@@ -77,6 +77,7 @@ function LineForm({ l, value, onChange }) {
                 <input type="checkbox" className="mt-1" checked={v.on} onChange={e => set({ on: e.target.checked })} />
                 <span className="flex-1">
                     <span className="font-bold text-slate-800">PO line {l.line_no}: {l.label}</span>
+                    {(l.supplier_code || l.garment_colour) && <span className="block text-xs font-semibold text-indigo-800">{l.supplier_code ? `Check on the box: supplier code ${l.supplier_code}` : ''}{l.supplier_code && l.garment_colour ? ' · ' : ''}{l.garment_colour ? `garment colour ${l.garment_colour}` : ''}</span>}
                     <QtyChips l={l} />
                 </span>
             </label>

@@ -29,7 +29,7 @@ export default function BomLinesTab({ bom, editable, tones }) {
 
     useEffect(() => { load(); }, [load, bom.colours]);
     useEffect(() => {
-        Promise.all([stylesApi.style(bom.style_id), mastersApi.fabricItems(), mastersApi.trimTypes(), mastersApi.trimItems()])
+        Promise.all([stylesApi.style(bom.style_id), mastersApi.fabricItems(), mastersApi.trimTypes(), mastersApi.trimItems({ include: 'dtm' })])
             .then(([s, fi, tt, ti]) => setRef({ style: s.data, fabricItems: fi.data, trimTypes: tt.data, trimItems: ti.data }))
             .catch(err => setError(apiError(err, 'Failed to load style and masters.')));
     }, [bom.style_id]);
@@ -131,7 +131,7 @@ export default function BomLinesTab({ bom, editable, tones }) {
             {section('trim', 'Trims', lines.trims)}
             {dtm && (
                 <DtmModal bom={bom} line={dtm} fabricLines={lines.fabric} trimItems={ref.trimItems}
-                    onClose={() => setDtm(null)} onDone={() => { setDtm(null); load(); mastersApi.trimItems().then(r => setRef(x => ({ ...x, trimItems: r.data }))).catch(() => {}); }} />
+                    onClose={() => setDtm(null)} onDone={() => { setDtm(null); load(); mastersApi.trimItems({ include: 'dtm' }).then(r => setRef(x => ({ ...x, trimItems: r.data }))).catch(() => {}); }} />
             )}
             {editing && (
                 <BomLineEditor kind={editing.kind} line={editing.line} bom={bom} style={ref.style} tones={tones}

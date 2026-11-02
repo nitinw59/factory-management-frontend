@@ -22,7 +22,8 @@ export const productionApi = {
     replacements: (params) => api.get('/v3/production/replacements', { params }),
     requestReplacement: (data) => api.post('/v3/production/replacements', data),
     acceptReplacement: (id) => api.post(`/v3/production/replacements/${id}/accept`),
-    pickupReplacement: (id) => api.post(`/v3/production/replacements/${id}/pickup`),               // line loader collected the piece (19 Oct 2026)
+    pickupReplacements: (ids) => api.post('/v3/production/replacements/pickup', { ids }),            // line loader collected the pieces (19 Oct 2026; several in one go, 2 Nov 2026)
+    returnReplacements: (ids) => api.post('/v3/production/replacements/return', { ids }),             // brought back to the station (2 Nov 2026)
     rejectReplacement: (id, reason) => api.post(`/v3/production/replacements/${id}/reject`, { reason }),
     // floor in-charge portal (19 Oct 2026, phase 4)
     floor: () => api.get('/v3/production/floor'),

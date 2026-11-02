@@ -33,7 +33,7 @@ export function exportReturnNotePdf(rn, company) {
     autoTable(doc, {
         startY: y + 4,
         head: [['#', 'Item', 'Type', 'Qty', ...(priced ? ['Rate (Rs)', 'Value (Rs)', 'GST %', 'GST (Rs)'] : [])]],
-        body: rn.lines.map(l => [l.line_no, `${l.label}${l.rolls.length ? `\nRolls: ${l.rolls.map(r => `${r.roll_no} (${qty(r.qty)})`).join(', ')}` : ''}`,
+        body: rn.lines.map(l => [l.line_no, `${l.doc_label || l.label}${l.rolls.length ? `\nRolls: ${l.rolls.map(r => `${r.roll_no} (${qty(r.qty)})`).join(', ')}` : ''}`,
             l.source === 'REJECTED' ? 'Rejected at receipt' : 'From stock', `${qty(l.qty)} ${l.purchase_uom}`, ...(priced ? [inr(l.rate), inr(l.value), l.gst_pct, inr(l.gst)] : [])]),
         foot: priced ? [['', 'Total', '', '', '', inr(rn.totals.taxable), '', inr(rn.totals.gst)], ['', 'Value with GST', '', '', '', inr(rn.totals.total), '', '']]
             : [['', `Total · ${rn.lines.length} line(s)`, '', Object.entries(rn.lines.reduce((m, l) => ({ ...m, [l.purchase_uom]: (m[l.purchase_uom] || 0) + l.qty }), {})).map(([u, q]) => `${qty(q)} ${u}`).join(' + ')]],

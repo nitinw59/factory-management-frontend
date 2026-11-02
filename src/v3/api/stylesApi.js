@@ -42,5 +42,6 @@ export const stylesApi = {
     saveTrimLine: (bomId, lineId, data) => (lineId ? api.put(`/v3/boms/${bomId}/trim-lines/${lineId}`, data) : api.post(`/v3/boms/${bomId}/trim-lines`, data)),
     deleteTrimLine: (bomId, lineId) => api.delete(`/v3/boms/${bomId}/trim-lines/${lineId}`),
     dtmPreview: (bomId, lineId, data) => api.post(`/v3/boms/${bomId}/trim-lines/${lineId}/dtm-preview`, data),
+    createDtmQuality: (data) => api.post('/v3/dtm-qualities', data),   // a quality with no stock, e.g. TKT 120 (3 Nov 2026)
     dtmApply: (bomId, lineId, data) => api.post(`/v3/boms/${bomId}/trim-lines/${lineId}/dtm`, data),
 };
