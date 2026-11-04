@@ -2,7 +2,7 @@
 // answers for (controllers/v3/access.js pageRoles). The layout shows only the
 // pages the user may open; the home page shows them as tiles; the page guard
 // maps any /v3 address (detail pages too) to its key by the longest prefix.
-import { Home, Radar, Building2, Ruler, Network, MonitorSmartphone, Bug, Landmark, Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, Shirt, Route, ClipboardCheck, FileText, Calculator, Settings2, Boxes, ShoppingCart, FileCheck, Gauge, Warehouse, CalendarDays, Truck, ShoppingBag, PackageCheck, PackageOpen, BadgeCheck, Wrench, PackageMinus, ListRestart, ClipboardPlus, PackageX, Receipt, BarChart3, Forklift, Scissors, ScanLine, RotateCcw, Container, UserCog, Inbox, Activity, LifeBuoy, LayoutDashboard, Ban, KeyRound, Scale, Undo2, Map as MapIcon } from 'lucide-react';
+import { Home, Radar, Building2, Ruler, Network, MonitorSmartphone, Bug, Landmark, Palette, SlidersHorizontal, Tags, Package, ClipboardList, Layers, Shirt, Route, ClipboardCheck, FileText, Calculator, Settings2, Boxes, ShoppingCart, FileCheck, Gauge, Warehouse, CalendarDays, Truck, ShoppingBag, PackageCheck, PackageOpen, BadgeCheck, Wrench, PackageMinus, ListRestart, ClipboardPlus, PackageX, Receipt, BarChart3, Forklift, Scissors, ScanLine, RotateCcw, Container, UserCog, Inbox, Activity, LifeBuoy, LayoutDashboard, Ban, KeyRound, Scale, Undo2, Map as MapIcon, FileMinus } from 'lucide-react';
 
 export const NAV = [
     { section: 'Home' },
@@ -29,7 +29,8 @@ export const NAV = [
     { to: '/v3/purchasing/to-order', label: 'To order', icon: ClipboardCheck, key: 'purchasing.toOrder', text: 'Items on approved requisitions, not yet on a PO' },
     { to: '/v3/purchasing/orders', label: 'Purchase orders', icon: ShoppingBag, key: 'purchasing.orders', text: 'POs to suppliers' },
     { to: '/v3/purchasing/suppliers', label: 'Suppliers', icon: Truck, key: 'purchasing.suppliers', text: 'Supplier list' },
-    { to: '/v3/purchasing/invoices', label: 'Supplier invoices', icon: Receipt, key: 'purchasing.invoices', text: 'Three-way match' },
+    { to: '/v3/purchasing/invoices', label: 'Supplier invoices', icon: Receipt, key: 'purchasing.invoices', text: 'Three-way match, approval' },
+    { to: '/v3/purchasing/debit-notes', label: 'Debit notes', icon: FileMinus, key: 'purchasing.debitNotes', text: 'What we claim back from suppliers' },
     { to: '/v3/purchasing/reports', label: 'Purchasing reports', icon: BarChart3, key: 'purchasing.reports', text: 'Open, overdue, prices, suppliers' },
     // Stores split by job (29 Oct 2026 menu review): goods in, stock and issue to production, spares & general items;
     // the one-time opening counts moved to Setup.

@@ -14,7 +14,7 @@ import { purchasingApi } from '../api/purchasingApi';
 import { settingsApi } from '../api/settingsApi';
 import { loadImage, loadLetterhead } from '../components/letterhead';
 import { adminApi } from '../../api/adminApi';
-import { API_BASE_URL } from '../../utils/api';
+import DocumentLink from './DocumentLink';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
@@ -355,7 +355,7 @@ export default function PurchaseOrderPage() {
                     <p className="text-xs font-black uppercase tracking-wider text-slate-500 mb-2">Documents</p>
                     {po.documents.length === 0 ? <p className="text-sm text-slate-400 mb-2">None yet (signed PO, quotation, supplier confirmation…).</p> : (
                         <ul className="text-sm mb-3 space-y-1">
-                            {po.documents.map(d => <li key={d.id}><a href={`${API_BASE_URL}${d.file_url}`} target="_blank" rel="noreferrer" className="text-indigo-700 hover:underline">{d.display_name} v{d.version}</a>
+                            {po.documents.map(d => <li key={d.id}><DocumentLink path={`/v3/purchasing/purchase-orders/${po.id}/documents/${d.id}`} name={`${d.display_name} v${d.version}`} />
                                 <span className="text-xs text-slate-500"> · {d.original_filename} · {new Date(d.created_at).toLocaleDateString('en-IN')}{d.uploaded_by_name ? ` · ${d.uploaded_by_name}` : ''}</span></li>)}
                         </ul>
                     )}

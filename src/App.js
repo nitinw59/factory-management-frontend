@@ -262,6 +262,9 @@ const V3ReturnNotePage = lazyPage(() => import('./v3/purchasing/ReturnNotePage')
 const V3InvoicesPage = lazyPage(() => import('./v3/purchasing/InvoicesPage'));
 const V3NewInvoicePage = lazyPage(() => import('./v3/purchasing/NewInvoicePage'));
 const V3InvoicePage = lazyPage(() => import('./v3/purchasing/InvoicePage'));
+const V3DebitNotesPage = lazyPage(() => import('./v3/purchasing/DebitNotesPage'));
+const V3NewDebitNotePage = lazyPage(() => import('./v3/purchasing/NewDebitNotePage'));
+const V3DebitNotePage = lazyPage(() => import('./v3/purchasing/DebitNotePage'));
 const V3PurchasingReportsPage = lazyPage(() => import('./v3/purchasing/PurchasingReportsPage'));
 const V3MaterialIssueHomePage = lazyPage(() => import('./v3/issue/MaterialIssueHomePage'));
 const V3IssueForOrderPage = lazyPage(() => import('./v3/issue/IssueForOrderPage'));
@@ -381,6 +384,10 @@ const appRoutes = (
           <Route path="purchasing/invoices" element={<V3InvoicesPage />} />
           <Route path="purchasing/invoices/new" element={<V3NewInvoicePage />} />
           <Route path="purchasing/invoices/:id" element={<V3InvoicePage />} />
+          <Route path="purchasing/invoices/:id/edit" element={<V3NewInvoicePage />} />
+          <Route path="purchasing/debit-notes" element={<V3DebitNotesPage />} />
+          <Route path="purchasing/debit-notes/new" element={<V3NewDebitNotePage />} />
+          <Route path="purchasing/debit-notes/:id" element={<V3DebitNotePage />} />
           <Route path="purchasing/reports" element={<V3PurchasingReportsPage />} />
           <Route path="material-issue" element={<V3MaterialIssueHomePage />} />
           <Route path="material-issue/orders/:orderId" element={<V3IssueForOrderPage />} />

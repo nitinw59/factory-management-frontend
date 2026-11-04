@@ -4,11 +4,27 @@ import autoTable from 'jspdf-autotable';
 import { inr } from './poShared';
 
 export const INVOICE_STATUS = {
+    NOT_CHECKED:          { label: 'Not checked',          cls: 'bg-slate-50 text-slate-500 border-slate-300' },
     MATCHED:              { label: 'Matched',              cls: 'bg-emerald-50 text-emerald-700 border-emerald-300' },
     MATCHED_WITH_WARNING: { label: 'Matched with warning', cls: 'bg-amber-50 text-amber-800 border-amber-300' },
+    MISMATCH:             { label: 'Does not match',       cls: 'bg-rose-50 text-rose-700 border-rose-300' },
     MISMATCH_OVERRIDDEN:  { label: 'Mismatch — overridden', cls: 'bg-rose-50 text-rose-700 border-rose-300' },
     CANCELLED:            { label: 'Cancelled',            cls: 'bg-slate-50 text-slate-500 border-slate-300' },
 };
+export const APPROVAL_STATUS = {
+    DRAFT:     { label: 'Draft',                cls: 'bg-slate-50 text-slate-600 border-slate-300' },
+    SUBMITTED: { label: 'Waiting for approval', cls: 'bg-sky-50 text-sky-800 border-sky-300' },
+    ON_HOLD:   { label: 'On hold',              cls: 'bg-amber-50 text-amber-800 border-amber-300' },
+    APPROVED:  { label: 'Approved',             cls: 'bg-emerald-50 text-emerald-700 border-emerald-300' },
+    CANCELLED: { label: 'Cancelled',            cls: 'bg-slate-50 text-slate-500 border-slate-300' },
+};
+export const CHARGE_KINDS = { FREIGHT: 'Freight', PACKING: 'Packing', INSURANCE: 'Insurance', OTHER: 'Other charge', DISCOUNT: 'Discount', TCS: 'TCS' };
+export const DEBIT_STATUS = {
+    SUBMITTED: { label: 'Waiting for approval', cls: 'bg-sky-50 text-sky-800 border-sky-300' },
+    APPROVED:  { label: 'Approved',             cls: 'bg-emerald-50 text-emerald-700 border-emerald-300' },
+    CANCELLED: { label: 'Cancelled',            cls: 'bg-slate-50 text-slate-500 border-slate-300' },
+};
+export const DEBIT_REASONS = { RETURN: 'Goods returned', RATE: 'Rate difference', SHORT: 'Short received', OTHER: 'Other' };
 export const SOURCE_LABEL = { REJECTED: 'Rejected at receipt', STOCK: 'From stock' };
 const qty = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
 

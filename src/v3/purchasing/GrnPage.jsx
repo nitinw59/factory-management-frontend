@@ -7,15 +7,16 @@
 // data-entry mistake — the entries go back to the receive screen as a draft; a withdrawn GRN can be entered again.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, XCircle, Undo2, Upload, AlertTriangle, PackageX, Pencil, Printer } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, Undo2, Upload, AlertTriangle, PackageX, Pencil, Printer, Tag, FileDown } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { purchasingApi } from '../api/purchasingApi';
 import { apiError } from '../api/mastersApi';
-import { API_BASE_URL } from '../../utils/api';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { GRN_STATUS, grnToDraft, writeDraft } from './grnShared';
-import { exportFabricInwardChallan, hasFabric } from './grnPrint';
+import { exportFabricInwardChallan, hasFabric, downloadGrnReceipts } from './grnPrint';
+import DocumentLink from './DocumentLink';
+import { exportLabels, rollCode } from '../issue/issuePrint';
 import { loadLetterhead } from '../components/letterhead';
 import { useAuth } from '../../context/AuthContext';
 import PoLink from '../components/PoLink';
@@ -47,10 +48,16 @@ export default function GrnPage() {
         try { setG((await fn()).data); if (close) close(); } catch (err) { (close ? setFormError : setError)(apiError(err, 'Failed.')); } finally { setBusy(false); }
     };
     const orders = [...new Map(g.lines.flatMap(l => l.bought_for).map(o => [o.order_id, o])).values()];
+    // Rolls exist in stock once the GRN is approved: labels from then on.
+    const labelRolls = g.status === 'APPROVED' ? g.lines.flatMap(l => l.rolls.filter(r => r.fabric_roll_id).map(r => ({ label: l.label, roll_no: r.roll_no, code: rollCode(r.fabric_roll_id), dye_lot: r.dye_lot, width: r.width, width_unit: r.width_unit, location: r.location }))) : [];
     // Withdraw: its receiver or the purchase manager (the server checks the same).
     const canWithdraw = g.status === 'PENDING_APPROVAL' && (perms.manage || (perms.receive && String(g.received_by_user_id) === String(user?.id)));
     // The GRN's entries as a receive draft in this browser, then the receive screen for its PO.
     const correctAgain = (grn) => { writeDraft(user?.id, grn.po_id, grnToDraft(grn)); navigate(`/v3/purchasing/receive/${grn.po_id}`); };
+    const getReceipt = async () => {
+        setPrinting(true); setError('');
+        try { await downloadGrnReceipts([id], user?.name || user?.email || ''); } catch (err) { setError(apiError(err, 'Failed to make the GRN receipt.')); } finally { setPrinting(false); }
+    };
     const printChallan = async () => {
         setPrinting(true); setError('');
         try { exportFabricInwardChallan(g, await loadLetterhead().catch(() => null), { copies, printedBy: user?.name || user?.email || '' }); }
@@ -91,10 +98,12 @@ export default function GrnPage() {
                         </select>
                     </span>
                 )}
+                <SecondaryButton onClick={getReceipt} disabled={printing}><FileDown size={14} /> {printing ? 'Making PDF…' : 'GRN receipt'}</SecondaryButton>
                 {perms.manage && g.status === 'PENDING_APPROVAL' && <>
-                    <PrimaryButton onClick={() => { if (window.confirm(`Approve ${g.grn_no} and put it into stock?`)) run(() => purchasingApi.grnAction(id, 'approve')); }} busy={busy} disabled={busy}><CheckCircle2 size={14} /> Approve into stock</PrimaryButton>
+                    <PrimaryButton onClick={() => { setAskText(''); setFormError(''); setAsk({ title: `Approve ${g.grn_no} into stock`, action: 'approve', confirm: 'Approve into stock', label: 'Why is this accepted? *', hint: 'Accounts see this reason when the goods are billed.' }); }} busy={busy} disabled={busy}><CheckCircle2 size={14} /> Approve into stock</PrimaryButton>
                     <SecondaryButton onClick={() => { setAskText(''); setFormError(''); setAsk({ title: `Reject ${g.grn_no}`, action: 'reject', confirm: 'Reject' }); }}><XCircle size={14} /> Reject</SecondaryButton>
                 </>}
+                {labelRolls.length > 0 && <SecondaryButton onClick={() => exportLabels(labelRolls, `RollLabels-${g.grn_no.replace(/[^\w-]+/g, '-')}.pdf`).catch(err => setError(apiError(err, 'Failed to make the labels.')))}><Tag size={14} /> Roll labels ({labelRolls.length})</SecondaryButton>}
                 {canWithdraw && <SecondaryButton onClick={() => { setAskText(''); setFormError(''); setAsk({ title: `Withdraw ${g.grn_no} to correct it`, action: 'withdraw', confirm: 'Withdraw and correct', label: 'What needs correcting? *', hint: 'Nothing is in stock yet, so nothing is undone. This GRN is kept as withdrawn and its entries open on the receive screen to correct and save again (the same challan can be used).' }); }}><Pencil size={14} /> Withdraw to correct</SecondaryButton>}
                 {(perms.manage || perms.receive) && g.status === 'WITHDRAWN' && ['ISSUED', 'PARTLY_RECEIVED'].includes(g.po_status) && <SecondaryButton onClick={() => correctAgain(g)}><Pencil size={14} /> Enter again (corrected)</SecondaryButton>}
                 {(perms.manage || perms.receive) && g.status === 'APPROVED' && <SecondaryButton onClick={() => navigate(`/v3/purchasing/return-notes/new?grn=${id}`)}><PackageX size={14} /> Return to supplier</SecondaryButton>}
@@ -161,7 +170,7 @@ export default function GrnPage() {
                 <div className="bg-white border border-slate-200 rounded-xl p-4">
                     <p className="text-xs font-black uppercase tracking-wider text-slate-500 mb-2">Scans (challan, invoice)</p>
                     {g.documents.length === 0 ? <p className="text-sm text-slate-400 mb-2">None yet.</p> : (
-                        <ul className="text-sm mb-3 space-y-1">{g.documents.map(d => <li key={d.id}><a href={`${API_BASE_URL}${d.file_url}`} target="_blank" rel="noreferrer" className="text-indigo-700 hover:underline">{d.original_filename}</a><span className="text-xs text-slate-500"> · {new Date(d.created_at).toLocaleDateString('en-IN')}{d.uploaded_by_name ? ` · ${d.uploaded_by_name}` : ''}</span></li>)}</ul>
+                        <ul className="text-sm mb-3 space-y-1">{g.documents.map(d => <li key={d.id}><DocumentLink path={`/v3/purchasing/grns/${id}/documents/${d.id}`} name={d.original_filename} /><span className="text-xs text-slate-500"> · {new Date(d.created_at).toLocaleDateString('en-IN')}{d.uploaded_by_name ? ` · ${d.uploaded_by_name}` : ''}</span></li>)}</ul>
                     )}
                     {(perms.receive || perms.manage) && (
                         <div className="flex flex-wrap items-center gap-2">

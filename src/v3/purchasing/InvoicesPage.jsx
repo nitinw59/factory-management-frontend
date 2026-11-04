@@ -10,7 +10,7 @@ import { PageHeader, SearchInput, inputCls, PrimaryButton, SecondaryButton, Erro
 import { fmtDate, todayLocal } from '../salesOrders/SalesOrderStatusBadge';
 import { useAuth } from '../../context/AuthContext';
 import { inr } from './poShared';
-import { INVOICE_STATUS } from './returnShared';
+import { INVOICE_STATUS, APPROVAL_STATUS } from './returnShared';
 
 export default function InvoicesPage() {
     const navigate = useNavigate();
@@ -22,6 +22,7 @@ export default function InvoicesPage() {
     const [search, setSearch] = useState('');
     const [from, setFrom] = useState('');
     const [to, setTo] = useState('');
+    const [approval, setApproval] = useState('');
     const [tol, setTol] = useState('');
     const [msg, setMsg] = useState('');
     const [error, setError] = useState('');
@@ -30,10 +31,10 @@ export default function InvoicesPage() {
         purchasingApi.settings().then(res => setTol(String(res.data.invoice_match_tolerance_pct))).catch(() => {});
     }, []);
     useEffect(() => {
-        const t = setTimeout(() => purchasingApi.invoices({ status: status || undefined, q: search.trim() || undefined, from: from || undefined, to: to || undefined })
+        const t = setTimeout(() => purchasingApi.invoices({ status: status || undefined, approval: approval || undefined, q: search.trim() || undefined, from: from || undefined, to: to || undefined })
             .then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load invoices.'))), 250);
         return () => clearTimeout(t);
-    }, [status, search, from, to]);
+    }, [status, approval, search, from, to]);
     const saveTol = async () => {
         setMsg('');
         try { await purchasingApi.saveSettings({ invoice_match_tolerance_pct: Number(tol) }); setMsg('Saved.'); } catch (err) { setMsg(apiError(err, 'Failed.')); }
@@ -41,12 +42,12 @@ export default function InvoicesPage() {
     const excel = () => {
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet((rows || []).map(r => ({
-            Date: r.invoice_date, Supplier: r.supplier_name, 'Invoice no.': r.invoice_no, GRNs: r.grns || '', 'Taxable (Rs)': r.taxable_amount, 'GST (Rs)': r.gst_amount,
-            'Total (Rs)': r.total_amount, Match: INVOICE_STATUS[r.status].label, Warnings: r.warning_count, 'Entered by': r.created_by_name || '',
+            Date: r.invoice_date, Supplier: r.supplier_name, GSTIN: r.supplier_gstin || '', 'Invoice no.': r.invoice_no, HSN: r.hsn_codes || '', GRNs: r.grns || '', 'Taxable (Rs)': r.taxable_amount, 'CGST (Rs)': r.cgst_amount, 'SGST (Rs)': r.sgst_amount, 'IGST (Rs)': r.igst_amount, 'TCS (Rs)': r.tcs_amount, 'Round-off (Rs)': r.round_off_amount,
+            'Total (Rs)': r.total_amount, Stage: r.status === 'CANCELLED' ? 'Cancelled' : APPROVAL_STATUS[r.approval_status].label, Match: INVOICE_STATUS[r.status].label, Warnings: r.warning_count, 'Entered by': r.created_by_name || '', 'Approved by': r.approved_by_name || '',
         }))), 'Supplier invoices');
         XLSX.writeFile(wb, `supplier-invoices-${todayLocal()}.xlsx`);
     };
-    const live = (rows || []).filter(r => r.status !== 'CANCELLED');
+    const live = (rows || []).filter(r => r.status !== 'CANCELLED' && r.approval_status !== 'DRAFT');
 
     return (
         <div>
@@ -57,6 +58,9 @@ export default function InvoicesPage() {
                 </>} />
             <div className="flex flex-wrap items-center gap-2 mb-3">
                 <SearchInput value={search} onChange={setSearch} placeholder="Invoice no., supplier" />
+                <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={approval} onChange={e => setApproval(e.target.value)} aria-label="Stage">
+                    <option value="">All stages</option>{['DRAFT', 'SUBMITTED', 'ON_HOLD', 'APPROVED'].map(k => <option key={k} value={k}>{APPROVAL_STATUS[k].label}</option>)}
+                </select>
                 <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={status} onChange={e => setStatus(e.target.value)} aria-label="Match status">
                     <option value="">All</option>{Object.entries(INVOICE_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
@@ -80,9 +84,15 @@ export default function InvoicesPage() {
                                     <td className="px-3 py-2.5">{r.supplier_name}</td>
                                     <td className="px-3 py-2.5 text-xs text-slate-600">{r.grns}</td>
                                     <td className="px-3 py-2.5 text-right tabular-nums">{inr(r.total_amount)}</td>
-                                    <td className="px-3 py-2.5"><span className={`text-[11px] font-black px-2 py-0.5 rounded border ${INVOICE_STATUS[r.status].cls}`}>{INVOICE_STATUS[r.status].label}</span></td>
+                                    <td className="px-3 py-2.5"><span className={`text-[11px] font-black px-2 py-0.5 rounded border ${APPROVAL_STATUS[r.status === 'CANCELLED' ? 'CANCELLED' : r.approval_status].cls}`}>{APPROVAL_STATUS[r.status === 'CANCELLED' ? 'CANCELLED' : r.approval_status].label}</span>{r.status !== 'CANCELLED' && r.status !== 'NOT_CHECKED' && <span className={`ml-1 text-[11px] font-black px-2 py-0.5 rounded border ${INVOICE_STATUS[r.status].cls}`}>{INVOICE_STATUS[r.status].label}</span>}</td>
                                 </tr>
                             ))}
+                            {rows.length > 0 && (
+                                <tr className="border-t-2 border-slate-300 bg-slate-50 font-black text-slate-700">
+                                    <td className="px-3 py-2.5" colSpan={4}>Total · {live.length} invoice(s), not counting drafts and cancelled</td>
+                                    <td className="px-3 py-2.5 text-right tabular-nums">{inr(live.reduce((s, r) => s + r.total_amount, 0))}</td><td />
+                                </tr>
+                            )}
                         </tbody>
                     </table>
                 </div>

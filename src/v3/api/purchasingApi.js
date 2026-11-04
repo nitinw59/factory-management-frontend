@@ -56,7 +56,14 @@ export const purchasingApi = {
     checkInvoice: (data) => api.post('/v3/purchasing/invoices/check', data),
     invoices: (params) => api.get('/v3/purchasing/invoices', { params }),
     invoice: (id) => api.get(`/v3/purchasing/invoices/${id}`),
-    createInvoice: (data) => api.post('/v3/purchasing/invoices', data),
+    createInvoice: (data, file) => { const fd = new FormData(); fd.append('payload', JSON.stringify(data)); if (file) fd.append('file', file); return api.post('/v3/purchasing/invoices', fd); },
+    updateInvoice: (id, data, file) => { const fd = new FormData(); fd.append('payload', JSON.stringify(data)); if (file) fd.append('file', file); return api.put(`/v3/purchasing/invoices/${id}`, fd); },
+    invoiceAction: (id, action, data) => api.post(`/v3/purchasing/invoices/${id}/${action}`, data),   // submit, approve, hold, release, send-back
+    debitNotes: (params) => api.get('/v3/purchasing/debit-notes', { params }),
+    debitNotesToRaise: () => api.get('/v3/purchasing/debit-notes/to-raise'),
+    debitNote: (id) => api.get(`/v3/purchasing/debit-notes/${id}`),
+    createDebitNote: (data) => api.post('/v3/purchasing/debit-notes', data),
+    debitNoteAction: (id, action, data) => api.post(`/v3/purchasing/debit-notes/${id}/${action}`, data),   // approve, cancel
     cancelInvoice: (id, reason) => api.post(`/v3/purchasing/invoices/${id}/cancel`, { reason }),
     uploadInvoiceDocument: (id, file) => { const fd = new FormData(); fd.append('file', file); return api.post(`/v3/purchasing/invoices/${id}/documents`, fd); },
 

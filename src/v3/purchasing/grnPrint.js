@@ -16,7 +16,8 @@
 // Two copies = the same pages again, marked STORE COPY / ACCOUNTS COPY.
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { drawPdfLetterhead } from '../components/letterhead';
+import { drawPdfLetterhead, loadLetterhead } from '../components/letterhead';
+import { purchasingApi } from '../api/purchasingApi';
 
 const M = 8;                                    // page margin (mm)
 const INK = [15, 23, 42];
@@ -210,6 +211,97 @@ function drawCopy(doc, g, lh, { copyLabel, printedBy }) {
         }
         doc.setTextColor(...INK);
     }
+}
+
+// ── GRN receipt (4 Nov 2026, owner: "add option to download grn receipts") ──────────────────────────────────────────────
+// One page per GRN, every kind of line, for accounts to file with the supplier's invoice: who received and approved it, and
+// the quantity trail per line. No prices: the stores read GRNs too.
+function drawReceipt(doc, g, lh, { printedBy }) {
+    const W = doc.internal.pageSize.getWidth();
+    const H = doc.internal.pageSize.getHeight();
+    const firstPage = doc.getNumberOfPages();
+    let y = drawPdfLetterhead(doc, lh, { x: M, title: 'GOODS RECEIPT NOTE', note: '' });
+    if (y < 10) { doc.setFont(undefined, 'bold'); doc.setFontSize(16); doc.text('GOODS RECEIPT NOTE', W / 2, 14, { align: 'center' }); doc.setFont(undefined, 'normal'); y = 20; }
+    doc.setDrawColor(180); doc.line(M, y, W - M, y); y += 2;
+    const cell = (label, value, extra = {}) => ({ content: `${label}\n${value || '—'}`, ...extra });
+    const supplier = [g.supplier_name, g.supplier_gstin ? `GSTIN ${g.supplier_gstin}` : (g.supplier_is_cash ? 'Cash purchase' : 'GSTIN —')].filter(Boolean).join('\n');
+    const approvedNote = (g.history || []).find(h => h.action === 'APPROVED')?.reason;
+    autoTable(doc, {
+        startY: y, theme: 'grid', margin: { left: M, right: M },
+        body: [
+            [cell('GRN no.', g.grn_no), cell('Received on', dmy(g.received_date)), cell('Supplier DC / challan', `${g.challan_no || ''}${g.challan_date ? ` · ${dmy(g.challan_date)}` : ''}`), cell('PO no.', g.po_no)],
+            [cell('Supplier', supplier, { colSpan: 2 }), cell('Vehicle no.', g.vehicle_no), cell('Received by', g.received_by_name)],
+            [cell('Status', STATUS_TEXT[g.status] || g.status, g.status === 'APPROVED' ? {} : { styles: { textColor: RED, fontStyle: 'bold' } }),
+                cell('Approved by', g.approved_at ? `${g.approved_by_name || 'within tolerance'} · ${when(g.approved_at)}` : ''), cell('Reason approved', approvedNote, { colSpan: 2 })],
+        ],
+        styles: { fontSize: 8.5, textColor: INK, lineColor: [148, 163, 184], lineWidth: 0.2, cellPadding: 1.8, valign: 'top' },
+        columnStyles: { 0: { cellWidth: (W - 2 * M) / 4 }, 1: { cellWidth: (W - 2 * M) / 4 }, 2: { cellWidth: (W - 2 * M) / 4 }, 3: { cellWidth: (W - 2 * M) / 4 } },
+        willDrawCell: (d) => { if (d.section === 'body') { d.cell.label = d.cell.text[0]; d.cell.text = ['', ...d.cell.text.slice(1)]; } },
+        didDrawCell: (d) => {
+            if (d.section !== 'body' || !d.cell.label) return;
+            doc.setFontSize(6.5); doc.setTextColor(...MUTED); doc.setFont(undefined, 'normal');
+            doc.text(String(d.cell.label).toUpperCase(), d.cell.x + 1.8, d.cell.y + 4);
+            doc.setTextColor(...INK);
+        },
+    });
+    const lines = g.lines || [];
+    const returned = (l) => (Number(l.returned_rejected) || 0) + (Number(l.returned_stock) || 0);
+    const units = new Map();
+    for (const l of lines) {
+        const u = unitOf(l.purchase_uom);
+        const t = units.get(u) || { accepted: 0, rejected: 0, returned: 0, billed: 0, rolls: 0 };
+        t.accepted += Number(l.accepted_qty) || 0; t.rejected += Number(l.rejected_qty) || 0; t.returned += returned(l); t.billed += Number(l.billed) || 0; t.rolls += l.rolls?.length || 0;
+        units.set(u, t);
+    }
+    const right = (v) => ({ content: v, styles: { halign: 'right' } });
+    autoTable(doc, {
+        startY: doc.lastAutoTable.finalY + 3, theme: 'grid', margin: { left: M, right: M, bottom: 16 },
+        head: [['#', 'Item', 'PO line', 'PO ordered', 'Received on PO', 'This GRN', 'Rejected', 'Returned', 'Billed', 'Unit', 'Rolls']],
+        body: lines.map((l, i) => [String(i + 1), l.rejection_reason ? `${l.label || ''}\nRejected: ${l.rejection_reason}` : (l.label || ''), String(l.po_line_no ?? ''), right(num(l.ordered_qty)), right(num(l.received_on_po)),
+            right(num(l.accepted_qty)), right(l.rejected_qty ? num(l.rejected_qty) : ''), right(returned(l) ? num(returned(l)) : ''), right(l.billed ? num(l.billed) : ''), unitOf(l.purchase_uom), l.rolls?.length ? String(l.rolls.length) : '']),
+        foot: [...units.entries()].map(([u, t]) => ['', `Total (${u})`, '', '', '', right(num(t.accepted)), right(t.rejected ? num(t.rejected) : ''), right(t.returned ? num(t.returned) : ''), right(t.billed ? num(t.billed) : ''), u, t.rolls ? String(t.rolls) : '']),
+        showFoot: 'lastPage',
+        styles: { fontSize: 8, textColor: INK, lineColor: [100, 116, 139], lineWidth: 0.2, cellPadding: 1.6, valign: 'middle' },
+        headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold', halign: 'center' },
+        footStyles: { fillColor: SHADE, textColor: INK, fontStyle: 'bold' },
+        columnStyles: { 0: { cellWidth: 7, halign: 'center' }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 10, halign: 'center' }, 3: { cellWidth: 17 }, 4: { cellWidth: 17 }, 5: { cellWidth: 17 }, 6: { cellWidth: 17 }, 7: { cellWidth: 18 }, 8: { cellWidth: 15 }, 9: { cellWidth: 11, halign: 'center' }, 10: { cellWidth: 11, halign: 'center' } },
+    });
+    y = doc.lastAutoTable.finalY + 8;
+    if (y > H - 40) { doc.addPage(); y = 16; }
+    const boxW = (W - 2 * M - 8) / 3;
+    [['Received by (store)', g.received_by_name], ['Authorised by (purchase manager)', g.approved_by_name || ''], ['Checked by (accounts)', '']].forEach(([label, name], i) => {
+        const x = M + i * (boxW + 4);
+        doc.setDrawColor(148, 163, 184); doc.setLineWidth(0.3); doc.rect(x, y, boxW, 22);
+        doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.text(label, x + 2, y + 4.5); doc.setFont(undefined, 'normal');
+        doc.setFontSize(7.5); doc.setTextColor(...MUTED); doc.text('Signature & date', x + 2, y + 20); doc.setTextColor(...INK);
+        if (name) { doc.setFontSize(8.5); doc.text(name, x + boxW - 2, y + 20, { align: 'right' }); }
+    });
+    const last = doc.getNumberOfPages();
+    const mark = STAMP[g.status];
+    for (let p = firstPage; p <= last; p += 1) {
+        doc.setPage(p);
+        doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.3); doc.line(M, H - 11, W - M, H - 11);
+        doc.setFontSize(7); doc.setTextColor(...MUTED);
+        doc.text(`Computer-generated · printed${printedBy ? ` by ${printedBy}` : ''} on ${when(new Date())}`, M, H - 7);
+        doc.text(`${g.grn_no} · page ${p - firstPage + 1} of ${last - firstPage + 1}`, W - M, H - 7, { align: 'right' });
+        if (mark) {
+            try {
+                doc.saveGraphicsState(); doc.setGState(new doc.GState({ opacity: 0.12 }));
+                doc.setFont(undefined, 'bold'); doc.setFontSize(mark.length > 10 ? 64 : 80); doc.setTextColor(...RED);
+                doc.text(mark, W / 2, H / 2 + 30, { align: 'center', angle: 35 });
+                doc.restoreGraphicsState(); doc.setFont(undefined, 'normal');
+            } catch { /* no transparency: the status cell still says it */ }
+        }
+        doc.setTextColor(...INK);
+    }
+}
+
+// Reads the GRNs and saves one PDF of their receipts.
+export async function downloadGrnReceipts(grnIds, printedBy = '') {
+    const [grns, lh] = await Promise.all([Promise.all(grnIds.map(id => purchasingApi.grn(id).then(r => r.data))), loadLetterhead().catch(() => null)]);
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    grns.forEach((g, i) => { if (i > 0) doc.addPage(); drawReceipt(doc, g, lh, { printedBy }); });
+    doc.save(grns.length === 1 ? `GRN-Receipt-${String(grns[0].grn_no).replace(/[^\w-]+/g, '-')}.pdf` : `GRN-Receipts-${grns.length}.pdf`);
 }
 
 // g: the GRN as GET /purchasing/grns/:id returns it; lh: loadLetterhead(); copies 1 | 2.

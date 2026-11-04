@@ -55,7 +55,7 @@ export default function EndBitLabelsPanel({ batchId, onClose }) {
     };
 
     return (
-        <div className="space-y-4 w-[min(920px,82vw)] max-h-[82vh] overflow-y-auto">
+        <div className="space-y-4 w-[min(1000px,82vw)] max-h-[82vh] overflow-y-auto">
             <div className="flex flex-wrap items-center gap-2">
                 <p className="text-sm text-slate-600"><b>#{d.batch.floor_no}</b> {d.batch.batch_code} · {d.batch.style} · {d.batch.order_no}</p>
                 <button type="button" onClick={load} className="ml-auto p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50" title="Refresh"><RefreshCw size={14} /></button>
@@ -80,16 +80,16 @@ export default function EndBitLabelsPanel({ batchId, onClose }) {
             <ErrorBox text={error} />
 
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
-                <table className="w-full text-sm min-w-[860px]">
+                <table className="w-full text-sm min-w-[960px]">
                     <thead className="text-[11px] font-black uppercase tracking-wider text-slate-500 bg-slate-50 text-left">
                         <tr>
                             <th className="px-3 py-2 w-8">{list.length > 0 && <input type="checkbox" checked={allOn} onChange={e => setPicked(new Set(e.target.checked ? list.map(x => x.id) : []))} aria-label="Select all end bits" title="Select all" />}</th>
-                            <th className="px-3 py-2">End bit (barcode)</th><th className="px-3 py-2">Kind</th><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Fabric</th><th className="px-3 py-2">Colour</th>
+                            <th className="px-3 py-2">End bit (barcode)</th><th className="px-3 py-2">Kind</th><th className="px-3 py-2">Roll no.</th><th className="px-3 py-2">Actual roll</th><th className="px-3 py-2">Fabric</th><th className="px-3 py-2">Colour</th>
                             <th className="px-3 py-2 text-right">Length</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Printed</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {list.length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center text-slate-400">This batch has no end bits.</td></tr>}
+                        {list.length === 0 && <tr><td colSpan={10} className="px-3 py-6 text-center text-slate-400">This batch has no end bits.</td></tr>}
                         {list.map(e => {
                             const on = picked.has(e.id);
                             return (
@@ -98,6 +98,7 @@ export default function EndBitLabelsPanel({ batchId, onClose }) {
                                     <td className="px-3 py-1.5 font-mono font-black text-slate-900">{e.tag}</td>
                                     <td className="px-3 py-1.5 text-xs font-bold">{e.kind_label}</td>
                                     <td className="px-3 py-1.5 font-bold">{e.roll || '—'}</td>
+                                    <td className="px-3 py-1.5 font-mono text-xs font-bold whitespace-nowrap">{e.actual_roll || '—'}</td>
                                     <td className="px-3 py-1.5 text-xs text-slate-600">{e.fabric}</td>
                                     <td className="px-3 py-1.5">{e.colour || '—'}</td>
                                     <td className="px-3 py-1.5 text-right tabular-nums">{fmt(e.length)} {e.uom}</td>
@@ -108,7 +109,7 @@ export default function EndBitLabelsPanel({ batchId, onClose }) {
                         })}
                         {list.length > 0 && (
                             <tr className="border-t-2 border-slate-300 bg-slate-50 font-black text-slate-700">
-                                <td className="px-3 py-2" /><td className="px-3 py-2" colSpan={5}>Total {list.length} end bit(s) · {chosen.length} selected{again.length ? ` (${again.length} printed before)` : ''}</td>
+                                <td className="px-3 py-2" /><td className="px-3 py-2" colSpan={6}>Total {list.length} end bit(s) · {chosen.length} selected{again.length ? ` (${again.length} printed before)` : ''}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{total(list)}</td><td className="px-3 py-2" /><td className="px-3 py-2 text-xs">{list.filter(e => e.printed_at).length} printed</td>
                             </tr>
                         )}

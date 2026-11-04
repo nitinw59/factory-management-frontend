@@ -7,6 +7,7 @@ const ACCENT = {
     violet: { selected: 'font-bold text-violet-600 bg-violet-50', focus: 'focus:border-violet-400' },
     amber:  { selected: 'font-bold text-amber-600 bg-amber-50',   focus: 'focus:border-amber-400'  },
     blue:   { selected: 'font-bold text-blue-600 bg-blue-50',     focus: 'focus:border-blue-400'   },
+    indigo: { selected: 'font-bold text-indigo-600 bg-indigo-50', focus: 'focus:border-indigo-400' },
     slate:  { selected: 'font-bold text-slate-600 bg-slate-100',  focus: 'focus:border-slate-400'  },
 };
 

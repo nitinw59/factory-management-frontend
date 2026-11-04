@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Modal from '../../shared/Modal';
 import { productionApi } from '../api/productionApi';
+import { useCanOpen } from '../V3Access';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 
@@ -179,6 +180,7 @@ export default function RecutsPage() {
     const [error, setError] = useState('');
     const [formError, setFormError] = useState('');
     const [busy, setBusy] = useState(false);
+    const canOpenBatch = useCanOpen('production.cutting');
     const load = useCallback(() => productionApi.recuts({ status: status || undefined }).then(res => setRows(orderFilter ? res.data.filter(r => r.order_id === orderFilter) : res.data)).catch(err => setError(apiError(err, 'Failed to load re-cuts.'))), [status, orderFilter]);
     useEffect(() => { load(); productionApi.permissions().then(res => setPerms(res.data)).catch(() => {}); }, [load]);
     const openCut = async (r) => {
@@ -203,11 +205,11 @@ export default function RecutsPage() {
                             {rows.map(r => (
                                 <tr key={r.id} className="border-t border-slate-100">
                                     <td className="px-3 py-2"><b>{r.part_name}</b> {r.size} · {r.colour}<span className="block text-xs text-slate-500">{r.uid}</span></td>
-                                    <td className="px-3 py-2"><Link to={`/v3/cutting/batches/${r.batch_id}`} className="text-indigo-700 hover:underline">{r.batch_code}</Link></td>
+                                    <td className="px-3 py-2">{canOpenBatch ? <Link to={`/v3/cutting/batches/${r.batch_id}`} className="text-indigo-700 hover:underline">{r.batch_code}</Link> : r.batch_code}</td>
                                     <td className="px-3 py-2">{r.stage}<span className="block text-xs text-slate-500">{new Date(r.created_at).toLocaleString()}{r.requested_by_name ? ` · ${r.requested_by_name}` : ''}</span></td>
                                     <td className="px-3 py-2 text-xs">{r.defect || '—'}</td>
                                     <td className="px-3 py-2 text-xs">{r.status === 'CUT' ? <>Cut from {r.roll_no} ({r.metres} {r.uom || 'm'})<span className="block">{r.replacement_uid}</span></> : r.status === 'CANCELLED' ? `Cancelled: ${r.cancelled_reason}` : 'Open'}</td>
-                                    <td className="px-3 py-2 text-right whitespace-nowrap">{perms.manage && r.status === 'OPEN' && <>
+                                    <td className="px-3 py-2 text-right whitespace-nowrap">{perms.recut && r.status === 'OPEN' && <>
                                         <SecondaryButton onClick={() => openCut(r)}>Cut replacement</SecondaryButton> <button type="button" className="text-xs text-slate-500 hover:underline ml-2" onClick={() => { setFormError(''); setCancel({ r, reason: '' }); }}>Cancel</button></>}</td>
                                 </tr>
                             ))}

@@ -120,9 +120,11 @@ export async function exportPickList(s, lh) {
     doc.save(`PickList-${fileNo(s)}.pdf`);
 }
 
-// One label per roll: stick it on the roll once, then every scan finds it.
-export async function exportRollLabels(s) {
-    const rows = slipRows(s).filter(r => r.code);
+// One label per roll: stick it on the roll once, then every scan finds it. rows: { label, roll_no, code, dye_lot, width, width_unit, location }.
+// From a slip, from Fabric stock and from a GRN (4 Nov 2026).
+export const rollCode = (id) => `R${id}`;
+export const exportRollLabels = (s) => exportLabels(slipRows(s).filter(r => r.code), `RollLabels-${fileNo(s)}.pdf`);
+export async function exportLabels(rows, fileName) {
     const codes = await Promise.all(rows.map(r => barcode(r.code)));
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const LW = 95; const LH = 52; const M = 8; const G = 4;
@@ -139,7 +141,7 @@ export async function exportRollLabels(s) {
         const b = codes[i]; const h = 25;
         doc.addImage(b.data, 'PNG', x + 3, y + 24, Math.min(h * b.ratio, LW - 6), h);
     });
-    doc.save(`RollLabels-${fileNo(s)}.pdf`);
+    doc.save(fileName);
 }
 
 const describe = ({ status, search, from, to, total }) => [status ? `Status: ${status}` : 'All statuses', search ? `Search: "${search}"` : null, from ? `from ${from}` : null, to ? `to ${to}` : null, `${total} slip${total === 1 ? '' : 's'}`, `Exported ${when(new Date())}`].filter(Boolean).join(' · ');

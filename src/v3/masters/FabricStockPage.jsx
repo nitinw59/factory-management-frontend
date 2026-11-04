@@ -3,10 +3,10 @@
 // it. Opening roll count (paste from Excel), per-roll adjustments and history.
 // 4 Nov 2026: filters, totals per unit, search by roll / lot / location, who holds the fabric and each roll, rolls grouped by lot;
 // Excel / PDF of what the filter and search show (fabricStockExport.js). Phase 2: adjust by the quantity counted, with a fixed
-// reason; correct location, dye lot and width (logged); count sheet.
+// reason; correct location, dye lot and width (logged); count sheet. Roll labels: tick rolls across fabrics, or print a whole fabric.
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronRight, Plus, History, SlidersHorizontal, Trash2, FileSpreadsheet, FileText, Pencil, ClipboardList } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, History, SlidersHorizontal, Trash2, FileSpreadsheet, FileText, Pencil, ClipboardList, Tag } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { mastersApi, apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading, fmtQty, useMastersPermissions } from '../components/ui';
@@ -14,6 +14,7 @@ import LocationList from '../components/LocationList';
 import { useV3Access } from '../V3Access';
 import { keyForPath } from '../v3Nav';
 import { loadLetterhead } from '../components/letterhead';
+import { exportLabels, rollCode } from '../issue/issuePrint';
 import { naturally, fmtDate, ageDays, rollFrom, perUnit, exportFabricStockExcel, exportFabricStockPdf, exportFabricCountSheet } from './fabricStockExport';
 
 const blankRow = () => ({ roll_no: '', dye_lot: '', qty: '', width: '', location: '' });
@@ -29,9 +30,10 @@ const FILTERS = [
     { key: 'ALL', label: 'All', test: () => true },
 ];
 const ROLL_LIMIT = 2000;   // the API's most rolls per answer
+const labelOf = (x) => ({ label: x.item_label, roll_no: x.roll_no, code: rollCode(x.id), dye_lot: x.dye_lot, width: x.width, width_unit: x.width_unit, location: x.location });
 
 // The rolls of one fabric, by dye lot.
-function RollsPanel({ item, rolls, loadError, onRetry, finishedShown, onToggleFinished, canAdjust, onAdjust, canCorrect, onCorrect, onHistory, orderLink }) {
+function RollsPanel({ item, rolls, loadError, onRetry, finishedShown, onToggleFinished, canAdjust, onAdjust, canCorrect, onCorrect, onHistory, orderLink, picked, onPick, onPrint }) {
     if (loadError) return <div className="py-1"><ErrorBox text={loadError} /><button type="button" className="mt-1 text-xs font-semibold text-indigo-700" onClick={onRetry}>Try again</button></div>;
     if (!rolls) return <Loading />;
     const matched = new Set((item.matched_roll_ids || []).map(String));
@@ -43,18 +45,21 @@ function RollsPanel({ item, rolls, loadError, onRetry, finishedShown, onToggleFi
     const onRolls = rolls.filter(x => x.status === 'IN_STOCK' && x.held_by.length).reduce((s, x) => s + x.qty, 0);
     const byMetres = Math.round((item.allocated - onRolls) * 1000) / 1000;
     const sum = (list, f) => list.reduce((s, x) => s + (Number(x[f]) || 0), 0);
+    const inStock = rolls.filter(x => x.status === 'IN_STOCK').sort((a, b) => naturally(a.roll_no, b.roll_no));
     return (
         <div>
             <p className="text-xs text-slate-600 py-1"><b>Held by:</b> {item.held_by.length === 0 ? 'no order' : item.held_by.map((h, i) => <Fragment key={h.order_id}>{i > 0 && ' · '}{orderLink(h)} {fmtQty(h.qty)} {item.uom}</Fragment>)}</p>
             {byMetres > 0 && <p className="text-xs text-slate-500 pb-1">{fmtQty(byMetres)} {item.uom} is allocated as a quantity, not to particular rolls, so the rolls below don't show it.</p>}
+            {inStock.length > 0 && <button type="button" className="mb-1 inline-flex items-center gap-1 text-xs font-semibold text-indigo-700" onClick={() => onPrint(inStock)}><Tag size={11} /> Print labels for all {inStock.length} roll{inStock.length === 1 ? '' : 's'} in stock</button>}
             <table className="w-full text-xs">
-                <thead className="text-slate-500 text-right"><tr><th className="text-left py-1">Roll</th><th>Width</th><th>Now</th><th>Received qty</th><th>Received on</th><th>Age</th><th className="text-left pl-4">Location</th><th className="text-left">From</th><th className="text-left">Held by</th><th className="w-44" /></tr></thead>
+                <thead className="text-slate-500 text-right"><tr><th className="w-6" /><th className="text-left py-1">Roll</th><th>Width</th><th>Now</th><th>Received qty</th><th>Received on</th><th>Age</th><th className="text-left pl-4">Location</th><th className="text-left">From</th><th className="text-left">Held by</th><th className="w-44" /></tr></thead>
                 <tbody>
                     {groups.map(([lot, list]) => (
                         <Fragment key={lot}>
-                            <tr className="border-t border-slate-300 bg-slate-100/70"><td colSpan={10} className="py-1 px-1 font-bold text-slate-700">{lot ? `Lot ${lot}` : 'Lot not recorded'} · {list.length} roll{list.length === 1 ? '' : 's'} · {fmtQty(sum(list, 'qty'))} {item.uom}</td></tr>
+                            <tr className="border-t border-slate-300 bg-slate-100/70"><td colSpan={11} className="py-1 px-1 font-bold text-slate-700">{lot ? `Lot ${lot}` : 'Lot not recorded'} · {list.length} roll{list.length === 1 ? '' : 's'} · {fmtQty(sum(list, 'qty'))} {item.uom}</td></tr>
                             {list.map(x => (
                                 <tr key={x.id} className={`border-t border-slate-200 text-right tabular-nums ${x.status !== 'IN_STOCK' ? 'text-slate-400' : ''} ${matched.has(String(x.id)) ? 'bg-amber-50' : ''}`}>
+                                    <td className="text-left">{x.status === 'IN_STOCK' && <input type="checkbox" checked={picked.has(String(x.id))} onChange={e => onPick(x, e.target.checked)} aria-label={`Label for roll ${x.roll_no}`} />}</td>
                                     <td className="text-left py-1 font-semibold">{x.roll_no}{ROLL_STATUS[x.status] && <span className="ml-1 text-[10px]">{ROLL_STATUS[x.status]}</span>}</td>
                                     <td>{x.width ? `${x.width} ${x.width_unit}` : '—'}</td>
                                     <td className="font-bold">{fmtQty(x.qty)} {x.uom}</td>
@@ -73,9 +78,9 @@ function RollsPanel({ item, rolls, loadError, onRetry, finishedShown, onToggleFi
                             ))}
                         </Fragment>
                     ))}
-                    {visible.length === 0 && <tr><td colSpan={10} className="py-2 text-slate-400">No rolls in stock.</td></tr>}
+                    {visible.length === 0 && <tr><td colSpan={11} className="py-2 text-slate-400">No rolls in stock.</td></tr>}
                 </tbody>
-                {visible.length > 0 && <tfoot><tr className="border-t-2 border-slate-300 text-right tabular-nums font-bold text-slate-700"><td className="text-left py-1">Total · {visible.length} roll{visible.length === 1 ? '' : 's'}</td><td /><td>{fmtQty(sum(visible, 'qty'))} {item.uom}</td><td>{fmtQty(sum(visible, 'original_qty'))}</td><td colSpan={6} /></tr></tfoot>}
+                {visible.length > 0 && <tfoot><tr className="border-t-2 border-slate-300 text-right tabular-nums font-bold text-slate-700"><td /><td className="text-left py-1">Total · {visible.length} roll{visible.length === 1 ? '' : 's'}</td><td /><td>{fmtQty(sum(visible, 'qty'))} {item.uom}</td><td>{fmtQty(sum(visible, 'original_qty'))}</td><td colSpan={6} /></tr></tfoot>}
             </table>
             {finishedCount > 0 && <button type="button" className="mt-1 text-xs font-semibold text-indigo-700" onClick={onToggleFinished}>{finishedShown ? 'Hide' : 'Show'} {finishedCount} finished / returned roll{finishedCount === 1 ? '' : 's'}</button>}
         </div>
@@ -102,6 +107,7 @@ export default function FabricStockPage() {
     const [busy, setBusy] = useState(false);
     const [formError, setFormError] = useState('');
     const [exporting, setExporting] = useState('');    // 'excel' | 'pdf' | 'count'
+    const [picked, setPicked] = useState(new Map());   // roll id → roll, for labels; kept across fabrics
 
     const loadRolls = useCallback((itemId) => {
         setRollsError(prev => ({ ...prev, [itemId]: '' }));
@@ -182,6 +188,11 @@ export default function FabricStockPage() {
         } catch (err) { setFormError(apiError(err, 'Failed to save.')); } finally { setBusy(false); }
     };
     const showLedger = (roll) => mastersApi.rollLedger(roll.id).then(res => { setError(''); setLedger({ roll, rows: res.data }); }).catch(err => setError(apiError(err, 'Failed to load history.')));
+    const pickRoll = (x, on) => setPicked(prev => { const nx = new Map(prev); if (on) nx.set(String(x.id), x); else nx.delete(String(x.id)); return nx; });
+    const printLabels = async (list) => {
+        setExporting('labels'); setError('');
+        try { await exportLabels(list.map(labelOf), `RollLabels-${list.length}-rolls.pdf`); } catch (err) { setError(apiError(err, 'Failed to make the labels.')); } finally { setExporting(''); }
+    };
     const toggleFinished = (id) => setFinishedShown(prev => { const nx = new Set(prev); if (nx.has(id)) nx.delete(id); else nx.add(id); return nx; });
     const orderLink = (h) => {
         const to = `/v3/planning/orders/${h.order_id}`;
@@ -229,6 +240,13 @@ export default function FabricStockPage() {
                     {otherHits > 0 && <button type="button" className="text-sm font-semibold text-indigo-700 hover:underline" onClick={() => setFilter('ALL')}>{otherHits} more match{otherHits === 1 ? 'es' : ''} under All</button>}
                 </div>
             )}
+            {picked.size > 0 && (
+                <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 mb-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm">
+                    <b>{picked.size} roll{picked.size === 1 ? '' : 's'} ticked</b>
+                    <PrimaryButton onClick={() => printLabels([...picked.values()])} disabled={!!exporting}><Tag size={14} /> {exporting === 'labels' ? 'Making labels…' : 'Print labels'}</PrimaryButton>
+                    <SecondaryButton onClick={() => setPicked(new Map())}>Clear</SecondaryButton>
+                </div>
+            )}
             {!rows ? (!error && <Loading />) : (
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
                     <table className="w-full text-sm min-w-[860px]">
@@ -258,7 +276,7 @@ export default function FabricStockPage() {
                                             <RollsPanel item={r} rolls={rolls[r.id]} loadError={rollsError[r.id]} onRetry={() => loadRolls(r.id)} finishedShown={finishedShown.has(String(r.id))} onToggleFinished={() => toggleFinished(String(r.id))}
                                                 canAdjust={perms.fabricStock} onAdjust={(x) => { setFormError(''); setAdjust({ roll: x, item: r, counted: '', code: '', note: '' }); }}
                                                 canCorrect={perms.rollLocation} onCorrect={(x) => { setFormError(''); setDetails({ roll: x, location: x.location || '', dye_lot: x.dye_lot || '', width: x.width ? String(x.width) : '', width_unit: x.width_unit || 'in', reason: '' }); }}
-                                                onHistory={showLedger} orderLink={orderLink} />
+                                                onHistory={showLedger} orderLink={orderLink} picked={picked} onPick={pickRoll} onPrint={printLabels} />
                                         </td></tr>
                                     )}
                                 </Fragment>

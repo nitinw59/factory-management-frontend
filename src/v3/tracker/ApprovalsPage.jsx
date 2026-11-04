@@ -10,7 +10,7 @@ import { useV3Live } from '../live';
 import { apiError } from '../api/mastersApi';
 import { DtmLinkReview } from '../planning/DtmStockLinks';
 
-const KIND_CLS = { BOM: 'bg-violet-100 text-violet-800', ORDER: 'bg-sky-100 text-sky-800', REQUISITION: 'bg-amber-100 text-amber-800', PO: 'bg-rose-100 text-rose-800', GRN: 'bg-emerald-100 text-emerald-800', TRIM_ITEM: 'bg-teal-100 text-teal-800', DTM_LINK: 'bg-teal-100 text-teal-800' };
+const KIND_CLS = { BOM: 'bg-violet-100 text-violet-800', ORDER: 'bg-sky-100 text-sky-800', REQUISITION: 'bg-amber-100 text-amber-800', PO: 'bg-rose-100 text-rose-800', GRN: 'bg-emerald-100 text-emerald-800', SUPPLIER_INVOICE: 'bg-indigo-100 text-indigo-800', DEBIT_NOTE: 'bg-indigo-100 text-indigo-800', TRIM_ITEM: 'bg-teal-100 text-teal-800', DTM_LINK: 'bg-teal-100 text-teal-800' };
 
 function waited(since) {
     if (!since) return '';

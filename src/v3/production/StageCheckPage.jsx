@@ -16,8 +16,8 @@
 // below. The hardware scanner is caught on the whole page (scanShared) and switches to SCANNER, as in 2.0. Stages
 // before Assembly are unchanged — no scanner, no sounds.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronRight, Shirt, Layers, Ruler, Package, AlertTriangle, Component, Hammer, Check, CheckCircle2, Barcode, List } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { RotateCcw, ChevronDown, ChevronRight, Shirt, Layers, Ruler, Package, AlertTriangle, Component, Hammer, Check, CheckCircle2, Barcode, List } from 'lucide-react';
 import { productionApi } from '../api/productionApi';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, ErrorBox, Loading } from '../components/ui';
@@ -109,6 +109,7 @@ function PartAccordion({ name, pieces, open, onToggle, onBulk, onFix, children }
 export default function StageCheckPage() {
     const [st, setSt] = useState(null);
     const [perms, setPerms] = useState({});
+    const [recutsOpen, setRecutsOpen] = useState(null);   // re-cuts and replacements waiting, for those who do them (4 Nov 2026)
     const [params] = useSearchParams();
     const focusStage = params.get('stage'), focusBatch = params.get('batch');   // from the order tracker: open this stage and batch
     const focusApplied = useRef(false);
@@ -144,6 +145,11 @@ export default function StageCheckPage() {
         productionApi.permissions().then(r => setPerms(r.data)).catch(() => {});
         productionApi.station().then(res => { setSt(res.data); if (res.data.stage) setStageId(res.data.stage.id); else if (focusStage && res.data.can_pick_line && res.data.stages.some(s => String(s.id) === focusStage)) setStageId(res.data.stages.find(s => String(s.id) === focusStage).id); }).catch(err => setError(apiError(err, 'Failed to load your workstation.')));
     }, [focusStage]);
+    useEffect(() => {
+        if (!perms.recut) return;
+        Promise.all([productionApi.recuts({ status: 'OPEN' }), productionApi.replacements({ status: 'open' })])
+            .then(([a, b]) => setRecutsOpen(a.data.length + b.data.length)).catch(() => {});
+    }, [perms.recut, queue]);
     const loadQueue = useCallback(() => { if (stageId) productionApi.queue(stageId).then(res => { setQueue(res.data); if (focusBatch && !focusApplied.current && String(stageId) === focusStage) { focusApplied.current = true; setOpenId(focusBatch); } }).catch(err => setError(apiError(err, 'Failed to load the queue.'))); }, [stageId, focusStage, focusBatch]);
     useEffect(() => {
         setQueue(null); setOpenId(null); setView(null); setBatchPick(stageId ? store.get(`v3.stageBatch.${stageId}`, 'ALL') : 'ALL');
@@ -279,6 +285,7 @@ export default function StageCheckPage() {
                     {stage && <span className="text-xs font-black uppercase tracking-widest bg-slate-100 text-slate-600 px-2.5 py-2 rounded-lg">{stage.unit === 'GARMENT' ? 'Garments' : stage.unit === 'BUNDLE' ? 'Bundles' : 'Pieces'}</span>}
                     {st.station && <span className="text-sm font-black text-indigo-700 bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-100">{st.station.workstation}</span>}
                     {st.station && <span className="text-sm font-bold text-slate-600 bg-slate-100 px-3 py-2 rounded-lg">{st.station.line}</span>}
+                    {perms.recut && <Link to="/v3/production/recuts" className={`inline-flex items-center gap-1.5 text-sm font-black px-3 py-2 rounded-lg border ${recutsOpen ? 'bg-amber-50 text-amber-800 border-amber-300' : 'bg-white text-indigo-700 border-indigo-200'} hover:bg-indigo-50`}><RotateCcw size={14} /> Re-cuts{recutsOpen ? ` · ${recutsOpen} waiting` : ''}</Link>}
                     {stage && <span className={`inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest px-2 ${live ? 'text-emerald-600' : 'text-slate-400'}`} title={live ? 'Updates by itself when others check' : 'Reconnecting'}><span className={`h-2.5 w-2.5 rounded-full ${live ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />{live ? 'Live' : 'Offline'}</span>}
                     <span className="ml-auto flex flex-wrap items-center gap-2">
                         {stage && !isGarment && queue && queue.length > 0 && (
