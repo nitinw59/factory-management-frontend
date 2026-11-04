@@ -18,6 +18,8 @@ export const trimKitsApi = {
     bomChangeSeen: (id, note) => api.post(`/v3/trim-kits/${id}/bom-change/seen`, { note }),   // BOM changed after the kit was started (25 Oct 2026)
     // 21 Oct 2026: Pending to fulfil; extra lines from free stock (the merchandiser approves)
     pending: () => api.get('/v3/trim-kits/pending'),
+    slips: (params) => api.get('/v3/trim-kits/slips', { params }),
+    slip: (id) => api.get(`/v3/trim-kits/slips/${id}`),
     requestExtra: (id, data) => api.post(`/v3/trim-kits/${id}/extra`, data),   // { replaces_line_id, trim_item_id, qty, reason }
     extraRequests: (status) => api.get('/v3/trim-kits/extra-requests', { params: { status } }),
     approveExtra: (rid, note) => api.post(`/v3/trim-kits/extra-requests/${rid}/approve`, { note }),

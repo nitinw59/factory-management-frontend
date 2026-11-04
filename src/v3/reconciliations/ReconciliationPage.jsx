@@ -197,6 +197,12 @@ export default function ReconciliationPage() {
                     <b>Outdated</b> — {r.outdated_reason}{r.outdated_by_name ? ` (${r.outdated_by_name}, ${when(r.outdated_at)})` : ` (${when(r.outdated_at)})`}. These figures no longer hold: it can't be approved or acknowledged — generate it again{r.kind === 'FABRIC' ? ' once the order\'s batches are finalised' : ''}.
                 </div>
             )}
+            {f.released_fabric?.length > 0 && (
+                <div className="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                    <p className="font-bold">Released to free stock when this report was approved:</p>
+                    <ul className="list-disc pl-5">{f.released_fabric.map(x => <li key={x.item_id}>{x.label}: {x.qty} {x.uom}{x.rolls.length ? ` (rolls ${x.rolls.join(', ')})` : ''}</li>)}</ul>
+                </div>
+            )}
             {!r.outdated_at && provisional.length > 0 && (
                 <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                     <p className="font-bold">Provisional — these figures will still change:</p>

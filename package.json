@@ -12,6 +12,7 @@
     "exceljs": "^4.4.0",
     "html2canvas": "^1.4.1",
     "html5-qrcode": "^2.3.8",
+    "jsbarcode": "3.12.3",
     "jspdf": "^4.0.0",
     "jspdf-autotable": "^5.0.7",
     "jwt-decode": "^4.0.0",

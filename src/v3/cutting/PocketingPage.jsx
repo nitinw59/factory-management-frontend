@@ -240,7 +240,6 @@ function OrderView({ orderId }) {
                             </table>
                         </div>
                         <p className="text-xs font-black uppercase tracking-wider text-slate-500 mb-1">Lays</p>
-                        {d.lay_lock && f.lays.some(l => l.status === 'CUT') && <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1 mb-1">🔒 {d.lay_lock.reason} A new lay (make-up) is still allowed.</p>}
                         {f.lays.length === 0 ? <p className="text-sm text-slate-400">None yet.</p> : f.lays.map(l => (
                             <div key={l.id} className={`flex flex-wrap items-center gap-2 py-1.5 border-t border-slate-100 text-sm ${l.status === 'CANCELLED' ? 'opacity-50 line-through' : ''}`}>
                                 <b>Lay {l.lay_no}</b><span className="text-slate-600">{l.plies} plies × {fmt(l.layer_length_in)} in = {fmt(l.laid)} {f.uom}{l.waste ? ` + ${fmt(l.waste)} waste` : ''}</span>
@@ -248,8 +247,8 @@ function OrderView({ orderId }) {
                                 <span className="text-xs text-slate-500">{l.cells.map(c => `${c.part_name} ${c.size} ${c.pieces}`).join(' · ')}</span>
                                 <span className="text-xs text-slate-400">{l.created_by_name} · {new Date(l.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{l.notes ? ` · ${l.notes}` : ''}{l.cancel_reason ? ` · cancelled: ${l.cancel_reason}` : ''}</span>
                                 {perms.manage && l.status === 'CUT' && (l.cancel_blocked
-                                    ? <span className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-slate-400 cursor-not-allowed" title={l.cancel_blocked}><Ban size={12} /> Cancel — locked</span>
-                                    : <button type="button" className="ml-auto text-xs font-bold text-rose-700 hover:underline" onClick={() => { setFormError(''); setVals({ reason: '' }); setAsk({ title: `Cancel lay ${l.lay_no}`, hint: `Only while none of its pieces is handed over and no batch of the order is finalised.${l.stacked_with ? ` The whole lay is cancelled — ${l.stacked_with} too.` : ''}`, fields: [['reason', 'Reason', 'text']], run: (v) => cuttingApi.cancelLay(l.id, v.reason) }); }}><Ban size={12} className="inline" /> Cancel</button>)}
+                                    ? <span className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-slate-500"><Ban size={12} /> {l.cancel_blocked}</span>
+                                    : <button type="button" className="ml-auto text-xs font-bold text-rose-700 hover:underline" onClick={() => { setFormError(''); setVals({ reason: '' }); setAsk({ title: `Undo lay ${l.lay_no}`, hint: `Its pieces come out of the pocket stock and its metres go back to At cutting. Only if this lay wasn't really cut: if it was, record it again straight away, or the metres will show as fabric that no longer exists. The order's fabric report is marked outdated.${l.stacked_with ? ` The whole lay is undone — ${l.stacked_with} too.` : ''}`, fields: [['reason', 'Reason', 'text']], run: (v) => cuttingApi.cancelLay(l.id, v.reason) }); }}><Ban size={12} className="inline" /> Undo lay</button>)}
                             </div>
                         ))}
                         {f.writeoffs.length > 0 && <p className="text-xs text-slate-500 mt-2">Written off: {f.writeoffs.map(w => `${fmt(w.metres)} ${f.uom} (${w.reason})`).join(' · ')}</p>}

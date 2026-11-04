@@ -38,7 +38,7 @@ export default function AllocateModal({ target, onClose, onDone }) {
                     <div className="bg-slate-50 rounded-lg py-2"><p className="text-slate-500">Allocated</p><p className="font-black text-slate-800">{fmt(target.allocated)} {target.uom}</p></div>
                     <div className="bg-slate-50 rounded-lg py-2"><p className="text-slate-500">Free stock</p><p className={`font-black ${target.free < 0 ? 'text-rose-700' : 'text-slate-800'}`}>{fmt(target.free)} {target.uom}</p></div>
                 </div>
-                {allocating && max <= 0 && <p className="text-sm text-amber-700">{target.open <= 0 ? 'Already fully allocated.' : target.kind === 'FABRIC' ? 'No free fabric: add rolls in Masters → Fabric stock, or release from another order.' : 'No free stock to allocate.'}</p>}
+                {allocating && max <= 0 && <p className="text-sm text-amber-700">{target.open <= 0 ? 'Already fully allocated.' : target.kind === 'FABRIC' ? 'No free fabric: add rolls in Stores → Fabric stock, or release from another order.' : 'No free stock to allocate.'}</p>}
                 <Field label={`Quantity (${target.uom}) *`} hint={allocating ? `Up to ${fmt(max)} ${target.uom}. Stock isn't moved; it's reserved for this order.` : `Up to ${fmt(max)} ${target.uom} back to free stock.`}>
                     <input className={inputCls} type="number" min="0" step={target.uom === 'pcs' ? 1 : 'any'} value={qty} onChange={e => setQty(e.target.value)} autoFocus />
                 </Field>

@@ -11,6 +11,7 @@ import { apiError } from '../api/mastersApi';
 import { useV3Live } from '../live';
 import { PageHeader, SearchInput, ErrorBox, Loading } from '../components/ui';
 import { KIT_STATUS, ACTION, SHORT_REASON, qty } from './trimKitShared';
+import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 
 const TABS = [
     ['READY', 'Ready for pickup'],
@@ -20,7 +21,32 @@ const TABS = [
     ['', 'All'],
     ['pending', 'Pending to fulfil'],
     ['extra', 'Extra lines'],
+    ['slips', 'Trim slips'],
 ];
+
+// Trim slips (4 Nov 2026): what signed kits sent to the lines, apart from the fabric slips.
+function TrimSlips({ rows }) {
+    return (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
+            <table className="w-full text-sm min-w-[720px]">
+                <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2.5">Slip</th><th className="px-3 py-2.5">Date</th><th className="px-3 py-2.5">Order</th><th className="px-3 py-2.5">To</th><th className="px-3 py-2.5">Signed by</th><th className="px-3 py-2.5 text-right">Items</th></tr></thead>
+                <tbody>
+                    {rows.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No trim slips.</td></tr>}
+                    {rows.map(s => (
+                        <tr key={s.id} className="border-t border-slate-100">
+                            <td className="px-3 py-2.5"><Link to={`/v3/trim-kits/slips/${s.id}`} className="font-semibold text-indigo-700 hover:underline">{s.issue_no}</Link></td>
+                            <td className="px-3 py-2.5 whitespace-nowrap">{fmtDate(s.issue_date)}</td>
+                            <td className="px-3 py-2.5">{s.order_no}<span className="block text-xs text-slate-500">{s.customer_name}</span></td>
+                            <td className="px-3 py-2.5">{s.stage}</td><td className="px-3 py-2.5">{s.received_by}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{s.line_count}{s.has_returns && <span className="block text-[11px] text-slate-500">with returns</span>}</td>
+                        </tr>
+                    ))}
+                </tbody>
+                {rows.length > 0 && <tfoot><tr className="border-t-2 border-slate-200 bg-slate-50 font-bold"><td className="px-3 py-2.5" colSpan={5}>Total · {rows.length} slip{rows.length === 1 ? '' : 's'}</td><td className="px-3 py-2.5 text-right tabular-nums">{rows.reduce((a, s) => a + s.line_count, 0)}</td></tr></tfoot>}
+            </table>
+        </div>
+    );
+}
 
 export default function TrimKitsPage() {
     const [params, setParams] = useSearchParams();
@@ -38,6 +64,7 @@ export default function TrimKitsPage() {
         if (!perm) return;
         setError('');
         if (tab === 'pending') { trimKitsApi.pending().then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load.'))); return; }
+        if (tab === 'slips') { trimKitsApi.slips({ q: search.trim() || undefined }).then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load the slips.'))); return; }
         if (tab === 'extra') { trimKitsApi.extraRequests(extraStatus).then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load.'))); return; }
         trimKitsApi.list({ status: tab || undefined, q: search.trim() || undefined }).then(res => setRows(res.data)).catch(err => setError(apiError(err, 'Failed to load trim kits.')));
     }, [perm, tab, search, extraStatus]);
@@ -57,7 +84,8 @@ export default function TrimKitsPage() {
                 ))}
             </div>
             <ErrorBox text={error} />
-            {tab === 'pending' ? (!rows || Array.isArray(rows) ? <Loading /> : <PendingView data={rows} />)
+            {tab === 'slips' ? (!Array.isArray(rows) ? <Loading /> : <TrimSlips rows={rows} />)
+            : tab === 'pending' ? (!rows || Array.isArray(rows) ? <Loading /> : <PendingView data={rows} />)
             : tab === 'extra' ? (!Array.isArray(rows) ? <Loading /> : <ExtraView rows={rows} status={extraStatus} setStatus={(v) => { setRows(null); setExtraStatus(v); }} />)
             : !Array.isArray(rows) ? <Loading /> : rows.length === 0 ? (
                 <p className="text-sm text-slate-500 bg-white border border-slate-200 rounded-xl p-6 text-center">{tab === 'READY' ? 'No kit is waiting for pickup.' : 'No kits here.'}</p>

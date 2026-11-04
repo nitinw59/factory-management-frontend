@@ -291,7 +291,7 @@ export default function OrderTrackPage() {
                             <thead className={`${TONE.sky.head} text-left`}><tr><th className={TH}>Issue slip · to</th><th className={`${TH} text-right`}>Date</th></tr></thead>
                             <tbody>{d.issues.map(s => (
                                 <tr key={s.id} className="border-t border-slate-100">
-                                    <td className="px-3 py-1.5"><L to={`/v3/material-issue/issues/${s.id}`} k="issue.materialIssue">{s.issue_no}</L><span className="block text-[11px] text-slate-500">to {s.stage || '—'}{s.batch_code ? ` · batch ${s.batch_code}` : ''} · {s.lines} line(s)</span></td>
+                                    <td className="px-3 py-1.5"><L to={s.is_trim ? `/v3/trim-kits/slips/${s.id}` : `/v3/material-issue/issues/${s.id}`} k={s.is_trim ? 'store.trimKits' : 'issue.materialIssue'}>{s.issue_no}</L><span className="block text-[11px] text-slate-500">to {s.stage || '—'}{s.batch_code ? ` · batch ${s.batch_code}` : ''} · {s.lines} line(s)</span></td>
                                     <td className="px-3 py-1.5 text-xs text-right">{fmtDate(s.issue_date)}</td>
                                 </tr>
                             ))}</tbody>

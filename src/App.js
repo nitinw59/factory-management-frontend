@@ -404,6 +404,7 @@ const appRoutes = (
           <Route path="production/recuts" element={<V3RecutsPage />} />
           <Route path="production/loading" element={<V3LineLoadingPage />} />
           <Route path="trim-kits" element={<V3TrimKitsPage />} />
+          <Route path="trim-kits/slips/:id" element={<V3MaterialIssueSlipPage />} />
           <Route path="trim-kits/:id" element={<V3TrimKitPage />} />
           <Route path="admin/access" element={<V3UserAccessPage />} />
           <Route path="admin/customers" element={<V3CustomersAdminPage />} />

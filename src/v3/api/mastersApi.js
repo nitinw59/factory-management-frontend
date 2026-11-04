@@ -38,6 +38,7 @@ export const mastersApi = {
     fabricRolls: (params) => api.get(`${base}/fabric-rolls`, { params }),
     postOpeningRolls: (rolls, note) => api.post(`${base}/fabric-rolls/opening`, { rolls, note }),
     adjustRoll: (id, data) => api.post(`${base}/fabric-rolls/${id}/adjustment`, data),
+    correctRoll: (id, data) => api.patch(`${base}/fabric-rolls/${id}/details`, data),
     rollLedger: (id) => api.get(`${base}/fabric-rolls/${id}/ledger`),
 };
 
