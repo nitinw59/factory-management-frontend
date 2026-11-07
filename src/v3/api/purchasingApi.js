@@ -33,6 +33,7 @@ export const purchasingApi = {
     // Goods receipt (GRN) — only against issued POs
     receivablePos: (params) => api.get('/v3/purchasing/receiving/pos', { params }),
     receivingView: (poId) => api.get(`/v3/purchasing/receiving/pos/${poId}`),
+    challanCheck: (poId, no) => api.get(`/v3/purchasing/receiving/pos/${poId}/challan`, { params: { no } }),
     createGrn: (data) => api.post('/v3/purchasing/grns', data),
     // Direct purchase of spares / general items (25 Oct 2026): the PO is made from the bill. With a bill file → multipart.
     directSetup: () => api.get('/v3/purchasing/direct-purchases/setup'),

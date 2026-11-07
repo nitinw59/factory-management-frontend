@@ -112,7 +112,9 @@ export default function GrnPage() {
             <ErrorBox text={error} />
 
             <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 grid sm:grid-cols-4 gap-3 text-sm">
-                <div><p className="text-xs font-bold text-slate-500">Challan / DC</p><p className="font-semibold">{g.challan_no}{g.challan_date ? ` · ${fmtDate(g.challan_date)}` : ''}</p></div>
+                <div><p className="text-xs font-bold text-slate-500">Challan / DC</p><p className="font-semibold">{g.challan_no}{g.challan_date ? ` · ${fmtDate(g.challan_date)}` : ''}</p>
+                    {/* One challan, several GRNs (6 Nov 2026): the rest of the delivery */}
+                    {(g.same_delivery || []).length > 0 && <p className="mt-1 text-xs text-slate-600">Same delivery: {g.same_delivery.map((x, i) => <span key={x.id}>{i > 0 && ', '}<Link to={`/v3/purchasing/grns/${x.id}`} className="font-semibold text-indigo-700 hover:underline">{x.grn_no}</Link> ({x.po_no})</span>)}</p>}</div>
                 <div><p className="text-xs font-bold text-slate-500">Received</p><p className="font-semibold">{fmtDate(g.received_date)}{g.received_by_name ? ` by ${g.received_by_name}` : ''}</p></div>
                 <div><p className="text-xs font-bold text-slate-500">Vehicle</p><p className="font-semibold">{g.vehicle_no || '—'}</p></div>
                 <div><p className="text-xs font-bold text-slate-500">Approved</p><p className="font-semibold">{g.approved_at ? `${new Date(g.approved_at).toLocaleString()}${g.approved_by_name ? ` by ${g.approved_by_name}` : ' (within tolerance)'}` : '—'}</p></div>

@@ -8,9 +8,12 @@
 // "Discard draft". Browser storage only: it never reaches the server or another device.
 // 25 Oct 2026: each store sees only what it receives (the server's rule on save) — the fabric store manager the POs with
 // an open fabric line and only their fabric lines, the store manager trim / store-item lines; a note counts the rest.
-import { useEffect, useState } from 'react';
+// 6 Nov 2026: one challan for 2 POs (or fabric and trims) — when the challan is already on another GRN of the supplier
+// (compared without spaces, case and punctuation), the receiver says it is the same delivery, which brings its date,
+// vehicle and scan, or corrects the number. The server refuses the same PO line twice on one challan.
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, PackageCheck, Plus, Trash2, AlertTriangle, Save, ShoppingBag } from 'lucide-react';
+import { ArrowLeft, PackageCheck, Plus, Trash2, AlertTriangle, Save, ShoppingBag, Truck } from 'lucide-react';
 import { useV3Access, useSeesPrices } from '../V3Access';
 import { purchasingApi } from '../api/purchasingApi';
 import { apiError } from '../api/mastersApi';
@@ -36,6 +39,46 @@ const isBlank = (header, vals) => !Object.values(vals).some(v => v.on)
 const KIND_TEXT = { FABRIC: 'fabric', TRIM: 'trim', STORE: 'store-item' };
 const otherStore = (kinds) => (kinds.includes('FABRIC') ? 'the fabric store' : 'the trim store');
 const timeText = (ms) => new Date(ms).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+const challanKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// The challan is already on other GRNs of this supplier: same delivery (yes / correct the number), then which scan to take.
+function SameDelivery({ same, confirmed, onConfirm, onCorrect, onUndo, copyFrom, setCopyFrom, challanDate }) {
+    const first = same.grns[0];
+    const withScans = same.grns.filter(x => x.documents > 0);
+    const otherDate = challanDate && same.grns.find(x => x.challan_date && x.challan_date !== challanDate);
+    return (
+        <div className={`mb-4 rounded-xl border px-4 py-3 text-sm ${confirmed ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
+            <p className="flex items-center gap-2 font-bold"><Truck size={16} /> {confirmed ? `Same delivery as ${same.grns.map(x => x.grn_no).join(', ')}` : `Challan ${first.challan_no} is already received`}</p>
+            <ul className="mt-2 space-y-1">
+                {same.grns.map(x => (
+                    <li key={x.id}>
+                        <Link to={`/v3/purchasing/grns/${x.id}`} target="_blank" className="font-semibold underline">{x.grn_no}</Link> · {x.po_no} · received {fmtDate(x.received_date)}{x.received_by_name ? ` by ${x.received_by_name}` : ''}
+                        {x.vehicle_no ? ` · vehicle ${x.vehicle_no}` : ''} · {x.line_count} line{x.line_count === 1 ? '' : 's'}{x.documents ? ` · ${x.documents} scan${x.documents === 1 ? '' : 's'}` : ''}
+                    </li>
+                ))}
+            </ul>
+            {same.same_po_lines.length > 0 && <p className="mt-2 font-semibold text-rose-800">On this PO it already received {same.same_po_lines.map(l => `line ${l.line_no}`).join(', ')}. Those lines can't be received on this challan again.</p>}
+            {!confirmed
+                ? <div className="mt-3 flex flex-wrap gap-2">
+                    <PrimaryButton onClick={onConfirm}>Yes, same delivery</PrimaryButton>
+                    <SecondaryButton onClick={onCorrect}>No, correct the number</SecondaryButton>
+                </div>
+                : <div className="mt-2 space-y-2">
+                    {withScans.length > 0 && (
+                        <label className="flex flex-wrap items-center gap-2">
+                            <span>Challan scan:</span>
+                            <select className="px-2 py-1.5 border border-slate-300 rounded-lg bg-white text-slate-800" value={copyFrom} onChange={e => setCopyFrom(e.target.value)}>
+                                {withScans.map(x => <option key={x.id} value={x.id}>Take the scan of {x.grn_no}</option>)}
+                                <option value="">Don't attach a scan</option>
+                            </select>
+                        </label>
+                    )}
+                    {otherDate && <p className="font-semibold text-amber-800">The challan date differs from {otherDate.grn_no} ({fmtDate(otherDate.challan_date)}). Check it on the paper.</p>}
+                    <button type="button" className="text-xs font-bold hover:underline" onClick={onUndo}>Not the same delivery?</button>
+                </div>}
+        </div>
+    );
+}
 
 // Ordered / received / waiting / open / due as chips — open is what can be received now; the due date turns
 // amber within 3 days and red when overdue.
@@ -195,6 +238,29 @@ export default function ReceiveGoodsPage() {
     const [savedAt, setSavedAt] = useState(null);     // last draft write (null = nothing saved / storage blocked)
     const [drafts, setDrafts] = useState(() => draftPoIds(userId));
     const [receives, setReceives] = useState(null);   // line kinds this user receives (server's rule), for the list hint
+    const [same, setSame] = useState(null);           // { key, grns, same_po_lines }: GRNs already on this challan
+    const [sameOk, setSameOk] = useState('');         // the challan key the receiver confirmed as the same delivery
+    const [copyFrom, setCopyFrom] = useState('');     // GRN whose scans this receipt takes
+    const challanRef = useRef(null);
+    const key = challanKey(header.challan_no);
+
+    // The challan as it is typed → the GRNs already on it (after a pause).
+    useEffect(() => {
+        if (!po || !key) { setSame(null); return; }
+        let live = true;
+        const t = setTimeout(() => purchasingApi.challanCheck(po.id, header.challan_no)
+            .then(res => { if (live) setSame(res.data.grns.length ? res.data : null); })
+            .catch(() => { if (live) setSame(null); }), 400);
+        return () => { live = false; clearTimeout(t); };
+    }, [po, key]); // eslint-disable-line react-hooks/exhaustive-deps
+    const confirmed = Boolean(same && sameOk === same.key);
+    const confirmSame = () => {
+        const from = same.grns.find(x => x.challan_date || x.vehicle_no) || same.grns[0];
+        setHeader(h => ({ ...h, challan_date: h.challan_date || from.challan_date || '', vehicle_no: h.vehicle_no || from.vehicle_no || '' }));
+        setCopyFrom(same.grns.find(x => x.documents > 0)?.id || '');
+        setSameOk(same.key);
+    };
+    const correctChallan = () => { setSameOk(''); challanRef.current?.focus(); challanRef.current?.select(); };
 
     // Every change while a PO is open → the draft (removed again when the form is back to blank).
     useEffect(() => {
@@ -223,6 +289,7 @@ export default function ReceiveGoodsPage() {
             setHeader(draft ? { ...blankHeader(), ...draft.header } : blankHeader());
             setRestored(draft ? { at: draft.savedAt, fromGrn: draft.fromGrn || null } : null);
             setSavedAt(draft ? draft.savedAt : null);
+            setSameOk('');
             setPo(res.data);
         } catch (err) { setError(apiError(err, 'Failed to open the PO.')); }
     };
@@ -233,7 +300,7 @@ export default function ReceiveGoodsPage() {
         setHeader(blankHeader());
         setRestored(null); setSavedAt(null);
     };
-    const backToList = () => { setPo(null); setRestored(null); setDrafts(draftPoIds(userId)); if (poId) navigate('/v3/purchasing/receive'); };
+    const backToList = () => { setPo(null); setRestored(null); setSameOk(''); setDrafts(draftPoIds(userId)); if (poId) navigate('/v3/purchasing/receive'); };
     const submit = async () => {
         setBusy(true); setError('');
         const lines = po.lines.filter(l => vals[l.id]?.on).map(l => {
@@ -244,10 +311,15 @@ export default function ReceiveGoodsPage() {
                 : { ...base, label_article: v.label_article, label_shade: v.label_shade, rolls: (v.rolls || []).filter(r => r.roll_no || r.qty).map(r => ({ ...r, qty: Number(r.qty), width: r.width ? Number(r.width) : null })) };
         });
         try {
-            const res = await purchasingApi.createGrn({ po_id: po.id, ...header, lines });
+            const res = await purchasingApi.createGrn({ po_id: po.id, ...header, lines, ...(confirmed ? { same_delivery: true, copy_documents_from: copyFrom || null } : {}) });
             dropDraft(userId, po.id);   // saved for real — the draft is done
             navigate(`/v3/purchasing/grns/${res.data.id}`);
-        } catch (err) { setError(apiError(err, 'Failed to save the receipt.')); setBusy(false); }
+        } catch (err) {
+            // Another store saved this challan meanwhile: ask about the same delivery.
+            const d = err?.response?.data;
+            if (d?.code === 'SAME_DELIVERY') { setSame(prev => ({ key, same_po_lines: prev?.same_po_lines || [], grns: d.grns })); setSameOk(''); }
+            setError(apiError(err, 'Failed to save the receipt.')); setBusy(false);
+        }
     };
 
     if (po) {
@@ -266,12 +338,14 @@ export default function ReceiveGoodsPage() {
                     </div>
                 )}
                 {po.lines.length > 0 && <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 grid sm:grid-cols-4 gap-3">
-                    <Field label="Supplier challan / DC no. *"><input className={inputCls} value={header.challan_no} onChange={e => setHeader({ ...header, challan_no: e.target.value })} autoFocus /></Field>
+                    <Field label="Supplier challan / DC no. *"><input ref={challanRef} className={inputCls} value={header.challan_no} onChange={e => setHeader({ ...header, challan_no: e.target.value })} autoFocus /></Field>
                     <Field label="Challan date"><input className={inputCls} type="date" value={header.challan_date} onChange={e => setHeader({ ...header, challan_date: e.target.value })} /></Field>
                     <Field label="Vehicle no."><input className={`${inputCls} uppercase`} value={header.vehicle_no} onChange={e => setHeader({ ...header, vehicle_no: e.target.value })} /></Field>
                     <Field label="Received on *"><input className={inputCls} type="date" max={todayLocal()} value={header.received_date} onChange={e => setHeader({ ...header, received_date: e.target.value })} /></Field>
                     <div className="sm:col-span-4"><Field label="Notes"><input className={inputCls} value={header.notes} onChange={e => setHeader({ ...header, notes: e.target.value })} /></Field></div>
                 </div>}
+                {po.lines.length > 0 && same && <SameDelivery same={same} confirmed={confirmed} onConfirm={confirmSame} onCorrect={correctChallan} onUndo={() => setSameOk('')}
+                    copyFrom={copyFrom} setCopyFrom={setCopyFrom} challanDate={header.challan_date} />}
                 <div className="space-y-3 mb-4">
                     {/* Settings → Stores: locations offered for roll locations (free text still allowed) */}
                     <datalist id="v3-store-locations">{(po.locations || []).filter(x => x.area === 'ALL' || x.area === 'FABRIC').map(x => <option key={x.code} value={x.code}>{x.name || ''}</option>)}</datalist>
@@ -287,7 +361,8 @@ export default function ReceiveGoodsPage() {
                 {po.lines.length > 0 && <ReceiptSummary lines={po.lines} vals={vals} />}
                 <ErrorBox text={error} />
                 {po.lines.length > 0 && <div className="flex flex-wrap items-center gap-3">
-                    <PrimaryButton onClick={submit} busy={busy} disabled={busy || !po.receivable || !header.challan_no.trim() || !Object.values(vals).some(v => v.on)}><PackageCheck size={15} /> Save goods receipt</PrimaryButton>
+                    <PrimaryButton onClick={submit} busy={busy} disabled={busy || !po.receivable || !header.challan_no.trim() || (same && !confirmed) || !Object.values(vals).some(v => v.on)}><PackageCheck size={15} /> Save goods receipt</PrimaryButton>
+                    {same && !confirmed && <span className="text-xs font-semibold text-amber-800">Say whether challan {header.challan_no} is the same delivery first.</span>}
                     {savedAt
                         ? <span className="text-xs text-slate-500 inline-flex items-center gap-1"><Save size={12} /> Draft saved on this browser · {timeText(savedAt)}{!restored && <button type="button" className="ml-2 font-semibold text-rose-700 hover:underline" onClick={discardDraft}>Discard</button>}</span>
                         : <span className="text-xs text-slate-400">Your entries are kept as a draft on this browser as you type.</span>}

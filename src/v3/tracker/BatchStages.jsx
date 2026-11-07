@@ -3,6 +3,8 @@
 // a column per route stage — % done there (pieces, or garments at garment stages), the line, garments through,
 // rework / rejected, and ⏱ when work on the line has had no check for a shift. Tap a stage for its rolls (MODE_1)
 // or sizes (MODE_2): state, done, line, on the line since, what it waits for — the line loader's board, read only.
+// 6 Nov 2026: the totals open as colour × size tables — garments cut against ordered, and garments through each stage against
+// garments cut in finalised batches (with rework and rejected).
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { X } from 'lucide-react';
@@ -55,6 +57,62 @@ function StageCell({ s, stuckHours, onOpen }) {
                 )}
             </button>
         </td>
+    );
+}
+
+// A colour × size table of one total: rows are colours, columns sizes, with a Total row and column. cells: [{ colour_id, colour,
+// size_id, size, display_order, n, of?, rework?, rejected? }] — of is what n is compared with (ordered, or cut).
+function MatrixModal({ title, note, ofLabel, cells, onClose }) {
+    useEffect(() => {
+        const esc = (e) => { if (e.key === 'Escape') onClose(); };
+        window.addEventListener('keydown', esc);
+        return () => window.removeEventListener('keydown', esc);
+    }, [onClose]);
+    const sizes = [...new Map(cells.map(c => [c.size_id, c])).values()].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || String(a.size).localeCompare(String(b.size), undefined, { numeric: true }));
+    const colours = [...new Map(cells.map(c => [c.colour_id, c])).values()].sort((a, b) => a.colour.localeCompare(b.colour));
+    const sumOf = (list) => list.reduce((a, c) => ({ n: a.n + (c.n || 0), of: a.of + (c.of || 0), rework: a.rework + (c.rework || 0), rejected: a.rejected + (c.rejected || 0) }), { n: 0, of: 0, rework: 0, rejected: 0 });
+    const at = (cid, sid) => sumOf(cells.filter(c => (cid == null || c.colour_id === cid) && (sid == null || c.size_id === sid)));
+    const Cell = ({ v, bold }) => {
+        const diff = v.n - v.of;
+        return (
+            <td className={`px-2 py-1.5 text-right tabular-nums border-l border-slate-100 ${bold ? 'font-black' : ''}`}>
+                {v.n || v.of ? <>
+                    <span className="block">{fmtQty(v.n)}</span>
+                    {ofLabel && <span className={`block text-[11px] font-normal ${diff > 0 ? 'text-amber-700' : diff < 0 ? 'text-slate-500' : 'text-emerald-700'}`}>of {fmtQty(v.of)}{diff > 0 ? ` · +${fmtQty(diff)}` : ''}</span>}
+                    {(v.rework > 0 || v.rejected > 0) && <span className="block text-[11px] font-semibold">{v.rework > 0 && <span className="text-amber-700">↻{v.rework} </span>}{v.rejected > 0 && <span className="text-rose-700">✗{v.rejected}</span>}</span>}
+                </> : <span className="text-slate-300">—</span>}
+            </td>
+        );
+    };
+    return (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-3" role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-start gap-3 px-4 py-3 border-b border-slate-200 bg-slate-50 rounded-t-xl">
+                    <div className="min-w-0"><h3 className="font-black text-slate-900">{title}</h3>{note && <p className="text-xs text-slate-600">{note}</p>}</div>
+                    <button type="button" onClick={onClose} className="ml-auto p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-200" aria-label="Close"><X size={18} /></button>
+                </div>
+                <div className="overflow-auto">
+                    {!cells.length ? <p className="px-4 py-6 text-sm text-slate-500">Nothing here yet.</p> : (
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-50 text-left text-slate-500 sticky top-0"><tr><th className={TH}>Colour</th>{sizes.map(z => <th key={z.size_id} className={`${TH} text-right border-l border-slate-100`}>{z.size}</th>)}<th className={`${TH} text-right border-l border-slate-200`}>Total</th></tr></thead>
+                            <tbody>{colours.map(c => (
+                                <tr key={c.colour_id} className="border-t border-slate-100 align-top">
+                                    <td className="px-2 py-1.5 font-semibold whitespace-nowrap">{c.colour}</td>
+                                    {sizes.map(z => <Cell key={z.size_id} v={at(c.colour_id, z.size_id)} />)}
+                                    <Cell v={at(c.colour_id, null)} bold />
+                                </tr>
+                            ))}</tbody>
+                            <tfoot className="bg-slate-50 border-t-2 border-slate-200 font-bold align-top"><tr>
+                                <td className="px-2 py-2">Total</td>
+                                {sizes.map(z => <Cell key={z.size_id} v={at(null, z.size_id)} bold />)}
+                                <Cell v={at(null, null)} bold />
+                            </tr></tfoot>
+                        </table>
+                    )}
+                </div>
+                {ofLabel && <p className="px-4 py-2 text-[11px] text-slate-500 border-t border-slate-100">Each cell: the count, then "of" {ofLabel}{ofLabel === 'ordered' ? ' (amber + = cut over the order)' : ''}. ↻ rework · ✗ rejected.</p>}
+            </div>
+        </div>
     );
 }
 
@@ -126,6 +184,7 @@ export default function BatchStages({ orderId, can }) {
     const [d, setD] = useState(null);
     const [error, setError] = useState('');
     const [open, setOpen] = useState(null);   // { b, s }
+    const [matrix, setMatrix] = useState(null);   // { title, note, ofLabel, cells }
     useEffect(() => {
         setD(null);
         trackerApi.orderProduction(orderId).then(res => setD(res.data)).catch(err => setError(apiError(err, 'Failed to load the batches.')));
@@ -153,6 +212,16 @@ export default function BatchStages({ orderId, can }) {
                 const garments = l.batches.reduce((a, b) => a + (b.garments || 0), 0);
                 const all = l.batches.reduce((a, b) => b.stages.reduce((x, s) => ({ done: x.done + s.done, items: x.items + s.items }), a), { done: 0, items: 0 });
                 const stuck = l.batches.filter(b => b.stages.some(s => s.stuck)).length;
+                // drill-downs of the totals row
+                const key = (c) => `${c.colour_id}|${c.size_id}`;
+                const merge = (list) => [...list.reduce((m, c) => { const x = m.get(key(c)) || { ...c, n: 0, of: 0, rework: 0, rejected: 0 }; x.n += c.n || 0; x.of += c.of || 0; x.rework += c.rework || 0; x.rejected += c.rejected || 0; m.set(key(c), x); return m; }, new Map()).values()];
+                const openCut = () => setMatrix({ title: `Garments cut · line ${l.line_no} · ${l.style}`, note: `${l.batches.length} batch${l.batches.length === 1 ? '' : 'es'}, by colour and size, against the order`, ofLabel: 'ordered',
+                    cells: merge([...l.batches.flatMap(b => b.cut_by || []), ...(d.ordered || []).filter(o => o.line_id === l.line_id).map(o => ({ ...o, n: 0, of: o.n }))]) });
+                const openStage = (c) => {
+                    const fin = l.batches.filter(b => b.stages.length);
+                    setMatrix({ title: `${stageName(c)}: garments through · line ${l.line_no} · ${l.style}`, note: `Garments with ${c.unit === 'GARMENT' ? 'the garment' : 'every piece this stage checks'} cleared, by colour and size, against the garments cut in the ${fin.length} finalised batch${fin.length === 1 ? '' : 'es'}`, ofLabel: 'cut',
+                        cells: merge([...fin.flatMap(b => (b.stages.find(x => x.stage_type_id === c.stage_type_id)?.by || []).map(x => ({ ...x, n: x.done }))), ...fin.flatMap(b => (b.cut_by || []).map(x => ({ ...x, of: x.n, n: 0 })))]) });
+                };
                 return (
                     <Section key={l.line_id} tone="emerald" title={`Batches × stages · line ${l.line_no} · ${l.style}`}
                         subtitle="tap a stage for its rolls / sizes" right={`${l.batches.length} batch${l.batches.length === 1 ? '' : 'es'}${stuck ? ` · ⏱ ${stuck} stuck (no check for ${d.stuck_hours} h)` : ''}`}>
@@ -189,11 +258,13 @@ export default function BatchStages({ orderId, can }) {
                                 })}</tbody>
                                 <tfoot className={`${t0.foot} border-t-2 font-bold`}><tr>
                                     <td className="px-3 py-2 sticky left-0 z-10 bg-emerald-50">Total · {l.batches.length} batch{l.batches.length === 1 ? '' : 'es'}</td>
-                                    <td className="px-2 py-2 text-right tabular-nums">{fmtQty(garments)}</td>
+                                    <td className="px-2 py-2 text-right tabular-nums"><button type="button" onClick={openCut} title="By colour and size" className="underline decoration-dotted underline-offset-2 hover:text-indigo-700">{fmtQty(garments)}</button></td>
                                     {tot.map((x, i) => (
-                                        <td key={cols[i].stage_type_id} className="px-2 py-2 text-xs border-l border-slate-100 whitespace-nowrap" title="garments through this stage">
-                                            {fmtQty(x.g)} gmt{x.rework ? <span className="ml-1 text-amber-700">↻{x.rework}</span> : null}{x.rejected ? <span className="ml-1 text-rose-700">✗{x.rejected}</span> : null}
-                                            {x.on > 0 && <span className="block font-semibold text-sky-700">{x.on} on line</span>}
+                                        <td key={cols[i].stage_type_id} className="px-2 py-2 text-xs border-l border-slate-100 whitespace-nowrap">
+                                            <button type="button" onClick={() => openStage(cols[i])} title="Garments through this stage, by colour and size" className="text-left hover:text-indigo-700">
+                                                <span className="underline decoration-dotted underline-offset-2">{fmtQty(x.g)} gmt</span>{x.rework ? <span className="ml-1 text-amber-700">↻{x.rework}</span> : null}{x.rejected ? <span className="ml-1 text-rose-700">✗{x.rejected}</span> : null}
+                                                {x.on > 0 && <span className="block font-semibold text-sky-700">{x.on} on line</span>}
+                                            </button>
                                         </td>
                                     ))}
                                     {!cols.length && <td />}
@@ -202,12 +273,13 @@ export default function BatchStages({ orderId, can }) {
                             </table>
                         </div>
                         <p className="px-4 py-1.5 text-[11px] text-slate-500 border-t border-slate-100">
-                            % done at each stage (pieces; garments at garment stages) · ✓ garments through · ↻ rework (! = older than {d.stuck_hours} h) · ✗ rejected · ⏱ work on the line with no check for {d.stuck_hours} h. Overall: all stages together. Totals: garments through each stage.
+                            % done at each stage (pieces; garments at garment stages) · ✓ garments through · ↻ rework (! = older than {d.stuck_hours} h) · ✗ rejected · ⏱ work on the line with no check for {d.stuck_hours} h. Overall: all stages together. Totals: garments through each stage; tap a total for it by colour and size.
                         </p>
                     </Section>
                 );
             })}
             {open && <StageDetail b={open.b} s={open.s} stuckHours={d.stuck_hours} onClose={() => setOpen(null)} />}
+            {matrix && <MatrixModal {...matrix} onClose={() => setMatrix(null)} />}
         </div>
     );
 }

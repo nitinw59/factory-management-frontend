@@ -1,6 +1,6 @@
 // Enter a supplier invoice, or carry on with a draft (/invoices/:id/edit). The accountant works from the paper, top to bottom:
 // first what is printed (supplier, number, date, taxable, CGST + SGST or IGST, total, typed, never copied from the lines) and
-// its scan; then the GRN lines of that supplier, grouped by GRN, each with its quantity trail, a warning when goods came above
+// its scan (optional since 6 Nov 2026, owner: "do not mandate challan or invoice upload"); then the GRN lines of that supplier, grouped by GRN, each with its quantity trail, a warning when goods came above
 // the PO, and its HSN; then freight and other charges. Quantity, rate and GST start from the rate frozen when the goods came.
 // The three-way match runs live and marks the lines it questions.
 // Phase 2 (4 Nov 2026, owner: "build next phase"): Save draft holds nothing. Submit sends it for approval by someone else; one
@@ -170,7 +170,6 @@ export default function NewInvoicePage() {
         !form.invoice_no.trim() && 'the invoice number',
         !form.invoice_date && 'the invoice date',
         !amountsIn && 'taxable and total as printed',
-        !hasScan && 'the scan of the invoice',
         !chosen.length && 'the lines billed',
         chosen.length > 0 && !picksFilled && 'quantity and rate on every ticked line',
         missingHsn.length > 0 && `HSN on ${missingHsn.length} line(s)`,
@@ -192,8 +191,8 @@ export default function NewInvoicePage() {
     return (
         <div>
             <Link to="/v3/purchasing/invoices" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Supplier invoices</Link>
-            <PageHeader title={editId ? `Draft invoice ${saved?.invoice_no || ''}` : 'Enter supplier invoice'} subtitle="Type what is printed on the invoice, attach its scan, then tick the goods it bills. Someone else approves it." actions={dirty && !editId ? <SecondaryButton onClick={clearDraft}>Clear</SecondaryButton> : null} />
-            {restored && dirty && <p className="mb-3 text-sm rounded-lg bg-sky-50 border border-sky-200 text-sky-900 px-3 py-2">Your unfinished invoice was restored. Attach the scan again.</p>}
+            <PageHeader title={editId ? `Draft invoice ${saved?.invoice_no || ''}` : 'Enter supplier invoice'} subtitle="Type what is printed on the invoice, attach its scan if you have one, then tick the goods it bills. Someone else approves it." actions={dirty && !editId ? <SecondaryButton onClick={clearDraft}>Clear</SecondaryButton> : null} />
+            {restored && dirty && <p className="mb-3 text-sm rounded-lg bg-sky-50 border border-sky-200 text-sky-900 px-3 py-2">Your unfinished invoice was restored. If it had a scan, attach it again.</p>}
             {saved?.sent_back_reason && <p className="mb-3 text-sm rounded-lg bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2"><b>Sent back to correct:</b> {saved.sent_back_reason}</p>}
 
             <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 space-y-3">
@@ -213,7 +212,7 @@ export default function NewInvoicePage() {
                 </div>
                 {taxMode && <p className="text-xs text-slate-500">The PO for these goods is {taxMode === 'INTRA' ? 'CGST + SGST (same state)' : 'IGST (other state)'}. Enter what is printed.</p>}
                 <div className="grid sm:grid-cols-4 gap-3">
-                    <Field label="Invoice scan *">
+                    <Field label="Invoice scan (optional)">
                         {scan
                             ? <span className="flex items-center gap-2 px-3 py-2 text-sm border border-emerald-300 bg-emerald-50 rounded-lg"><Paperclip size={14} className="shrink-0 text-emerald-700" /><span className="truncate" title={scan.name}>{scan.name}</span><button type="button" onClick={() => setScan(null)} className="ml-auto text-slate-500 hover:text-rose-700" aria-label="Remove the scan"><X size={14} /></button></span>
                             : <label className="flex items-center gap-2 px-3 py-2 text-sm font-semibold border border-dashed border-slate-400 rounded-lg cursor-pointer text-slate-600 hover:border-indigo-500 hover:text-indigo-700"><Paperclip size={14} /> {hasScan ? `Add another (${saved.documents.length} on file)` : 'Attach PDF or photo'}<input type="file" className="sr-only" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={e => pickScan(e.target.files?.[0])} /></label>}

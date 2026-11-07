@@ -28,6 +28,8 @@ const num = (v) => (v == null || v === '' ? '' : Number(v).toLocaleString('en-IN
 const dmy = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '');
 const when = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
 const unitOf = (u) => String(u || 'm').toUpperCase();
+// The supplier's challan and date; with the delivery's other GRNs when one challan has several (6 Nov 2026).
+const challanText = (g) => `${g.challan_no || ''}${g.challan_date ? ` · ${dmy(g.challan_date)}` : ''}${(g.same_delivery || []).length ? `\nAlso on ${g.same_delivery.map(x => x.grn_no).join(', ')}` : ''}`;
 const STAMP = { PENDING_APPROVAL: 'NOT APPROVED', REJECTED: 'REJECTED', WITHDRAWN: 'WITHDRAWN', REVERSED: 'REVERSED' };
 const STATUS_TEXT = {
     PENDING_APPROVAL: 'Waiting for approval — NOT IN STOCK',
@@ -87,7 +89,7 @@ function drawCopy(doc, g, lh, { copyLabel, printedBy }) {
         startY: y, theme: 'grid', margin: { left: M, right: M },
         body: [
             [cell('Challan (GRN) no.', g.grn_no), cell('Received on', dmy(g.received_date)),
-                cell('Supplier DC / challan', `${g.challan_no || ''}${g.challan_date ? ` · ${dmy(g.challan_date)}` : ''}`), cell('PO no.', g.po_no)],
+                cell('Supplier DC / challan', challanText(g)), cell('PO no.', g.po_no)],
             [cell('Supplier', supplier, { colSpan: 2 }), cell('Vehicle no.', g.vehicle_no), cell('Received by', g.received_by_name)],
             [cell('Status', STATUS_TEXT[g.status] || g.status, g.status === 'APPROVED' ? {} : { styles: { textColor: RED, fontStyle: 'bold' } }),
                 cell('Approved by', approved), cell('For orders', orders.join(', '), { colSpan: 2 })],
@@ -229,7 +231,7 @@ function drawReceipt(doc, g, lh, { printedBy }) {
     autoTable(doc, {
         startY: y, theme: 'grid', margin: { left: M, right: M },
         body: [
-            [cell('GRN no.', g.grn_no), cell('Received on', dmy(g.received_date)), cell('Supplier DC / challan', `${g.challan_no || ''}${g.challan_date ? ` · ${dmy(g.challan_date)}` : ''}`), cell('PO no.', g.po_no)],
+            [cell('GRN no.', g.grn_no), cell('Received on', dmy(g.received_date)), cell('Supplier DC / challan', challanText(g)), cell('PO no.', g.po_no)],
             [cell('Supplier', supplier, { colSpan: 2 }), cell('Vehicle no.', g.vehicle_no), cell('Received by', g.received_by_name)],
             [cell('Status', STATUS_TEXT[g.status] || g.status, g.status === 'APPROVED' ? {} : { styles: { textColor: RED, fontStyle: 'bold' } }),
                 cell('Approved by', g.approved_at ? `${g.approved_by_name || 'within tolerance'} · ${when(g.approved_at)}` : ''), cell('Reason approved', approvedNote, { colSpan: 2 })],
