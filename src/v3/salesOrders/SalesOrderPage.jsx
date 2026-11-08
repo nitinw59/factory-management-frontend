@@ -238,7 +238,7 @@ export default function SalesOrderPage() {
             {tab === 'lines' && (
                 <div className="space-y-3">
                     {order.lines.map(l => (
-                        <OrderLineCard key={lineKey(l)} line={l} orderId={id} onPpm={(format) => ppmTemplate(l, format)} ppmCount={(order.documents || []).filter(d => d.doc_type === 'PPM' && d.line_id === String(l.id)).length} onDocuments={() => setTab('documents')} editable={editable && l.status === 'ACTIVE'} canDelete={neverApproved} needsReason={false} proposing={revising}
+                        <OrderLineCard key={lineKey(l)} line={l} orderId={id} customerId={order.customer_id} onPpm={(format) => ppmTemplate(l, format)} ppmCount={(order.documents || []).filter(d => d.doc_type === 'PPM' && d.line_id === String(l.id)).length} onDocuments={() => setTab('documents')} editable={editable && l.status === 'ACTIVE'} canDelete={neverApproved} needsReason={false} proposing={revising}
                             onUndoCancel={l.cancel_requested && editable ? () => act(() => salesOrdersApi.removeChange(id, l.cancel_requested.op_id)) : null}
                             onSave={(data) => saveLine(l.id, data)} onDelete={() => deleteLine(l)}
                             onCancelLine={editable && revising && l.status === 'ACTIVE' && activeLines.length > 1 && !l.cancel_requested
@@ -249,7 +249,7 @@ export default function SalesOrderPage() {
                                 : null} />
                     ))}
                     {(order.proposed_lines || []).map(l => (
-                        <OrderLineCard key={l.id} line={l} orderId={id} editable={editable} canDelete={editable} needsReason={false} proposing
+                        <OrderLineCard key={l.id} line={l} orderId={id} customerId={order.customer_id} editable={editable} canDelete={editable} needsReason={false} proposing
                             onSave={(data) => saveLine(l.id, data)} onDelete={() => deleteLine(l)} />
                     ))}
                     {order.lines.length === 0 && <p className="text-sm text-slate-400">No lines yet.{editable ? ' Add a style to start.' : ''}</p>}

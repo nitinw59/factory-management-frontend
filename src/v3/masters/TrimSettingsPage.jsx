@@ -30,7 +30,7 @@ export default function TrimSettingsPage() {
     const unsetCount = (colours || []).filter(c => c.is_active && !c.tone_group_id).length;
     const shown = useMemo(() => {
         const q = search.trim().toLowerCase();
-        return (colours || []).filter(c => c.is_active && (!onlyUnset || !c.tone_group_id) && (!q || c.name.toLowerCase().includes(q)));
+        return (colours || []).filter(c => c.is_active && (!onlyUnset || !c.tone_group_id) && (!q || (c.label || c.name).toLowerCase().includes(q)));
     }, [colours, search, onlyUnset]);
 
     const setTone = async (colour, toneId) => {
@@ -94,7 +94,7 @@ export default function TrimSettingsPage() {
                     {shown.length === 0 && <p className="py-6 text-center text-sm text-slate-400">No colours to show.</p>}
                     {shown.map(c => (
                         <div key={c.id} className="flex items-center gap-3 py-2">
-                            <span className="flex-1 font-semibold text-slate-800">{c.name}</span>
+                            <span className="flex-1 font-semibold text-slate-800">{c.label || c.name}{c.customer_name && <span className="ml-1 text-xs font-normal text-slate-500">({c.customer_name})</span>}</span>
                             {savedId === c.id && <span className="text-xs font-bold text-emerald-600 flex items-center gap-1"><Check size={13} /> Saved</span>}
                             <select
                                 value={c.tone_group_id || ''}

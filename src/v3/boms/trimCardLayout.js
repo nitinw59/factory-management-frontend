@@ -159,7 +159,9 @@ const dmy = (d) => d.toLocaleDateString('en-GB');
 export function buildCard(card, s, { order = null, company = null } = {}) {
     const sizeName = new Map(card.sizes.map(z => [z.id, z.name]));
     const lines = new Map([...lineKeys(card.fabric), ...lineKeys(card.trims)]);
-    const colours = card.colours.filter(c => !s.hidden_colours.includes(c.id));
+    // Printed for an order: only the order's colours (8 Nov 2026) — the BOM may hold many more.
+    const onOrder = order?.colour_ids?.length ? new Set(order.colour_ids.map(String)) : null;
+    const colours = card.colours.filter(c => !s.hidden_colours.includes(c.id) && (!onOrder || onOrder.has(String(c.id))));
 
     const header = [];
     if (s.header.buyer) header.push(['Buyer', order?.customer_name || card.bom.buyer || '']);

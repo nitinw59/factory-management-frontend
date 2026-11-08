@@ -30,7 +30,7 @@ export default function CuttingHomePage() {
     }, [tab, status, search]);
     return (
         <div>
-            <PageHeader title="Cutting" subtitle="Cut batches per order line: the cutting manager sets the size ratio and layer length, picks rolls issued to cutting; the cutter enters lays per roll." />
+            <PageHeader title="Cutting" subtitle="Group the rolls received at cutting, plan the lays (cut plan), create a batch from each lay; the cutter enters lays per roll." />
             <div className="flex gap-1 mb-3 border-b border-slate-200">
                 {[['orders', 'Orders to cut'], ['batches', 'Cut batches'], ...(pinAllowed ? [['password', 'My override password']] : [])].map(([k, v]) => <button key={k} type="button" onClick={() => setParams(k === 'orders' ? {} : { tab: k })} className={`px-3 py-2 text-sm font-semibold border-b-2 -mb-px ${tab === k ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}>{v}</button>)}
             </div>
@@ -51,7 +51,12 @@ export default function CuttingHomePage() {
                                     <td className={`px-3 py-2.5 text-right tabular-nums font-bold ${l.cut >= l.ordered && l.ordered ? 'text-emerald-700' : ''}`}>{l.cut}</td>
                                     <td className="px-3 py-2.5 text-right tabular-nums">{l.fabric_issued || '—'}</td>
                                     <td className="px-3 py-2.5 text-right tabular-nums">{l.batches}</td>
-                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">{perms.manage && <Link to={`/v3/cutting/lines/${l.line_id}/new`} className="text-sm font-semibold text-indigo-700 hover:underline">New batch →</Link>}</td>
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap space-x-3">
+                                        {/* Cut order plan and roll grouping (8 Nov 2026) */}
+                                        <Link to={`/v3/cutting/orders/${l.order_id}/roll-groups`} className="text-sm font-semibold text-slate-600 hover:underline">Rolls</Link>
+                                        <Link to={`/v3/cutting/lines/${l.line_id}/plan`} className="text-sm font-semibold text-indigo-700 hover:underline">Cut plan →</Link>
+                                        {perms.manage && <Link to={`/v3/cutting/lines/${l.line_id}/new`} className="text-sm font-semibold text-slate-500 hover:underline">New batch</Link>}
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>

@@ -1,6 +1,8 @@
 // One sales order line: style + BOM version, ship date, and the garment
-// colour × size quantity grid (rows = the BOM's colours, columns = the style's
-// sizes) with row / column / line totals. Pasting a block copied from Excel
+// colour × size quantity grid (rows = the colours ON THIS LINE, columns = the style's
+// sizes) with row / column / line totals. More colours come from the line's Style BOM
+// version through "Add colour" (8 Nov 2026: a BOM may hold 100 colours, the order 3);
+// only this buyer's colours and the common ones are offered. Pasting a block copied from Excel
 // fills the grid from the cell pasted into. On an approved order every save
 // needs a reason (it becomes a revision); lines are cancelled, not deleted.
 import { useEffect, useMemo, useState } from 'react';
@@ -16,7 +18,7 @@ const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
 const rowTotalOf = (cells, cid) => Object.entries(cells).filter(([k]) => k.startsWith(`${cid}:`)).reduce((n, [, v]) => n + Number(v || 0), 0);
 
 // proposing (15 Oct 2026): an approved order — saves go into its change request; the card shows the proposed values.
-export default function OrderLineCard({ line: approvedLine, orderId, onPpm, ppmCount = 0, onDocuments, editable, canDelete, needsReason, proposing = false, onSave, onDelete, onCancelLine, onMoveBom, onUndoCancel }) {
+export default function OrderLineCard({ line: approvedLine, orderId, customerId, onPpm, ppmCount = 0, onDocuments, editable, canDelete, needsReason, proposing = false, onSave, onDelete, onCancelLine, onMoveBom, onUndoCancel }) {
     // What the card edits: the proposed values when this line has a proposed change, else the line as it is.
     const line = useMemo(() => (proposing && approvedLine.proposed ? { ...approvedLine, ...approvedLine.proposed, qty: approvedLine.proposed.qty } : approvedLine), [approvedLine, proposing]);
     const [cells, setCells] = useState(() => toCells(line));
@@ -34,26 +36,32 @@ export default function OrderLineCard({ line: approvedLine, orderId, onPpm, ppmC
     const versions = line.approved_versions || [];
     const pickVersion = editable && !needsReason && versions.length > 0;
     const [bomId, setBomId] = useState(line.bom_id ? String(line.bom_id) : '');
-    useEffect(() => { setCells(toCells(line)); setShipDate(line.ship_date || ''); setNotes(line.notes || ''); setBrand(line.brand || ''); setBomId(line.bom_id ? String(line.bom_id) : ''); }, [line]);
+    useEffect(() => { setCells(toCells(line)); setShipDate(line.ship_date || ''); setNotes(line.notes || ''); setBrand(line.brand || ''); setBomId(line.bom_id ? String(line.bom_id) : ''); setExtraColours([]); }, [line]);
     const picked = pickVersion ? versions.find(v => v.id === bomId) || null : null;
     const canAddColour = editable && !needsReason && !proposing && versions.length === 0;
     const [extraColours, setExtraColours] = useState([]);
     const [colourQ, setColourQ] = useState('');
     const [colourHits, setColourHits] = useState([]);
+    // Rows: the colours on this line + the ones added here. On a picked version, a colour it lacks is flagged.
     const colours = useMemo(() => {
-        if (picked) {
-            // The version's colours, plus any colour that has quantities but isn't on it (flagged; must be cleared).
-            const off = line.colours.filter(c => !picked.colours.some(b => b.garment_colour_id === c.garment_colour_id) && rowTotalOf(cells, c.garment_colour_id) > 0);
-            return [...picked.colours, ...off.map(c => ({ ...c, on_bom: false }))];
-        }
-        return [...line.colours, ...extraColours.filter(c => !line.colours.some(x => x.garment_colour_id === c.garment_colour_id))];
-    }, [picked, line.colours, extraColours, cells]);
+        const rows = [...line.colours, ...extraColours.filter(c => !line.colours.some(x => x.garment_colour_id === c.garment_colour_id))];
+        return picked ? rows.map(c => ({ ...c, on_bom: picked.colours.some(b => b.garment_colour_id === c.garment_colour_id) })) : rows;
+    }, [picked, line.colours, extraColours]);
+    // "Add colour": the version's colours (this buyer's + common) not yet on the line.
+    const pool = useMemo(() => (picked ? picked.colours : versions.length || line.bom_id ? (line.bom_colours || []) : [])
+        .filter(c => c.is_active && !colours.some(x => x.garment_colour_id === c.garment_colour_id)), [picked, versions.length, line.bom_id, line.bom_colours, colours]);
+    const addColours = (list) => setExtraColours(prev => [...prev, ...list.filter(c => !prev.some(x => x.garment_colour_id === c.garment_colour_id)).map(c => ({ ...c, on_bom: true }))]);
+    const inUse = colours.filter(c => rowTotalOf(cells, c.garment_colour_id) > 0).map(c => c.garment_colour_id);
+    const versionNote = (v) => {
+        const lacks = inUse.filter(id => !v.colours.some(c => c.garment_colour_id === id)).map(id => colours.find(c => c.garment_colour_id === id)?.name);
+        return `${v.colours.length} colour${v.colours.length === 1 ? '' : 's'}${inUse.length ? (lacks.length ? ` · lacks ${lacks.join(', ')}` : ` · has this line's ${inUse.length === 1 ? 'colour' : `${inUse.length} colours`} ✓`) : ''}`;
+    };
     const offBom = colours.filter(c => c.on_bom === false && rowTotalOf(cells, c.garment_colour_id) > 0).map(c => c.name);
     useEffect(() => {
         if (!canAddColour || colourQ.trim().length < 2) { setColourHits([]); return undefined; }
-        const t = setTimeout(() => mastersApi.garmentColours({ search: colourQ.trim() }).then(res => setColourHits(res.data.filter(c => c.is_active).slice(0, 12))).catch(() => setColourHits([])), 250);
+        const t = setTimeout(() => mastersApi.garmentColours({ search: colourQ.trim(), ...(customerId && { for_customer: customerId }) }).then(res => setColourHits(res.data.filter(c => c.is_active).slice(0, 12))).catch(() => setColourHits([])), 250);
         return () => clearTimeout(t);
-    }, [colourQ, canAddColour]);
+    }, [colourQ, canAddColour, customerId]);
 
     const original = useMemo(() => JSON.stringify([toCells(line), line.ship_date || '', line.notes || '', line.brand || '', line.bom_id ? String(line.bom_id) : '']), [line]);
     const dirty = JSON.stringify([Object.fromEntries(Object.entries(cells).filter(([, v]) => v !== '' && Number(v) !== 0)), shipDate, notes, brand, bomId]) !== original;
@@ -118,7 +126,7 @@ export default function OrderLineCard({ line: approvedLine, orderId, onPpm, ppmC
                                 Style BOM
                                 <select className="px-1.5 py-0.5 text-xs font-semibold border border-slate-300 rounded" value={bomId} onChange={e => setBomId(e.target.value)} aria-label="Style BOM version">
                                     <option value="">— pick the version —</option>
-                                    {versions.map((v, i) => <option key={v.id} value={v.id}>v{v.version_no}{i === 0 ? ' (latest)' : ''} · {v.colours.length} colour{v.colours.length === 1 ? '' : 's'}: {v.colours.map(c => c.name).join(', ')}</option>)}
+                                    {versions.map((v, i) => <option key={v.id} value={v.id}>v{v.version_no}{i === 0 ? ' (latest)' : ''} · {versionNote(v)}</option>)}
                                 </select>
                                 {picked && <Link to={`/v3/boms/${picked.id}`} className="font-semibold text-indigo-700 hover:underline">open v{picked.version_no}</Link>}
                                 {picked && String(picked.id) === String(line.bom_id) && <Link to={`/v3/boms/${line.bom_id}/trim-card${orderId ? `?order=${orderId}` : ''}`} className="ml-1 inline-flex items-center gap-1 font-semibold text-indigo-700 hover:underline"><ClipboardList size={12} /> Trim card</Link>}
@@ -197,13 +205,22 @@ export default function OrderLineCard({ line: approvedLine, orderId, onPpm, ppmC
                 <div className="mb-2 flex flex-wrap items-center gap-1.5">
                     <input className={`${inputCls} !py-1 w-56`} value={colourQ} onChange={e => setColourQ(e.target.value)} placeholder="Add a colour — type its name…" aria-label="Add a colour" />
                     {colourHits.filter(c => !colours.some(x => x.garment_colour_id === String(c.id))).map(c => (
-                        <button key={c.id} type="button" onClick={() => { setExtraColours([...extraColours, { garment_colour_id: String(c.id), name: c.name, is_active: true, on_bom: false }]); setColourQ(''); }}
-                            className="px-2 py-1 rounded border border-slate-200 text-xs font-semibold text-slate-700 hover:border-indigo-400">+ {c.name}</button>
+                        <button key={c.id} type="button" onClick={() => { setExtraColours([...extraColours, { garment_colour_id: String(c.id), name: c.label || c.name, is_active: true, on_bom: false }]); setColourQ(''); }}
+                            className="px-2 py-1 rounded border border-slate-200 text-xs font-semibold text-slate-700 hover:border-indigo-400" title={c.customer_name ? `${c.customer_name}'s colour` : 'Common colour'}>+ {c.label || c.name}</button>
                     ))}
                 </div>
             )}
+            {editable && !cancelled && pool.length > 0 && (
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                    <select className={`${inputCls} !py-1 !w-72`} value="" onChange={e => { const c = pool.find(x => x.garment_colour_id === e.target.value); if (c) addColours([c]); }} aria-label="Add a colour from the Style BOM">
+                        <option value="">+ Add colour ({pool.length} more on {picked ? `v${picked.version_no}` : 'the Style BOM'})</option>
+                        {pool.map(c => <option key={c.garment_colour_id} value={c.garment_colour_id}>{c.name}</option>)}
+                    </select>
+                    <button type="button" onClick={() => addColours(pool)} className="px-2 py-1 rounded border border-slate-200 text-xs font-semibold text-slate-700 hover:border-indigo-400">Add all {pool.length}</button>
+                </div>
+            )}
             {colours.length === 0 || line.sizes.length === 0 ? (
-                <p className="text-sm text-amber-700">{line.sizes.length === 0 ? 'The style has no sizes.' : canAddColour ? 'Add the colours being ordered (above).' : pickVersion && !picked ? 'Pick the Style BOM version first.' : 'This style\'s BOM has no colours.'}</p>
+                <p className="text-sm text-amber-700">{line.sizes.length === 0 ? 'The style has no sizes.' : canAddColour || pool.length ? 'Add the colours being ordered (above).' : pickVersion && !picked ? 'Pick the Style BOM version first.' : 'No colours on this line.'}</p>
             ) : (
                 <div className="overflow-x-auto">
                     <table className="border-collapse text-sm">

@@ -2,13 +2,14 @@
 // order's facts), hold the meeting, upload the signed scan back here (versioned: a new upload of
 // the same line makes v2, older versions stay listed). Other order documents the same way.
 // Removing hides a document from the order (kept on record, with the reason).
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FileDown, FileSpreadsheet, Upload, ExternalLink, Trash2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { API_BASE_URL } from '../../utils/api';
 import { salesOrdersApi } from '../api/salesOrdersApi';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox } from '../components/ui';
+import { downloadOrderBomRecord } from '../boms/bomV2';
 
 const fmtSize = (b) => (b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
 
@@ -22,6 +23,64 @@ function DocRow({ d, canRemove, onRemove }) {
             {d.notes && <span className="basis-full text-xs text-slate-600">{d.notes}</span>}
             {canRemove && <button type="button" className="ml-auto p-1 rounded text-slate-400 hover:text-rose-600" onClick={() => onRemove(d)} aria-label={`Remove ${d.display_name} v${d.version}`}><Trash2 size={14} /></button>}
         </li>
+    );
+}
+
+const CAUSE = { APPROVED: 'Order approved', REVISED: 'Revision approved', BOM_CHANGED: 'Style BOM moved', MADE_LATER: 'Created afterwards' };
+const when = (x) => new Date(x).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+// The order's BOM as approved — one frozen record per approved revision (8 Nov 2026). PDF / Excel drawn from the record.
+function BomRecords({ order }) {
+    const [rows, setRows] = useState(null);
+    const [busy, setBusy] = useState('');
+    const [error, setError] = useState('');
+    useEffect(() => {
+        salesOrdersApi.bomRecords(order.id).then(r => setRows(r.data)).catch(err => { setRows([]); setError(apiError(err, 'Failed to load the BOM records.')); });
+    }, [order.id, order.revision_no, order.status]);
+    const download = async (r, format, summary = false) => {
+        const key = `${r.id}:${format}:${summary}`;
+        setBusy(key); setError('');
+        try { await downloadOrderBomRecord((await salesOrdersApi.bomRecord(order.id, r.id)).data, format, { summary }); }
+        catch (err) { setError(apiError(err, err.message || 'Download failed.')); }
+        finally { setBusy(''); }
+    };
+    return (
+        <section className="bg-white border border-slate-200 rounded-xl p-4">
+            <h2 className="font-black text-slate-800 mb-1">BOM records</h2>
+            <p className="text-xs text-slate-500 mb-3">The order's BOM exactly as approved: fabric, trims, consumption and quantities for this order's colours. A record is saved when the order is approved and for every approved revision, and never changes afterwards — the PDF and Excel are printed from it, not from today's data.</p>
+            <ErrorBox text={error} />
+            {!rows ? <p className="text-sm text-slate-400">Loading…</p> : rows.length === 0 ? (
+                <p className="text-sm text-slate-400">{order.status === 'APPROVED' ? 'No record yet.' : 'Saved when the order is approved.'}</p>
+            ) : (
+                <table className="w-full text-sm">
+                    <thead className="text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
+                        <tr><th className="py-1.5 pr-3">Revision</th><th className="py-1.5 pr-3">Style BOM</th><th className="py-1.5 pr-3">Saved</th><th className="py-1.5" /></tr>
+                    </thead>
+                    <tbody>
+                        {rows.map((r, i) => (
+                            <tr key={r.id} className="border-t border-slate-100">
+                                <td className="py-2 pr-3 font-bold text-slate-800">R{r.revision_no}{i === 0 && <span className="ml-1.5 text-[10px] font-bold text-emerald-700">current</span>}</td>
+                                <td className="py-2 pr-3 text-slate-700">{r.boms || '—'}</td>
+                                <td className="py-2 pr-3 text-xs text-slate-600">
+                                    {CAUSE[r.cause] || r.cause} · {when(r.created_at)}{r.created_by_name ? ` · ${r.created_by_name}` : ''}
+                                    {r.made_later && <span className="block text-[11px] text-amber-700">Created afterwards for an order approved before records existed — it shows the BOM as it was on that day.</span>}
+                                </td>
+                                <td className="py-2 text-right whitespace-nowrap">
+                                    <SecondaryButton onClick={() => download(r, 'pdf')} disabled={!!busy}><FileDown size={14} /> PDF</SecondaryButton>
+                                    <span className="inline-block w-1.5" />
+                                    <SecondaryButton onClick={() => download(r, 'xlsx')} disabled={!!busy}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
+                                    <span className="inline-block w-1.5" />
+                                    <SecondaryButton onClick={() => download(r, 'pdf', true)} disabled={!!busy}>Summary PDF</SecondaryButton>
+                                </td>
+                            </tr>
+                        ))}
+                        <tr className="border-t-2 border-slate-200 text-xs font-bold text-slate-500">
+                            <td className="py-1.5" colSpan={4}>{rows.length} record{rows.length === 1 ? '' : 's'}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            )}
+        </section>
     );
 }
 
@@ -49,6 +108,7 @@ export default function OrderDocumentsTab({ order, canUpload, onPpmTemplate, onC
 
     return (
         <div className="space-y-4">
+            <BomRecords order={order} />
             <section className="bg-white border border-slate-200 rounded-xl p-4">
                 <h2 className="font-black text-slate-800 mb-1">PPM sheets</h2>
                 <p className="text-xs text-slate-500 mb-3">Download the template for a line as PDF or Excel (buyer, style, order no., quantity, colours and delivery date are filled in; the Excel boxes can be typed in), hold the pre-production meeting, then upload the signed scan.</p>

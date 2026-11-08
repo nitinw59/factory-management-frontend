@@ -472,6 +472,24 @@ export async function downloadOrderBomV2(planningApi, orderId, format, opts = {}
     return exportBomV2Pdf(blocks, lh);
 }
 
+// A frozen BOM record of the order (8 Nov 2026): the same sheet, drawn from what was saved when the order (or a revision of
+// it) was approved — not from today's data. data = GET /sales-orders/:id/bom-records/:recordId.
+export async function downloadOrderBomRecord(data, format, opts = {}) {
+    const r = data.record || {};
+    const when = (x) => (x ? new Date(x).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
+    const blocks = buildOrderBomV2(data, { summary: !!opts.summary }).map(bk => ({
+        ...bk,
+        file: `${bk.file}-R${r.revision_no}`,
+        header: [...bk.header, ['BOM record', `Revision R${r.revision_no}${r.order_approved_by ? ` · order approved by ${r.order_approved_by}` : ''}`,
+            r.made_later ? 'Created afterwards' : 'Recorded', `${when(r.recorded_at)}${r.recorded_by ? ` · ${r.recorded_by}` : ''}`]],
+        footnote: `${bk.footnote} Frozen record: printed from what was saved ${r.made_later ? `on ${when(r.recorded_at)} (created afterwards, not at approval)` : 'when this revision was approved'}, not from today's data.`,
+    }));
+    if (!blocks.length) throw new Error('The record has no lines with pieces.');
+    const lh = await loadLetterhead();
+    if (format === 'xlsx') return exportBomV2Xlsx(blocks, lh);
+    return exportBomV2Pdf(blocks, lh);
+}
+
 export async function exportBomV2Xlsx(blocks, lh = null) {
     await saveWorkbook(await buildBomV2Workbook(blocks, lh), `${blocks[0]?.file || 'BOM-v2'}.xlsx`);
 }

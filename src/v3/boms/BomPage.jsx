@@ -50,10 +50,10 @@ export default function BomPage() {
     const notesDirty = bom && notes !== (bom.notes || '');
 
     // The BOM's own colours (also when inactive since), in name order; the rest only through the search.
-    const bomColourRows = useMemo(() => allColours.filter(c => picked.has(String(c.id))).sort((x, y) => x.name.localeCompare(y.name)), [allColours, picked]);
+    const bomColourRows = useMemo(() => allColours.filter(c => picked.has(String(c.id))).sort((x, y) => (x.label || x.name).localeCompare(y.label || y.name)), [allColours, picked]);
     const addableColours = useMemo(() => {
         const q = search.trim().toLowerCase();
-        return q ? allColours.filter(c => c.is_active && !picked.has(String(c.id)) && c.name.toLowerCase().includes(q)) : [];
+        return q ? allColours.filter(c => c.is_active && !picked.has(String(c.id)) && `${c.label || c.name} ${c.customer_name || ''}`.toLowerCase().includes(q)) : [];
     }, [allColours, picked, search]);
 
     const run = async (fn, after) => {
@@ -128,7 +128,7 @@ export default function BomPage() {
                                 return (
                                     <div key={cid} className="flex flex-wrap items-center gap-3 px-3 py-2">
                                         <span className="flex-1 min-w-[180px] text-sm font-semibold text-slate-800">
-                                            {c.name}
+                                            {c.label || c.name}{c.customer_name && <span className="ml-1 text-[11px] font-normal text-slate-500">({c.customer_name})</span>}
                                             {!c.is_active && <span className="ml-2 text-[11px] font-bold text-rose-600">inactive</span>}
                                         </span>
                                         <span className="text-xs text-slate-500 w-32">tone: {c.tone_name || <span className="font-bold text-amber-600">not set</span>}</span>
@@ -157,7 +157,7 @@ export default function BomPage() {
                                             : addableColours.slice(0, 30).map(c => (
                                                 <button key={c.id} type="button" onClick={() => { setPicked(m => new Map(m).set(String(c.id), '')); setSearch(''); }}
                                                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 text-xs font-semibold text-slate-700">
-                                                    <Plus size={12} /> {c.name}{c.tone_name ? <span className="font-normal text-slate-400"> · {c.tone_name}</span> : null}
+                                                    <Plus size={12} /> {c.label || c.name}{c.customer_name ? <span className="font-normal text-slate-500"> ({c.customer_name})</span> : null}{c.tone_name ? <span className="font-normal text-slate-400"> · {c.tone_name}</span> : null}
                                                 </button>
                                             ))}
                                         {addableColours.length > 30 && <span className="text-xs text-slate-400 self-center">… {addableColours.length - 30} more, keep typing</span>}

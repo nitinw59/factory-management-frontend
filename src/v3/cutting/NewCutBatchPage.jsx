@@ -106,6 +106,7 @@ export default function NewCutBatchPage() {
         <div>
             <Link to="/v3/cutting" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Cutting</Link>
             <PageHeader title={`New cut batch — ${d.line.order_no} line ${d.line.line_no}`} subtitle={`${d.line.customer_name} · ${d.line.style_code} ${d.line.style_name} · ships ${fmtDate(d.line.ship_date)}`} />
+            <p className="mb-3 text-sm rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-900 px-3 py-2">A batch typed here skips the cut plan. <Link to={`/v3/cutting/lines/${lineId}/plan`} className="font-semibold underline">Open the cut plan</Link> to have the ratio, marker and rolls suggested.</p>
             <div className={`mb-3 text-sm rounded-lg px-3 py-2 border ${d.cutting_gate.allowed ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}><b>Cutting gate:</b> {d.cutting_gate.allowed ? (d.cutting_gate.ready ? 'open — all materials covered.' : `open by override — ${d.cutting_gate.reason}`) : `closed — ${d.cutting_gate.reason}`}</div>
             <div className="mb-4"><OrderGrid grid={d.grid} extra={preview} /></div>
             <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 space-y-3">

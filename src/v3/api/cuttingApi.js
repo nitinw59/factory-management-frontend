@@ -51,6 +51,18 @@ export const cuttingApi = {
     batchPockets: (batchId) => api.get(`/v3/cutting/batches/${batchId}/pockets`),
     handPockets: (batchId) => api.post(`/v3/cutting/batches/${batchId}/pockets`),
     replacePocket: (batchId, data) => api.post(`/v3/cutting/batches/${batchId}/pockets/replace`, data),
+    // cut order plan (8 Nov 2026): rules, suggested lays, lay → batch; roll grouping by shade / width
+    plan: (lineId) => api.get(`/v3/cutting/plans/${lineId}`),
+    savePlan: (lineId, data) => api.put(`/v3/cutting/plans/${lineId}`, data),   // { allowance_pct?, rules?, notes? }
+    suggestPlan: (lineId) => api.post(`/v3/cutting/plans/${lineId}/suggest`),
+    addPlanLay: (lineId, data) => api.post(`/v3/cutting/plans/${lineId}/lays`, data),
+    updatePlanLay: (layId, data) => api.put(`/v3/cutting/plan-lays/${layId}`, data),   // { ratios, marker_length_in, rolls: [{ key, garment_colour_id, planned_plies }], notes }
+    removePlanLay: (layId) => api.delete(`/v3/cutting/plan-lays/${layId}`),
+    batchFromLay: (layId, data) => api.post(`/v3/cutting/plan-lays/${layId}/batch`, data),   // { numbering_mode }
+    planSettings: () => api.get('/v3/cutting/plan-settings'),
+    savePlanSettings: (data) => api.put('/v3/cutting/plan-settings', data),   // { rules, plan_mandatory? }
+    rollGroups: (orderId) => api.get(`/v3/cutting/roll-groups/${orderId}`),
+    saveRollGroups: (orderId, rolls) => api.put(`/v3/cutting/roll-groups/${orderId}`, { rolls }),
     // over-cut above the free limit (20 Oct 2026)
     overCuts: (params) => api.get('/v3/cutting/over-cuts', { params }),
     approveOverCut: (batchId, note) => api.post(`/v3/cutting/over-cuts/${batchId}/approve`, { note }),

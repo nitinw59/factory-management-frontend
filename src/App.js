@@ -275,6 +275,8 @@ const V3CutBatchPage = lazyPage(() => import('./v3/cutting/CutBatchPage'));
 const V3EndBitsPage = lazyPage(() => import('./v3/cutting/EndBitsPage'));
 const V3OverCutsPage = lazyPage(() => import('./v3/cutting/OverCutsPage'));
 const V3PocketingPage = lazyPage(() => import('./v3/cutting/PocketingPage'));   // pocketing / lining (20 Oct 2026)
+const V3CutPlanPage = lazyPage(() => import('./v3/cutting/CutPlanPage'));   // cut order plan (8 Nov 2026)
+const V3RollGroupsPage = lazyPage(() => import('./v3/cutting/RollGroupsPage'));   // roll grouping by shade / width (8 Nov 2026)
 const V3FloorLayoutPage = lazyPage(() => import('./v3/production/FloorLayoutPage'));   // floor layout board (20 Oct 2026)
 const V3FloorPage = lazyPage(() => import('./v3/floor/FloorPage'));                   // floor in-charge portal (19 Oct 2026, phase 4)
 const V3ReworkStatusPage = lazyPage(() => import('./v3/floor/ReworkStatusPage'));
@@ -394,6 +396,8 @@ const appRoutes = (
           <Route path="material-issue/issues/:id" element={<V3MaterialIssueSlipPage />} />
           <Route path="cutting" element={<V3CuttingHomePage />} />
           <Route path="cutting/lines/:lineId/new" element={<V3NewCutBatchPage />} />
+          <Route path="cutting/lines/:lineId/plan" element={<V3CutPlanPage />} />
+          <Route path="cutting/orders/:orderId/roll-groups" element={<V3RollGroupsPage />} />
           <Route path="cutting/batches/:id" element={<V3CutBatchPage />} />
           <Route path="cutting/end-bits" element={<V3EndBitsPage />} />
           <Route path="cutting/over-cuts" element={<V3OverCutsPage />} />

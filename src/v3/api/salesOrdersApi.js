@@ -16,6 +16,9 @@ export const salesOrdersApi = {
     deleteLine: (id, lineId) => api.delete(`/v3/sales-orders/${id}/lines/${lineId}`),
     cancelLine: (id, lineId, reason) => api.post(`/v3/sales-orders/${id}/lines/${lineId}/cancel`, { reason }),
     moveLineBom: (id, lineId, reason) => api.post(`/v3/sales-orders/${id}/lines/${lineId}/move-bom`, { reason }),
+    // The order's BOM as approved, frozen per revision (8 Nov 2026)
+    bomRecords: (id) => api.get(`/v3/sales-orders/${id}/bom-records`),
+    bomRecord: (id, recordId) => api.get(`/v3/sales-orders/${id}/bom-records/${recordId}`),
 
     // Documents (signed PPM sheets, other order documents)
     uploadDocument: (id, { file, doc_type, line_id, display_name, notes }) => {
